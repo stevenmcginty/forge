@@ -1,5 +1,13 @@
 # Handoff
 
+## Forge Web (laptop browser): Gemini Live agent + D uses the phone flow (2026-09-24)
+
+- **Decided (Steve):** the deck face gets the main voice agent, starting with Gemini Live. Claude next, then GPT Realtime. D in a laptop browser acts like the phone: spoken commands, review countdown with Undo, auto-send.
+- **How:** the browser runs the same `GeminiLiveSession`. The desktop mints a single-use token (`voice-token`, raw key stays in main). Setup, context and tool calls go over new authenticated WebRequests, answered by the renderer (`src/lib/realtime/web-bridge.ts`, `src/components/WebVoiceBridge.tsx`). Browser sessions get a `WEB_VOICE_NOTE` ("WHERE YOU ARE"). An old desktop makes Listen say "Update the desktop app to use voice here". D drives the deck's SessionComposer via `web/src/lib/dictation-seat.ts`; a live session's mic is held shut while D records.
+- **Checked:** typecheck, lint:hooks, web:build, realtime:check 26, dictation:check 31. Nothing live-tested; Steve tests.
+- **Loose ends:** browser tool calls do not show in the desktop's recent-actions list. `insertAtCaret` / `dictateIntoComposer` in `web/src/deck/composer.ts` are now unused.
+- **Claude in the browser (next):** no live voice mode. Browser records → desktop Groq STT → desktop Claude agent → reply spoken in the browser.
+
 ## Relay comet is back (2026-09-24)
 
 - **Cause:** the comet only fired from the bar's own send-to-pane. Since 1322260 the bar asks the main agent by default, and the agent's `typeIntoPane` / `VoiceAgent.sendPrompt` never fired one. `pane_send` never told the renderer at all.

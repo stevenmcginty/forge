@@ -434,8 +434,8 @@
 
 /* ------------------------------------------------------------- voice bar
  *
- * The project, D and Type as one object — a glass capsule in the top bar, a
- * run of controls leading the dock.
+ * The project, Listen, D and Type as one object — a glass capsule in the top
+ * bar, a run of controls leading the dock.
  */
 
 .app[data-face='deck'] .dk-voicebar {
@@ -463,7 +463,24 @@
   min-width: 0;
 }
 
-/* Up here the project pill is the capsule's own height. */
+/* Listen: VoicePill.css's switch; a failure is one line of words beside it. */
+.app[data-face='deck'] .dk-listen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-listen__error {
+  max-width: 260px;
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Up here the project pill and Listen are the capsule's own height. */
 .app[data-face='deck'] .dk-bar .dk-project {
   height: 26px;
   max-width: 170px;
@@ -476,6 +493,27 @@
 
 .app[data-face='deck'] .dk-bar .dk-project[data-open='true'] .dk-project__chev {
   transform: rotate(180deg);
+}
+
+.app[data-face='deck'] .dk-bar .listen__btn {
+  height: 26px;
+  padding: 0 10px 0 4px;
+  gap: 7px;
+}
+
+.app[data-face='deck'] .dk-bar .listen__track {
+  transform: scale(0.85);
+  margin: 0 -2px;
+}
+
+.app[data-face='deck'] .dk-bar .listen__text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.app[data-face='deck'] .dk-bar .listen__word {
+  font-size: 12px;
 }
 
 /* ------------------------------------------------------------------- D
@@ -816,6 +854,7 @@
 }
 
 @media (max-width: 1240px) {
+  .app[data-face='deck'] .dk-bar .listen__brain,
   .app[data-face='deck'] .dk-agents__count {
     display: none;
   }

@@ -527,6 +527,14 @@ export const IPC = {
    */
   webCommandResult: 'web:command-result',
   /**
+   * Main asking the renderer for its half of a browser's voice agent — the
+   * setup bundle, one tool call, or the app context (`WebVoiceAskEvent` in
+   * shared/web.ts). Answered on `webVoiceResult`, its own channel because the
+   * answer carries data, not just "an error sentence, or nothing".
+   */
+  webVoiceAsk: 'web:voice-ask',
+  webVoiceResult: 'web:voice-result',
+  /**
    * Which panes a browser currently has open. Main → renderer, on every change.
    *
    * The message `mobileWatched` is, on the other link and for the same reason:

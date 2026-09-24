@@ -44,7 +44,7 @@ import { SessionComposer } from '../components/SessionComposer'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStateChip, bringForward, type DeckAgent } from './agents'
 import { composerField, composerOpen } from './composer'
-import { useRawDictation } from './dictation'
+import { useDeckDictation } from './dictation'
 import type { BarPlace, DeckView } from './view'
 import { ProjectsSheet, VoiceBar } from './VoiceBar'
 import './deck.css'
@@ -269,7 +269,7 @@ const SENT_GRACE_MS = 8000
 
 function FloatingComposer(): ReactNode {
   const open = composerOpen.use()
-  const raw = useRawDictation()
+  const dictation = useDeckDictation()
   const [hasDraft, setHasDraft] = useState(false)
   const sentAt = useRef(0)
   const ref = useRef<HTMLDivElement | null>(null)
@@ -291,7 +291,14 @@ function FloatingComposer(): ReactNode {
     return () => window.clearInterval(timer)
   }, [])
 
-  const busy = raw !== 'idle'
+  // A dictation that sent itself is a Send: the box goes once it empties, as after Enter.
+  const wasReview = useRef(false)
+  useEffect(() => {
+    if (wasReview.current && dictation === 'idle') sentAt.current = Date.now()
+    wasReview.current = dictation === 'review'
+  }, [dictation])
+
+  const busy = dictation !== 'idle'
   const shown = open || hasDraft
 
   // A click elsewhere puts an empty, idle box away — not one holding words.

@@ -101,7 +101,7 @@ import type {
   ForemanToolRequest,
   ForemanToolResult
 } from './foreman'
-import type { WebMirrorChunk, WebMirrorConfig, WebProjectRemoveEvent } from './web'
+import type { WebMirrorChunk, WebMirrorConfig, WebProjectRemoveEvent, WebVoiceAskEvent, WebVoiceAskReply } from './web'
 import type { HandoffStartRemoteEvent } from './handoffview'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
@@ -811,6 +811,14 @@ export interface ForgeApi {
     onProjectRemove?(cb: (e: WebProjectRemoveEvent) => void): () => void
     /** Answer an `onCommand`, `onProjectAdd` or `onProjectRemove`. `error` empty means it worked. */
     commandResult(requestId: string, error?: string): void
+    /**
+     * A browser running the voice agent needs the renderer's half: the setup
+     * bundle, one tool call, or the app context. Answered with `voiceResult`.
+     * Optional for the same reason as `onProjectRemove`: an older preload has
+     * no such member.
+     */
+    onVoiceAsk?(cb: (e: WebVoiceAskEvent) => void): () => void
+    voiceResult?(reply: WebVoiceAskReply): void
     /**
      * Which panes a browser has open, under exactly the rule `mobile.onWatched`
      * above states: ids, no geometry, a label and nothing more.

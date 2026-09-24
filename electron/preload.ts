@@ -241,6 +241,9 @@ const api: ForgeApi = {
     onProjectRemove: (cb) => subscribe(IPC.webProjectRemove, cb),
     // One result channel for every question — see `IPC.webCommandResult`.
     commandResult: (requestId, error) => ipcRenderer.send(IPC.webCommandResult, { requestId, error: error ?? '' }),
+    // A browser's voice agent: main asks, the renderer answers with data.
+    onVoiceAsk: (cb) => subscribe(IPC.webVoiceAsk, cb),
+    voiceResult: (reply) => ipcRenderer.send(IPC.webVoiceResult, reply),
     onWatched: (cb) => subscribe(IPC.webWatched, cb),
     // The attention detector's news, going the other way to everything else in
     // this block: the buffer it reads is here and the socket it ends on is

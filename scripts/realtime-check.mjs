@@ -589,4 +589,16 @@ for (const gateAt of ['mic', 'connect']) {
   })
 }
 
+console.log('Forge Web voice agent')
+
+await check('an older desktop\'s "does not understand" becomes "update the desktop app"; no key is said in words', async () => {
+  const { voiceFailureWords, UPDATE_DESKTOP_WORDS, NO_KEY_WORDS } = await import('../web/src/deck/voice-words.ts')
+  assert.equal(
+    voiceFailureWords({ code: 'unsupported', message: 'This desktop does not understand a "voice-setup" request.' }),
+    UPDATE_DESKTOP_WORDS
+  )
+  assert.equal(voiceFailureWords({ code: 'failed', message: 'No Gemini key is set — add one in Settings → Models & APIs' }), NO_KEY_WORDS)
+  assert.equal(voiceFailureWords({ code: 'failed', message: 'Could not reach Gemini: offline' }), 'Could not reach Gemini: offline')
+})
+
 console.log(process.exitCode ? `\nrealtime:check FAILED (${passed} passed)` : `\nrealtime:check passed (${passed} checks)`)

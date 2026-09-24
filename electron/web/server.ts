@@ -45,7 +45,9 @@ import {
   type WebServerFrame,
   type WebSession,
   type WebShutdownReason,
-  type WebUsageFrame
+  type WebUsageFrame,
+  type WebVoiceSetup,
+  type WebVoiceToolAnswer
 } from '@shared/web'
 /*
  * The one validator, shared with the phone link. `readMirrorInput` never looks
@@ -503,6 +505,25 @@ export interface WebServerHost {
     request: { paneId: string; target: HandoffTargetWire },
     deviceName: string
   ) => Promise<string | null>
+
+  /* ----------------------------------------------------------- voice agent
+   *
+   * A desktop browser running the main voice agent. The audio goes from the
+   * browser to the provider directly; these supply the rest. The setup, the
+   * tool calls and the context are the renderer's (its voice hub builds and
+   * answers them), so a host forwards those; the token is minted in main from
+   * the stored key, which never leaves main. All four or none: a host without
+   * them answers `unsupported`, and the browser says to update the desktop.
+   */
+
+  /** The persona, tools and context, or a sentence (no key, no window). */
+  voiceSetup?: (carryover: string | null) => Promise<{ ok: true; setup: WebVoiceSetup } | { ok: false; error: string }>
+  /** One single-use ephemeral token, for one connect. */
+  voiceToken?: () => Promise<{ ok: true; token: string; expiresAt: number } | { ok: false; error: string }>
+  /** One tool call, answered the way the desktop's own voice session answers it. Never rejects. */
+  voiceTool?: (name: string, args: Record<string, unknown>) => Promise<WebVoiceToolAnswer>
+  /** The app context as it is now. */
+  voiceContext?: () => Promise<{ ok: true; text: string } | { ok: false; error: string }>
 
   /**
    * Put a pasted image on this machine's clipboard so an agent that reads
@@ -2996,6 +3017,81 @@ export class WebServer {
           // desktop never registered — an attach eaten in transit, a refused
           // frame — and re-ask within a beat. See `sessions` on WebResult.
           answer({ kind: 'ok', sessions: [...client.subs] })
+          return
+        }
+
+        /*
+         * The voice agent in a desktop browser. Authenticated like every other
+         * request on this socket — there is no other door to it — and the key
+         * stays in main: `voice-token` hands out a single-use ephemeral token.
+         */
+        case 'voice-setup': {
+          if (!this.host.voiceSetup) {
+            failed('unsupported', 'This Forge cannot run the voice agent for a browser.')
+            return
+          }
+          if (request.provider !== 'gemini-live') {
+            failed('unsupported', 'This desktop can only run Gemini Live in a browser for now.')
+            return
+          }
+          const carryover = wireString(request.carryover, 4000)
+          const res = await this.host.voiceSetup(carryover || null)
+          if (!res.ok) {
+            failed('failed', res.error)
+            return
+          }
+          answer({ kind: 'voice-setup', setup: res.setup })
+          return
+        }
+
+        case 'voice-token': {
+          if (!this.host.voiceToken) {
+            failed('unsupported', 'This Forge cannot run the voice agent for a browser.')
+            return
+          }
+          if (request.provider !== 'gemini-live') {
+            failed('unsupported', 'This desktop can only run Gemini Live in a browser for now.')
+            return
+          }
+          const res = await this.host.voiceToken()
+          if (!res.ok) {
+            failed('failed', res.error)
+            return
+          }
+          answer({ kind: 'voice-token', token: res.token, expiresAt: res.expiresAt })
+          return
+        }
+
+        case 'voice-tool': {
+          if (!this.host.voiceTool) {
+            failed('unsupported', 'This Forge cannot run the voice agent for a browser.')
+            return
+          }
+          const name = wireString(request.name, 64)
+          if (!/^[a-z][a-z0-9_]*$/.test(name)) {
+            failed('bad-frame', 'That is not a tool name.')
+            return
+          }
+          const args: unknown = request.args ?? {}
+          if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+            failed('bad-frame', 'Tool arguments must be an object.')
+            return
+          }
+          answer({ kind: 'voice-tool', answer: await this.host.voiceTool(name, args as Record<string, unknown>) })
+          return
+        }
+
+        case 'voice-context': {
+          if (!this.host.voiceContext) {
+            failed('unsupported', 'This Forge cannot run the voice agent for a browser.')
+            return
+          }
+          const res = await this.host.voiceContext()
+          if (!res.ok) {
+            failed('failed', res.error)
+            return
+          }
+          answer({ kind: 'voice-context', text: res.text })
           return
         }
 

@@ -1480,6 +1480,34 @@ export type WebRequest =
    */
   | { kind: 'handoff-start'; paneId: string; target: HandoffTargetWire }
   /**
+   * The desktop's main voice agent, run in a desktop browser (the deck face).
+   *
+   * The audio never passes through the desktop: the browser opens the
+   * provider's socket itself, exactly as the Electron renderer does. What the
+   * desktop supplies is everything that makes it the SAME agent — the persona,
+   * the tool list, the app context — built by the renderer with the functions
+   * the voice hub uses, and a single-use ephemeral token minted in main. The
+   * raw key never leaves main.
+   *
+   * `voice-setup` is answered `{ kind: 'voice-setup' }`; `carryover` is the
+   * short account of a session that is being rolled over, or absent. Only
+   * `gemini-live` is built; any other provider is `unsupported`.
+   * `voice-token` is answered `{ kind: 'voice-token' }` — one token per
+   * connect, since a resume after `goAway` needs a fresh one.
+   * `voice-tool` runs one tool call through the renderer's `runRealtimeTool`,
+   * and is answered `{ kind: 'voice-tool' }` even when the tool failed (a
+   * failure is an answer the model says out loud).
+   * `voice-context` is answered `{ kind: 'voice-context' }` with the app
+   * context as it is now; the browser polls it and sends only changes.
+   *
+   * A desktop that predates these answers `unsupported` ("does not
+   * understand"), and the browser says to update the desktop app.
+   */
+  | { kind: 'voice-setup'; provider: WebVoiceProvider; carryover?: string }
+  | { kind: 'voice-token'; provider: WebVoiceProvider }
+  | { kind: 'voice-tool'; name: string; args: Record<string, unknown> }
+  | { kind: 'voice-context' }
+  /**
    * Begin enrolling this browser's passkey. Only on a socket that opened with
    * the PIN (or a passkey) on a desktop that still has that same PIN set; any
    * other socket is answered `failed` with code `unsupported`. Answered
@@ -2079,6 +2107,71 @@ export type WebResult =
    * still the one set).
    */
   | { kind: 'passkeys'; passkeys: WebPasskeyInfo[]; canRegister: boolean }
+  /** The answer to `voice-setup`. */
+  | { kind: 'voice-setup'; setup: WebVoiceSetup }
+  /** The answer to `voice-token`: single-use, for one connect. Never the key. */
+  | { kind: 'voice-token'; token: string; expiresAt: number }
+  /** The answer to `voice-tool`. */
+  | { kind: 'voice-tool'; answer: WebVoiceToolAnswer }
+  /** The answer to `voice-context`. Empty when the desktop has nothing to say yet. */
+  | { kind: 'voice-context'; text: string }
+
+/* ------------------------------------------------------ the voice agent
+ *
+ * See `voice-setup` in `WebRequest`. Provider-neutral in name so GPT Realtime
+ * can join later; only Gemini Live exists today.
+ */
+
+export type WebVoiceProvider = 'gemini-live'
+
+/** A tool the voice model may call — shared/realtime.ts's `RealtimeToolSpec`, restated for the wire. */
+export interface WebVoiceToolSpec {
+  name: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+/** Everything a browser needs to run the desktop's voice agent, bar the token. */
+export interface WebVoiceSetup {
+  provider: WebVoiceProvider
+  model: string
+  voice: string
+  instructions: string
+  tools: WebVoiceToolSpec[]
+  /** The app context at this moment ('' when the agent's deps are not up yet). */
+  context: string
+  /** Send a changed context at most this often (src/lib/realtime/context.ts). */
+  contextMinGapMs: number
+  /** The conversation closes after this long listening to quiet (`agentIdleTimeoutMs`). */
+  idleTimeoutMs: number
+}
+
+/** src/lib/realtime/session.ts's `RealtimeToolAnswer`, restated for the wire. */
+export interface WebVoiceToolAnswer {
+  ok: boolean
+  text: string
+  image?: { mime: string; base64: string }
+}
+
+/**
+ * Main asking the renderer for its half of a voice request, over
+ * `IPC.webVoiceAsk`; answered on `IPC.webVoiceResult` with a
+ * `WebVoiceAskReply` carrying the same `requestId`. An IPC event rather than a
+ * wire frame, declared here beside the requests it serves.
+ */
+export type WebVoiceAskEvent =
+  | { requestId: string; op: 'setup'; carryover: string | null }
+  | { requestId: string; op: 'tool'; name: string; args: Record<string, unknown> }
+  | { requestId: string; op: 'context' }
+
+/** The renderer's answer. `error` set means it could not; otherwise the op's field is filled. */
+export interface WebVoiceAskReply {
+  requestId: string
+  error?: string
+  setup?: WebVoiceSetup
+  answer?: WebVoiceToolAnswer
+  context?: string
+}
 
 /**
  * "This desktop is going away."

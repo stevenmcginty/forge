@@ -17,7 +17,10 @@ import {
   type WebMirrorConfig,
   type WebPasskeyAssertion,
   type WebPasskeyRequestOptions,
-  type WebProjectRemoveEvent
+  type WebProjectRemoveEvent,
+  type WebVoiceAskEvent,
+  type WebVoiceAskReply,
+  type WebVoiceToolAnswer
 } from '@shared/web'
 import { commandExe } from '@shared/agents'
 import { isSessionId } from '@shared/session'
@@ -44,6 +47,7 @@ import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxFile, saveInboxImage } from './web/inbox'
 import { transcribeAudio } from './voice-bridge'
+import { mintGeminiToken } from './realtime/tokens'
 import { filePasskeyStorage } from './web/passkey'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
@@ -733,6 +737,62 @@ function askRenderer(channel: string, payload: object, noWindow: string): Promis
     pendingOps.set(requestId, { resolve, timer })
     windows[0].webContents.send(channel, { ...payload, requestId })
   })
+}
+
+/* ------------------------------------------------- voice agent asks */
+
+/** A `WebVoiceAskEvent` before its id: one Omit per member, so the union survives. */
+type Unsent<E> = E extends unknown ? Omit<E, 'requestId'> : never
+type VoiceAskPayload = Unsent<WebVoiceAskEvent>
+
+interface PendingVoiceAsk {
+  resolve: (reply: WebVoiceAskReply) => void
+  timer: NodeJS.Timeout
+}
+
+const pendingVoice = new Map<string, PendingVoiceAsk>()
+/** Setup and context are quick reads in the renderer. */
+const VOICE_ASK_MS = 8000
+/**
+ * A tool can be slow — a pane that has to mount, a browser step — but a
+ * browser waiting on it must not wait forever, and its own request gives up at
+ * 30 s. So main answers first, in words the model can say.
+ */
+const VOICE_TOOL_MS = 25_000
+
+/**
+ * `askRenderer` for an answer that carries data: a browser's voice agent asks
+ * for the renderer's setup bundle, a tool call, or the app context. Same
+ * mechanism — a request id, a pending map, a deadline — on its own channel,
+ * `IPC.webVoiceResult`, because the reply is a payload rather than a sentence.
+ */
+function askVoice(payload: VoiceAskPayload, timeoutMs: number, late?: string): Promise<WebVoiceAskReply> {
+  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+  const requestId = randomUUID()
+  if (windows.length === 0) {
+    return Promise.resolve({
+      requestId,
+      error: 'Forge has no window open on the desktop, so the voice agent cannot run.'
+    })
+  }
+  return new Promise<WebVoiceAskReply>((resolve) => {
+    const timer = setTimeout(() => {
+      pendingVoice.delete(requestId)
+      resolve({ requestId, error: late ?? `The desktop did not answer within ${Math.round(timeoutMs / 1000)} seconds.` })
+    }, timeoutMs)
+    pendingVoice.set(requestId, { resolve, timer })
+    windows[0].webContents.send(IPC.webVoiceAsk, { ...payload, requestId })
+  })
+}
+
+async function voiceTool(name: string, args: Record<string, unknown>): Promise<WebVoiceToolAnswer> {
+  const reply = await askVoice(
+    { op: 'tool', name, args },
+    VOICE_TOOL_MS,
+    `no answer from the desktop within ${VOICE_TOOL_MS / 1000} seconds. It may still be running there — check before trying again.`
+  )
+  if (reply.answer) return reply.answer
+  return { ok: false, text: `FAILED: ${reply.error ?? 'the desktop gave no answer.'}` }
 }
 
 /**
@@ -1484,6 +1544,23 @@ async function start(): Promise<void> {
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
     saveInboxFile: (bytes, name) => Promise.resolve(saveInboxFile(join(getDataDir(), 'web-inbox'), bytes, name)),
     transcribeAudio: (bytes, mime) => transcribeAudio(bytes, mime),
+    // A browser's voice agent. The key is checked here so "no key" is said at
+    // once; the bundle is the renderer's, built with the voice hub's functions.
+    voiceSetup: async (carryover) => {
+      if (!getSettings().geminiKey?.trim()) {
+        return { ok: false, error: 'No Gemini key is set — add one in Settings → Models & APIs' }
+      }
+      const reply = await askVoice({ op: 'setup', carryover }, VOICE_ASK_MS)
+      return reply.setup ? { ok: true, setup: reply.setup } : { ok: false, error: reply.error ?? 'The desktop gave no voice setup.' }
+    },
+    voiceToken: () => mintGeminiToken(getSettings().geminiKey),
+    voiceTool: (name, args) => voiceTool(name, args),
+    voiceContext: async () => {
+      const reply = await askVoice({ op: 'context' }, VOICE_ASK_MS)
+      return typeof reply.context === 'string'
+        ? { ok: true, text: reply.context }
+        : { ok: false, error: reply.error ?? 'The desktop gave no context.' }
+    },
     // Resolved here and tailed there: this file is the half that knows what a
     // pane is, electron/web/transcript-watcher.ts is the half that knows what a
     // transcript is, and the server between them knows neither.
@@ -2150,6 +2227,16 @@ export function registerWebHandlers(): void {
     pending.resolve(payload?.error ? String(payload.error) : null)
   })
 
+  /** The renderer's answer to a voice agent ask (`askVoice`). */
+  ipcMain.on(IPC.webVoiceResult, (_e, payload: WebVoiceAskReply) => {
+    const requestId = String(payload?.requestId ?? '')
+    const pending = pendingVoice.get(requestId)
+    if (!pending) return
+    pendingVoice.delete(requestId)
+    clearTimeout(pending.timer)
+    pending.resolve({ ...payload, requestId })
+  })
+
   /** The renderer's verdict on a `webCommand`. */
   ipcMain.on(IPC.webCommandResult, (_e, payload: { requestId?: string; error?: string }) => {
     const requestId = String(payload?.requestId ?? '')
@@ -2221,5 +2308,10 @@ export async function disposeWeb(): Promise<void> {
     pending.resolve('Forge is shutting down.')
   }
   pendingOps.clear()
+  for (const [requestId, pending] of pendingVoice) {
+    clearTimeout(pending.timer)
+    pending.resolve({ requestId, error: 'Forge is shutting down.' })
+  }
+  pendingVoice.clear()
   await stop('quit')
 }

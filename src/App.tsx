@@ -8,6 +8,7 @@ import { TitleBar, useDeckMode, useDeckModes } from '@/components/TitleBar'
 import { StaleBanner } from '@/components/StaleBanner'
 import { UpdateBanner } from '@/components/UpdateBanner'
 import { WebProjectRemoveBridge } from '@/components/WebProjectRemoveBridge'
+import { WebVoiceBridge } from '@/components/WebVoiceBridge'
 import { HubLayer } from '@/components/hub/HubLayer'
 import { Backdrop } from '@/components/shell/Backdrop'
 import { DeckToast } from '@/components/shell/DeckToast'
@@ -205,6 +206,7 @@ export function App(): ReactNode {
       {/* The Forge Mobile pairing prompt — asked over whatever else is up. */}
       <ApprovalPrompt />
       <WebProjectRemoveBridge />
+      <WebVoiceBridge />
     </div>
   )
 }

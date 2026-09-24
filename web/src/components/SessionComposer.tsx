@@ -26,6 +26,7 @@ import {
   type VoiceMode,
   type VoiceState
 } from '../lib/dictate'
+import { useLendDictation, type DictationSeat } from '../lib/dictation-seat'
 import { isImageFile, uploadFileChunks } from '../lib/file'
 import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
@@ -620,6 +621,26 @@ export function SessionComposer({
         : undefined,
     [cancelVoice, finishVoice, setVoiceMode, startVoice, undoReview]
   )
+
+  /*
+   * The deck's D button runs this same dictation — commands, review, send —
+   * so the deck's box lends it out. The phone lends nothing. `voice` is a
+   * dependency only so each change is lent afresh and D hears of it.
+   */
+  const lent = useMemo<DictationSeat | null>(
+    () =>
+      face === 'deck' && isDictationSupported()
+        ? {
+            start: startVoice,
+            stop: () => void finishVoice(),
+            cancel: cancelVoice,
+            undo: undoReview,
+            state: () => voiceRef.current
+          }
+        : null,
+    [cancelVoice, face, finishVoice, startVoice, undoReview, voice]
+  )
+  useLendDictation(lent)
 
   /**
    * An effort level, picked for this pane.

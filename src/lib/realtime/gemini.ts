@@ -1,4 +1,4 @@
-import { GEMINI_LIVE_WS_URL } from '@shared/realtime'
+import { GEMINI_LIVE_WS_URL, type RealtimeGeminiTokenResult } from '@shared/realtime'
 import workletUrl from './pcm-worklet.js?url&no-inline'
 import type {
   RealtimeCaption,
@@ -8,7 +8,7 @@ import type {
   RealtimeToolAnswer,
   RealtimeToolCall
 } from './session'
-import { toGeminiTools } from './tools'
+import { geminiToolDeclarations } from './tool-format'
 import { micError } from './errors'
 import { LiveTraceCounters, liveTrace, serverMessageTypes } from './live-trace'
 
@@ -35,6 +35,27 @@ import { LiveTraceCounters, liveTrace, serverMessageTypes } from './live-trace'
  */
 
 const MAX_RECONNECTS = 3
+
+/**
+ * Where a connect gets its single-use token. On the desktop that is main, over
+ * the preload bridge (the default below); Forge Web injects one that asks the
+ * desktop over its socket (web/src/deck/voiceAgent.ts). `undefined` means
+ * there is no bridge at all.
+ */
+export type GeminiTokenGetter = () => Promise<RealtimeGeminiTokenResult | undefined>
+
+/**
+ * The desktop's own bridge — electron/preload.ts's `realtime.geminiToken`.
+ * Read off `window` loosely so this file also builds for a browser, where
+ * there is no `window.forge` (and a token getter is always injected).
+ */
+const desktopGeminiToken: GeminiTokenGetter = async () =>
+  (window as unknown as { forge?: { realtime?: { geminiToken(): Promise<RealtimeGeminiTokenResult> } } }).forge?.realtime?.geminiToken()
+
+export interface GeminiLiveOptions extends RealtimeSessionOptions {
+  /** Defaults to the desktop's preload bridge. */
+  getToken?: GeminiTokenGetter
+}
 
 function b64FromBuffer(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf)
@@ -65,7 +86,7 @@ export function buildGeminiSetup(
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice } } }
       },
       systemInstruction: { parts: [{ text: opts.instructions }] },
-      tools: toGeminiTools(opts.tools),
+      tools: geminiToolDeclarations(opts.tools),
       // Server-side VAD stays on (the default): hands-free, no push-to-talk.
       realtimeInputConfig: { automaticActivityDetection: { disabled: false } },
       sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
@@ -95,6 +116,7 @@ interface GeminiServerMessage {
 export class GeminiLiveSession implements RealtimeSession {
   readonly provider = 'gemini-live' as const
   private readonly opts: RealtimeSessionOptions
+  private readonly getToken: GeminiTokenGetter
   private ws: WebSocket | null = null
   private ctx: AudioContext | null = null
   private stream: MediaStream | null = null
@@ -128,8 +150,9 @@ export class GeminiLiveSession implements RealtimeSession {
   private readonly trace = new LiveTraceCounters(() => this.traceState())
   private openedAt = 0
 
-  constructor(opts: RealtimeSessionOptions) {
+  constructor(opts: GeminiLiveOptions) {
     this.opts = opts
+    this.getToken = opts.getToken ?? desktopGeminiToken
   }
 
   private traceState(): string {
@@ -200,7 +223,7 @@ export class GeminiLiveSession implements RealtimeSession {
 
   /** Open (or re-open) the socket and wait for setupComplete. */
   private async connect(): Promise<void> {
-    const res = await window.forge.realtime?.geminiToken()
+    const res = await this.getToken()
     this.bailIfStopped()
     if (!res) throw new Error('This Forge build has no realtime bridge — restart Forge')
     if (!res.ok) throw new Error(res.error)

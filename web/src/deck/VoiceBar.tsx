@@ -1,17 +1,29 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
+import '@/components/hub/VoicePill.css'
 import { Rail } from '../components/Rail'
 import { useActiveProject, useForge } from '../state'
 import { useDeckAgents } from './agents'
 import { composerField, composerOpen, focusedField, openComposer } from './composer'
-import { cancelRawDictation, rawDictationSupported, toggleRawDictation, useRawDictation, type RawTarget } from './dictation'
+import { useDictationSeat } from '../lib/dictation-seat'
+import {
+  cancelDeckDictation,
+  deckDictationPhase,
+  deckDictationSupported,
+  toggleDeckDictation,
+  undoDeckDictation,
+  useDeckDictation,
+  type DeckDictationPhase
+} from './dictation'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import type { BarPlace, DeckView } from './view'
+import { holdWebVoiceMic, setVoiceLink, stopWebVoice, toggleWebVoice, useWebVoice, webVoiceSupported } from './voiceAgent'
+import { voicePhaseWord, type WebVoicePhase } from './voice-words'
 
 /**
- * The voice bar: the project you are in, D — and, in the top bar, Type. One
- * group, drawn in the top bar or leading the dock at the bottom edge (the
- * default); the "…" menu says where it is in a word and moves it.
+ * The voice bar: the project you are in, Listen, D — and, in the top bar,
+ * Type. One group, drawn in the top bar or leading the dock at the bottom edge
+ * (the default); the "…" menu says where it is in a word and moves it.
  */
 export function VoiceBar({ place }: { place: BarPlace }): ReactNode {
   return (
@@ -20,6 +32,7 @@ export function VoiceBar({ place }: { place: BarPlace }): ReactNode {
         <ProjectPill place={place} />
         {place === 'top' ? <ProjectsSheet /> : null}
       </span>
+      <ListenSwitch />
       <DictateButton />
       {place === 'top' ? <TypeButton /> : null}
     </div>
@@ -77,62 +90,168 @@ export function ProjectsSheet(): ReactNode {
   )
 }
 
-/* -------------------------------------------------------------------- D */
+/* ---------------------------------------------------------------- Listen */
 
-/** Who D's words are filed under: the pane the bar talks to, while the link is up. */
-function useRawTarget(): RawTarget | null {
-  const { state, actions } = useForge()
-  const { current } = useDeckAgents()
-  const live = state.stage.kind === 'connected' && state.connection.state === 'live'
-  if (!live || !current || !rawDictationSupported()) return null
-  return { paneId: current.leaf.id, request: actions.request, notice: actions.setNotice }
+const BRAIN = 'Gemini Live'
+
+type Look = 'offline' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted' | 'error'
+
+/** VoicePill.css's looks and knob marks, one per phase: a shape and a word, colour only agreeing. */
+function lookOf(phase: WebVoicePhase, muted: boolean): { look: Look; mark: string } {
+  switch (phase) {
+    case 'off':
+      return { look: 'offline', mark: 'offline' }
+    case 'connecting':
+      return { look: 'connecting', mark: 'connecting' }
+    case 'listening':
+      return muted ? { look: 'muted', mark: 'muted' } : { look: 'listening', mark: 'listening' }
+    case 'thinking':
+      return { look: 'thinking', mark: 'thinking' }
+    case 'speaking':
+      return { look: 'speaking', mark: 'speaking' }
+    case 'error':
+      return { look: 'error', mark: 'error' }
+  }
 }
 
 /**
- * Press D. With no text field holding the keyboard, the composer comes up
- * first, so the words have somewhere to be seen arriving.
+ * Listen: the desktop's main voice agent, talking through this browser
+ * (./voiceAgent.ts). One press opens a hands-free conversation — a pause sends
+ * the turn, the reply is spoken, it listens again by itself — and a second
+ * press, "that's all", or quiet closes it. VoicePill.css's switch, imported
+ * rather than copied, with the phase as its word and a failure as one line
+ * beside it.
  */
-function pressD(target: RawTarget | null, phase: ReturnType<typeof useRawDictation>): void {
-  if (phase === 'idle' && target && !focusedField()) openComposer()
-  toggleRawDictation(target)
+function ListenSwitch(): ReactNode {
+  const voice = useWebVoice()
+  const { state } = useForge()
+  const live = state.stage.kind === 'connected' && state.connection.state === 'live'
+  const supported = webVoiceSupported()
+  const on = voice.phase !== 'off' && voice.phase !== 'error'
+  const { look, mark } = lookOf(voice.phase, voice.muted)
+  const word = voicePhaseWord(voice.phase, voice.muted)
+  const failed = voice.phase === 'error'
+  const said = `${BRAIN} · ${word}`
+  const title = !supported
+    ? 'Listen — this browser cannot run the voice agent here (it needs a secure page and a microphone).'
+    : !live && !on
+      ? 'Listen — needs a live link to the desktop.'
+      : failed
+        ? `${said}: ${voice.error ?? 'no more detail'}. Click to try again.`
+        : on
+          ? `${said}. Talk; a pause sends it. Click (or say "that's all") to stop.`
+          : `${said}${voice.ended ? ` — ${voice.ended}` : ''}. Click to talk to the voice agent, hands-free.`
+  return (
+    <span
+      className="listen dk-listen"
+      data-on={on ? 'true' : undefined}
+      data-look={look}
+      data-mark={mark}
+      data-recording={voice.phase === 'listening' && !voice.muted ? 'true' : undefined}
+    >
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        className="listen__btn"
+        title={title}
+        aria-label={`Listen: ${on ? 'on' : 'off'} — ${said}`}
+        disabled={!supported || (!live && !on && !failed)}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => toggleWebVoice()}
+      >
+        <span className="listen__track" aria-hidden="true">
+          <span className="listen__knob" />
+        </span>
+        <span className="listen__text">
+          <span className="listen__brain">{BRAIN}</span>
+          <span className="listen__word">
+            <span className="listen__word-text">{word}</span>
+          </span>
+        </span>
+      </button>
+      {failed && voice.error ? (
+        <span className="dk-listen__error" role="status" title={voice.error}>
+          {voice.error}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+/* -------------------------------------------------------------------- D */
+
+/**
+ * Whether D may start: a live link, an agent on screen for the words to go to
+ * (the pane the bar talks to), and the composer that runs the dictation.
+ */
+function useCanDictate(): boolean {
+  const { state } = useForge()
+  const { current } = useDeckAgents()
+  const seat = useDictationSeat()
+  const live = state.stage.kind === 'connected' && state.connection.state === 'live'
+  return live && !!current && !!seat && deckDictationSupported()
+}
+
+/**
+ * Press D. The composer comes up first — the words, the countdown and Undo
+ * are seen there — and takes the keyboard when no other text field has it.
+ */
+function pressD(canStart: boolean, phase: DeckDictationPhase): void {
+  if ((phase === 'idle' || phase === 'review') && canStart) {
+    if (focusedField()) composerOpen.set(true)
+    else openComposer()
+  }
+  toggleDeckDictation(canStart)
 }
 
 export const D_SHORTCUT = 'Right Ctrl'
 
 /**
- * D: dictation, raw — the words are typed where the caret is (or into the
- * composer), never sent. Its own tint, apart from the accent, and every
- * state in a shape and a word: the letter at rest, a stop square and
- * "Listening" while the microphone is open, a turning arc and "…" while the
- * desktop writes it down.
+ * D: the phone's dictation — the words go to the agent on screen: spoken
+ * commands act, anything else waits in the composer with a countdown and
+ * Undo, then sends. Its own tint, apart from the accent, and every state in a
+ * shape and a word: the letter at rest, a stop square and "Listening" while
+ * the microphone is open, a turning arc and "…" while the desktop writes it
+ * down, an arrow and "Sending" while the words wait to go.
  */
 function DictateButton(): ReactNode {
-  const phase = useRawDictation()
-  const target = useRawTarget()
-  const supported = rawDictationSupported()
-  const busy = phase !== 'idle'
+  const phase = useDeckDictation()
+  const canStart = useCanDictate()
+  const supported = deckDictationSupported()
+  const busy = phase !== 'idle' && phase !== 'review'
   const title = !supported
     ? 'Dictate — this browser cannot record audio here (it needs a secure page and a microphone).'
-    : !target && !busy
-      ? 'Dictate — needs a live link and an agent to file the words under.'
+    : !canStart && !busy
+      ? 'Dictate — needs a live link and an agent to send the words to.'
       : phase === 'recording'
-        ? `Listening. Press again (or tap ${D_SHORTCUT}) to stop — the words are typed, never sent.`
+        ? `Listening. Press again (or tap ${D_SHORTCUT}) to stop — then the words wait a moment with Undo, and send.`
         : phase === 'starting'
           ? 'Opening the microphone…'
           : phase === 'transcribing'
             ? 'The desktop is writing it down…'
-            : `Dictate (${D_SHORTCUT}) — talk, press again, and the words are typed where the caret is, never sent.`
+            : phase === 'review'
+              ? 'Sending in a moment — Undo (or Esc) keeps the words to edit. Press to add more.'
+              : `Dictate (${D_SHORTCUT}) — talk, press again; commands like "stop" act, other words send after a moment with Undo.`
   return (
     <button
       type="button"
       className="dk-dictate"
       data-phase={phase}
-      aria-label={phase === 'recording' ? 'Dictate: listening. Stop' : phase === 'idle' ? 'Dictate' : 'Dictate: writing it down'}
+      aria-label={
+        phase === 'recording'
+          ? 'Dictate: listening. Stop'
+          : phase === 'idle'
+            ? 'Dictate'
+            : phase === 'review'
+              ? 'Dictate: sending in a moment. Add more'
+              : 'Dictate: writing it down'
+      }
       aria-pressed={phase === 'recording'}
       title={title}
-      disabled={!busy && !target}
+      disabled={!busy && !canStart}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={() => pressD(target, phase)}
+      onClick={() => pressD(canStart, phase)}
     >
       {phase === 'recording' ? (
         <>
@@ -143,6 +262,15 @@ function DictateButton(): ReactNode {
         <span className="dk-dictate__letter" aria-hidden="true">
           D
         </span>
+      ) : phase === 'review' ? (
+        <>
+          <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2 6h7.5M6.5 3l3 3-3 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="dk-dictate__word" aria-hidden="true">
+            Sending
+          </span>
+        </>
       ) : (
         <>
           <svg className="dk-dictate__spin" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
@@ -202,6 +330,7 @@ export function toggleComposer(): void {
  * keys, which is the point of each of them:
  *
  *   Right Ctrl, tapped alone   D (the desktop's dictation key)
+ *   Esc, while words wait      Undo the dictation's send
  *   Ctrl+Shift+G               the composer (the desktop's voice card key)
  *   Ctrl+G                     the Wall, on or off (the desktop's mosaic key)
  *
@@ -217,10 +346,19 @@ export function DeckKeys({
   onView: (view: DeckView) => void
   place: BarPlace
 }): ReactNode {
-  const target = useRawTarget()
-  const phase = useRawDictation()
-  const latest = useRef({ target, phase, view, onView, place })
-  latest.current = { target, phase, view, onView, place }
+  const canStart = useCanDictate()
+  const phase = useDeckDictation()
+  const latest = useRef({ canStart, phase, view, onView, place })
+  latest.current = { canStart, phase, view, onView, place }
+
+  // Listen's link to the desktop, handed over whenever it changes (a reconnect
+  // may replace it), and its mic held shut while D records and the desktop
+  // writes it down (V5).
+  const { actions } = useForge()
+  const request = actions.request
+  useEffect(() => setVoiceLink({ request }), [request])
+  const dictating = phase === 'starting' || phase === 'recording' || phase === 'transcribing'
+  useEffect(() => holdWebVoiceMic(dictating), [dictating])
 
   useEffect(() => {
     let armed = false
@@ -230,6 +368,13 @@ export function DeckKeys({
         return
       }
       armed = false
+      // Esc, from anywhere, while dictated words wait to send: Undo.
+      if (e.key === 'Escape' && deckDictationPhase() === 'review') {
+        e.preventDefault()
+        e.stopPropagation()
+        undoDeckDictation()
+        return
+      }
       if (!e.ctrlKey || e.altKey || e.metaKey || e.code !== 'KeyG') return
       e.preventDefault()
       e.stopPropagation()
@@ -248,7 +393,7 @@ export function DeckKeys({
       armed = false
       if (!tapped) return
       const now = latest.current
-      pressD(now.target, now.phase)
+      pressD(now.canStart, now.phase)
     }
     const disarm = (): void => {
       armed = false
@@ -266,7 +411,14 @@ export function DeckKeys({
   }, [])
 
   // Leaving the deck face (a window narrowed to a phone's) closes the microphone.
-  useEffect(() => () => cancelRawDictation(), [])
+  useEffect(
+    () => () => {
+      cancelDeckDictation()
+      stopWebVoice()
+      setVoiceLink(null)
+    },
+    []
+  )
 
   return null
 }
