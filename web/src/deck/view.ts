@@ -50,9 +50,9 @@ const BAR_KEY = 'forge-web-bar'
 
 function storedPlace(): BarPlace {
   try {
-    return window.localStorage.getItem(BAR_KEY) === 'bottom' ? 'bottom' : 'top'
+    return window.localStorage.getItem(BAR_KEY) === 'top' ? 'top' : 'bottom'
   } catch {
-    return 'top'
+    return 'bottom'
   }
 }
 

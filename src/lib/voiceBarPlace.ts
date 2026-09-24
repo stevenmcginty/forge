@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react'
 
 /**
- * Where the voice bar lives: in the top bar (the default — the stage keeps the
- * whole height, which is what a laptop screen needs) or clipped to the bottom
- * edge, as the dock it used to be.
+ * Where the voice bar lives: clipped to the bottom edge (the default — Steve
+ * finds it reads cleaner there, and accepts the height it costs) or in the top
+ * bar, where the stage keeps the whole height.
  *
  * Kept in this window's localStorage like the backdrop (lib/backdrop.ts): it is
  * a per-machine layout choice — a laptop and a big monitor want different
@@ -17,9 +17,9 @@ const KEY = 'forge:voice-bar-place'
 
 function load(): VoiceBarPlace {
   try {
-    return localStorage.getItem(KEY) === 'bottom' ? 'bottom' : 'top'
+    return localStorage.getItem(KEY) === 'top' ? 'top' : 'bottom'
   } catch {
-    return 'top'
+    return 'bottom'
   }
 }
 
