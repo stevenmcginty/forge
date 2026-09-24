@@ -586,3 +586,264 @@
     max-width: 150px;
   }
 }
+
+/* ================================================================ grip */
+
+/*
+ * The voice bar's handle, at its left end: drag it to the other edge of the
+ * window to move the bar there. Quiet until hovered.
+ */
+.dock__grip {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: var(--dock-h);
+  border-radius: var(--r-full);
+  color: var(--text-dim);
+  cursor: grab;
+  touch-action: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.dock__grip:hover,
+.dock[data-dragging='true'] .dock__grip {
+  color: var(--text-secondary);
+}
+
+.dock[data-dragging='true'] .dock__grip {
+  cursor: grabbing;
+}
+
+.dock__grip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Mid-drag the bar follows the pointer; it springs home on release. */
+.dock[data-dragging='true'] {
+  translate: 0 var(--drag-y, 0);
+  opacity: 0.94;
+}
+
+.dock:not([data-dragging='true']) {
+  transition: translate var(--dur-glide) var(--spring-glide);
+}
+
+/* Where a drop lands: a slot at the other edge, with the word for it. */
+.dock__snap {
+  position: fixed;
+  left: 50%;
+  z-index: var(--z-sheet);
+  display: grid;
+  place-items: center;
+  width: min(640px, 60vw);
+  height: 34px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px dashed var(--glass-line-strong);
+  background: color-mix(in srgb, var(--bg-base) 70%, transparent);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.dock__snap[data-to='bottom'] {
+  bottom: 12px;
+}
+
+.dock__snap[data-to='top'] {
+  top: calc(var(--titlebar-h) + 6px);
+}
+
+.dock__snap[data-armed='true'] {
+  color: var(--accent-ink);
+  border-style: solid;
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+/* ============================================ the voice bar in the top bar
+ *
+ * One slim line in the top bar: grip, project, Listen, D, the text, where it
+ * goes. The glass box is taken out of flow (absolute, pinned to the top), so
+ * when it has more to show — a long message, what Forge said and did, the
+ * palette — it drops down over the stage and the top bar never grows. While
+ * it is dropped it goes opaque: it is over live terminals then, and nothing
+ * here blurs streaming output.
+ */
+
+.dock[data-place='top'] {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  display: block;
+  width: 100%;
+  max-width: 1000px;
+  height: 30px;
+  -webkit-app-region: no-drag;
+}
+
+.dock[data-place='top'] .dock__grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 30px;
+}
+
+.dock[data-place='top'] .dock__composer.comp {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 0;
+  width: auto;
+  min-height: 30px;
+  padding: 1px 4px 1px 2px;
+  border-radius: 16px;
+  flex-direction: column-reverse;
+  box-shadow: var(--pill-shadow), inset 0 1px 0 var(--glass-hi);
+}
+
+.dock[data-place='top'] .dock__composer::before {
+  display: none;
+}
+
+.dock[data-place='top'] .dock__composer:is([data-tall='true'], :has(.crail)) {
+  background: var(--sheet-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+}
+
+.dock[data-place='top'] .comp__row {
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.dock[data-place='top'] .comp__row > :not(.dock__field) {
+  margin-top: 1px;
+  margin-bottom: 0;
+}
+
+.dock[data-place='top'] .comp__project {
+  height: 26px;
+  padding: 0 8px 0 10px;
+}
+
+.dock[data-place='top'] .listen__btn {
+  height: 26px;
+  gap: 7px;
+  padding: 0 10px 0 5px;
+}
+
+/* The brain and the word side by side, not stacked: one line of type. */
+.dock[data-place='top'] .listen__text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.dock[data-place='top'] .listen__brain {
+  max-width: 96px;
+}
+
+.dock[data-place='top'] .listen__wave {
+  height: 14px;
+}
+
+.dock[data-place='top'] .dict {
+  height: 26px;
+  min-width: 26px;
+}
+
+.dock[data-place='top'] .dock__field {
+  height: 28px;
+  min-height: 28px;
+  padding: 4px 2px;
+  font-size: 13.5px;
+}
+
+.dock[data-place='top'] .dock__target {
+  height: 24px;
+  margin-top: 2px;
+}
+
+.dock[data-place='top'] .comp__send {
+  height: 26px;
+}
+
+/* What Forge said and did: under the row now, not over it. */
+.dock[data-place='top'] .crail {
+  margin: 6px 0 0;
+  border-top: 1px solid var(--glass-line);
+  border-bottom: 0;
+  transform-origin: 50% 0;
+}
+
+/* The palette and the save form drop from the bar. */
+.dock[data-place='top'] :is(.cpal, .csave) {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform-origin: 50% 0;
+  animation-name: comp-drop;
+}
+
+.dock[data-place='top'] .cpal {
+  max-height: min(430px, calc(100vh - var(--titlebar-h) - 40px));
+}
+
+@keyframes comp-drop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.975);
+  }
+}
+
+/* The project sheet drops from the bar too; its chevron points down, then up. */
+.dock[data-place='top'] .sheet--projects {
+  left: 18px;
+  max-height: min(700px, calc(100vh - var(--titlebar-h) - 24px));
+  transform-origin: 30px 0;
+}
+
+.dock[data-place='top'] .dock__chev {
+  transform: rotate(0deg);
+}
+
+.dock[data-place='top'] .comp__project[data-open='true'] .dock__chev {
+  transform: rotate(180deg);
+}
+
+.dock[data-place='top'] .dock__composer--idle {
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 0;
+  min-height: 30px;
+  padding: 1px 12px 1px 2px;
+  border-radius: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock:not([data-dragging='true']) {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .dock:not([data-dragging='true']) {
+  transition: none;
+}
+
+/*
+ * Typing up here: the text needs the width, so while there is text in the bar
+ * the project keeps its dot and Listen keeps its switch (the knob still shows
+ * the state by shape), and both give their words back when the bar is empty.
+ */
+.dock[data-place='top'] .comp:not([data-empty='true']) :is(.listen__text, .dock__project-name) {
+  display: none;
+}

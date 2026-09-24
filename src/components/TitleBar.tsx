@@ -1,26 +1,32 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useKeymap } from '@/hooks/useHub'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
 import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
-import { countLeaves } from '@/lib/splitTree'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
-import { useActiveProject, useActiveWorkspace, useApp, usePaneCount } from '@/state/AppState'
+import { setVoiceBarPlace, useVoiceBarPlace } from '@/lib/voiceBarPlace'
+import { useActiveProject, useApp, usePaneCount, useViewMode } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
 import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
 import { ScreenshotTray } from './ScreenshotTray'
 import type { NewTabDetail } from './TerminalGrid'
+import { AgentsMenu } from './shell/AgentsMenu'
+import { Dock } from './shell/Dock'
 import { toggleSheet } from './shell/Sheet'
 import './shell/DeckBar.css'
 
 /**
- * The deck's one top layer: the mark, a quiet count of the project's agents and
- * the new-agent button on the left, the mode switcher in the middle, and on the
- * right one "…" menu that holds everything else — Settings, the keyboard sheet,
- * the panes switcher, the tools (Skills, Commands, tab colours, Wall text), the
- * screenshot shelf and the account. Three grid columns, so the three can never
- * collide. There are no tabs up here any more: every terminal is on the stage,
- * in the wall strip or on the Wall (see TerminalGrid), and Ctrl+G flips the two.
+ * The deck's one top layer. On the left: the mark, the Agents menu (every agent
+ * in the project; pick one to open it Full screen), the new-agent button and
+ * the Wall switch. In the middle: the voice bar (project, Listen, D, the text)
+ * — unless it has been clipped to the bottom edge, when the mode switcher takes
+ * the middle back. On the right: the modes (while the voice bar is up here) and
+ * one "…" menu that holds everything else — Settings, the keyboard sheet, the
+ * agents list, the voice bar's place, the tools (Skills, Commands, tab
+ * colours, Wall text), the screenshot shelf and the account. Three grid
+ * columns, so nothing can collide. There is nothing over the terminals: Full
+ * screen is one terminal, the Wall is all of them, and Ctrl+G flips the two.
  * Transparent over the backdrop — the window is draggable anywhere along it —
  * with the native minimise/maximise/close buttons drawn by Windows into the
  * reserved gap on the far right (titleBarOverlay), never re-implemented here.
@@ -32,23 +38,31 @@ export function TitleBar(): ReactNode {
   const { state } = useApp()
   const [focused, setFocused] = useState(true)
   const isDevChannel = state.info?.channel === 'dev'
+  const place = useVoiceBarPlace()
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
 
   return (
-    <header className="deckbar" data-focused={focused}>
+    <header className="deckbar" data-focused={focused} data-voicebar={place}>
       <div className="deckbar__left">
         <span className="deckbar__mark" data-channel={isDevChannel ? 'dev' : undefined}>
           <Icon name="forge" size={15} />
         </span>
         <span className="deckbar__wordmark">Forge</span>
         {isDevChannel ? <span className="deckbar__channel">DEV</span> : null}
-        <AgentCount />
+        <AgentControls />
       </div>
 
-      <ModePill />
+      {place === 'top' ? (
+        <div className="deckbar__voice">
+          <Dock place="top" />
+        </div>
+      ) : (
+        <ModePill />
+      )}
 
       <div className="deckbar__right">
+        {place === 'top' ? <ModePill /> : null}
         <DeckMenu />
         {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
         <div className="deckbar__controls-gap" />
@@ -127,27 +141,21 @@ function ModePill(): ReactNode {
   )
 }
 
-/* ------------------------------------------------------------ agent count */
+/* --------------------------------------------------------- agent controls */
 
 /**
- * How many terminals the project has, and the one new-agent button that is on
- * screen whichever size the terminals are — Ctrl+T's chooser anchors on it.
+ * The Agents menu, the new-agent button (Ctrl+T's chooser anchors on it; it is
+ * on screen whichever size the terminals are) and the Wall switch.
  */
-function AgentCount(): ReactNode {
+function AgentControls(): ReactNode {
   const project = useActiveProject()
-  const workspace = useActiveWorkspace()
   const { used, max } = usePaneCount()
   if (!project) return null
-  const n = workspace.tabs.reduce((sum, t) => sum + countLeaves(t.root), 0)
   const atLimit = used >= max
 
   return (
     <span className="deckbar__agents">
-      {n > 0 ? (
-        <span className="deckbar__count">
-          {n} {n === 1 ? 'agent' : 'agents'}
-        </span>
-      ) : null}
+      <AgentsMenu />
       <button
         type="button"
         className="deckbar__new"
@@ -161,7 +169,47 @@ function AgentCount(): ReactNode {
       >
         <Icon name="plus" size={13} />
       </button>
+      <WallSwitch />
     </span>
+  )
+}
+
+/**
+ * Wall on or off. On: every agent at once. Off: Full screen, one terminal.
+ * The state is a shape as well as a light — a filled square beside the word
+ * when on, a hollow one when off — and aria-pressed for a screen reader.
+ * Over the browser or the board it brings the agents back, as the Wall.
+ */
+function WallSwitch(): ReactNode {
+  const { actions } = useApp()
+  const viewMode = useViewMode()
+  const surface = useShellMode()
+  const { commands } = useKeymap()
+  const combo = commands.find((c) => c.id === 'view.toggle')?.keys[0]
+  const on = viewMode === 'mosaic' && !surface
+  const keys = combo ? ` (${combo})` : ''
+
+  return (
+    <button
+      type="button"
+      className="deckbar__wall"
+      data-on={on ? 'true' : undefined}
+      aria-pressed={on}
+      title={on ? `Wall is on — every agent at once. Click for Full screen${keys}` : `Wall — every agent at once${keys}`}
+      onClick={() => {
+        if (surface) {
+          actions.setViewMode('mosaic')
+          uiCommands.run('set-mode', 'agents')
+          return
+        }
+        actions.setViewMode(on ? 'tabs' : 'mosaic')
+      }}
+    >
+      <span className="deckbar__wallmark" aria-hidden="true">
+        {on ? '■' : '□'}
+      </span>
+      Wall
+    </button>
   )
 }
 
@@ -283,10 +331,11 @@ function DeckMenu(): ReactNode {
           </button>
           <button type="button" role="menuitem" className="deckmenu__row" onClick={() => run(() => toggleSheet('panes'))}>
             <Icon name="viewMosaic" size={14} />
-            <span className="deckmenu__label">Every pane</span>
+            <span className="deckmenu__label">Every agent</span>
             <CommandKeys id="ui.toggle-panes-switcher" />
           </button>
         </div>
+        <VoiceBarPlaceRow />
         <div className="deckmenu__section">
           <span className="deckmenu__eyebrow">Tools</span>
           <div className="deckmenu__tools" ref={toolsHost.set}>
@@ -299,5 +348,34 @@ function DeckMenu(): ReactNode {
         </div>
       </div>
     </span>
+  )
+}
+
+/* ------------------------------------------------------- voice bar place */
+
+/**
+ * Voice bar: Top or Bottom — the same choice as dragging the bar by its grip,
+ * kept per machine (lib/voiceBarPlace). The chosen side is lit and ticked.
+ */
+function VoiceBarPlaceRow(): ReactNode {
+  const place = useVoiceBarPlace()
+  return (
+    <div className="deckmenu__section">
+      <span className="deckmenu__eyebrow">Voice bar</span>
+      <div className="deckmenu__seg" role="group" aria-label="Voice bar place">
+        {(['top', 'bottom'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            data-on={place === p ? 'true' : undefined}
+            aria-pressed={place === p}
+            onClick={() => setVoiceBarPlace(p)}
+          >
+            {place === p ? <span aria-hidden="true">✓</span> : null}
+            {p === 'top' ? 'Top' : 'Bottom'}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }

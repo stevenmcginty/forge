@@ -19,6 +19,7 @@ import { HUB_FOCUS_EVENT, type HubFocusDetail } from '@/lib/hubnav'
 import { fadeIn } from '@/lib/motion'
 import { shellMode, shellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
+import { useVoiceBarPlace } from '@/lib/voiceBarPlace'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { useActiveProject, useApp, type SettingsSection } from '@/state/AppState'
 import '@/components/shell/deck-tokens.css'
@@ -29,11 +30,11 @@ import './App.css'
 /**
  * The desktop shell: a command deck.
  *
- * One backdrop (the room), a slim top bar (the mark, the mode switcher, the
- * tools), the stage (whatever mode is on — the agents' terminals, or a
- * registered surface such as the browser under the wall strip that keeps every
- * terminal in sight), and the dock along the bottom
- * (project, type-or-speak, panes, the voice socket). Settings is a pop-up over all of it: the panes stay live
+ * One backdrop (the room), a slim top bar (the mark, the Agents menu and the
+ * Wall switch, the voice bar, the modes, the tools), and the stage under it
+ * with almost no margin: the agents' terminals — the Wall, or one Full screen —
+ * or a registered surface such as the browser. The voice bar can be clipped to
+ * the bottom edge instead (lib/voiceBarPlace). Settings is a pop-up over all of it: the panes stay live
  * behind it and Esc puts you back.
  *
  * The terminals never notice any of this. terminalHost owns every xterm, so a
@@ -51,13 +52,14 @@ export function App(): ReactNode {
   const surface = surfaces.find((s) => s.id === surfaceId) ?? null
   const modes = useDeckModes()
   const mode = useDeckMode()
+  const voiceBar = useVoiceBarPlace()
 
   // Every layout change that moves pane edges gets a refit once it settles —
   // the same 200ms beat the app has always used, now also after a mode glide.
   useEffect(() => {
     const t = setTimeout(() => terminalHost.fitAll(), 380)
     return () => clearTimeout(t)
-  }, [state.view, surfaceId])
+  }, [state.view, surfaceId, voiceBar])
 
   /* ------------------------------------------------------------ modes */
 
@@ -155,7 +157,7 @@ export function App(): ReactNode {
   const Surface = surface?.render ?? null
 
   return (
-    <div className="app deck" data-ready={state.ready} data-mode={mode}>
+    <div className="app deck" data-ready={state.ready} data-mode={mode} data-voicebar={voiceBar}>
       <Backdrop />
       <TitleBar />
       {/*
@@ -172,10 +174,9 @@ export function App(): ReactNode {
           </div>
         ) : (
           /*
-           * The agents' column: the terminals (the Wall, or the wall strip over
-           * Full screen), or — with the browser or the board up — the wall
-           * strip alone, and the surface under it at the stage's full width.
-           * Never side by side: nothing covers or squeezes the surface.
+           * The agents' column: the terminals (the Wall, or one Full screen),
+           * or — with the browser or the board up — the surface alone at the
+           * stage's full size (the grid keeps only its chooser and tools).
            */
           <div className="deck__agents" data-beside={Surface ? 'true' : undefined}>
             <TerminalGrid beside={Boolean(Surface)} />
@@ -187,7 +188,8 @@ export function App(): ReactNode {
           </div>
         )}
       </main>
-      <Dock />
+      {/* The voice bar: in the top bar (TitleBar) unless clipped down here. */}
+      {voiceBar === 'bottom' ? <Dock place="bottom" /> : null}
       <DeckToast />
       <SettingsPopup />
       {/*

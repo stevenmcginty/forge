@@ -51,15 +51,14 @@
 }
 
 /*
- * How many agents the project has, and the new-agent button. Quiet on purpose:
- * set off from the mark by one short hairline, the count in the instrument
- * face with figures that do not jiggle as it changes.
+ * The Agents menu, the new-agent button and the Wall switch. Set off from the
+ * mark by one short hairline.
  */
 .deckbar__agents {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: none;
   margin-left: 6px;
   padding-left: 13px;
@@ -74,16 +73,6 @@
   height: 14px;
   transform: translateY(-50%);
   background: var(--glass-line-strong);
-}
-
-.deckbar__count {
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  color: var(--text-muted);
 }
 
 .deckbar__new {
@@ -427,5 +416,227 @@
 }
 
 :root[data-reduced-motion='true'] .deckmenu__panel {
+  animation: none;
+}
+
+/* ------------------------------------------------- the voice bar, up here
+ *
+ * With the voice bar in the top bar (the default) the middle column is the
+ * bar: it takes whatever the left and right leave, up to a comfortable
+ * reading width, and the modes move over beside the … menu. Only the bar
+ * itself opts out of the drag region, so the gaps round it still move the
+ * window.
+ */
+
+.deckbar[data-voicebar='top'] {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 12px;
+}
+
+.deckbar[data-voicebar='top'] .deckbar__right {
+  gap: 8px;
+}
+
+.deckbar__voice {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+}
+
+/* The bar's own sheet (projects) or the Agents menu is open: step up. */
+.deckbar:has(.sheet) {
+  z-index: var(--z-sheet);
+}
+
+/* A laptop: the wordmark goes first, the mark stays. */
+@media (max-width: 1600px) {
+  .deckbar[data-voicebar='top'] .deckbar__wordmark {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------ the Agents menu */
+
+.agentsmenu {
+  position: relative;
+  display: inline-flex;
+  -webkit-app-region: no-drag;
+}
+
+.deckbar__agentsbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 9px 0 11px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__agentsbtn:hover,
+.deckbar__agentsbtn[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.deckbar__agentsbtn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.deckbar__agentsn {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.deckbar__agentschev {
+  color: var(--text-dim);
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.deckbar__agentsbtn[data-open='true'] .deckbar__agentschev {
+  transform: rotate(180deg);
+}
+
+/*
+ * Sheets opened from the top bar — the Agents menu here, the project sheet
+ * out of the voice bar — drop from it instead of rising from the dock.
+ */
+.deckbar .sheet {
+  top: calc(100% + 8px);
+  bottom: auto;
+  animation-name: sheet-drop;
+}
+
+.deckbar .sheet--panes {
+  left: 0;
+  right: auto;
+  max-height: min(620px, calc(100vh - var(--titlebar-h) - 24px));
+  transform-origin: 40px 0;
+}
+
+@keyframes sheet-drop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -10px, 0) scale(0.965);
+  }
+}
+
+/* ------------------------------------------------------------ Wall switch */
+
+.deckbar__wall {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px 0 9px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__wall:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+/* On: lit, and the square beside the word is filled (off, it is hollow). */
+.deckbar__wall[data-on='true'] {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.deckbar__wall:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.deckbar__wallmark {
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* ------------------------------------------- the … menu's Voice bar row */
+
+.deckmenu__seg {
+  display: flex;
+  gap: 2px;
+  margin: 2px 4px 0;
+  padding: 2px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.deckmenu__seg > button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.deckmenu__seg > button:hover {
+  color: var(--text-primary);
+}
+
+.deckmenu__seg > button[data-on='true'] {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.deckmenu__seg > button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deckbar .sheet {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .deckbar .sheet {
   animation: none;
 }

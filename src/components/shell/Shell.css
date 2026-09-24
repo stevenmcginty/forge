@@ -11,6 +11,24 @@
   position: relative;
   isolation: isolate;
   background: var(--bg-base);
+  /*
+   * The terminals are the work, so the stage takes nearly all of the window:
+   * a few pixels of backdrop round it, no more. With the voice bar in the top
+   * bar (the default) nothing is left to clear at the bottom edge. Scoped here
+   * rather than in deck-tokens.css, which Forge Web's deck reads too.
+   */
+  --stage-pad-x: 6px;
+  --stage-pad-top: 2px;
+  --dock-clear: 6px;
+  /* Wall tiles: a shorter head and a smaller X, so the terminal gets the room. */
+  --tile-head-h: 24px;
+  --tile-close-size: 20px;
+}
+
+/* The voice bar clipped to the bottom edge: clear it, and sit it lower. */
+.deck[data-voicebar='bottom'] {
+  --dock-bottom: 8px;
+  --dock-clear: calc(var(--dock-h) + var(--dock-bottom) + 8px);
 }
 
 .deck__stage {
@@ -36,31 +54,26 @@
 }
 
 /*
- * The agents' column. The terminals fill it (the Wall, or the wall strip over
- * Full screen — TerminalGrid lays those out); with the browser or the board up
- * it is the wall strip on top and the surface under it at full stage width.
+ * The agents' column. The terminals fill it (the Wall, or one Full screen —
+ * TerminalGrid lays those out); with the browser or the board up the surface
+ * fills it and the grid draws no terminals.
  */
 .deck__agents {
   display: flex;
   flex-direction: column;
-  gap: var(--wall-strip-gap);
+  gap: 0;
   flex: 1;
   min-width: 0;
   min-height: 0;
 }
 
-/* Beside a surface the grid is the wall strip alone: its own height, or none. */
+/* Beside a surface the grid holds only the chooser: no height of its own. */
 .deck__agents[data-beside='true'] > .grid {
   flex: none;
 }
 
 .deck__agents[data-beside='true'] > .grid:empty {
   display: none;
-}
-
-/* Full screen: the wall strip, then the active tab under it. */
-.deck .grid[data-view='full'] {
-  gap: var(--wall-strip-gap);
 }
 
 .deck__surface {

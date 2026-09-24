@@ -1,43 +1,50 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { PaneLeaf, TerminalTab } from '@shared/types'
-import { useCallSigns } from '@/hooks/useHub'
-import { usePaneRuntime } from '@/hooks/usePaneRuntime'
-import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
-import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
-import { usePaneActivity } from '@/lib/paneActivity'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { shellSheet, useShellSheet } from '@/lib/shellSlots'
-import { collectLeaves } from '@/lib/splitTree'
-import { terminalHost } from '@/lib/terminals'
 import { useUiCommand } from '@/lib/uiCommands'
-import { useActiveProject, useActiveWorkspace, useApp, usePaneCount, useViewMode } from '@/state/AppState'
-import { AgentBadge } from '../AgentBadge'
+import { setVoiceBarPlace, type VoiceBarPlace } from '@/lib/voiceBarPlace'
+import { useActiveProject, useApp } from '@/state/AppState'
 import { Composer } from '../hub/Composer'
 import { Icon } from '../Icon'
 import { RailStack } from '../rail/RailStack'
 import { Sheet, toggleSheet } from './Sheet'
-import { StateChip } from './StateChip'
 import './Dock.css'
 
 /**
- * The dock: one bar along the deck's bottom edge, and nothing else.
+ * The voice bar: the project you are in, Listen, D (raw dictation) and the
+ * text — the only place you talk to Forge (./hub/Composer).
  *
- * The bar (./hub/Composer) is the only place you talk to Forge: the project
- * you are in at its left (it opens the project sheet — every project, with its
- * tasks, git, activity and share sections), the Listen switch, the text, and
- * where the text goes. The panes live on the Wall and in the tabs; the
- * references that used to sit in a Tools pill (Skills, Commands, tab colours,
- * Wall text) are in the top bar's "…" menu and in the palette (Ctrl+K). The
- * panes switcher is still one key away (Ctrl+Shift+E).
+ * It lives in one of two places, a per-machine choice (lib/voiceBarPlace):
  *
- * It floats over the backdrop, below the stage, so it never covers a terminal
- * and its glass only ever blurs a still picture.
+ *   top      in the top bar, between the agents and the modes (the default).
+ *            Slim — one line — and it drops down over the stage only while
+ *            there is something to show (a long message, Forge's reply, the
+ *            palette), so the terminals keep the whole height.
+ *   bottom   clipped to the deck's bottom edge, floating, as the old dock.
+ *
+ * The grip at its left end moves it: drag it down to the bottom edge and it
+ * clips there, drag it up and it goes back into the top bar. The … menu has
+ * the same choice as a switch, and Enter on the grip flips it.
+ *
+ * The project sheet opens out of it, dropping from the top bar or rising from
+ * the bottom edge. The panes switcher is the top bar's Agents menu now.
  */
-export function Dock(): ReactNode {
+export function Dock({ place }: { place: VoiceBarPlace }): ReactNode {
   const project = useActiveProject()
+  const [drag, setDrag] = useState<{ y: number; armed: boolean } | null>(null)
+  const other = place === 'top' ? 'bottom' : 'top'
   return (
-    <div className="dock" role="toolbar" aria-label="Dock">
+    <div
+      className="dock"
+      data-place={place}
+      data-dragging={drag ? 'true' : undefined}
+      role="toolbar"
+      aria-label="Voice bar"
+      style={drag ? ({ '--drag-y': `${drag.y}px` } as React.CSSProperties) : undefined}
+    >
+      <Grip place={place} onDrag={setDrag} />
       {project ? (
-        <Composer lead={<ProjectPill />} />
+        <Composer lead={<ProjectPill />} compact={place === 'top'} />
       ) : (
         <div className="dock__composer dock__composer--idle">
           <ProjectPill />
@@ -45,8 +52,80 @@ export function Dock(): ReactNode {
         </div>
       )}
       <ProjectSheet />
-      <PanesSheet />
+      {/* Where a drop will clip it: a lit slot at the other edge, with a word. */}
+      {drag
+        ? createPortal(
+            <div className="dock__snap" data-to={other} data-armed={drag.armed ? 'true' : undefined} aria-hidden="true">
+              {drag.armed ? `Let go — clip to the ${other}` : `Drag to the ${other} edge`}
+            </div>,
+            document.body
+          )
+        : null}
     </div>
+  )
+}
+
+/* -------------------------------------------------------------------- grip */
+
+/** Let go within this share of the window's height from the other edge, and the bar moves there. */
+const SNAP_AT = 0.45
+
+/**
+ * The bar's handle. A drag follows the pointer (the bar moves with it, as a
+ * transform); let go past the middle of the window and it clips to the other
+ * edge, anywhere short of that and it springs back. Enter or Space on it flips
+ * the edge outright, for the keyboard.
+ */
+function Grip({
+  place,
+  onDrag
+}: {
+  place: VoiceBarPlace
+  onDrag: (drag: { y: number; armed: boolean } | null) => void
+}): ReactNode {
+  const start = useRef<{ id: number; y: number } | null>(null)
+  const other: VoiceBarPlace = place === 'top' ? 'bottom' : 'top'
+  const passed = (clientY: number): boolean =>
+    place === 'top' ? clientY > window.innerHeight * (1 - SNAP_AT) : clientY < window.innerHeight * SNAP_AT
+
+  return (
+    <button
+      type="button"
+      className="dock__grip"
+      title={place === 'top' ? 'Drag down to clip the voice bar to the bottom edge' : 'Drag up to put the voice bar back in the top bar'}
+      aria-label={place === 'top' ? 'Move the voice bar to the bottom' : 'Move the voice bar to the top'}
+      onMouseDown={(e) => e.preventDefault()}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.currentTarget.setPointerCapture(e.pointerId)
+        start.current = { id: e.pointerId, y: e.clientY }
+      }}
+      onPointerMove={(e) => {
+        const s = start.current
+        if (!s || s.id !== e.pointerId) return
+        const dy = e.clientY - s.y
+        // Only toward the other edge: the bar is already against its own.
+        onDrag({ y: place === 'top' ? Math.max(0, dy) : Math.min(0, dy), armed: passed(e.clientY) })
+      }}
+      onPointerUp={(e) => {
+        const s = start.current
+        start.current = null
+        onDrag(null)
+        if (!s || s.id !== e.pointerId) return
+        if (passed(e.clientY)) setVoiceBarPlace(other)
+      }}
+      onPointerCancel={() => {
+        start.current = null
+        onDrag(null)
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault()
+        setVoiceBarPlace(other)
+      }}
+    >
+      <Icon name="grip" size={12} />
+    </button>
   )
 }
 
@@ -103,186 +182,3 @@ function ProjectSheet(): ReactNode {
   )
 }
 
-/* -------------------------------------------------------------- panes pill */
-
-interface Row {
-  leaf: PaneLeaf
-  tab: TerminalTab
-}
-
-function PanesSheet(): ReactNode {
-  const { state, actions } = useApp()
-  const workspace = useActiveWorkspace()
-  const viewMode = useViewMode()
-  const { used, max } = usePaneCount()
-  const open = useShellSheet() === 'panes'
-  // No pill in the dock any more: the switcher answers to its keys and the palette.
-  useUiCommand('open-panes-switcher', () => shellSheet.set('panes'))
-  useUiCommand('close-panes-switcher', () => {
-    if (shellSheet.get() === 'panes') shellSheet.set(null)
-  })
-  useUiCommand('toggle-panes-switcher', () => toggleSheet('panes'))
-  const { map: callSigns } = useCallSigns()
-  const rows = useMemo<Row[]>(
-    () => workspace.tabs.flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab }))),
-    [workspace.tabs]
-  )
-  const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? null
-  const currentId = activeTab?.activePaneId ?? null
-  const [cursor, setCursor] = useState(0)
-  const listRef = useRef<HTMLDivElement | null>(null)
-
-  // Only on opening: moving the cursor must not snap back to the current pane.
-  const openedAt = useRef({ rows, currentId })
-  openedAt.current = { rows, currentId }
-  useEffect(() => {
-    if (!open) return
-    const { rows: list, currentId: here } = openedAt.current
-    const i = list.findIndex((r) => r.leaf.id === here)
-    setCursor(i < 0 ? 0 : i)
-    requestAnimationFrame(() => listRef.current?.focus())
-  }, [open])
-
-  const pick = (row: Row): void => {
-    shellSheet.set(null)
-    actions.revealPane(row.leaf.id)
-    requestAnimationFrame(() => terminalHost.focus(row.leaf.id))
-  }
-
-  return (
-    <Sheet id="panes" className="sheet--panes" label="Panes">
-      <header className="sheet__head">
-        <span className="sheet__eyebrow">Panes</span>
-        <span className="sheet__count mono">
-          {rows.length} here · {used}/{max} in all
-        </span>
-        <div className="sheet__seg" role="group" aria-label="View">
-          <button
-            type="button"
-            data-active={viewMode === 'tabs' ? 'true' : undefined}
-            onClick={() => actions.setViewMode('tabs')}
-            title="Full screen — one terminal (its tab's splits too) under the wall strip (Ctrl+G)"
-          >
-            Full screen
-          </button>
-          <button
-            type="button"
-            data-active={viewMode === 'mosaic' ? 'true' : undefined}
-            onClick={() => actions.setViewMode('mosaic')}
-            title="Wall — every pane at once (Ctrl+G)"
-          >
-            Wall
-          </button>
-        </div>
-      </header>
-      <div
-        ref={listRef}
-        className="sheet__list"
-        role="listbox"
-        aria-label="Panes"
-        tabIndex={-1}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            e.preventDefault()
-            const step = e.key === 'ArrowDown' ? 1 : -1
-            setCursor((c) => (rows.length ? (c + step + rows.length) % rows.length : 0))
-            return
-          }
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            const row = rows[cursor]
-            if (row) pick(row)
-            return
-          }
-          if (/^[1-9]$/.test(e.key)) {
-            const row = rows[Number(e.key) - 1]
-            if (row) {
-              e.preventDefault()
-              pick(row)
-            }
-          }
-        }}
-      >
-        {rows.length === 0 ? <div className="sheet__empty">No panes yet in this project.</div> : null}
-        {rows.map((row, i) => (
-          <PaneRow
-            key={row.leaf.id}
-            row={row}
-            index={i}
-            callSign={callSigns[row.leaf.id] ?? null}
-            current={row.leaf.id === currentId}
-            cursor={i === cursor}
-            showTab={workspace.tabs.length > 1}
-            profiles={state.settings.agentProfiles}
-            onHover={() => setCursor(i)}
-            onPick={() => pick(row)}
-          />
-        ))}
-      </div>
-      <footer className="sheet__foot">
-        <button
-          type="button"
-          className="cta-btn sheet__new"
-          onClick={() => {
-            shellSheet.set(null)
-            window.dispatchEvent(new CustomEvent(NEW_TAB_EVENT))
-          }}
-        >
-          <Icon name="plus" size={13} />
-          New agent
-        </button>
-        <span className="sheet__keys mono">↑↓ pick · 1–9 jump · Enter go</span>
-      </footer>
-    </Sheet>
-  )
-}
-
-function PaneRow({
-  row,
-  index,
-  callSign,
-  current,
-  cursor,
-  showTab,
-  profiles,
-  onHover,
-  onPick
-}: {
-  row: Row
-  index: number
-  callSign: string | null
-  current: boolean
-  cursor: boolean
-  showTab: boolean
-  profiles: Parameters<typeof resolveProfile>[0]
-  onHover: () => void
-  onPick: () => void
-}): ReactNode {
-  const profile = resolveProfile(profiles, row.leaf.profileId)
-  const runtime = usePaneRuntime(row.leaf.id)
-  const activity = usePaneActivity(row.leaf.id, runtime)
-  const title = paneDisplayTitle(profile, row.leaf.title)
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={cursor}
-      className="prow"
-      data-current={current ? 'true' : undefined}
-      data-cursor={cursor ? 'true' : undefined}
-      style={{ '--pane-accent': profile.accent } as React.CSSProperties}
-      onPointerEnter={onHover}
-      onClick={onPick}
-    >
-      <span className="prow__num mono">{index + 1}</span>
-      <AgentBadge profile={profile} size="sm" />
-      <span className="prow__name truncate">{callSign ?? title}</span>
-      <span className="prow__kind truncate">
-        {callSign ? title : title === profile.name ? '' : profile.name}
-        {showTab ? ` · ${row.tab.title}` : ''}
-      </span>
-      <StateChip activity={activity} />
-      {current ? <span className="prow__here">here</span> : null}
-    </button>
-  )
-}

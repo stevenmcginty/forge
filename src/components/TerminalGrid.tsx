@@ -15,7 +15,6 @@ import { Icon } from './Icon'
 import { MosaicView } from './MosaicView'
 import { SkillsButton } from './SkillsFlyout'
 import { FocusReticle } from './shell/FocusReticle'
-import { WallStrip } from './shell/WallStrip'
 import { SplitView } from './SplitView'
 import './TerminalGrid.css'
 
@@ -28,15 +27,16 @@ export interface NewTabDetail {
  * The terminal area, in one of two sizes, plus the empty states that lead in:
  *
  *   Wall         (viewMode 'mosaic') every terminal at once, filling the stage.
- *   Full screen  (viewMode 'tabs') the active tab — its splits and all — under
- *                the wall strip, which keeps every other terminal in sight.
+ *   Full screen  (viewMode 'tabs') the active tab — its splits and all — with
+ *                the whole stage to itself. Nothing sits over it.
  *
- * `beside` is the browser or the board on the stage: then this draws only the
- * wall strip, and the surface takes the room below it (see App).
+ * `beside` is the browser or the board on the stage: then this draws no
+ * terminals (only the chooser and the tools), and the surface has the stage.
  *
  * There is no tab strip. Tabs are still the unit a split tree lives in, but you
- * pick a terminal from the strip or the Wall; Ctrl+G flips the two sizes and
- * the tab shortcuts still step through the tabs Full screen shows.
+ * pick a terminal from the top bar's Agents menu or the Wall; Ctrl+G (or the
+ * Wall switch) flips the two sizes and the tab shortcuts still step through
+ * the tabs Full screen shows.
  */
 export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNode {
   const { state, actions } = useApp()
@@ -101,8 +101,8 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
   }, [tabs, tinted])
 
   /*
-   * The two ways between the sizes. Both also bring the agents back on stage
-   * when the browser or the board is up — the strip is the way back to them.
+   * From a Wall tile to Full screen. It also brings the agents back on stage
+   * when the browser or the board is up.
    */
   const openFull = useCallback(
     (paneId: string): void => {
@@ -114,10 +114,6 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
     },
     [actions, beside]
   )
-  const toWall = useCallback((): void => {
-    actions.setViewMode('mosaic')
-    if (beside) uiCommands.run('set-mode', 'agents')
-  }, [actions, beside])
 
   /*
    * Esc goes from Full screen back to the Wall — but only when nobody else owns
@@ -185,12 +181,7 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
   }
 
   const atLimit = used >= max
-  const anyPanes = workspace.tabs.length > 0
   const view = beside ? 'beside' : viewMode === 'mosaic' ? 'wall' : 'full'
-  // The strip is for when the terminals are not all on the stage already.
-  const showStrip = anyPanes && view !== 'wall'
-  // Panes attached full size below the strip get a marker there, not a peek.
-  const onScreen = view === 'full' && tab ? collectLeaves(tab.root).map((l) => l.id) : []
 
   const toolParts = (
     <>
@@ -236,16 +227,10 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
     />
   )
 
-  const strip = showStrip ? (
-    <WallStrip project={project} workspace={workspace} onScreen={onScreen} onOpen={openFull} onWall={toWall} />
-  ) : null
-
   return (
     <div className="grid" data-view={view}>
       {/* The references live in the title bar's "…" menu (see toolsHost in lib/shellSlots). */}
       {toolsHost ? createPortal(<div className="deck-tools">{toolParts}</div>, toolsHost) : null}
-
-      {strip}
 
       {beside ? null : (
         <div className="grid__body" ref={bodyRef}>

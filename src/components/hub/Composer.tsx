@@ -16,6 +16,7 @@ import type { HubAction, HubCaption } from '@/state/VoiceHubController'
 import { Icon } from '../Icon'
 import { setBarTarget, useBarTarget } from './barMode'
 import { ACTION_GLYPH, hubAsk, listenState, useHubPreview, useHubView } from './hubView'
+import { DictateButton } from './DictateButton'
 import { KeyRecorder, Keys } from './KeyRecorder'
 import { ListenToggle } from './VoicePill'
 import './Composer.css'
@@ -31,9 +32,10 @@ import './Composer.css'
  *               the main agent: it sends when you pause, answers, and listens
  *               again. Right Shift flips it too. The brain's name and what it
  *               is doing are inside the switch, in words.
- *   dictate     no button: the Dictate key (Right Ctrl) is the hidden power
- *               key for raw words into the focused pane — or into this bar,
- *               when the bar has focus. The bar says so while it runs.
+ *   D           raw dictation (DictateButton): the Dictate key (Right Ctrl) as
+ *               a small button beside Listen — raw words into the focused
+ *               pane, or into this bar when the bar has focus. It says
+ *               "● Rec" while it runs.
  *   replies     what Forge says grows the bar upward, with a trail of what it
  *               did ("✓ Opened Codex pane · ✓ Typed into Everest") that opens
  *               into the whole list.
@@ -58,7 +60,7 @@ type PaletteItem =
   | { kind: 'prompt'; key: string; prompt: SavedPrompt }
   | { kind: 'command'; key: string; id: string; title: string; group: string; keys: string[] }
 
-export function Composer({ lead }: { lead?: ReactNode }): ReactNode {
+export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?: boolean }): ReactNode {
   const { state, actions } = useApp()
   const tab = useActiveTab()
   const dictation = useDictation()
@@ -90,13 +92,19 @@ export function Composer({ lead }: { lead?: ReactNode }): ReactNode {
   const showPalette = (paletteOpen || slash) && focused
   const query = slash ? text.slice(1).trim().toLowerCase() : ''
 
-  // Grow upward with the text, one line at a time, to five; then scroll.
+  // Grow with the text, one line at a time, to five; then scroll. At the
+  // bottom edge the bar grows upward; in the top bar (compact) it drops down,
+  // over the stage, and goes back to one slim line when the text does.
+  const [tall, setTall] = useState(false)
   useLayoutEffect(() => {
     const el = fieldRef.current
     if (!el) return
+    const min = compact ? 28 : 34
     el.style.height = '0px'
-    el.style.height = `${Math.min(Math.max(34, el.scrollHeight), 5 * 20 + 14)}px`
-  }, [text])
+    const h = Math.min(Math.max(min, el.scrollHeight), 5 * 20 + 14)
+    el.style.height = `${h}px`
+    setTall(h > min + 4)
+  }, [text, compact])
 
   const focusField = (): void => fieldRef.current?.focus()
   const backToPane = (): void => {
@@ -249,6 +257,7 @@ export function Composer({ lead }: { lead?: ReactNode }): ReactNode {
       data-target={toForge ? 'forge' : 'pane'}
       data-empty={text ? undefined : 'true'}
       data-palette={showPalette ? 'true' : undefined}
+      data-tall={tall ? 'true' : undefined}
       style={{ '--pane-accent': profile?.accent ?? 'var(--accent)' } as React.CSSProperties}
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) {
@@ -287,6 +296,7 @@ export function Composer({ lead }: { lead?: ReactNode }): ReactNode {
       <div className="comp__row">
         {lead}
         <ListenToggle />
+        <DictateButton />
 
         <textarea
           ref={fieldRef}
@@ -337,15 +347,6 @@ export function Composer({ lead }: { lead?: ReactNode }): ReactNode {
             }
           }}
         />
-
-        {dictating ? (
-          <span className="comp__dictating" role="status" title={`The Dictate key is on — ${dictateKey} stops it`}>
-            <span className="comp__dictating-dot" aria-hidden="true">
-              ●
-            </span>
-            Dictating
-          </span>
-        ) : null}
 
         <button
           type="button"

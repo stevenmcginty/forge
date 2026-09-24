@@ -71,37 +71,6 @@
   font-size: 12.5px;
 }
 
-/* The Dictate key is on: a word beside the text, not only a colour. */
-.comp__dictating {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  height: 26px;
-  margin-bottom: 4px;
-  padding: 0 10px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--accent-line);
-  background: var(--accent-soft);
-  font-family: var(--font-display);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.comp__dictating-dot {
-  font-size: 8px;
-  animation: comp-blink 1.4s ease-in-out infinite;
-}
-
-@keyframes comp-blink {
-  50% {
-    opacity: 0.35;
-  }
-}
-
 /* A hint is one line: it truncates rather than wrapping under the chip. */
 .comp .dock__field::placeholder {
   overflow: hidden;
@@ -743,7 +712,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .comp__acts,
-  .comp__dictating-dot,
   .crail,
   .crail[data-state='closing'],
   .cpal,
@@ -754,7 +722,7 @@
   }
 }
 
-:root[data-reduced-motion='true'] :is(.comp__acts, .comp__dictating-dot, .crail, .cpal, .csave, .crail__line, .crail__glyph) {
+:root[data-reduced-motion='true'] :is(.comp__acts, .crail, .cpal, .csave, .crail__line, .crail__glyph) {
   animation: none !important;
 }
 
