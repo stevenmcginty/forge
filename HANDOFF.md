@@ -1,5 +1,15 @@
 # Handoff
 
+## Wall → Full screen fix merged; New beside Wall; Full screen names the pane in the browser (2026-09-24 13:30)
+
+- **Cause of "I thought you fixed it":** the Wall → Full screen scaling fix (ad8950f, "Full screen claims the pane's grid") and 4 sibling commits were built in worktree branch `worktree-agent-ab599473cfdab9e9b` but never merged. Now merged (a8c32af), conflicts with bfa0040's agent picker resolved; the agent chip sits in the AAA voice bar.
+- **Decided (Steve, reverses c6da229):** a New button (plus + "New") right beside the Wall switch, desktop (`src/components/TitleBar.tsx`, Ctrl+T anchors on `[data-new-agent]`) and browser (`web/src/deck/DeckTopBar.tsx`, logic copied from AgentsMenu).
+- **Browser Full screen:** PaneView's header shows again in Full screen only, styled like desktop PaneName (bold 15px, pill + bar). Wall unchanged.
+- **Old desktop message** now names the agent: "Update the desktop app to use Claude here".
+- **Claude voice "not working":** the running desktop started 11:27, before bfa0040 (12:46). Needs a desktop restart.
+- **Checked:** typecheck, webclient tsc, web:build, build, realtime:check 27 (in a scratch worktree). Name bar NOT viewed on screen.
+- **Open:** with Claude picked, Listen's navigation moves the desktop's view, not the browser's (Claude's tools run on the desktop). `scripts/web-deck-check.mjs` still crashes on the deleted PanesSheet.tsx.
+
 ## Forge Web: agent switcher — Gemini Live, ChatGPT, Claude (2026-09-24, uncommitted)
 
 - **Decided (Steve):** in the laptop browser, flip the main voice agent between Gemini Live, ChatGPT (GPT Realtime) and Claude (Opus).
