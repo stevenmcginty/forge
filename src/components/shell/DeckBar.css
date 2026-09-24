@@ -108,6 +108,88 @@
   opacity: 0.4;
 }
 
+/*
+ * The Wall's Grid | Free switch (WallLayoutSwitch in MosaicView), on the bar
+ * while the Wall is up — chip-sized to match Wall and New. The chosen side is
+ * filled and bold, the other hollow and light: shape and weight, not colour.
+ */
+/*
+ * With the switch on the bar the left side can outgrow its half, and the centre
+ * pill would sit on top of it: the left side takes the room it needs and the
+ * pill moves over (still centred whenever there is room), and in a narrow
+ * window the wordmark steps aside first.
+ */
+.deckbar:has(.deckbar__wallmode) {
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
+}
+
+@media (max-width: 1400px) {
+  .deckbar:has(.deckbar__wallmode) .deckbar__wordmark {
+    display: none;
+  }
+}
+
+.deckbar__wallmode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  -webkit-app-region: no-drag;
+}
+
+.deckbar__wallmode .wallmode {
+  height: 26px;
+  margin: 0;
+  border-color: var(--glass-line-strong);
+  border-radius: var(--r-full);
+}
+
+.deckbar__wallmode .wallmode__btn {
+  gap: 5px;
+  padding: 0 10px 0 9px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.deckbar__wallmode .wallmode__btn + .wallmode__btn {
+  border-left-color: var(--glass-line-strong);
+}
+
+.deckbar__wallmode .wallmode__btn[data-on='true'] {
+  font-weight: 700;
+  color: var(--text-on-accent);
+}
+
+.deckbar__fit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__fit:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.deckbar__fit:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 .deckbar__mark {
   display: grid;
   place-items: center;

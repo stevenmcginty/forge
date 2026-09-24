@@ -5,8 +5,9 @@ import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
 import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { setVoiceBarPlace, useVoiceBarPlace } from '@/lib/voiceBarPlace'
-import { useActiveProject, useApp, usePaneCount, useViewMode } from '@/state/AppState'
+import { useActiveProject, useApp, useMosaic, usePaneCount, useViewMode } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
+import { WallLayoutSwitch } from './MosaicView'
 import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
 import { ScreenshotTray } from './ScreenshotTray'
@@ -156,6 +157,38 @@ function AgentControls(): ReactNode {
       <AgentsMenu />
       <WallSwitch />
       <NewAgentButton />
+      <WallLayoutControls />
+    </span>
+  )
+}
+
+/**
+ * The Wall's Grid | Free switch, on the bar while the Wall is on screen — the
+ * menu's Tools has it too, but a layout switch you have to go looking for is
+ * one nobody finds. Beside it, "Fit" while the grid has been dragged to a size
+ * of its own: one click back to the grid that fills the window.
+ */
+function WallLayoutControls(): ReactNode {
+  const { actions } = useApp()
+  const viewMode = useViewMode()
+  const surface = useShellMode()
+  const mosaic = useMosaic()
+  if (viewMode !== 'mosaic' || surface) return null
+
+  return (
+    <span className="deckbar__wallmode">
+      <WallLayoutSwitch />
+      {mosaic.mode === 'auto' && mosaic.grid ? (
+        <button
+          type="button"
+          className="deckbar__fit"
+          title="Fit to window: back to the grid that fills the window"
+          onClick={() => actions.setMosaicGrid(null)}
+        >
+          <Icon name="restart" size={11} />
+          Fit
+        </button>
+      ) : null}
     </span>
   )
 }
