@@ -741,15 +741,9 @@
   padding: 0 10px 0 5px;
 }
 
-/* The brain and the word side by side, not stacked: one line of type. */
-.dock[data-place='top'] .listen__text {
-  flex-direction: row;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.dock[data-place='top'] .listen__brain {
-  max-width: 96px;
+/* The voice unit's rim, around the shorter Listen and agent chip. */
+.dock[data-place='top'] .vunit {
+  height: 30px;
 }
 
 .dock[data-place='top'] .listen__wave {
@@ -850,6 +844,6 @@
  * the state by shape) and the voice agent chip keeps its chevron, and all
  * three give their words back when the bar is empty.
  */
-.dock[data-place='top'] .comp:not([data-empty='true']) :is(.listen__text, .dock__project-name, .bpick-chip__name) {
+.dock[data-place='top'] .comp:not([data-empty='true']) :is(.listen__word, .dock__project-name, .bpick-chip__name) {
   display: none;
 }

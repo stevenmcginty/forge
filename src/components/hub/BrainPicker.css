@@ -1,70 +1,144 @@
 /*
- * The voice agent chip beside Listen, and its menu (BrainPicker.tsx).
+ * The voice agent chip — the right half of the voice unit (VoicePill.css) —
+ * and its menu (BrainPicker.tsx).
  *
- * The chip is quiet — the bar's secondary type on a hairline — so it never
- * reads as a second Listen. Every state is a word or a shape: a fallback
- * carries ◆ and says why, the brain in use a tick AND "in use", and each other
- * row its status glyph and word (● Ready, ◇ Needs key, ✕ Not installed …).
+ * The chip is the brain's mark in a round tile, then its name, then a chevron.
+ * It sits inside the unit's rim, so it has none of its own: Listen and the
+ * agent read as one control. Every state is a word or a shape: a fallback
+ * carries a diamond on the tile and says why in the name; in the menu the
+ * brain in use has an inverted tile, a check AND "in use"; a brain that cannot
+ * be picked has a dashed tile, its status glyph and word (◇ Needs key,
+ * ✕ Not installed, ! Not logged in) and a line saying what to do.
  */
 
 .bpick-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   /* The chip gives up width before its neighbours: D and the text field keep theirs. */
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 260px;
-  height: 28px;
-  margin-bottom: 4px;
-  padding: 0 8px 0 10px;
+  max-width: 240px;
+  height: 32px;
+  padding: 0 9px 0 5px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--text-secondary);
-  box-shadow: inset 0 0 0 1px var(--line-hairline);
+  color: var(--text-primary);
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
 
+/* The seam between Listen and the agent: a hairline, inside the one rim. */
+.bpick-chip::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--glass-line);
+  pointer-events: none;
+}
+
 .bpick-chip:hover,
 .bpick-chip[data-open='true'] {
-  color: var(--text-primary);
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .bpick-chip:focus-visible {
   outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
+  outline-offset: 1px;
+}
+
+.bpick-chip__tile {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  transition: box-shadow var(--dur-med) var(--ease-out);
+}
+
+/* Listen on: the agent's tile takes the same lit rim — this is who hears you. */
+.vunit:has(.listen[data-on='true']) .bpick-chip__tile {
+  box-shadow: inset 0 0 0 1.5px var(--accent-line);
+}
+
+/* A fallback: a small diamond on the tile's shoulder, cut out of the bar. */
+.bpick-chip__mark {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--warn);
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
+  transform: rotate(45deg);
 }
 
 .bpick-chip__name {
   min-width: 0;
 }
 
-.bpick-chip__mark {
-  flex: none;
-  font-size: 9px;
-  color: var(--warn);
-}
-
 .bpick-chip__chev {
   flex: none;
   color: var(--text-dim);
-  transition: transform var(--dur-fast) var(--ease-out);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.bpick-chip:hover .bpick-chip__chev {
+  color: var(--text-secondary);
 }
 
 .bpick-chip[data-open='true'] .bpick-chip__chev {
   transform: rotate(180deg);
 }
 
+/* A narrow window: the chip keeps its mark; the name is in the title and the
+   accessible name, and one click away in the menu. */
+@media (max-width: 1100px) {
+  .bpick-chip {
+    gap: 4px;
+    padding-right: 7px;
+  }
+
+  .bpick-chip__name {
+    display: none;
+  }
+}
+
 /* ------------------------------------------------------------------ menu */
 
+.bpick__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-4) var(--s-4);
+}
+
+.bpick__hint {
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
 .bpick__row {
-  gap: var(--s-3);
+  gap: 10px;
+  min-height: 42px;
+  padding: 5px var(--s-4) 5px 6px;
 }
 
 .bpick__row:focus-visible {
@@ -72,17 +146,52 @@
   outline-offset: -2px;
 }
 
-.bpick__tick {
+.bpick__tile {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
-  width: 14px;
-  color: var(--accent);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.bpick__row:hover:not([disabled]) .bpick__tile {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
+}
+
+/* The brain in use: the tile inverts — a solid disc, whatever the theme. */
+.bpick__tile[data-look='use'],
+.bpick__row:hover .bpick__tile[data-look='use'] {
+  color: var(--bg-panel-raised);
+  background: var(--text-primary);
+}
+
+/* Cannot be picked: an empty, dashed ring. */
+.bpick__tile[data-look='off'] {
+  color: var(--text-dim);
+  background: none;
+  box-shadow: none;
+  outline: 1px dashed color-mix(in srgb, var(--text-dim) 70%, transparent);
+  outline-offset: -1px;
+}
+
+.bpick__tile[data-look='plain'] {
+  color: var(--text-muted);
+  background: none;
 }
 
 .bpick__text {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 1px;
   min-width: 0;
 }
 
@@ -90,10 +199,29 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--t-md);
+  font-weight: 500;
 }
 
 .bpick__sub {
-  font-size: var(--t-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.bpick__row:hover:not([disabled]) .bpick__sub {
+  color: var(--text-muted);
+}
+
+/* A note about this pick ("Starts next time you press Listen") outranks the
+   row's description: it is in the ink, not the dim. */
+.bpick__row[data-note='true'] .bpick__sub {
+  color: var(--text-secondary);
+}
+
+.bpick__row[disabled] .bpick__name {
   color: var(--text-muted);
 }
 
@@ -103,7 +231,7 @@
   gap: 4px;
   flex: none;
   font-family: var(--font-display);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -116,12 +244,19 @@
   line-height: 1;
 }
 
+.bpick__check {
+  order: -1;
+  color: var(--accent);
+}
+
 .bpick__state[data-tone='use'] {
   color: var(--text-primary);
 }
 
+/* Ready is the quiet case, so it is ink, not a colour. Needs-something is warn;
+   broken is danger — each also has its own glyph and word. */
 .bpick__state[data-tone='ok'] {
-  color: var(--ok);
+  color: var(--text-secondary);
 }
 
 .bpick__state[data-tone='need'] {
@@ -130,4 +265,12 @@
 
 .bpick__state[data-tone='bad'] {
   color: var(--danger);
+}
+
+.bpick__state[data-tone='wait'] {
+  color: var(--text-dim);
+}
+
+.bpick__settings {
+  min-height: 34px;
 }

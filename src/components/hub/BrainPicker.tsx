@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AGENT_BRAINS, agentBrainSpec, migrateAgentBrain, type AgentBrainId } from '@shared/agent-brain'
+import { AGENT_BRAINS, agentBrainSpec, migrateAgentBrain, type AgentBrainId, type AgentBrainKind, type AgentBrainSpec } from '@shared/agent-brain'
 import { useBrainProbes } from '@/hooks/useBrainStatus'
-import { barBrainLabel, brainSwitchWaits, brainUnavailable, statusOf } from '@/lib/brainStatus'
+import { barBrainLabel, brainSwitchWaits, brainUnavailable, statusOf, type BrainStatus } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
 import { Popover } from '../Popover'
+import { BrainMark } from './BrainMark'
 import { listenState, useHubView } from './hubView'
 import './BrainPicker.css'
 
 /**
- * The voice agent, picked in place: a chip beside Listen naming the brain that
- * will actually answer, and a menu of every brain (AGENT_BRAINS) to switch to
- * without opening Settings.
+ * The voice agent, picked in place: the right half of the voice unit (Listen
+ * is the left — see VoicePill.css), naming the brain that will actually answer
+ * by its mark and its name, and a menu of every brain (AGENT_BRAINS) to switch
+ * to without opening Settings. In a narrow window the chip keeps only the mark.
  *
  * The chip reads the setting the same way Settings' Main agent card does
  * (resolveAgentBrain), so a pick that fell back for want of a key says so in
@@ -69,15 +71,15 @@ export function BrainPicker(): ReactNode {
           setOpen((v) => !v)
         }}
       >
-        {fellBack ? (
-          <span className="bpick-chip__mark" aria-hidden="true">
-            ◆
-          </span>
-        ) : null}
+        <span className="bpick-chip__tile" aria-hidden="true">
+          <BrainMark brain={resolved.brain} size={13} />
+          {/* A fallback: a warn diamond on the mark, and the words say why. */}
+          {fellBack ? <span className="bpick-chip__mark" /> : null}
+        </span>
         <span className="bpick-chip__name truncate">{label}</span>
         <Icon name="chevronDown" size={11} className="bpick-chip__chev" />
       </button>
-      <Popover anchor={chip} open={open} onClose={close} align="start" width={320} label="Voice agent">
+      <Popover anchor={chip} open={open} onClose={close} align="start" width={336} label="Voice agent">
         <BrainMenu
           chosen={chosen}
           current={resolved.brain}
@@ -154,7 +156,10 @@ function BrainMenu({
 
   return (
     <div ref={ref} className="bpick" role="menu" aria-label="Voice agent" onKeyDown={onKeyDown}>
-      <div className="eyebrow popover__eyebrow">Voice agent</div>
+      <div className="bpick__head">
+        <span className="eyebrow">Voice agent</span>
+        <span className="bpick__hint">answers Listen</span>
+      </div>
       {AGENT_BRAINS.map((spec) => {
         const inUse = spec.id === current
         const status = statusOf(spec, s, probes[spec.id])
@@ -173,20 +178,22 @@ function BrainMenu({
             aria-checked={inUse}
             className="popover__row bpick__row"
             data-selected={inUse ? 'true' : undefined}
+            data-note={sub ? 'true' : undefined}
             disabled={off}
             title={probes[spec.id]?.result?.reason}
             onClick={() => onPick(spec.id)}
           >
-            <span className="bpick__tick" aria-hidden="true">
-              {inUse ? <Icon name="check" size={14} /> : null}
+            <span className="bpick__tile" data-look={inUse ? 'use' : off ? 'off' : undefined} aria-hidden="true">
+              <BrainMark brain={spec.id} size={14} />
             </span>
             <span className="bpick__text">
               <span className="bpick__name">{spec.label}</span>
-              {sub ? <span className="bpick__sub">{sub}</span> : null}
+              <span className="bpick__sub">{sub ?? rowNote(spec, status, off)}</span>
             </span>
             {inUse ? (
               <span className="bpick__state" data-tone="use">
                 in use
+                <Icon name="check" size={12} className="bpick__check" />
               </span>
             ) : (
               <span className="bpick__state" data-tone={status.tone}>
@@ -201,11 +208,34 @@ function BrainMenu({
       })}
       <div className="popover__divider" />
       <button type="button" role="menuitem" className="popover__row bpick__row bpick__settings" onClick={onSettings}>
-        <span className="bpick__tick" aria-hidden="true" />
+        <span className="bpick__tile" data-look="plain" aria-hidden="true">
+          <Icon name="gear" size={13} />
+        </span>
         <span className="bpick__text">
           <span className="bpick__name">Voice settings…</span>
         </span>
       </button>
     </div>
   )
+}
+
+const KIND_WORD: Record<AgentBrainKind, string> = {
+  realtime: 'Live audio',
+  session: 'Agent session',
+  json: 'Text turns'
+}
+
+/**
+ * A row's second line: what the brain is and how it signs in — or, when it
+ * cannot be picked, what to do about it, in words.
+ */
+function rowNote(spec: AgentBrainSpec, status: BrainStatus, off: boolean): string {
+  // "your ChatGPT login (codex login)" reads "your ChatGPT login" on one line.
+  const auth = spec.auth.replace(/\s*\(.*\)\s*$/, '')
+  if (off) {
+    if (status.word === 'Needs key') return `Add your ${auth} in Settings`
+    if (status.word === 'Not logged in') return `Log in first — ${auth}`
+    if (status.word === 'Not installed') return 'Not on this computer yet'
+  }
+  return `${KIND_WORD[spec.kind]} · ${auth}`
 }

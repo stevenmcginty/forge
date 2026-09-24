@@ -314,8 +314,11 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
 
       <div className="comp__row">
         {lead}
-        <ListenToggle />
-        <BrainPicker />
+        {/* The voice unit: Listen and who answers it, one rim (VoicePill.css). */}
+        <span className="vunit">
+          <ListenToggle />
+          <BrainPicker />
+        </span>
         <DictateButton />
 
         <textarea

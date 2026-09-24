@@ -19,6 +19,46 @@
  * light one) gets a knob that contrasts with its own track.
  */
 
+/* ------------------------------------------------------------------- unit
+ *
+ * Listen and the voice agent picker (BrainPicker.css) share one rim, mounted
+ * by Composer: the switch and its state on the left, who answers on the right.
+ * The rim is the unit's, so "on" lights the whole unit — rim and glow — and the
+ * Listen half fills; the agent's tile takes the same lit ring.
+ */
+
+.vunit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 36px;
+  padding: 2px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  transition: box-shadow var(--dur-med) var(--ease-out);
+}
+
+.vunit:has(.listen[data-on='true']) {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 18px -6px var(--accent-glow);
+}
+
+/* Listening for real: the rim lights a step further. */
+.vunit:has(.listen[data-recording='true']) {
+  box-shadow:
+    inset 0 0 0 1px var(--accent-line),
+    0 0 0 3px var(--accent-softer),
+    0 0 22px -4px var(--accent-glow);
+}
+
+.vunit:has(.listen[data-look='error']) {
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
 .listen {
   --lamp: var(--accent);
   --lamp-ink: var(--text-on-accent);
@@ -29,6 +69,7 @@
   align-items: center;
   gap: 4px;
   flex: none;
+  height: 100%;
 }
 
 /* A failure speaks in warn; the ink on it is the page itself, which every
@@ -43,54 +84,39 @@
   display: inline-flex;
   align-items: center;
   gap: 9px;
-  height: 36px;
-  padding: 0 12px 0 8px;
+  height: 32px;
+  padding: 0 12px 0 6px;
   border-radius: var(--r-full);
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line);
   transition:
     background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-med) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
 
 .listen__btn:hover {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .listen__btn:focus-visible {
   outline: 2px solid var(--lamp);
-  outline-offset: 2px;
+  outline-offset: 1px;
   border-radius: var(--r-full);
 }
 
+/* On: the Listen half fills; the rim around it is the unit's. */
 .listen[data-on='true'] .listen__btn {
   color: var(--text-primary);
   background: var(--accent-soft);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 0 18px -6px var(--accent-glow);
 }
 
-/* On, but not hearing you: the pill steps back a shade. */
+/* On, but not hearing you: the fill steps back a shade. */
 .listen[data-look='muted'] .listen__btn {
   background: var(--accent-softer);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, var(--glass-line));
-}
-
-/* Listening for real: the rim lights a step further. */
-.listen[data-recording='true'] .listen__btn {
-  box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 0 0 3px var(--accent-softer),
-    0 0 22px -4px var(--accent-glow);
 }
 
 .listen[data-look='error'] .listen__btn {
   background: var(--warn-soft);
-  box-shadow: inset 0 0 0 1px var(--warn-line);
 }
 
 /* ------------------------------------------------------------------ track */
@@ -356,32 +382,6 @@
 
 /* ------------------------------------------------------------------ words */
 
-.listen__text {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  min-width: 0;
-}
-
-.listen__brain {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-display);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  line-height: 11px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.listen[data-on='true'] .listen__brain {
-  color: color-mix(in srgb, var(--accent) 70%, var(--text-primary));
-}
-
 .listen__word {
   display: inline-flex;
   align-items: baseline;
@@ -393,6 +393,7 @@
   color: var(--text-primary);
 }
 
+/* Off, the word is the quiet half of the unit: the agent's name leads. */
 .listen[data-look='offline'] .listen__word,
 .listen[data-look='muted'] .listen__word {
   color: var(--text-secondary);
@@ -442,6 +443,7 @@
 /* "Why?" beside a failure: the full reason, one click away. */
 .listen__why {
   height: 24px;
+  margin-right: 2px;
   padding: 0 9px;
   border-radius: var(--r-full);
   border: 1px solid var(--warn-line);
