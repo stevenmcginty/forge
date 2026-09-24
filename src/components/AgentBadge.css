@@ -27,12 +27,71 @@
 }
 
 /*
+ * On Paper a light accent (Claude's old lime) all but vanished as text on its
+ * own pale wash. The text badge — now only for agents Forge has no logo for —
+ * pulls its letters and rim toward the ink there; the wash keeps the colour.
+ */
+:root[data-appearance='light'] .agent-badge:not([data-logo]):not([data-shell]) {
+  color: color-mix(in srgb, var(--badge-accent, var(--accent)) 50%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--badge-accent, var(--accent)) 55%, transparent);
+}
+
+/*
+ * The logo plate. Same footprint as the text badge it replaces, so nothing
+ * that lays itself out around a badge moves.
+ *
+ * `--logo-brand` is the mark's colour for this surface: the brand colour tuned
+ * for dark or for Paper (set inline from shared/agent-logos.ts), or the theme's
+ * ink for a monochrome brand. It is handed on as `--badge-accent`, so every
+ * rule elsewhere that grows or glows a badge from its accent (the phone
+ * header, the sheets) now washes it in the maker's colour instead.
+ */
+.agent-badge[data-logo] {
+  --logo-brand: var(--logo-on-dark, var(--text-primary));
+  --badge-accent: var(--logo-brand);
+}
+
+:root[data-appearance='light'] .agent-badge[data-logo] {
+  --logo-brand: var(--logo-on-light, var(--text-primary));
+}
+
+/* A monochrome mark on Paper: ink at the usual strength turns the plate into a
+   dark slab heavier than any coloured one. Lighter wash, lighter rim. */
+:root[data-appearance='light'] .agent-badge[data-mono='true']:not([data-logo='shell']) {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 22%, transparent);
+}
+
+.agent-badge__logo {
+  display: block;
+  height: 70%;
+  width: auto;
+  aspect-ratio: 1;
+  fill: var(--logo-brand);
+}
+
+/* The ink half of a two-tone mark (Kimi's K beside its blue dot). */
+.agent-badge__logo path[data-ink='true'] {
+  fill: var(--text-primary);
+}
+
+/*
  * A shell is not an agent. Same shape, no colour: no tinted wash, no coloured
  * rim — just outlined grey, so on a wall of panes the loud badges are exactly
  * the ones with something running in them.
  */
-.agent-badge[data-shell='true'] {
+.agent-badge[data-shell='true'],
+.agent-badge[data-logo='shell'] {
   color: var(--text-secondary);
   background: none;
   border-color: var(--line-strong);
+}
+
+.agent-badge[data-logo='shell'] {
+  --badge-accent: var(--text-secondary);
+}
+
+.agent-badge[data-logo='shell'] .agent-badge__logo {
+  height: 62%;
+  fill: var(--text-secondary);
 }
