@@ -3112,6 +3112,16 @@ export interface PtyGeometryEvent {
   deskOwns: boolean
 }
 
+/**
+ * One pane's agent just sent a message into another pane (`pane_send`, over
+ * electron/share-link.ts). Both are pane (= PTY session) ids. The renderer flies
+ * the relay comet from `from` to `to`. See `IPC.ptyRelay`.
+ */
+export interface PtyRelayEvent {
+  from: string
+  to: string
+}
+
 export interface WindowStateEvent {
   maximized: boolean
   focused: boolean

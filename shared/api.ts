@@ -63,6 +63,7 @@ import type {
   PtyDataEvent,
   PtyExitEvent,
   PtyGeometryEvent,
+  PtyRelayEvent,
   Settings,
   Shot,
   StoreSnapshot,
@@ -194,6 +195,11 @@ export interface ForgeApi {
      * moved it was somewhere else entirely. See `IPC.ptyGeometry`.
      */
     onGeometry(cb: (e: PtyGeometryEvent) => void): () => void
+    /**
+     * One pane's agent sent a message into another (`pane_send`). See
+     * `IPC.ptyRelay`. Optional: a preload older than the renderer lacks it.
+     */
+    onRelay?(cb: (e: PtyRelayEvent) => void): () => void
   }
 
   store: {

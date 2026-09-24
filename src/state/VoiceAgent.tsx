@@ -54,6 +54,7 @@ import {
   type AppAction
 } from '@/lib/appactions'
 import { makeId } from '@/lib/ids'
+import { relayComet } from '@/lib/relayComet'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { terminalHost, type PaneStatus } from '@/lib/terminals'
 import { toolLabel } from '@/lib/toolLabels'
@@ -1327,6 +1328,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       }
       terminalHost.focus(pane.paneId)
       terminalHost.scrollToBottom(pane.paneId)
+      // Relayed on your behalf: the comet flies from the bar to the pane.
+      relayComet(pane.paneId)
 
       const prefix = flesh ? 'Fleshed out and typed into' : 'Typed into'
       if (!submit) {

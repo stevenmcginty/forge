@@ -7,6 +7,7 @@ import type { NavPane } from '@/lib/hubnav'
 import { getCallSigns, getPrompts, subscribeCallSigns, subscribePrompts, syncCallSigns } from '@/lib/hubStores'
 import type { KeyCommandDef } from '@/lib/keymap'
 import { defineCommands, loadKeymapOverrides, setCommandHandler } from '@/lib/keymapRegistry'
+import { relayComet } from '@/lib/relayComet'
 import { agentCommandId, promptCommandId } from '@/lib/shortcutCommands'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
@@ -97,11 +98,18 @@ export function useHubRuntime(): void {
         if (/[\r\n]/.test(text)) terminalHost.paste(paneId, text)
         else if (!terminalHost.type(paneId, text)) return false
         if (submit) terminalHost.submit(paneId)
+        // The main agent (typed to, or talked to) just relayed words into a
+        // pane: the comet shows them going from the bar to that pane.
+        relayComet(paneId)
         return true
       }
     })
     return () => setHubRuntime(null)
   }, [])
+
+  // One pane's agent sent to another (pane_send, in main): the comet flies
+  // between them. Optional-chained — a stale preload has no onRelay.
+  useEffect(() => window.forge?.pty?.onRelay?.((e) => relayComet(e.to, e.from)), [])
 
   /* ------------------------------------------------------------- keymap */
 

@@ -99,6 +99,8 @@ export interface ShareLinkDeps {
   write: (id: string, data: string) => boolean
   /** electron/pty-host.ts `getReplay` — the catch-up buffer for one session. */
   replay: (id: string) => string
+  /** A send went in, `from` → `to` (session ids). Tells the renderer, for the relay comet. */
+  onSend?: (from: string, to: string) => void
 }
 
 /**
@@ -443,6 +445,11 @@ export class ShareLink {
       return { ok: false, error: `Forge could not write to "${pane.title}" — the pane may have just closed.` }
     }
     this.noteWrite(pane.id, now)
+    try {
+      this.deps.onSend?.(me.id, pane.id)
+    } catch {
+      /* decoration only: the message is in either way */
+    }
 
     return { ok: true, op: 'send', pane: pane.title, id: pane.id, bytes: size, quietForMs, forced }
   }

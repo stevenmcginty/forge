@@ -32,6 +32,12 @@ export const IPC = {
    * a window drag or a split is one message rather than one per pane per frame.
    */
   ptyGeometry: 'pty:geometry',
+  /**
+   * A `pane_send` from one pane's agent reached another pane. Main → renderer,
+   * decoration only: the renderer flies the relay comet between the two. See
+   * PtyRelayEvent and src/lib/relayComet.ts.
+   */
+  ptyRelay: 'pty:relay',
 
   // store
   storeSnapshot: 'store:snapshot',

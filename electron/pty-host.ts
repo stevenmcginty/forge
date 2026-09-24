@@ -310,7 +310,9 @@ function getLink(): ShareLink {
       // phone that was reading it. The grid follows the *person* who typed —
       // an agent typing into a pane leaves the grid where it was.
       write: (id, data) => getManager().write(id, data),
-      replay: getReplay
+      replay: getReplay,
+      // The renderer flies the relay comet from the sender's pane to this one.
+      onSend: (from, to) => send(IPC.ptyRelay, { from, to })
     })
   }
   return link

@@ -3,6 +3,7 @@ import { handoffAskPrompt, handoffTakePrompt } from '@shared/handoff'
 import type { HandoffRecord, HandoffStartRequest } from '@shared/types'
 import { isClaudeCommand, isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { handoffPaneTitle, handoffTargets, type HandoffTarget, type HandoffTargetWire } from '@/lib/handoffview'
+import { relayComet } from '@/lib/relayComet'
 import { collectLeaves } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveProject, useActiveWorkspace, useApp } from '@/state/AppState'
@@ -138,13 +139,15 @@ export function HandoffProvider({ children }: { children: ReactNode }): ReactNod
    * bracketed paste and its terminator have to be down the pipe before the
    * newline that submits them.
    */
-  const deliverTo = useCallback((paneId: string, text: string, submit: boolean): void => {
+  const deliverTo = useCallback((paneId: string, text: string, submit: boolean, from?: string): void => {
     live.current.actions.revealPane(paneId)
     terminalHost.focus(paneId)
     requestAnimationFrame(() => {
       // Typed on somebody else's behalf: a brief handed off from a phone must
       // not take the pane's grid off that phone. See TerminalHost.paste.
       terminalHost.paste(paneId, text, { claim: false })
+      // The relay comet: from the pane handing off, or from the bar.
+      relayComet(paneId, from)
       if (submit) requestAnimationFrame(() => terminalHost.submit(paneId, { claim: false }))
     })
   }, [])
@@ -174,7 +177,7 @@ export function HandoffProvider({ children }: { children: ReactNode }): ReactNod
         if (!marked) return
         waiting.current.delete(record.id)
         const body = await window.forge.handoff.read(id, record.id)
-        deliverTo(leaf.id, handoffTakePrompt(marked, body?.body ?? null), want.autoSend)
+        deliverTo(leaf.id, handoffTakePrompt(marked, body?.body ?? null), want.autoSend, record.from)
         act.setNotice(`Handed off to ${profile.name}`)
         return
       }
@@ -194,7 +197,8 @@ export function HandoffProvider({ children }: { children: ReactNode }): ReactNod
       const body = await window.forge.handoff.read(id, record.id)
       const opened = act.openAgentPane(title, handoffTakePrompt(marked, body?.body ?? null), {
         profileId: profile.id,
-        submit: want.autoSend
+        submit: want.autoSend,
+        ...(record.from ? { relayFrom: record.from } : {})
       })
       if (opened === null) {
         // Refused — the session or tab limit, which the reducer has already put

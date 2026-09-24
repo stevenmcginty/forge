@@ -8,6 +8,7 @@ import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
 import { comboFromEvent } from '@/lib/keymap'
 import { commandForCombo, setCommandHandler } from '@/lib/keymapRegistry'
+import { relayComet } from '@/lib/relayComet'
 import { composerRouteNow } from '@/lib/shellSlots'
 import { findLeaf } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
@@ -145,8 +146,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     setText('')
     // Sent: the words in the bar are done with. Dictation into the bar ends with the send.
     if (intoBar) dictation.toggle()
-    const el = document.querySelector(`.pane[data-pane-id="${paneId}"], .mtile[data-pane-id="${paneId}"]`)
-    if (el && shellRef.current) fireComet(shellRef.current, el, profile?.accent ?? '#c6ff4a')
+    relayComet(paneId, shellRef.current)
   }
 
   const cancel = (): void => {

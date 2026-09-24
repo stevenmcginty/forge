@@ -1,5 +1,11 @@
 # Handoff
 
+## Relay comet is back (2026-09-24)
+
+- **Cause:** the comet only fired from the bar's own send-to-pane. Since 1322260 the bar asks the main agent by default, and the agent's `typeIntoPane` / `VoiceAgent.sendPrompt` never fired one. `pane_send` never told the renderer at all.
+- **Fix:** `src/lib/relayComet.ts` flies from the sending pane (or the bar) to the target's on-screen `.pane`, `.mtile` or `.wstrip__tile`. Called from Composer, `typeIntoPane`, `sendPrompt`, new agent pane briefs (`relayFrom`), handoff, and a new optional main→renderer `pty:relay` event after `pane_send`.
+- **Checked:** typecheck, hub, voice-hotkey, share-link, dictation checks; live in a throwaway Forge, Full screen and Wall. Not live-tested: a real LLM brain call, handoff, a strip-only target.
+
 ## Dictate key is Right Alt; every app key is in Settings › Shortcuts (2026-09-24)
 
 - **Cause:** UK layout. Windows sends Right Alt as AltGr: a fake Left Ctrl goes down first, then Right Alt, and the fake Ctrl auto-repeats beside it while held (proved with real SendInput in a probe window). `KeyRecorder.tsx` saw "Left Ctrl + another key" and recorded nothing. `stt-gesture.ts` treated each fake-Ctrl repeat as a new combo key, so a hold ended at ~0.5 s.

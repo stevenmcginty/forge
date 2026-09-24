@@ -76,6 +76,7 @@ import {
 import { handleSignal, startMirror, stopMirror } from '@/lib/mirror'
 import { startWebMirror, stopWebMirror } from '@/lib/web-mirror'
 import { terminalHost } from '@/lib/terminals'
+import { relayComet } from '@/lib/relayComet'
 import { BriefDelivery, type BriefProbe } from '@/lib/briefDelivery'
 import { CloseConfirmHost } from '@/components/CloseConfirm'
 import { confirmProjectServer } from '@/lib/devicePreview'
@@ -136,6 +137,12 @@ interface PendingType {
    * handoff on a tab with `handoffAutoSend` on ever asks for.
    */
   paste?: boolean
+  /**
+   * A brief relayed into a new agent pane (openAgentPane): a comet flies to
+   * the pane as it goes in — from `relayFrom`, the pane that asked for it, or
+   * from the bar when that is null. Absent for a tool pane's own command.
+   */
+  relay?: { from: string | null }
 }
 
 export interface AppState {
@@ -427,6 +434,8 @@ type Action =
       paneId?: string
       /** Another project than the one on screen — a pane agent's own. */
       projectId?: string
+      /** See PendingType.relay. */
+      relay?: { from: string | null }
     }
   | { type: 'drainTypes'; paneIds: string[] }
   | { type: 'closeTab'; tabId: string }
@@ -1008,7 +1017,13 @@ function reducer(state: AppState, action: Action): AppState {
       const pendingTypes = action.text
         ? [
             ...state.pendingTypes,
-            { paneId: leaf.id, text: action.text, submit: action.submit, ...(action.paste ? { paste: true } : {}) }
+            {
+              paneId: leaf.id,
+              text: action.text,
+              submit: action.submit,
+              ...(action.paste ? { paste: true } : {}),
+              ...(action.relay ? { relay: action.relay } : {})
+            }
           ]
         : state.pendingTypes
       if (!here) {
@@ -1454,7 +1469,13 @@ export interface AppActions {
   openAgentPane(
     title: string,
     prompt: string,
-    opts?: { profileId?: string; submit?: boolean; anchorPaneId?: string }
+    opts?: {
+      profileId?: string
+      submit?: boolean
+      anchorPaneId?: string
+      /** The pane the brief comes from, for its relay comet only (see PendingType.relay). */
+      relayFrom?: string
+    }
   ): string | null
   closeTab(tabId: string): void
   selectTab(tabId: string): void
@@ -1709,6 +1730,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
               delivery.markDone(pending)
               inFlight.delete(pending)
               terminalHost.paste(pending.paneId, pending.text)
+              if (pending.relay) relayComet(pending.paneId, pending.relay.from)
               // A pasted brief can be submitted too, and one caller asks for
               // it: a handoff on a tab with auto-send on. Another frame first
               // — the bracketed paste and its terminator have to be down the
@@ -1723,6 +1745,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           inFlight.delete(pending)
           if (!terminalHost.type(pending.paneId, pending.text)) return
           terminalHost.focus(pending.paneId)
+          if (pending.relay) relayComet(pending.paneId, pending.relay.from)
           if (pending.submit) terminalHost.submit(pending.paneId)
         }, 220)
       }
@@ -2062,7 +2085,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           // the tab handover all honour. Pasted rather than typed because these
           // are multi-sentence briefs; see PendingType.paste.
           submit: opts?.submit === true,
-          paste: true
+          paste: true,
+          relay: { from: opts?.relayFrom ?? opts?.anchorPaneId ?? null }
         })
         // A refusal still went through the reducer, which says why in the notice.
         return refused ? null : paneId
