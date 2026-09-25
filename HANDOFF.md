@@ -1,5 +1,12 @@
 # Handoff
 
+## Project folder on the title bar and the Wall (2026-09-25, 1139472, pushed)
+
+- **Asked (Steve):** show the project folder in more places than the bottom-left pill; picked A (title bar chip) and D (big name on the Wall) from a Board mockup.
+- **Built (designer):** `ProjectChip` in `src/components/TitleBar.tsx` (folder, name, branch, opens the project sheet, path tooltip; shrinks at 1200/1100/1000px, hidden at <=1024px with the voice bar on Top on the Wall). `WallName` in `src/components/MosaicView.tsx` (faint watermark + label bottom-left, hidden while a tile covers it). CSS in `DeckBar.css`, `MosaicView.css`.
+- **Known:** on the Grid the bottom-left cell always has a tile, so the Wall label and most of the watermark only show in Free or a shortened grid. The sheet still opens from the bottom dock when the bar is at the bottom.
+- **Checked:** typecheck, lint:hooks, mosaic:check 113; designer screenshots in a throwaway Forge at 960-1600px, dark and paper.
+
 ## Wall tile grows its terminal; Hide on the Forge reply box (2026-09-25, ae783df, not pushed)
 
 - **Asked (Steve):** text stays small when a tile goes from small to large; the Forge reply box above the bar sticks with no way to close it.
