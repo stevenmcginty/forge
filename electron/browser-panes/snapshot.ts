@@ -14,25 +14,56 @@ import { BROWSER_MAX_LABEL_CHARS, BROWSER_MAX_READ_CHARS, BROWSER_MAX_REFS } fro
  * `Runtime.evaluate`, rather than as TypeScript functions, because the Electron
  * tsconfig has no DOM library and main-process code has no business with one.
  * Plain Node, no Electron import: scripts/browser-check.mjs runs `formatRead`
- * directly and runs READ_SCRIPT inside a real page.
+ * directly and runs readScript() inside a real page.
  */
 
-/** What READ_SCRIPT hands back. */
+/** What readScript() hands back. */
 export interface PageSnapshot {
   url: string
   title: string
   items: string[]
+  /** Seeable and reachable, but past BROWSER_MAX_REFS. */
   dropped: number
+  /** Drawn, but hidden, covered or out of reach — left out on purpose. */
+  hidden?: number
+  /** With `find`: elements whose words do not contain it. */
+  unmatched?: number
+  /** The `find` text the list was narrowed by, as given. */
+  find?: string
+  /** How many of the first items sit inside the dialog on top of the page. */
+  inDialog?: number
   text: string
 }
 
 /**
- * Number every visible interactive element, park them on the page, and return
- * the list plus the page's own words. An expression, so evaluate returns it.
+ * Number every interactive element a person could see and reach, park them on
+ * the page, and return the list plus the page's own words. An expression, so
+ * evaluate returns it. `find` narrows the list to elements whose words contain
+ * it (any case); the numbers still map to window.__forgeRefs as usual.
+ *
+ * What counts as seeable and reachable — kept simple on purpose:
+ *  - It has a box (1×1 or bigger), and neither it nor anything it sits in is
+ *    display:none, visibility:hidden or opacity:0 (Element.checkVisibility), or
+ *    [inert] / [aria-hidden=true] (shadow roots crossed).
+ *  - On screen: a hit test (elementFromPoint at its middle and four inner
+ *    points) must land on it, inside it, or on its own <label>. Landing on
+ *    something else means it is covered. One exception: covered only by a
+ *    fixed/sticky bar (wide and short: a header or footer) still counts, since
+ *    scrolling brings it out from under the bar.
+ *  - Off screen (below the fold, in a scroll box): it must be reachable by
+ *    scrolling — not clipped away by an overflow:hidden box, not in a fixed
+ *    layer that sits off screen, not at negative page coordinates. And when a
+ *    modal is up (aria-modal / <dialog> opened modal, or a full-screen fixed
+ *    layer at the viewport centre that is proven to cover other elements), only
+ *    what is inside it is listed: the rest would scroll up underneath it.
+ *  - Elements inside the dialog on top (or that full-screen layer) come first,
+ *    so a modal's buttons never fall past the cap behind the page under it.
  */
-export const READ_SCRIPT = `(() => {
+export function readScript(find: string | null): string {
+  return `(() => {
   const LIMIT_REFS = ${BROWSER_MAX_REFS};
   const LIMIT_LABEL = ${BROWSER_MAX_LABEL_CHARS};
+  const FIND_RAW = ${JSON.stringify(find ?? '')};
   const SELECTOR = [
     'a[href]', 'button', 'input:not([type=hidden])', 'select', 'textarea', 'summary',
     '[role="button"]', '[role="link"]', '[role="tab"]', '[role="checkbox"]', '[role="radio"]',
@@ -79,11 +110,159 @@ export const READ_SCRIPT = `(() => {
     walk(document);
     return out;
   };
+  // Up one level, out of a shadow root into its host when need be.
+  const up = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || null;
+  const inside = (outer, n) => { for (let x = n; x; x = up(x)) if (x === outer) return true; return false; };
+  const vw = document.documentElement.clientWidth || innerWidth;
+  const vh = document.documentElement.clientHeight || innerHeight;
+  const muted = (el) => {
+    for (let x = el; x; x = up(x)) if (x.hasAttribute('inert') || x.getAttribute('aria-hidden') === 'true') return true;
+    return false;
+  };
+  const drawn = (el) => {
+    const style = getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.opacity === '0' || style.display === 'none') return false;
+    return typeof el.checkVisibility !== 'function' || el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  };
+  // A fixed or sticky bar across most of the width and short: a header or footer.
+  const barOf = (n) => {
+    for (let x = n; x; x = up(x)) {
+      const p = getComputedStyle(x).position;
+      if (p === 'fixed' || p === 'sticky') {
+        const b = x.getBoundingClientRect();
+        return b.width >= vw * 0.5 && b.height <= vh * 0.3;
+      }
+    }
+    return false;
+  };
+  // Where hit tests at the part of el on screen now (box, from clipped) land:
+  // 'top', 'bar', 'covered', or 'off' (none of it on screen).
+  const hitTest = (el, box, own) => {
+    if (!box) return { at: 'off', hits: [] };
+    const l = Math.max(box.L, 0), t = Math.max(box.T, 0), r = Math.min(box.R, vw), b = Math.min(box.B, vh);
+    if (r - l < 1 || b - t < 1) return { at: 'off', hits: [] };
+    const root = el.getRootNode && el.getRootNode().elementFromPoint ? el.getRootNode() : document;
+    const x1 = l + (r - l) * 0.2, x2 = l + (r - l) * 0.8, y1 = t + (b - t) * 0.2, y2 = t + (b - t) * 0.8;
+    const hits = [];
+    for (const [x, y] of [[(l + r) / 2, (t + b) / 2], [x1, y1], [x2, y1], [x1, y2], [x2, y2]]) {
+      const hit = root.elementFromPoint(x, y);
+      if (hit && own(hit)) return { at: 'top', hits };
+      hits.push(hit);
+    }
+    if (hits.every((h) => h && barOf(h))) return { at: 'bar', hits };
+    return { at: 'covered', hits };
+  };
+  const mine = (el) => (hit) => {
+    if (hit === el || inside(el, hit)) return true;
+    if (el.labels) for (const lab of el.labels) if (inside(lab, hit)) return true;
+    // Nothing ever lands on a pointer-events:none element; a click falls through to what holds it.
+    return inside(hit, el) && getComputedStyle(el).pointerEvents === 'none';
+  };
+  const scrolls = (v) => v === 'auto' || v === 'scroll';
+  const clips = (v) => v !== 'visible';
+  const htmlStyle = getComputedStyle(document.documentElement);
+  const bodyStyle = document.body ? getComputedStyle(document.body) : htmlStyle;
+  const pageX = !['hidden', 'clip'].includes(htmlStyle.overflowX) && !['hidden', 'clip'].includes(bodyStyle.overflowX);
+  const pageY = !['hidden', 'clip'].includes(htmlStyle.overflowY) && !['hidden', 'clip'].includes(bodyStyle.overflowY);
+  const pageBox = document.scrollingElement || document.documentElement;
+  // el's box as the boxes it sits in clip it: as things stand (roam false), or
+  // once the boxes that scroll are scrolled to it (roam true). Null when none of it is left.
+  const clipped = (el, roam) => {
+    const b0 = el.getBoundingClientRect();
+    let L = b0.left, T = b0.top, R = b0.right, B = b0.bottom, fixed = false;
+    for (let n = el; n && n !== document.body && n !== document.documentElement; n = up(n)) {
+      const s = getComputedStyle(n);
+      if (n !== el && (clips(s.overflowX) || clips(s.overflowY))) {
+        const c = n.getBoundingClientRect();
+        if (clips(s.overflowX)) {
+          if (roam && scrolls(s.overflowX) && n.scrollWidth > n.clientWidth + 1) {
+            const at = L - c.left + n.scrollLeft;
+            if (at + (R - L) <= 0 || at >= n.scrollWidth) return null;
+            const w = Math.min(R - L, c.width); L = c.left; R = c.left + w;
+          } else { L = Math.max(L, c.left); R = Math.min(R, c.right); }
+        }
+        if (clips(s.overflowY)) {
+          if (roam && scrolls(s.overflowY) && n.scrollHeight > n.clientHeight + 1) {
+            const at = T - c.top + n.scrollTop;
+            if (at + (B - T) <= 0 || at >= n.scrollHeight) return null;
+            const h = Math.min(B - T, c.height); T = c.top; B = c.top + h;
+          } else { T = Math.max(T, c.top); B = Math.min(B, c.bottom); }
+        }
+        if (R - L < 1 || B - T < 1) return null;
+      }
+      if (s.position === 'fixed') { fixed = true; break; }
+    }
+    return { L, T, R, B, fixed };
+  };
+  // Can scrolling (the page, or a scroll box it sits in) bring el on screen?
+  const reachable = (el) => {
+    const b = clipped(el, true);
+    if (!b) return false;
+    // A fixed layer never scrolls with the page: off screen is off for good.
+    if (b.fixed) return b.R > 0 && b.B > 0 && b.L < vw && b.T < vh;
+    const x0 = pageX ? -scrollX : 0, y0 = pageY ? -scrollY : 0;
+    const x1 = pageX ? pageBox.scrollWidth - scrollX : vw, y1 = pageY ? pageBox.scrollHeight - scrollY : vh;
+    return b.R > x0 && b.B > y0 && b.L < x1 && b.T < y1;
+  };
+  const words = (el) => clean([el.innerText, el.getAttribute('aria-label'), el.labels && el.labels.length ? el.labels[0].innerText : '',
+    el.getAttribute('placeholder'), secret(el) ? '' : el.value, el.getAttribute('title'), el.getAttribute('alt'), el.getAttribute('name')].join(' ')).toLowerCase();
+  const FIND = clean(FIND_RAW).toLowerCase();
+  const sized = vw >= 1 && vh >= 1;
+
+  // What is on top: the last open dialog whose middle is really on top, and
+  // the innermost full-screen fixed layer under the viewport's centre.
+  const shown = (n) => { const b = n.getBoundingClientRect(); return b.width >= 1 && b.height >= 1 && drawn(n) && !muted(n); };
+  let dialog = null, modal = null, layer = null;
+  if (sized) {
+    for (const d of deepAll('dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]')) {
+      if (!shown(d) || hitTest(d, clipped(d, false), (h) => h === d || inside(d, h)).at !== 'top') continue;
+      dialog = d;
+      let isModal = d.getAttribute('aria-modal') === 'true';
+      try { isModal = isModal || d.matches(':modal'); } catch (e) { /* older engine */ }
+      if (isModal) modal = d;
+    }
+    let h = document.elementFromPoint(vw / 2, vh / 2);
+    while (h && h.shadowRoot) { const d = h.shadowRoot.elementFromPoint(vw / 2, vh / 2); if (!d || d === h) break; h = d; }
+    for (let n = h; n && n !== document.body && n !== document.documentElement; n = up(n)) {
+      if (getComputedStyle(n).position !== 'fixed') continue;
+      const b = n.getBoundingClientRect();
+      if (Math.min(b.right, vw) - Math.max(b.left, 0) >= vw * 0.9 && Math.min(b.bottom, vh) - Math.max(b.top, 0) >= vh * 0.9) { layer = n; break; }
+    }
+  }
+
   const refs = [];
   const items = [];
-  let dropped = 0;
+  let dropped = 0, hidden = 0, unmatched = 0;
+  const onTop = [];
+  const later = [];
+  const candidates = [];
+  let layerCovers = false;
   for (const el of deepAll(SELECTOR)) {
-    if (!visible(el)) continue;
+    const box = el.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) continue;
+    if (FIND && !words(el).includes(FIND)) { unmatched++; continue; }
+    if (!drawn(el) || muted(el)) { hidden++; continue; }
+    candidates.push(el);
+    if (!sized) { onTop.push(el); continue; }
+    const test = hitTest(el, clipped(el, false), mine(el));
+    if (test.at === 'top') onTop.push(el);
+    else if (test.at === 'covered') {
+      hidden++;
+      if (layer && !inside(layer, el) && test.hits.some((x) => x && inside(layer, x))) layerCovers = true;
+    } else later.push(el);
+  }
+  // A full-screen layer only counts as a modal once it is seen covering something.
+  const gate = modal || (layerCovers ? layer : null);
+  const listed = new Set(onTop);
+  for (const el of later) {
+    if (reachable(el) && (!gate || inside(gate, el))) listed.add(el); else hidden++;
+  }
+  const front = modal || dialog || gate;
+  const all = candidates.filter((el) => listed.has(el));
+  const first = front ? all.filter((el) => inside(front, el)) : [];
+  const ordered = first.length ? first.concat(all.filter((el) => !inside(front, el))) : all;
+  const inDialog = dialog ? Math.min(first.length, LIMIT_REFS) : 0;
+  for (const el of ordered) {
     if (refs.length >= LIMIT_REFS) { dropped++; continue; }
     refs.push(el);
     const extra = secret(el) ? (el.value ? ' (filled in — hidden)' : '')
@@ -101,8 +280,9 @@ export const READ_SCRIPT = `(() => {
     seen.add(t);
     blocks.push(t);
   }
-  return { url: location.href, title: document.title, items, dropped, text: blocks.join('\\n') };
+  return { url: location.href, title: document.title, items, dropped, hidden, unmatched, find: clean(FIND_RAW), inDialog, text: blocks.join('\\n') };
 })()`
+}
 
 /**
  * Bring ref N into view and say where its middle is, for a real mouse click.
@@ -269,9 +449,19 @@ export function formatRead(tabId: string, snap: PageSnapshot): string {
     `Tab ${tabId}: ${snap.url} — "${snap.title}"`,
     '',
     'Things you can click or type into. These numbers are good only until you read or navigate again, and they start at 1 every time:',
-    snap.items.length ? snap.items.join('\n') : 'Nothing on this page is clickable.'
+    snap.items.length
+      ? snap.items.join('\n')
+      : snap.find
+        ? `Nothing you can click here has "${snap.find}" in its words.`
+        : 'Nothing on this page is clickable.'
   ]
-  if (snap.dropped) lines.push(`…and ${snap.dropped} more, past the limit of ${BROWSER_MAX_REFS}.`)
+  if (snap.inDialog) lines.push(`[1]–[${snap.inDialog}] are in the dialog on top of the page.`)
+  if (snap.dropped) {
+    const hint = snap.find ? '' : ' Pass `find` with a word from the one you want to list only the elements that have it.'
+    lines.push(`…and ${snap.dropped} more, past the limit of ${BROWSER_MAX_REFS}.${hint}`)
+  }
+  if (snap.hidden) lines.push(`Left out: ${snap.hidden} hidden, covered by something on top, or out of reach — not clickable as the page stands.`)
+  if (snap.find) lines.push(`Only elements whose words contain "${snap.find}" are listed; ${snap.unmatched ?? 0} others were left out. Read without \`find\` for everything.`)
   let out = lines.join('\n')
   if (out.length > BROWSER_MAX_READ_CHARS) return `${out.slice(0, BROWSER_MAX_READ_CHARS)}\n…truncated`
   const heading = 'What the page says:'

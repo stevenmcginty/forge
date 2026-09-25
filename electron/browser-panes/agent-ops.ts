@@ -1,6 +1,7 @@
 import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import {
+  BROWSER_MAX_LABEL_CHARS,
   BROWSER_MAX_SURFACES,
   isBrowserTabId,
   normaliseBrowserUrl,
@@ -35,7 +36,8 @@ export interface BrowserDriver {
   records: () => BrowserSurfaceRecord[]
   /** Create a surface for `owner` and load `url` in it. Resolves once the page has loaded (or failed to). */
   open: (owner: BrowserOwner, url: string, title: string, project: string) => Promise<{ id: string; text: string }>
-  read: (id: string) => Promise<string>
+  /** `find` (already trimmed, or null) narrows the list to elements whose words contain it. */
+  read: (id: string, find: string | null) => Promise<string>
   click: (id: string, ref: number) => Promise<string>
   type: (id: string, ref: number | null, text: string, submit: boolean) => Promise<string>
   navigate: (id: string, url: string) => Promise<string>
@@ -79,8 +81,14 @@ export class BrowserAgentOps {
           return await this.open(owner, args)
         case 'browser_list':
           return this.list(owner)
-        case 'browser_read':
-          return await this.onTab(owner, args, (id) => this.driver.read(id))
+        case 'browser_read': {
+          let find: string | null = null
+          if (args['find'] !== undefined && args['find'] !== null) {
+            if (typeof args['find'] !== 'string') return fail(`\`find\` must be text, a word from what you want to click (e.g. "Next") — got ${JSON.stringify(args['find'])}.`)
+            find = args['find'].replace(/\s+/g, ' ').trim().slice(0, BROWSER_MAX_LABEL_CHARS) || null
+          }
+          return await this.onTab(owner, args, (id) => this.driver.read(id, find))
+        }
         case 'browser_click': {
           if (badRef(args['ref'])) return fail(`\`ref\` must be one of the numbers from your last browser_read — got ${JSON.stringify(args['ref'])}.`)
           const ref = Math.round(Number(args['ref']))

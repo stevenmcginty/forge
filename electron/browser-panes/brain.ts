@@ -68,7 +68,7 @@ export function brainBrowserTools(): BrainBrowserTool[] {
     {
       name: 'browser_read',
       description: BROWSER_TOOL_DESCRIPTIONS.browser_read,
-      shape: { id },
+      shape: { id, find: z.string().optional().describe(BROWSER_PARAM_TEXT.find) },
       handler: (args: Record<string, unknown>) => call('browser_read', args)
     },
     {

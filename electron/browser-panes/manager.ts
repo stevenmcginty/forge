@@ -33,8 +33,8 @@ import { installArtifactScheme } from '../artifact-scheme'
 import type { BrowserDriver } from './agent-ops'
 import { BrowserSurfaceStore } from './store'
 import {
-  READ_SCRIPT,
   formatRead,
+  readScript,
   refDomClickScript,
   refFocusScript,
   refPointScript,
@@ -688,12 +688,12 @@ export class BrowserManager implements BrowserDriver {
     return res.result?.value as T
   }
 
-  async read(id: string): Promise<string> {
+  async read(id: string, find: string | null = null): Promise<string> {
     const wc = this.wcFor(id)
     if (!wc) return `Tab ${id} is gone.`
     if (wc.isLoading()) await settle(wc)
     try {
-      const snap = await this.evaluate<PageSnapshot>(wc, READ_SCRIPT)
+      const snap = await this.evaluate<PageSnapshot>(wc, readScript(find))
       return formatRead(id, snap)
     } catch (err) {
       return `Tab ${id} could not be read: ${errText(err)}`

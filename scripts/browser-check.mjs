@@ -26,6 +26,9 @@
  *   6c. upload       browser_upload puts a real file into a hidden file box (no dialog),
  *                    the page's own input/change handlers fire, several boxes are listed
  *                    and picked by `which` or by a nearby element's ref.
+ *   6d. read         only what a person could see and reach is listed: a covered till is left
+ *                    out, a modal's buttons come first, `find` narrows the list (and its number
+ *                    clicks), plain, below-the-fold and scroll-box buttons all stay.
  *
  *   --live [--shots <dir>]  also: a VISIBLE window mounting the real React surface,
  *                    an agent opening https://example.com, browser_read + browser_screenshot
@@ -125,7 +128,8 @@ section('1. persistence round trip')
 /* --------------------------------------------------------------- 2. refs */
 section('2. ref numbering')
 {
-  const { formatRead, badRef, READ_SCRIPT } = await import('../electron/browser-panes/snapshot.ts')
+  const { formatRead, badRef, readScript } = await import('../electron/browser-panes/snapshot.ts')
+  const READ_SCRIPT = readScript(null)
   const items = Array.from({ length: 3 }, (_, i) => `[${i + 1}] button "B${i + 1}"`)
   const text = formatRead('b4', { url: 'https://x.test/', title: 'X', items, dropped: 2, text: 'Hello' })
   check('the read names the tab', text.startsWith('Tab b4: https://x.test/ — "X"'))
@@ -137,6 +141,17 @@ section('2. ref numbering')
   check('badRef refuses 0, -1, 1.2e9, NaN, "x"', [0, -1, 1.2e9, Number.NaN, 'x'].every((r) => badRef(r)))
   check('badRef accepts 1 and 7', !badRef(1) && !badRef(7))
   check('the page script parks refs on window.__forgeRefs and starts at 1', READ_SCRIPT.includes('window.__forgeRefs = refs') && READ_SCRIPT.includes("'[' + refs.length + '] '"))
+  check('find is carried into the page script as a JSON string literal', readScript('Ne"x`t').includes(`const FIND_RAW = ${JSON.stringify('Ne"x`t')};`))
+  const busy = formatRead('b2', { url: 'u', title: 't', items: ['[1] button "Close"', '[2] button "Next"'], dropped: 5, hidden: 200, inDialog: 2, text: '' })
+  check('the read says how many were hidden or covered, apart from the cap', busy.includes('Left out: 200 hidden, covered by something on top, or out of reach') && busy.includes(`…and 5 more, past the limit of ${S.BROWSER_MAX_REFS}.`), busy)
+  check('past the cap, the read hints `find`', busy.includes('Pass `find`'), busy)
+  check('the read says which numbers are in the dialog on top', busy.includes('[1]–[2] are in the dialog on top of the page.'), busy)
+  const found = formatRead('b2', { url: 'u', title: 't', items: ['[1] button "Next"'], dropped: 0, hidden: 0, unmatched: 9, find: 'Next', text: '' })
+  check('a find read says what it was narrowed to and how many others were left out', found.includes('Only elements whose words contain "Next" are listed; 9 others were left out.') && !found.includes('Pass `find`'), found)
+  const none = formatRead('b2', { url: 'u', title: 't', items: [], dropped: 0, unmatched: 3, find: 'Zebra', text: '' })
+  check('a find with no match says so', none.includes('Nothing you can click here has "Zebra" in its words.'), none)
+  const plain = formatRead('b2', { url: 'u', title: 't', items: ['[1] button "A"'], dropped: 0, hidden: 0, text: '' })
+  check('a plain read has no footer lines', !plain.includes('Left out') && !plain.includes('past the limit') && !plain.includes('dialog on top'), plain)
 }
 
 /* ------------------------------------------------- 2b. overlays and keys */
@@ -244,11 +259,11 @@ section('5. ownership and concurrency (fake driver)')
       records.push({ id, owner, url, title, project, rect: S.BROWSER_DEFAULT_RECT, createdAt: n, updatedAt: n })
       return { id, text: `opened ${id}` }
     },
-    read: async (id) => {
+    read: async (id, find) => {
       log.push(`start ${id}`)
       await delay(150)
       log.push(`end ${id}`)
-      return `read ${id}`
+      return `read ${id}${find ? ` find=${find}` : ''}`
     },
     click: async (id, ref) => `click ${id} ${ref}`,
     type: async (id, ref, text, submit) => `type ${id} ${ref} ${text} ${submit}`,
@@ -280,6 +295,10 @@ section('5. ownership and concurrency (fake driver)')
   const list = await ops.run('browser_list', {}, A)
   check('browser_list shows every tab with its owner', list.text.includes('b1') && list.text.includes('yours') && list.text.includes('owned by Zora (codex)'))
   check('a bad ref is refused before the driver', !(await ops.run('browser_click', { ref: 0 }, A)).ok)
+  check('read passes `find` to the driver, trimmed', (await ops.run('browser_read', { find: '  Next \n page ' }, A)).text === 'read b1 find=Next page')
+  check('an empty `find` reads everything', (await ops.run('browser_read', { find: '   ' }, A)).text === 'read b1')
+  const badFind = await ops.run('browser_read', { find: 5 }, A)
+  check('a `find` that is not text is refused before the driver', !badFind.ok && badFind.text.includes('`find` must be text'), badFind.text)
   log.length = 0
   const t0 = Date.now()
   await Promise.all([ops.run('browser_read', { id: 'b1' }, A), ops.run('browser_read', { id: 'b2' }, Bo)])
@@ -391,6 +410,40 @@ const server = createServer((req, res) => {
         '<div><button>Upload A</button><input type="file" name="a" style="display:none"></div>' +
         '<div><button>Upload B</button><input type="file" name="b" accept=".pdf" style="display:none"></div>' +
         '<script>window.__got = []; document.addEventListener("change", function (e) { window.__got.push(e.target.name + ":" + e.target.files[0].name) })</script>' })
+    } else if (url.pathname === '/busy') {
+      // A till of 200 buttons under an opaque full-screen back office, with a dialog on it.
+      // ?plain=1: the dialog has no role or aria-modal, so only the layer itself can tell.
+      const plain = url.searchParams.get('plain') === '1';
+      let till = '';
+      for (let i = 1; i <= 200; i++) till += '<button style="display:block;margin:6px">Till ' + i + '</button>';
+      page(res, { title: 'Busy', body: '<div id="till">' + till + '</div>' +
+        '<div style="position:fixed;inset:0;background:#eee;z-index:10"><h2>Back office</h2><button>Dashboard home</button>' +
+        '<div ' + (plain ? '' : 'role="dialog" aria-modal="true" ') + 'style="position:fixed;left:30%;top:25%;width:400px;height:400px;background:#fff;border:1px solid #000">' +
+        '<p>Reconcile</p><button onclick="this.parentNode.remove()">Close</button>' +
+        '<button onclick="document.title=&quot;Next pressed&quot;">Next</button></div></div>' })
+    } else if (url.pathname === '/plain') {
+      let body = '<h1>Plain</h1>';
+      for (let i = 1; i <= 20; i++) body += '<button>Plain ' + i + '</button> ';
+      page(res, { title: 'Plain', body })
+    } else if (url.pathname === '/long') {
+      // A fixed header bar, a scroll box taller inside than out, and a page far below the fold.
+      let rows = '';
+      for (let i = 1; i <= 30; i++) rows += '<button style="display:block">Row ' + i + '</button>';
+      let low = '';
+      for (let i = 1; i <= 40; i++) low += '<button style="display:block;margin:20px">Low ' + i + '</button>';
+      page(res, { title: 'Long', body: '<div style="position:fixed;top:0;left:0;right:0;height:50px;background:#333;z-index:5"><button>Menu</button></div>' +
+        '<div style="height:60px"></div><div id="list" style="height:150px;overflow:auto;border:1px solid #000">' + rows + '</div>' + low })
+    } else if (url.pathname === '/ghosts') {
+      page(res, { title: 'Ghosts', body: '<h1>Ghosts</h1><button>Real one</button>' +
+        '<div style="visibility:hidden"><button>Ghost vis</button></div>' +
+        '<div style="opacity:0"><button>Ghost opacity</button></div>' +
+        '<div inert><button>Ghost inert</button></div>' +
+        '<div aria-hidden="true"><button>Ghost aria</button></div>' +
+        '<div style="position:fixed;left:-400px;top:0;width:300px;height:100%"><button>Ghost drawer</button></div>' +
+        '<div style="height:40px;overflow:hidden"><div style="height:200px"></div><button>Ghost clipped</button></div>' +
+        '<button style="position:absolute;left:-9999px">Ghost offscreen</button>' +
+        '<div style="position:relative"><button>Ghost covered</button><div style="position:absolute;inset:0;background:#fff"></div></div>' +
+        '<label><input type="checkbox" name="agree" style="position:absolute;opacity:0.01"><span style="position:relative;display:inline-block;width:20px;height:20px;background:#000"></span> Agree</label>' })
     } else if (url.pathname === '/hang') {
       page(res, { title: 'Hang', body: '<h1>Hang page</h1><script>window.onload = function () { setTimeout(function () { for (;;) {} }, 50) }</script>' })
     } else { res.writeHead(404); res.end('no') }
@@ -783,6 +836,60 @@ if (!existsSync(electronExe)) {
     check('a missing file is refused over the real pipe', ups[9]?.isError === true && (ups[9]?.text ?? '').startsWith('There is no file at'), ups[9]?.text)
     const umaTidy = await agent(h, ready.linkFile, uma, [upId, twoId].filter(Boolean).map((id) => ({ op: 'browser_close', args: { id } })))
     check("Uma's tabs close", umaTidy.length === 2 && umaTidy.every((r) => !r.isError), umaTidy.map((r) => r.text).join('\n'))
+
+    section('6d. Electron: browser_read lists only what a person could see and reach, and `find` (tabs not on screen)')
+    const vic = { id: 'pane-E', name: 'Vic', agent: 'claude' }
+    const listOf = (text) => (text ?? '').split('\n').filter((l) => /^\[\d+\] /.test(l))
+    const busy = await agent(h, ready.linkFile, vic, [
+      { op: 'browser_open', args: { url: `${ready.base}/busy` } },
+      { op: 'browser_read' },
+      { op: 'browser_read', args: { find: 'next' } },
+      { op: 'browser_click', args: { ref: 1 } },
+      { op: 'browser_read' },
+      { op: 'browser_open', args: { url: `${ready.base}/busy?plain=1` } },
+      { op: 'browser_read' }
+    ])
+    const busyItems = listOf(busy[1]?.text)
+    check('a modal over a covered till: its buttons come first', busyItems[0] === '[1] button "Close"' && busyItems[1] === '[2] button "Next"', busy[1]?.text)
+    check('…the 200 covered till buttons are left out, and the read says so', !busyItems.some((l) => l.includes('Till')) && /Left out: 2\d\d hidden/.test(busy[1]?.text ?? '') && !(busy[1]?.text ?? '').includes('past the limit'), busy[1]?.text)
+    check('…and says which numbers are in the dialog on top', (busy[1]?.text ?? '').includes('[1]–[2] are in the dialog on top of the page.'), busy[1]?.text)
+    const nextItems = listOf(busy[2]?.text)
+    check('find "next" lists only the Next button, numbered 1', nextItems.length === 1 && nextItems[0] === '[1] button "Next"' && (busy[2]?.text ?? '').includes('Only elements whose words contain "next"'), busy[2]?.text)
+    check('…and clicking that number presses Next', !busy[3]?.isError && (busy[3]?.text ?? '').startsWith('Clicked "Next"') && (busy[4]?.text ?? '').includes('"Next pressed"'), `${busy[3]?.text}\n${busy[4]?.text}`)
+    const plainBusy = listOf(busy[6]?.text)
+    check(
+      'a full-screen layer with no dialog role, seen covering the till: its buttons first, the till left out',
+      plainBusy.length === 3 && plainBusy[0] === '[1] button "Dashboard home"' && plainBusy[1] === '[2] button "Close"' && plainBusy[2] === '[3] button "Next"' && /Left out: 2\d\d hidden/.test(busy[6]?.text ?? ''),
+      busy[6]?.text
+    )
+    const plain = await agent(h, ready.linkFile, vic, [
+      { op: 'browser_open', args: { url: `${ready.base}/plain` } },
+      { op: 'browser_read' },
+      { op: 'browser_open', args: { url: `${ready.base}/long` } },
+      { op: 'browser_read' },
+      { op: 'browser_open', args: { url: `${ready.base}/ghosts` } },
+      { op: 'browser_read' }
+    ])
+    const plainItems = listOf(plain[1]?.text)
+    check('a plain page of 20 buttons lists all 20, with nothing left out', plainItems.length === 20 && plainItems[19] === '[20] button "Plain 20"' && !(plain[1]?.text ?? '').includes('Left out'), plain[1]?.text)
+    const longWant = ['Menu', ...Array.from({ length: 30 }, (_, i) => `Row ${i + 1}`), ...Array.from({ length: 40 }, (_, i) => `Low ${i + 1}`)]
+    const longSame = (text) => JSON.stringify(listOf(text).map((l) => l.replace(/^\[\d+\] button "(.*)"$/, '$1'))) === JSON.stringify(longWant)
+    check('below the fold and inside a scroll box: every button is still listed', longSame(plain[3]?.text) && !(plain[3]?.text ?? '').includes('Left out'), plain[3]?.text)
+    const longId = tabIn(plain[2])
+    const scrolled = await app.send({
+      cmd: 'tabEval',
+      id: longId,
+      js: 'scrollTo(0, 300); document.getElementById("list").scrollTop = 200; [scrollY, document.getElementById("list").scrollTop, [...document.querySelectorAll("button")].filter((b) => b.textContent.startsWith("Low") && b.getBoundingClientRect().top < 50 && b.getBoundingClientRect().bottom > 0).length]'
+    })
+    check('the page scrolled 300px, the box 200px, and a button now sits under the header bar', Array.isArray(scrolled) && scrolled[0] === 300 && scrolled[1] === 200 && scrolled[2] >= 1, JSON.stringify(scrolled))
+    const [longAgain] = await agent(h, ready.linkFile, vic, [{ op: 'browser_read', args: { id: longId } }])
+    check('scrolled: buttons under the fixed header bar, above the fold and scrolled out of the box are all still listed', longSame(longAgain?.text) && !(longAgain?.text ?? '').includes('Left out'), longAgain?.text)
+    const ghosts = plain[5]?.text ?? ''
+    check('hidden, transparent, inert, aria-hidden, off-canvas, clipped, off-page and covered buttons are left out', listOf(ghosts).every((l) => !l.includes('Ghost')) && ghosts.includes('Left out: 8 hidden'), ghosts)
+    check('…while a visible button and a checkbox under its own styled label are kept', listOf(ghosts).some((l) => l.includes('button "Real one"')) && listOf(ghosts).some((l) => l.startsWith('[2] input checkbox')), ghosts)
+    const vicIds = [tabIn(busy[0]), tabIn(busy[5]), tabIn(plain[0]), longId, tabIn(plain[4])].filter(Boolean)
+    const vicTidy = await agent(h, ready.linkFile, vic, vicIds.map((id) => ({ op: 'browser_close', args: { id } })))
+    check("Vic's tabs close", vicIds.length === 5 && vicTidy.every((r) => !r.isError), vicTidy.map((r) => r.text).join('\n'))
 
     await app.send({ cmd: 'quit' })
     await app.exited

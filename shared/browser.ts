@@ -310,6 +310,7 @@ export const BROWSER_TOOL_DESCRIPTIONS: Record<BrowserToolName, string> = {
   browser_read: [
     `${BROWSER_PREAMBLE} Reads a tab: the address and title, a numbered list of everything you can click or type into, then what the page says.`,
     'Those numbers are the only way to act on the page. They restart at 1 on EVERY read and die when the page changes — never act on a number you did not just receive.',
+    'Only what a person could see and reach is listed: things hidden or covered by something on top are left out, and a dialog on top of the page is listed first. On a busy page pass `find` (e.g. "Next") to list only the elements whose words contain it — their numbers work like any others.',
     'Omit `id` to read your current tab.'
   ].join('\n'),
   browser_click: [
@@ -342,7 +343,8 @@ export const BROWSER_PARAM_TEXT = {
   submit: 'Press Enter after typing (usually submits the form or search).',
   path: 'Full path of the file on this computer, e.g. "C:\\Users\\me\\Downloads\\statement.csv".',
   which: 'Which file box, by its number in the list a previous browser_upload gave. Only needed when the page has more than one.',
-  uploadRef: 'Optional: the number in square brackets from your last browser_read of the file box, or of the button or label that opens it.'
+  uploadRef: 'Optional: the number in square brackets from your last browser_read of the file box, or of the button or label that opens it.',
+  find: 'Optional: list only the elements whose words (label, text, placeholder) contain this, ignoring case — e.g. "Next" or "Close". The numbers still work with browser_click, browser_type and browser_upload.'
 } as const
 
 /** A JSON-schema object for one tool's arguments. Plain enough for MCP, Gemini Live and OpenAI Realtime. */
@@ -365,7 +367,11 @@ export const BROWSER_TOOL_PARAMS: Record<BrowserToolName, BrowserToolSchema> = {
     required: ['url']
   },
   browser_list: { type: 'object', properties: {}, required: [] },
-  browser_read: { type: 'object', properties: { id: idParam }, required: [] },
+  browser_read: {
+    type: 'object',
+    properties: { id: idParam, find: { type: 'string', description: BROWSER_PARAM_TEXT.find } },
+    required: []
+  },
   browser_click: {
     type: 'object',
     properties: { id: idParam, ref: { type: 'number', description: BROWSER_PARAM_TEXT.ref } },
