@@ -15,6 +15,7 @@ import type { NewTabDetail } from './TerminalGrid'
 import { AgentsMenu } from './shell/AgentsMenu'
 import { Dock } from './shell/Dock'
 import { toggleSheet } from './shell/Sheet'
+import { useBranch } from './shell/useBranch'
 import './shell/DeckBar.css'
 
 /**
@@ -51,6 +52,7 @@ export function TitleBar(): ReactNode {
         </span>
         <span className="deckbar__wordmark">Forge</span>
         {isDevChannel ? <span className="deckbar__channel">DEV</span> : null}
+        <ProjectChip />
         <AgentControls />
       </div>
 
@@ -139,6 +141,47 @@ function ModePill(): ReactNode {
         </button>
       ))}
     </nav>
+  )
+}
+
+/* ----------------------------------------------------------- project chip */
+
+/**
+ * The folder you are in, beside the mark, in every view: the folder, its name,
+ * the git branch (when there is one) and a chevron. It opens the same project
+ * sheet as the voice bar's project pill — one sheet, one state (shellSheet);
+ * the pill keeps the Ctrl+Shift+B commands. The full path is its tooltip. In a
+ * narrow window the branch goes first, then the name (DeckBar.css).
+ */
+function ProjectChip(): ReactNode {
+  const project = useActiveProject()
+  const branch = useBranch(project?.id ?? null)
+  const open = useShellSheet() === 'projects'
+  if (!project) return null
+
+  return (
+    <button
+      type="button"
+      className="deckbar__project"
+      data-open={open ? 'true' : undefined}
+      data-sheet-toggle="projects"
+      aria-expanded={open}
+      aria-label={`Project ${project.name}${branch ? `, branch ${branch}` : ''}. Switch project`}
+      title={project.path}
+      style={{ '--project': project.color } as React.CSSProperties}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => toggleSheet('projects')}
+    >
+      <Icon name="folder" size={14} className="deckbar__projectmark" />
+      <span className="deckbar__projectname truncate">{project.name}</span>
+      {branch ? (
+        <span className="deckbar__projectbranch">
+          <Icon name="branch" size={11} />
+          <span className="truncate">{branch}</span>
+        </span>
+      ) : null}
+      <Icon name="chevronDown" size={11} className="deckbar__projectchev" />
+    </button>
   )
 }
 

@@ -228,6 +228,123 @@
   box-shadow: inset 0 0 0 1px var(--warn-line);
 }
 
+/*
+ * The project chip (ProjectChip): the folder in the project's own colour, the
+ * name in full ink, the branch quieter in mono. A capsule like the Agents
+ * button beside it. It gives way before anything else on the bar: in a
+ * narrower window the branch goes first, then the wordmark beside it, then the
+ * name narrows, and at the narrowest the folder alone is left (the name is in
+ * its tooltip and on the voice bar's project pill).
+ */
+.deckbar__project {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 26px;
+  margin-left: 2px;
+  padding: 0 8px 0 9px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  -webkit-app-region: no-drag;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__project:hover,
+.deckbar__project[data-open='true'] {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.deckbar__project:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.deckbar__projectmark {
+  flex: none;
+  color: var(--project);
+}
+
+.deckbar__projectmark path {
+  fill: color-mix(in srgb, var(--project) 24%, transparent);
+}
+
+.deckbar__projectname {
+  min-width: 0;
+  max-width: 180px;
+}
+
+.deckbar__projectbranch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 140px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.deckbar__projectbranch svg {
+  flex: none;
+}
+
+.deckbar__projectchev {
+  flex: none;
+  color: var(--text-dim);
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.deckbar__project[data-open='true'] .deckbar__projectchev {
+  transform: rotate(180deg);
+}
+
+@media (max-width: 1200px) {
+  .deckbar__projectbranch {
+    display: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .deckbar:has(.deckbar__project) .deckbar__wordmark {
+    display: none;
+  }
+
+  .deckbar__projectname {
+    max-width: 80px;
+  }
+
+  /* The voice bar up here has the project pill in it: its text needs the room. */
+  .deckbar[data-voicebar='top'] .deckbar__projectname {
+    display: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .deckbar__projectname {
+    display: none;
+  }
+}
+
+/* The voice bar up here and the Wall's switch too: the bar's own pill names the project. */
+@media (max-width: 1024px) {
+  .deckbar[data-voicebar='top']:has(.deckbar__wallmode) .deckbar__project {
+    display: none;
+  }
+}
+
 /* ------------------------------------------------------------------ modes */
 
 .deckbar__modes {

@@ -94,6 +94,102 @@
 }
 
 /*
+ * The project's name on the Wall (WallName): large and faint on the floor
+ * under the tiles, captioned by a small clear label — folder, name, branch —
+ * in the bottom-left corner. Placed before the wall and never above it, so the
+ * tiles paint over both; neither takes a click, a drag or the wheel, and
+ * neither is laid out with the tiles, so no tile moves for them. The label
+ * shows only while no tile sits on its corner.
+ */
+.mosaic__name {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mosaic__watermark {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 46px;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: clamp(88px, 13vw, 232px);
+  font-weight: 700;
+  line-height: 0.78;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+  /*
+   * Faint on any floor: a difference blend nudges whatever is under it toward
+   * its opposite, so it reads lighter on a dark backdrop and darker on a pale
+   * one, in every theme, without ever getting loud.
+   */
+  color: rgba(255, 255, 255, 0.07);
+  mix-blend-mode: difference;
+}
+
+.mosaic__place {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 28px);
+  height: 26px;
+  padding: 0 11px 0 9px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--pill-shadow);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.mosaic__place[data-covered='true'] {
+  opacity: 0;
+}
+
+.mosaic__placemark {
+  flex: none;
+  color: var(--project);
+}
+
+.mosaic__placemark path {
+  fill: color-mix(in srgb, var(--project) 24%, transparent);
+}
+
+.mosaic__placename {
+  min-width: 0;
+}
+
+.mosaic__placebranch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 160px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.mosaic__placebranch svg {
+  flex: none;
+}
+
+/*
  * The Grid | Free switch (WallLayoutSwitch), in the menu's Tools. The chosen
  * side is a solid block with a bold word and the other an outline with a light
  * one, so which is on reads by shape and weight, never by colour alone.

@@ -63,6 +63,7 @@ import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { StateChip } from './shell/StateChip'
+import { useBranch } from './shell/useBranch'
 import './MosaicView.css'
 
 /**
@@ -994,6 +995,7 @@ export function MosaicView({
 
   return (
     <div className="mosaic">
+      <WallName project={project} wallRef={wallRef} tiles={tiles} />
       {/*
         No toolbar over the wall. Crossing from the grid into freeform must not
         move a single tile, and a strip of chrome appearing above them would
@@ -1045,6 +1047,80 @@ export function MosaicView({
       </div>
       {/* The grid in words while an edge drag resizes every tile. See frame. */}
       <div className="mosaic__gridlabel" ref={gridLabelRef} role="status" hidden />
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------- wall name */
+
+/**
+ * The project's name on the Wall: set large and faint behind the tiles, with
+ * a small clear label (folder, name, branch) in the bottom-left corner. Both
+ * sit under the tiles and take no clicks, so they never cover a terminal or
+ * move one — where the tiles fill the wall, they fill it. The label hides
+ * whenever a tile's box overlaps its corner, so it is either whole and
+ * readable or not there. `tiles` is MosaicView's memo of every tile's box: it
+ * changes whenever a tile can have moved (membership, columns, rows, freeform).
+ */
+function WallName({
+  project,
+  wallRef,
+  tiles
+}: {
+  project: Project
+  wallRef: React.RefObject<HTMLDivElement | null>
+  tiles: Record<string, MosaicTileRect>
+}): ReactNode {
+  const branch = useBranch(project.id)
+  const labelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const wall = wallRef.current
+    const canvas = wall?.firstElementChild as HTMLElement | null | undefined
+    const label = labelRef.current
+    if (!wall || !canvas || !label) return undefined
+    let frame = 0
+    // Each tile's resting box (offsets, not transforms): a drag or a glide in
+    // flight does not count until it lands, and landing re-renders `tiles`.
+    const check = (): void => {
+      frame = 0
+      const r = label.getBoundingClientRect()
+      const c = canvas.getBoundingClientRect()
+      const covered = [...canvas.querySelectorAll<HTMLElement>(':scope > .mtile')].some((t) => {
+        const left = c.left + t.offsetLeft
+        const top = c.top + t.offsetTop
+        return left < r.right && left + t.offsetWidth > r.left && top < r.bottom && top + t.offsetHeight > r.top
+      })
+      label.dataset.covered = covered ? 'true' : 'false'
+    }
+    const soon = (): void => {
+      if (!frame) frame = requestAnimationFrame(check)
+    }
+    const ro = new ResizeObserver(soon)
+    ro.observe(wall)
+    ro.observe(canvas)
+    wall.addEventListener('scroll', soon, { passive: true })
+    soon()
+    return () => {
+      cancelAnimationFrame(frame)
+      ro.disconnect()
+      wall.removeEventListener('scroll', soon)
+    }
+  }, [wallRef, tiles, branch, project.name])
+
+  return (
+    <div className="mosaic__name" aria-hidden="true" style={{ '--project': project.color } as React.CSSProperties}>
+      <span className="mosaic__watermark">{project.name}</span>
+      <div className="mosaic__place" ref={labelRef} data-covered="true">
+        <Icon name="folder" size={13} className="mosaic__placemark" />
+        <span className="mosaic__placename truncate">{project.name}</span>
+        {branch ? (
+          <span className="mosaic__placebranch">
+            <Icon name="branch" size={10} />
+            <span className="truncate">{branch}</span>
+          </span>
+        ) : null}
+      </div>
     </div>
   )
 }
