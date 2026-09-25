@@ -1,38 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Forge Watch</string>
-    <string name="dictate">Talk to Forge</string>
-    <string name="sign_in">Sign in</string>
-    <string name="sign_out_as">Sign out (%1$s)</string>
-    <string name="signing_in">Signing in…</string>
-    <string name="warmup_start">Hold LTE on</string>
-    <string name="warmup_stop">Release LTE</string>
-    <string name="auto_warmup">Auto LTE on phone loss</string>
     <string name="warmup_notification_title">Forge LTE warm-up</string>
     <string name="warmup_notification_text">Keeping cellular attached</string>
 
-    <string name="listening">Listening…</string>
-    <string name="tap_to_talk">Tap Talk, or say \"open forge\"</string>
-    <string name="talk">Talk</string>
-    <string name="stop">Stop</string>
-    <string name="send">Send</string>
-    <string name="send_n">Send (%1$d)</string>
+    <!-- Voice screen -->
+    <string name="hint_listening">Say a prompt,\nor “open forge”</string>
+    <string name="hint_idle">Tap the mic to talk</string>
+    <string name="hint_off">Tap the mic to try again</string>
+    <string name="mic_listening">LISTENING</string>
+    <string name="mic_paused">MIC PAUSED</string>
+    <string name="mic_off">MIC OFF</string>
+    <string name="mic_start">Start listening</string>
+    <string name="mic_stop">Stop listening</string>
+    <string name="mic_desc_listening">Microphone, listening</string>
+    <string name="mic_desc_paused">Microphone, paused</string>
+    <string name="mic_desc_off">Microphone, off</string>
+    <string name="send_n">Send %1$d</string>
+    <string name="clear_draft">Clear the draft</string>
+    <string name="status_tap">Pick a project or tab</string>
+    <string name="settings">Settings</string>
     <string name="mic_needed">Microphone needed</string>
-
-    <string name="close_other_tabs">Close other tabs</string>
-    <string name="close_tab">Close tab</string>
+    <string name="signing_in">Signing in…</string>
 
     <string name="ask_email">Forge email</string>
     <string name="ask_password">Password</string>
     <string name="ask_pin">Desktop PIN</string>
-
-    <string name="picker_projects">Projects</string>
-    <string name="picker_new_tab">+ New tab</string>
-    <string name="picker_all_projects">◀ All projects</string>
-    <string name="picker_agent_for">New tab in %1$s — which agent?</string>
-    <string name="picker_back">◀ Back</string>
-    <string name="picker_not_connected">Not connected</string>
-    <string name="pick_project">Tap here to pick a project</string>
 
     <string name="state_off">Forge</string>
     <string name="state_signed_out">Tap to sign in</string>
@@ -41,4 +34,38 @@
     <string name="state_connecting">Connecting to %1$s…</string>
     <string name="state_pin">Tap to enter PIN</string>
     <string name="state_refused">Refused. Tap to retry</string>
+    <string name="pick_project">Tap to pick a project</string>
+
+    <!-- Picker -->
+    <string name="picker_projects">Projects</string>
+    <string name="picker_not_connected">Not connected</string>
+    <string name="picker_not_connected_note">Swipe back to see why.</string>
+    <string name="picker_all_projects">All projects</string>
+    <string name="picker_new_tab">New tab</string>
+    <string name="picker_agent_for">New tab in %1$s</string>
+    <string name="picker_back">Back</string>
+    <string name="picker_no_tabs">No tabs yet.</string>
+    <string name="picker_current">current</string>
+    <string name="picker_active">Active</string>
+    <plurals name="picker_tabs">
+        <item quantity="one">1 tab</item>
+        <item quantity="other">%1$d tabs</item>
+    </plurals>
+    <string name="picker_no_tab_count">No tabs</string>
+    <string name="close_tab">Close tab</string>
+    <string name="close_named">Close %1$s</string>
+    <string name="close_other_tabs">Close other tabs</string>
+
+    <!-- Settings -->
+    <string name="dictate">Talk to Forge</string>
+    <string name="sign_in">Sign in</string>
+    <string name="sign_out">Sign out</string>
+    <string name="not_signed_in">Not signed in</string>
+    <string name="warmup_start">Hold LTE on</string>
+    <string name="warmup_stop">Release LTE</string>
+    <string name="warmup_on">LTE held on now</string>
+    <string name="warmup_off">LTE not held</string>
+    <string name="auto_warmup">Auto LTE</string>
+    <string name="auto_warmup_on">On if phone is lost</string>
+    <string name="off">Off</string>
 </resources>

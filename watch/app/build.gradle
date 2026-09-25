@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 // The Forge Web Firebase project the watch signs in to. The same two values
@@ -28,6 +29,25 @@ android {
 
     buildFeatures {
         buildConfig true
+        compose true
+    }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged resources for the screen tests.
+            includeAndroidResources = true
+            // The screen screenshots are opt-in so the grammar tests stay quick:
+            //   ./gradlew :app:testDebugUnitTest -Pforge.shots=<folder for the PNGs>
+            all { test ->
+                def shots = project.findProperty('forge.shots')
+                if (shots) {
+                    test.systemProperty 'roborazzi.test.record', 'true'
+                    test.systemProperty 'forge.shots', file(shots).absolutePath
+                } else {
+                    test.exclude '**/*ScreenshotTest*'
+                }
+            }
+        }
     }
 
     buildTypes {
@@ -56,5 +76,15 @@ dependencies {
     // Wear's substitute for a keyboard: the full-screen text entry the
     // sign-in and the PIN box use.
     implementation 'androidx.wear:wear-input:1.1.0'
+    // The screens: Compose for Wear OS, Material 3.
+    implementation 'androidx.activity:activity-compose:1.10.1'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.7'
+    implementation 'androidx.wear.compose:compose-foundation:1.5.6'
+    implementation 'androidx.wear.compose:compose-material3:1.5.6'
+    implementation 'androidx.compose.material:material-icons-core:1.7.8'
     testImplementation 'junit:junit:4.13.2'
+    // Screenshots of the screens on a round 384 px frame, no emulator.
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation 'io.github.takahirom.roborazzi:roborazzi:1.50.0'
+    testImplementation 'io.github.takahirom.roborazzi:roborazzi-compose:1.50.0'
 }

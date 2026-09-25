@@ -1,5 +1,12 @@
 # Handoff
 
+## Forge Watch UI rebuilt in Compose for Wear (2026-09-25, not committed)
+
+- **Asked (Steve):** watch app "not up to scratch"; basic, small, voice. Problem picked: looks bad / too big. Chose Compose for Wear over tidying the Views.
+- **Built (designer):** `watch/app/.../{WatchTheme,VoiceScreen,PickerScreen,SettingsScreen}.kt`; the three activities now `setContent`. Voice screen: curved status on the top rim, one round mic with state word on the bottom rim (LISTENING etc., shape differs per state), Send N only with a draft. XML layouts and old drawables deleted. Kotlin 1.9.25 -> 2.0.21 + compose plugin, wear compose-material3 1.5.6. Voice/link logic, manifest and `:watchface` untouched.
+- **Checked:** `./gradlew assembleDebug`, `:app:testDebugUnitTest` (VoiceCommands 10/10). Screenshots: `./gradlew :app:testDebugUnitTest -Pforge.shots=<dir>` (Roborazzi, 12 shots, round 384px).
+- **Needs:** install on the Pixel Watch 2 (`adb connect 192.168.4.46:<port>`, then `adb -s <ip:port> install -r watch/app/build/outputs/apk/debug/app-debug.apk`). Not seen on hardware.
+
 ## Terminal scroll lost after a reload; New button stands out (2026-09-25, not committed)
 
 - **Asked (Steve):** can't scroll Elia (Claude Code) on the Wall or in Full screen; "+ New" on the title bar should stand out a little.

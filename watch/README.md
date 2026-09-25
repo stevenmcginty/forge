@@ -3,10 +3,28 @@
 Wear OS companion for Forge. Two modules, two APKs:
 
 - **`:app`** (`com.forge.watch`) — Kotlin app. Talk to Forge from the wrist.
-  - `DictationActivity` — the voice screen. One **Talk** button, a status
-    line (desktop · project · tab), the words so far, and a **Send** button
-    that appears once there is a draft. Starts listening the moment it opens.
-    Keeps its old class name because the watch face's tap target names it.
+  - `DictationActivity` — the voice screen (`VoiceScreen.kt`, Compose for
+    Wear OS). Nothing scrolls. The top rim says where the words go
+    (`● project · tab ▾`, a hollow ring and a reason when not connected);
+    tap it for the picker, long-press it for settings. The bottom rim says
+    whether the mic hears you: LISTENING, MIC PAUSED or MIC OFF. Between
+    them: the draft in white, the phrase still being spoken in grey italic,
+    one notice line, then the mic — a solid lime disc with a ring that
+    swells with your voice when listening, a hollow disc when paused, a
+    struck-through mic when off. **Send N** (N words) appears beside it once
+    there is a draft: tap to send, long-press to clear. Starts listening
+    the moment it opens. Keeps its old class name because the watch face's
+    tap target names it.
+  - `PickerActivity` (`PickerScreen.kt`) — projects, then that project's
+    tabs, then the agent for a new tab, as a crown-scrollable Wear list.
+    The current project and active tab are outlined and say so in words.
+    Each tab has a close button; long-press a tab also closes it. **New
+    tab** sits on the bottom edge; three or more tabs add **Close other
+    tabs**. Swipe back or tap the title to go up a level.
+  - `MainActivity` (`SettingsScreen.kt`) — Talk to Forge, sign in/out,
+    hold LTE on, and auto LTE on phone loss.
+  - `WatchTheme.kt` — black, white, one lime accent. Every state also has
+    a word or a shape, never colour alone.
   - `ForgeDictationService` — the microphone as a foreground service, so
     listening survives the screen going dark. The recogniser restart loop is
     DictationMic's engine (its `:core` `DictationService`), carried over
@@ -74,6 +92,13 @@ Without them the app says "Not configured".
 cd watch
 ./gradlew assembleDebug
 ./gradlew :app:testDebugUnitTest   # the grammar tests
+```
+
+Pictures of every screen on a round 384 px face, from fake state, with no
+emulator (Robolectric + Roborazzi). Opt-in so the grammar tests stay quick:
+
+```sh
+./gradlew :app:testDebugUnitTest -Pforge.shots=<folder for the PNGs>
 ```
 
 Needs an Android SDK (`local.properties` with `sdk.dir`, same as
