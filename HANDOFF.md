@@ -1,5 +1,12 @@
 # Handoff
 
+## Wall tile grows its terminal; Hide on the Forge reply box (2026-09-25, ae783df, not pushed)
+
+- **Asked (Steve):** text stays small when a tile goes from small to large; the Forge reply box above the bar sticks with no way to close it.
+- **Cause:** a life-size tile read its pane's geometry once per mount and only cropped; a pane born in a crowded wall (never shown Full screen) kept its small grid forever. The reply box shows a non-final caption with no time limit.
+- **Built:** `terminalHost.growPeek` (`src/lib/terminals.ts`) + PeekStage in `src/components/MosaicView.tsx`: a life-size tile bigger than its terminal grows it (grow only, smaller still crops). `CaptionRail` in `src/components/hub/Composer.tsx`: "Hide" button (hides until something newer), non-final captions expire after 60 s.
+- **Checked:** typecheck, lint:hooks, mosaic:check 113. Not seen live. Scaled mode (`mosaicText: 'scaled'`) unchanged.
+
 ## Wall: Grid | Free switch, header drag reorders on the grid (2026-09-24 17:44, merged to master, not pushed)
 
 - **Asked (Steve):** the Wall was a mess of overlapping tiles. Freeform may stay, but there must be an obvious way into a tidy, symmetrical mode.
