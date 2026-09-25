@@ -1,3 +1,5 @@
+import { statSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import {
   BROWSER_MAX_SURFACES,
   isBrowserTabId,
@@ -9,7 +11,7 @@ import {
 import { badRef } from './snapshot'
 
 /**
- * The seven tools' rules, over whatever actually drives the pages.
+ * The eight tools' rules, over whatever actually drives the pages.
  *
  * This is where "many agents at once" is decided, and it is decided by what is
  * *absent*: there is no browser-wide lock. Every agent (a pane, the voice hub,
@@ -37,6 +39,8 @@ export interface BrowserDriver {
   click: (id: string, ref: number) => Promise<string>
   type: (id: string, ref: number | null, text: string, submit: boolean) => Promise<string>
   navigate: (id: string, url: string) => Promise<string>
+  /** Put the file at `path` (checked: a file that exists) into the page's file box. */
+  upload: (id: string, path: string, ref: number | null, which: number | null) => Promise<string>
   /** A PNG on disk, or why not. */
   screenshot: (id: string, owner: BrowserOwner) => Promise<{ path: string } | { error: string }>
   close: (id: string) => Promise<boolean>
@@ -93,6 +97,8 @@ export class BrowserAgentOps {
           }
           return await this.onTab(owner, args, (id) => this.driver.type(id, ref, text, submit))
         }
+        case 'browser_upload':
+          return await this.upload(owner, args)
         case 'browser_screenshot':
           return await this.screenshot(owner, args)
         case 'browser_close':
@@ -177,6 +183,36 @@ export class BrowserAgentOps {
     this.touch(owner, id)
     const text = await this.queued(id, () => work(id))
     return ok(text, id)
+  }
+
+  /**
+   * Only the one file the agent names goes to the page — never a folder, never
+   * a guess. The path must be absolute: a relative one would resolve against
+   * Forge's own working directory, not the agent's.
+   */
+  private async upload(owner: BrowserOwner, args: Record<string, unknown>): Promise<BrowserAgentReply> {
+    const path = typeof args['path'] === 'string' ? args['path'].trim() : ''
+    if (!path) return fail('`path` is required — the full path of the file to put into the page.')
+    if (!isAbsolute(path)) return fail(`\`path\` must be a full path, like C:\\Users\\you\\Downloads\\file.csv — got "${path}".`)
+    let isFile: boolean
+    try {
+      isFile = statSync(path).isFile()
+    } catch {
+      return fail(`There is no file at ${path}. Check the path and try again.`)
+    }
+    if (!isFile) return fail(`${path} is not a file (a folder, perhaps). browser_upload takes one file.`)
+    let ref: number | null = null
+    if (args['ref'] !== undefined && args['ref'] !== null) {
+      if (badRef(args['ref'])) return fail(`\`ref\` must be one of the numbers from your last browser_read — got ${JSON.stringify(args['ref'])}.`)
+      ref = Math.round(Number(args['ref']))
+    }
+    let which: number | null = null
+    if (args['which'] !== undefined && args['which'] !== null) {
+      const n = Number(args['which'])
+      if (!Number.isFinite(n) || Math.round(n) < 1) return fail(`\`which\` must be a number from the list browser_upload gave — got ${JSON.stringify(args['which'])}.`)
+      which = Math.round(n)
+    }
+    return await this.onTab(owner, args, (id) => this.driver.upload(id, path, ref, which))
   }
 
   private async screenshot(owner: BrowserOwner, args: Record<string, unknown>): Promise<BrowserAgentReply> {

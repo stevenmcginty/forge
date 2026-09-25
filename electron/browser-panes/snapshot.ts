@@ -171,6 +171,87 @@ export function refDomClickScript(ref: number): string {
 })()`
 }
 
+/** What uploadTargetScript hands back. `boxes` describes every file box, in page order. */
+export type UploadTarget =
+  | { kind: 'ok'; label: string }
+  | { kind: 'not-file'; label: string }
+  | { kind: 'none' }
+  | { kind: 'many'; boxes: string[] }
+  | { kind: 'bad-which'; boxes: string[] }
+
+/**
+ * Find the file box browser_upload means and park it on the page as
+ * `window.__forgeUpload`, for main to hand to CDP DOM.setFileInputFiles. Null
+ * when `ref` is stale.
+ *
+ * File boxes are usually hidden (`display: none` under a styled "Upload"
+ * label), so they never get a read number: every `input[type=file]` counts
+ * here, seen or not, shadow roots included. `ref` picks the box that element
+ * is, holds, labels, or sits beside (a parent with exactly one); `which` picks
+ * by the 1-based number in the list a `many` answer gave.
+ */
+export function uploadTargetScript(ref: number | null, which: number | null): string {
+  return `(() => {
+  const clean = (v) => String(v == null ? '' : v).replace(/\\s+/g, ' ').trim();
+  const isFile = (n) => !!n && n.tagName === 'INPUT' && String(n.type).toLowerCase() === 'file';
+  const deepAll = (selector) => {
+    const out = [];
+    const walk = (root) => {
+      for (const el of root.querySelectorAll(selector)) out.push(el);
+      for (const host of root.querySelectorAll('*')) if (host.shadowRoot) walk(host.shadowRoot);
+    };
+    walk(document);
+    return out;
+  };
+  const labelOf = (el) => {
+    const near = el.closest('label');
+    const candidates = [el.labels && el.labels.length ? el.labels[0].innerText : '', el.getAttribute('aria-label'),
+      near ? near.innerText : '', el.getAttribute('title'), el.getAttribute('name'), el.id,
+      el.parentElement ? el.parentElement.innerText : ''];
+    for (const c of candidates) {
+      const t = clean(c);
+      if (t) return t.slice(0, 60);
+    }
+    return '';
+  };
+  const describe = (el) => {
+    const accept = clean(el.getAttribute('accept'));
+    const label = labelOf(el);
+    return (label ? '"' + label + '"' : 'unlabelled') + (accept ? ' (accepts ' + accept + ')' : '') +
+      (el.multiple ? ', several files' : '') + (el.disabled ? ', disabled' : '');
+  };
+  const park = (el) => {
+    window.__forgeUpload = el;
+    return { kind: 'ok', label: labelOf(el) };
+  };
+  const all = deepAll('input[type=file]');
+  const boxes = all.map((el, i) => '  ' + (i + 1) + '. ' + describe(el));
+  const ref = ${ref === null ? 'null' : Math.round(ref)};
+  const which = ${which === null ? 'null' : Math.round(which)};
+  if (ref !== null) {
+    const refs = window.__forgeRefs;
+    const el = refs ? refs[ref - 1] : undefined;
+    if (!el || !el.isConnected) return null;
+    let box = isFile(el) ? el : isFile(el.control) ? el.control : null;
+    if (!box && el.querySelector) box = el.querySelector('input[type=file]');
+    if (!box && el.closest) {
+      const lab = el.closest('label');
+      if (lab && isFile(lab.control)) box = lab.control;
+    }
+    if (!box && el.parentElement) {
+      const near = el.parentElement.querySelectorAll('input[type=file]');
+      if (near.length === 1) box = near[0];
+    }
+    if (!box) return { kind: 'not-file', label: clean(el.innerText || el.getAttribute('aria-label') || el.tagName).slice(0, 60) };
+    return park(box);
+  }
+  if (all.length === 0) return { kind: 'none' };
+  if (which !== null) return which >= 1 && which <= all.length ? park(all[which - 1]) : { kind: 'bad-which', boxes };
+  if (all.length === 1) return park(all[0]);
+  return { kind: 'many', boxes };
+})()`
+}
+
 /** "1, 2, 3 — and nothing else." */
 export function badRef(ref: unknown): boolean {
   const n = Number(ref)

@@ -39,7 +39,9 @@ import {
   refFocusScript,
   refPointScript,
   staleRef,
-  type PageSnapshot
+  uploadTargetScript,
+  type PageSnapshot,
+  type UploadTarget
 } from './snapshot'
 
 /**
@@ -790,6 +792,53 @@ export class BrowserManager implements BrowserDriver {
     }
     await settle(wc)
     return `Typed that ${into} and pressed Enter on tab ${id}. Now on ${this.where(wc)}. Read the page again to see what changed.`
+  }
+
+  /**
+   * Put a file into a file box without the file dialog: CDP
+   * DOM.setFileInputFiles, which sets the files and fires the box's own
+   * `input` and `change` events the way a pick by hand does — React's onChange
+   * included. The path is checked by ./agent-ops.ts before it gets here.
+   */
+  async upload(id: string, path: string, ref: number | null, which: number | null): Promise<string> {
+    const wc = this.wcFor(id)
+    if (!wc) return `Tab ${id} is gone.`
+    if (wc.isLoading()) await settle(wc)
+    let target: UploadTarget | null
+    try {
+      target = await this.evaluate<UploadTarget | null>(wc, uploadTargetScript(ref, which))
+    } catch (err) {
+      return `I could not look for a file box on tab ${id}: ${errText(err)}`
+    }
+    if (!target) return staleRef(ref ?? 0)
+    if (target.kind === 'none') return `There is no file box on tab ${id}. Read the page: an "Upload" button may have to be clicked first to show one.`
+    if (target.kind === 'not-file') {
+      return `Element ${ref} ("${target.label}") is not a file box and does not open one. Call browser_upload without \`ref\` to use the page's file box, or read the page again.`
+    }
+    if (target.kind === 'many' || target.kind === 'bad-which') {
+      const lead = target.kind === 'many' ? `Tab ${id} has ${target.boxes.length} file boxes` : `There is no file box ${which} on tab ${id}; it has ${target.boxes.length}`
+      return `${lead}:\n${target.boxes.join('\n')}\nCall browser_upload again with \`which\` set to the number of the one you mean.`
+    }
+    const label = target.label ? ` "${target.label}"` : ''
+    let names: string[] | null = null
+    try {
+      const handle = await this.bounded<{ result?: { objectId?: string } }>(wc, 'Runtime.evaluate', { expression: 'window.__forgeUpload', returnByValue: false })
+      const objectId = handle.result?.objectId
+      if (!objectId) return `The file box on tab ${id} went away before the file could be put in. Read the page again and retry.`
+      await this.bounded(wc, 'DOM.setFileInputFiles', { files: [path], objectId })
+      await this.cdp(wc, 'Runtime.releaseObject', { objectId }).catch(() => undefined)
+      names = await this.evaluate<string[] | null>(
+        wc,
+        '(() => { const el = window.__forgeUpload; delete window.__forgeUpload; return el && el.files ? Array.from(el.files).map((f) => f.name) : null; })()'
+      )
+    } catch (err) {
+      return `I could not put ${basename(path)} into the file box${label} on tab ${id}: ${errText(err)}`
+    }
+    if (!names || !names.includes(basename(path))) {
+      return `The file box${label} on tab ${id} did not take ${basename(path)}. Read the page again and retry.`
+    }
+    await settle(wc)
+    return `Put ${basename(path)} into the file box${label} on tab ${id}. Read the page again to see what changed.`
   }
 
   async screenshot(id: string, owner: BrowserOwner): Promise<{ path: string } | { error: string }> {

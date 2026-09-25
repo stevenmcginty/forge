@@ -4,7 +4,7 @@
  *
  * A browser *surface* is a real web page (an Electron WebContentsView) that sits
  * on the canvas beside the panes. Steve can use it by hand; every agent pane and
- * the voice hub can drive it through the same seven tools (bridge/browser-tools.mjs
+ * the voice hub can drive it through the same eight tools (bridge/browser-tools.mjs
  * for the CLIs, src/lib/realtime/tools-browser.ts for the hub, and
  * electron/browser-panes/brain.ts for the Claude brain).
  *
@@ -86,7 +86,7 @@ export const BROWSER_IPC = {
   move: 'browser:move',
   /** Renderer → main, one-way: which project the window is showing. */
   project: 'browser:project',
-  /** Renderer → main: the voice hub calling one of the seven tools. */
+  /** Renderer → main: the voice hub calling one of the eight tools. */
   agent: 'browser:agent',
   /** Main → renderer: the whole surface list changed. */
   changed: 'browser:changed',
@@ -236,7 +236,7 @@ export interface BrowserSurfacesFile {
 
 export type BrowserHistoryAction = 'back' | 'forward' | 'reload' | 'stop'
 
-/** The seven tools, by name, in one place for the schema checks. */
+/** The eight tools, by name, in one place for the schema checks. */
 export const BROWSER_TOOL_NAMES = [
   'browser_open',
   'browser_list',
@@ -244,7 +244,8 @@ export const BROWSER_TOOL_NAMES = [
   'browser_click',
   'browser_type',
   'browser_screenshot',
-  'browser_close'
+  'browser_close',
+  'browser_upload'
 ] as const
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number]
 
@@ -322,7 +323,13 @@ export const BROWSER_TOOL_DESCRIPTIONS: Record<BrowserToolName, string> = {
     BROWSER_CONFIRM_RULE
   ].join('\n'),
   browser_screenshot: `${BROWSER_PREAMBLE} Photographs a tab as it looks now and returns the PNG's file path (it is also put on the Forge canvas board). For what text cannot answer — a seat map, a chart, a layout; browser_read is cheaper for anything readable. Omit \`id\` for your current tab.`,
-  browser_close: `${BROWSER_PREAMBLE} Closes a tab you have finished with. Omit \`id\` to close your current tab. Close only other agents' tabs when the user asks.`
+  browser_close: `${BROWSER_PREAMBLE} Closes a tab you have finished with. Omit \`id\` to close your current tab. Close only other agents' tabs when the user asks.`,
+  browser_upload: [
+    `${BROWSER_PREAMBLE} Puts a file from this computer into a page's file box (an <input type=file>, even a hidden one behind an "Upload" label or button) — no file dialog opens. Give \`path\`, the file's full path.`,
+    'With one file box on the page it is used; with several you get a numbered list — call again with `which`. `ref` (a number from your last browser_read) picks the box that element is, holds, or labels.',
+    'Read the page again after: the site reacts as if the file had been picked by hand. Omit `id` for your current tab.',
+    BROWSER_CONFIRM_RULE
+  ].join('\n')
 }
 
 /** The parameter words, shared the same way. */
@@ -332,7 +339,10 @@ export const BROWSER_PARAM_TEXT = {
   title: 'Optional short name for the tab, shown on the canvas.',
   ref: 'The number in square brackets from your last browser_read.',
   text: 'The text to type, exactly as it should appear.',
-  submit: 'Press Enter after typing (usually submits the form or search).'
+  submit: 'Press Enter after typing (usually submits the form or search).',
+  path: 'Full path of the file on this computer, e.g. "C:\\Users\\me\\Downloads\\statement.csv".',
+  which: 'Which file box, by its number in the list a previous browser_upload gave. Only needed when the page has more than one.',
+  uploadRef: 'Optional: the number in square brackets from your last browser_read of the file box, or of the button or label that opens it.'
 } as const
 
 /** A JSON-schema object for one tool's arguments. Plain enough for MCP, Gemini Live and OpenAI Realtime. */
@@ -372,7 +382,17 @@ export const BROWSER_TOOL_PARAMS: Record<BrowserToolName, BrowserToolSchema> = {
     required: ['text']
   },
   browser_screenshot: { type: 'object', properties: { id: idParam }, required: [] },
-  browser_close: { type: 'object', properties: { id: idParam }, required: [] }
+  browser_close: { type: 'object', properties: { id: idParam }, required: [] },
+  browser_upload: {
+    type: 'object',
+    properties: {
+      id: idParam,
+      path: { type: 'string', description: BROWSER_PARAM_TEXT.path },
+      ref: { type: 'number', description: BROWSER_PARAM_TEXT.uploadRef },
+      which: { type: 'number', description: BROWSER_PARAM_TEXT.which }
+    },
+    required: ['path']
+  }
 }
 
 /** The default size of a new surface, in canvas units. */

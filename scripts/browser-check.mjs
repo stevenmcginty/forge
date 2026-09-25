@@ -7,7 +7,7 @@
  *   2. refs          formatRead numbers from 1, caps the list, and badRef refuses junk.
  *   2b. overlays     the page hides under every pop-up that overlaps it (overlays.ts), and
  *                    main names keys exactly as the keymap does (browserKeyCombo).
- *   3. tool schema   bridge/browser-tools.mjs offers exactly the seven tools, with words
+ *   3. tool schema   bridge/browser-tools.mjs offers exactly the eight tools, with words
  *                    and schemas identical to shared/browser.ts (the canonical copy).
  *   4. link auth     the real BrowserLink answers the right token and refuses a wrong,
  *                    missing or oversized one — without ever calling the handler.
@@ -23,6 +23,9 @@
  *   6b. failures     a failing iframe, shadow DOM, a typed password never read back, pages
  *                    off screen when the renderer reloads, Forge's keys taken from a page,
  *                    a crashed tab reborn, a hung tab answering and closing.
+ *   6c. upload       browser_upload puts a real file into a hidden file box (no dialog),
+ *                    the page's own input/change handlers fire, several boxes are listed
+ *                    and picked by `which` or by a nearby element's ref.
  *
  *   --live [--shots <dir>]  also: a VISIBLE window mounting the real React surface,
  *                    an agent opening https://example.com, browser_read + browser_screenshot
@@ -175,14 +178,14 @@ const bridgeUrl = pathToFileURL(join(ROOT, 'bridge', 'browser-tools.mjs')).href
 {
   const B = await import(bridgeUrl)
   const names = B.BROWSER_TOOLS.map((t) => t.name)
-  check('exactly the seven tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES), names.join(', '))
-  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 7)
+  check('exactly the eight tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES), names.join(', '))
+  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 8)
   for (const tool of B.BROWSER_TOOLS) {
     check(`${tool.name}: description matches shared word for word`, tool.description === S.BROWSER_TOOL_DESCRIPTIONS[tool.name])
     check(`${tool.name}: schema matches shared`, JSON.stringify(tool.inputSchema) === JSON.stringify(S.BROWSER_TOOL_PARAMS[tool.name]))
     check(`${tool.name}: says it is Forge's browser, preferred, own tabs, parallel`, tool.description.startsWith(S.BROWSER_PREAMBLE))
   }
-  for (const name of ['browser_click', 'browser_type']) {
+  for (const name of ['browser_click', 'browser_type', 'browser_upload']) {
     const d = B.BROWSER_TOOLS.find((t) => t.name === name).description
     check(`${name}: carries the ask-first rule`, d.includes('Ask the user before purchases, messages, or submitting forms'))
   }
@@ -250,6 +253,7 @@ section('5. ownership and concurrency (fake driver)')
     click: async (id, ref) => `click ${id} ${ref}`,
     type: async (id, ref, text, submit) => `type ${id} ${ref} ${text} ${submit}`,
     navigate: async (id, url) => `nav ${id} ${url}`,
+    upload: async (id, path, ref, which) => `upload ${id} ${path} ${ref} ${which}`,
     screenshot: async (id) => ({ path: `/tmp/${id}.png` }),
     close: async (id) => {
       const at = records.findIndex((r) => r.id === id)
@@ -284,6 +288,20 @@ section('5. ownership and concurrency (fake driver)')
   log.length = 0
   await Promise.all([ops.run('browser_read', { id: 'b1' }, A), ops.run('browser_read', { id: 'b1' }, Bo)])
   check('reads on the same tab queue (no interleaving on one page)', log.join(',') === 'start b1,end b1,start b1,end b1', log.join(', '))
+  const upFile = join(scratch, 'upload-me.csv')
+  writeFileSync(upFile, 'date,amount\n', 'utf8')
+  const up = (args) => ops.run('browser_upload', args, A)
+  check('upload hands the driver the tab, the path and no ref/which', (await up({ path: upFile })).text === `upload b1 ${upFile} null null`)
+  check('upload passes ref and which through, rounded', (await up({ path: upFile, ref: 3, which: 2.2 })).text === `upload b1 ${upFile} 3 2`)
+  const noPath = await up({})
+  check('upload with no path is refused before the driver', !noPath.ok && noPath.text.includes('`path` is required'), noPath.text)
+  const rel = await up({ path: 'upload-me.csv' })
+  check('a relative path is refused (it would resolve against Forge, not the agent)', !rel.ok && rel.text.includes('must be a full path'), rel.text)
+  const gone = await up({ path: join(scratch, 'no-such-file.csv') })
+  check('a missing file is refused', !gone.ok && gone.text.startsWith('There is no file at'), gone.text)
+  const dir = await up({ path: scratch })
+  check('a folder is refused', !dir.ok && dir.text.includes('is not a file'), dir.text)
+  check('a bad ref or which is refused', !(await up({ path: upFile, ref: 0 })).ok && !(await up({ path: upFile, which: 0 })).ok && !(await up({ path: upFile, which: 'x' })).ok)
   const shot = await ops.run('browser_screenshot', {}, A)
   check('screenshot returns the file path', shot.ok && shot.imagePath === '/tmp/b1.png')
   const closed = await ops.run('browser_close', {}, A)
@@ -362,6 +380,17 @@ const server = createServer((req, res) => {
       page(res, { title: 'Shadow', body: '<h1>Shadow page</h1><x-card></x-card><script>customElements.define("x-card", class extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = "<button>Inside shadow</button><p>Shadow words</p>" } })</script>' })
     } else if (url.pathname === '/keys') {
       page(res, { title: 'Keys', body: '<h1>Keys page</h1><input id="f" autofocus><script>window.__got = []; addEventListener("keydown", function (e) { window.__got.push(e.code + (e.ctrlKey ? "+ctrl" : "")) }, true)</script>' })
+    } else if (url.pathname === '/upload') {
+      page(res, { title: 'Upload', body: '<h1>Upload page</h1><p id="out">No file yet</p><style>.hidden{display:none}</style>' +
+        '<label>Upload Statement<input type="file" class="hidden" accept=".csv"></label>' +
+        '<script>window.__ev = []; document.querySelector("input[type=file]").addEventListener("input", function () { window.__ev.push("input") });' +
+        'document.addEventListener("change", function (e) { const f = e.target.files[0]; window.__ev.push("change:" + (f ? f.name : "none"));' +
+        'if (f) f.text().then(function (t) { document.getElementById("out").textContent = "Got " + t.split(String.fromCharCode(10))[1] }) })</script>' })
+    } else if (url.pathname === '/upload2') {
+      page(res, { title: 'Two boxes', body: '<h1>Two boxes</h1>' +
+        '<div><button>Upload A</button><input type="file" name="a" style="display:none"></div>' +
+        '<div><button>Upload B</button><input type="file" name="b" accept=".pdf" style="display:none"></div>' +
+        '<script>window.__got = []; document.addEventListener("change", function (e) { window.__got.push(e.target.name + ":" + e.target.files[0].name) })</script>' })
     } else if (url.pathname === '/hang') {
       page(res, { title: 'Hang', body: '<h1>Hang page</h1><script>window.onload = function () { setTimeout(function () { for (;;) {} }, 50) }</script>' })
     } else { res.writeHead(404); res.end('no') }
@@ -717,6 +746,43 @@ if (!existsSync(electronExe)) {
     const tessIds = [tabIn(run1[0]), tabIn(run1[1]), loginId, keysId].filter(Boolean)
     const tidy = await agent(h, ready.linkFile, tess, tessIds.map((id) => ({ op: 'browser_close', args: { id } })))
     check("Tess's remaining tabs close", tessIds.length === 4 && tidy.every((r) => !r.isError), tidy.map((r) => r.text).join('\n'))
+
+    section('6c. Electron: browser_upload into hidden file boxes (tabs not on screen)')
+    const uma = { id: 'pane-D', name: 'Uma', agent: 'claude' }
+    const statement = join(scratch, 'statement.csv')
+    writeFileSync(statement, 'date,amount\n2026-07-01,12.50\n', 'utf8')
+    const ups = await agent(h, ready.linkFile, uma, [
+      { op: 'browser_open', args: { url: `${ready.base}/upload` } },
+      { op: 'browser_upload', args: { path: statement } },
+      { op: 'browser_read' },
+      { op: 'browser_open', args: { url: `${ready.base}/upload2` } },
+      { op: 'browser_upload', args: { path: statement } },
+      { op: 'browser_upload', args: { path: statement, which: 1 } },
+      { op: 'browser_read' },
+      { op: 'browser_upload', args: { path: statement, ref: 2 } },
+      { op: 'browser_upload', args: { path: statement, which: 3 } },
+      { op: 'browser_upload', args: { path: join(scratch, 'nope.csv') } }
+    ])
+    const upId = tabIn(ups[0])
+    const twoId = tabIn(ups[3])
+    check(
+      'upload into a hidden box inside a label says what went where',
+      !ups[1]?.isError && (ups[1]?.text ?? '') === `Put statement.csv into the file box "Upload Statement" on tab ${upId}. Read the page again to see what changed.`,
+      ups[1]?.text
+    )
+    check("the page's own change handler read the file's bytes", (ups[2]?.text ?? '').includes('Got 2026-07-01,12.50'), ups[2]?.text)
+    const ev = await app.send({ cmd: 'tabEval', id: upId, js: 'window.__ev' })
+    check('input then change fired, as for a pick by hand (bubbling, so React sees it)', JSON.stringify(ev) === JSON.stringify(['input', 'change:statement.csv']), JSON.stringify(ev))
+    const many = ups[4]?.text ?? ''
+    check('two boxes and no which: a numbered list, nothing uploaded', !ups[4]?.isError && many.includes('has 2 file boxes') && many.includes('1. "a"') && many.includes('2. "b" (accepts .pdf)') && many.includes('`which`'), many)
+    check('which: 1 picks the first box', (ups[5]?.text ?? '').startsWith('Put statement.csv into the file box "a"'), ups[5]?.text)
+    check('ref of the button beside a box picks that box', (ups[6]?.text ?? '').includes('[2] button "Upload B"') && (ups[7]?.text ?? '').startsWith('Put statement.csv into the file box "b"'), `${ups[6]?.text}\n${ups[7]?.text}`)
+    check('a which past the list is answered with the list', (ups[8]?.text ?? '').includes('There is no file box 3') && (ups[8]?.text ?? '').includes('2. "b"'), ups[8]?.text)
+    const got2 = await app.send({ cmd: 'tabEval', id: twoId, js: 'window.__got' })
+    check('each box got the file once, the right one each time', JSON.stringify(got2) === JSON.stringify(['a:statement.csv', 'b:statement.csv']), JSON.stringify(got2))
+    check('a missing file is refused over the real pipe', ups[9]?.isError === true && (ups[9]?.text ?? '').startsWith('There is no file at'), ups[9]?.text)
+    const umaTidy = await agent(h, ready.linkFile, uma, [upId, twoId].filter(Boolean).map((id) => ({ op: 'browser_close', args: { id } })))
+    check("Uma's tabs close", umaTidy.length === 2 && umaTidy.every((r) => !r.isError), umaTidy.map((r) => r.text).join('\n'))
 
     await app.send({ cmd: 'quit' })
     await app.exited

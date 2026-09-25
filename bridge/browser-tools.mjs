@@ -1,5 +1,5 @@
 /**
- * Forge's built-in browser, as MCP tools — the seven `browser_*` tools every
+ * Forge's built-in browser, as MCP tools — the eight `browser_*` tools every
  * agent CLI gets.
  *
  * Not a server of its own: a module the bridge servers spread into their tool
@@ -41,7 +41,10 @@ const PARAM = {
   title: 'Optional short name for the tab, shown on the canvas.',
   ref: 'The number in square brackets from your last browser_read.',
   text: 'The text to type, exactly as it should appear.',
-  submit: 'Press Enter after typing (usually submits the form or search).'
+  submit: 'Press Enter after typing (usually submits the form or search).',
+  path: 'Full path of the file on this computer, e.g. "C:\\Users\\me\\Downloads\\statement.csv".',
+  which: 'Which file box, by its number in the list a previous browser_upload gave. Only needed when the page has more than one.',
+  uploadRef: 'Optional: the number in square brackets from your last browser_read of the file box, or of the button or label that opens it.'
 }
 
 const idParam = { type: 'string', description: PARAM.id }
@@ -118,6 +121,25 @@ export const BROWSER_TOOLS = [
     name: 'browser_close',
     description: `${BROWSER_PREAMBLE} Closes a tab you have finished with. Omit \`id\` to close your current tab. Close only other agents' tabs when the user asks.`,
     inputSchema: { type: 'object', properties: { id: idParam }, required: [] }
+  },
+  {
+    name: 'browser_upload',
+    description: [
+      `${BROWSER_PREAMBLE} Puts a file from this computer into a page's file box (an <input type=file>, even a hidden one behind an "Upload" label or button) — no file dialog opens. Give \`path\`, the file's full path.`,
+      'With one file box on the page it is used; with several you get a numbered list — call again with `which`. `ref` (a number from your last browser_read) picks the box that element is, holds, or labels.',
+      'Read the page again after: the site reacts as if the file had been picked by hand. Omit `id` for your current tab.',
+      BROWSER_CONFIRM_RULE
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: idParam,
+        path: { type: 'string', description: PARAM.path },
+        ref: { type: 'number', description: PARAM.uploadRef },
+        which: { type: 'number', description: PARAM.which }
+      },
+      required: ['path']
+    }
   }
 ]
 
