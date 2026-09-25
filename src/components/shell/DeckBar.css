@@ -86,7 +86,12 @@
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--text-muted);
+  /* A touch louder than its neighbours: a hairline rim, brighter text and an
+     accent plus. The Wall's "on" state is a filled accent chip, so this stays
+     hollow and never reads as switched on. */
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 18%, transparent);
   -webkit-app-region: no-drag;
   transition:
     color var(--dur-fast) var(--ease-out),
@@ -96,7 +101,12 @@
 
 .deckbar__new:hover:not(:disabled) {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 28%, transparent);
+}
+
+.deckbar__new svg {
+  color: var(--accent-ink);
 }
 
 .deckbar__new:focus-visible {

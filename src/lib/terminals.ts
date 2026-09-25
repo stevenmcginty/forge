@@ -1,6 +1,6 @@
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import type { PtyDataEvent, PtyExitEvent, PtyGeometryEvent } from '@shared/types'
+import type { PtyDataEvent, PtyExitEvent, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
 import { findDevServerUrl } from '@shared/devserver'
 import { isTypedInput } from '@shared/typing'
@@ -487,7 +487,8 @@ class TerminalHost {
     window.forge.pty.onData((e: PtyDataEvent) => {
       const entry = this.entries.get(e.id)
       if (!entry) return
-      entry.term.write(e.data)
+      if (e.segments) this.writeReplay(entry, e.segments)
+      else entry.term.write(e.data)
       entry.outputBytes += e.data.length
       if (entry.runtime.status === 'starting') this.setRuntime(entry, { status: 'live' })
       this.scanForRemoteUrl(entry, e.data)
@@ -512,6 +513,35 @@ class TerminalHost {
     // would like; this says what the pane actually is, and who chose it.
     window.forge.pty.onGeometry((e: PtyGeometryEvent) => {
       this.setGeometry(e.id, e.deskOwns ? null : { cols: e.cols, rows: e.rows })
+    })
+  }
+
+  /**
+   * A reload's catch-up, one segment per width the PTY had (see `deskLog` in
+   * electron/pty-host.ts). Each segment is parsed at the width it was printed
+   * at, so xterm reflows it into scrollback the way it did live. Then the
+   * terminal goes back to the grid it should have now. The resizes run in
+   * write callbacks so they land between the right bytes. Nothing here touches
+   * the PTY, and there is no `term.onResize` subscription to tell it.
+   */
+  private writeReplay(entry: Entry, segments: PtyReplaySegment[]): void {
+    const { term } = entry
+    const cols = term.cols
+    const width = (c: number): void => {
+      if (c < 1 || term.cols === c) return
+      try {
+        term.resize(c, term.rows)
+      } catch {
+        /* xterm throws if resized mid-teardown — harmless */
+      }
+    }
+    for (const s of segments) {
+      term.write('', () => width(s.cols))
+      term.write(s.data)
+    }
+    term.write('', () => {
+      if (entry.container) this.fit(entry.paneId)
+      else width(cols)
     })
   }
 

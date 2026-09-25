@@ -1,5 +1,13 @@
 # Handoff
 
+## Terminal scroll lost after a reload; New button stands out (2026-09-25, not committed)
+
+- **Asked (Steve):** can't scroll Elia (Claude Code) on the Wall or in Full screen; "+ New" on the title bar should stand out a little.
+- **Cause (proven on a throwaway Forge):** `noteWidth` in `electron/pty-host.ts` replaced the replay buffer with a clear-screen on every PTY width change (Wall<->Full, growPeek). Claude Code does not reprint history after a resize, so a renderer reload (HMR on any src/ edit) rebuilt xterm with baseY 0. Claude Code clearing scrollback, mouse tracking and overlays were ruled out.
+- **Built:** pty-host keeps a per-width segment log (`deskLog`, same 192 KB cap) sent as `segments` on the desktop reload replay only; `writeReplay` in `src/lib/terminals.ts` replays each segment at its own width then fits. `PtyReplaySegment` in `shared/types.ts`. `getReplay` (phone, web, share, foreman) unchanged. New button: hairline rim, brighter text, accent plus (`src/components/shell/DeckBar.css`).
+- **Checked:** typecheck, lint:hooks, mosaic:check 113; repro after fix: baseY 253/276 after reload, wheel scrolls in peek, typing and Full screen.
+- **Needs:** a Forge restart (main process). Panes that already lost history stay empty. Not tested: Forge Web/phone (path unchanged), a busy turn filling 192 KB with spinner redraws.
+
 ## Project folder on the title bar and the Wall (2026-09-25, 1139472, pushed)
 
 - **Asked (Steve):** show the project folder in more places than the bottom-left pill; picked A (title bar chip) and D (big name on the Wall) from a Board mockup.

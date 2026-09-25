@@ -3113,9 +3113,21 @@ export type CreateSessionResult =
     }
   | { ok: false; id: string; error: string }
 
+/** Output a pane printed while its PTY was `cols` wide. See `deskLog` in electron/pty-host.ts. */
+export interface PtyReplaySegment {
+  cols: number
+  data: string
+}
+
 export interface PtyDataEvent {
   id: string
   data: string
+  /**
+   * Only on the catch-up sent to a reloaded desktop renderer: the same pane's
+   * recent output, width by width, so the rebuilt terminal gets its scrollback
+   * back. When present it replaces `data`, which is the single-width replay.
+   */
+  segments?: PtyReplaySegment[]
 }
 
 export interface PtyExitEvent {

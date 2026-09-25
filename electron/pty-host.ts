@@ -1,7 +1,7 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { resolve as resolvePath, sep } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
-import type { CreateSessionRequest, CreateSessionResult, PtyGeometryEvent } from '@shared/types'
+import type { CreateSessionRequest, CreateSessionResult, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
 import { commandExe, isGlmClaudeCommand, ZAI_ANTHROPIC_BASE_URL } from '@shared/agents'
 import { SHARE_DIR_ENV, SHARE_LINK_ENV } from '@shared/share'
 import { installCommandFor, toolSpecForCommand } from '@shared/tools'
@@ -65,6 +65,19 @@ const replay = new Map<string, string>()
  * buffer is only meaningful at this number, so this is kept beside it.
  */
 const widths = new Map<string, number>()
+/**
+ * The same output as `replay`, never thrown away at a width change: split into
+ * one segment per PTY width instead. Only the desktop's own renderer reads it,
+ * on a reload (see `create` below). It can replay each segment at the width it
+ * was printed at, so its rebuilt terminal gets its scrollback back.
+ *
+ * `replay` has to go blank at a width change (see `noteWidth`), and Claude Code
+ * does not print its conversation again after a resize. So a reload after any
+ * width change (Wall to Full screen, a life-size tile that grew) used to come
+ * back with no scrollback at all, and the wheel had nothing to scroll.
+ * Remote viewers still get `replay`: they cannot resize their grid to match.
+ */
+const deskLog = new Map<string, PtyReplaySegment[]>()
 let flushTimer: NodeJS.Timeout | null = null
 
 /**
@@ -250,6 +263,22 @@ function flush(): void {
 function remember(id: string, data: string): void {
   const next = (replay.get(id) ?? '') + data
   replay.set(id, next.length > REPLAY_LIMIT ? next.slice(next.length - REPLAY_LIMIT) : next)
+  const log = deskLog.get(id) ?? []
+  if (log.length === 0) log.push({ cols: widths.get(id) ?? 0, data: '' })
+  log[log.length - 1]!.data += data
+  // The same byte budget as `replay`, cut from the oldest end.
+  let over = log.reduce((sum, s) => sum + s.data.length, 0) - REPLAY_LIMIT
+  while (over > 0) {
+    const first = log[0]!
+    if (log.length > 1 && first.data.length <= over) {
+      over -= first.data.length
+      log.shift()
+    } else {
+      first.data = first.data.slice(over)
+      over = 0
+    }
+  }
+  deskLog.set(id, log)
   // The same bytes, counted rather than kept: this is the only place in main
   // that sees every chunk a pane prints, and "has this pane been quiet" is what
   // decides whether another agent may type into it. See electron/share-link.ts.
@@ -296,6 +325,14 @@ function noteWidth(id: string, cols: number): void {
   // nothing in the buffer that was written at a different one.
   if (previous === undefined || previous === cols) return
   replay.set(id, CLEAR_SCREEN)
+  deskLog.get(id)?.push({ cols, data: '' })
+}
+
+/** `deskLog` for one pane, questions removed like `getReplay`. Null when empty. */
+function deskReplay(id: string): PtyReplaySegment[] | null {
+  const log = deskLog.get(id)
+  if (!log || !log.some((s) => s.data)) return null
+  return log.map((s) => ({ cols: s.cols, data: withoutQuestions(s.data) }))
 }
 
 /** A session's real grid, or null. `manager` rather than getManager(): asking must not create one. */
@@ -606,6 +643,7 @@ export function viewerGone(viewer: string, id?: string): void {
  */
 export function killPane(id: string): boolean {
   replay.delete(id)
+  deskLog.delete(id)
   widths.delete(id)
   pending.delete(id)
   live.delete(id)
@@ -959,11 +997,16 @@ export function registerPtyHandlers(): void {
       // come out, or the reload answers them into a program that has long since
       // stopped listening and reads the answers as typing.
       const buffered = getReplay(spec.id)
-      if (buffered) setImmediate(() => send(IPC.ptyData, { id: spec.id, data: buffered }))
+      // After getReplay, which flushes: every byte in the log has been sent.
+      const segments = deskReplay(spec.id)
+      if (buffered || segments) {
+        setImmediate(() => send(IPC.ptyData, { id: spec.id, data: buffered, ...(segments ? { segments } : {}) }))
+      }
       return { ...result, restored: true }
     }
 
     replay.delete(spec.id)
+    deskLog.delete(spec.id)
     return result
   })
 
