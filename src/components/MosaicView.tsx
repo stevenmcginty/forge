@@ -1280,6 +1280,8 @@ export function PeekStage({
     const el = naturalRef.current
     if (!stage || !el) return
     let raf = 0
+    // Grows when the tile outgrows the terminal — see terminalHost.growPeek.
+    const size = { width: geometry.width, height: geometry.height }
 
     const apply = (): void => {
       const w = stage.clientWidth
@@ -1287,6 +1289,18 @@ export function PeekStage({
       if (w < 4 || h < 4) return
 
       if (refit) {
+        // A bigger tile than terminal: the terminal grows to fill it, rather
+        // than sitting small in one corner. Smaller still crops (below).
+        if (w > size.width || h > size.height) {
+          size.width = Math.max(size.width, w)
+          size.height = Math.max(size.height, h)
+          el.style.width = `${size.width}px`
+          el.style.height = `${size.height}px`
+          terminalHost.growPeek(paneId, size)
+          el.style.transform = `translate(0px, ${Math.min(0, h - size.height)}px)`
+          el.style.opacity = '1'
+          return
+        }
         /*
          * Life-size is a *window*, not a refit: the terminal keeps the exact
          * cols and rows it had in Full screen and the tile shows its
@@ -1302,9 +1316,9 @@ export function PeekStage({
          * of this reasoning on attachPeek: glancing at a pane must never
          * rewrite it.
          */
-        el.style.width = `${geometry.width}px`
-        el.style.height = `${geometry.height}px`
-        el.style.transform = `translate(0px, ${Math.min(0, h - geometry.height)}px)`
+        el.style.width = `${size.width}px`
+        el.style.height = `${size.height}px`
+        el.style.transform = `translate(0px, ${Math.min(0, h - size.height)}px)`
         el.style.opacity = '1'
         return
       }
@@ -1331,7 +1345,7 @@ export function PeekStage({
       if (raf) cancelAnimationFrame(raf)
       ro.disconnect()
     }
-  }, [geometry, reference, refit])
+  }, [geometry, paneId, reference, refit])
 
   return (
     <div className={className} ref={stageRef}>

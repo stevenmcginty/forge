@@ -444,6 +444,8 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
 /* ------------------------------------------------------------ caption rail */
 
 const CAPTION_WINDOW_MS = 9000
+/** A reply still marked "speaking" this long after it started is stuck, not speaking. */
+const CAPTION_STUCK_MS = 60_000
 const TRAIL_WINDOW_MS = 30_000
 
 const STATUS_WORD: Record<HubAction['status'], string> = {
@@ -468,6 +470,8 @@ function clock(at: number): string {
 function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: HubAction[] }): ReactNode {
   const [now, setNow] = useState(() => Date.now())
   const [expanded, setExpanded] = useState(false)
+  // Hide: everything up to this moment goes away; anything newer shows again.
+  const [hiddenAt, setHiddenAt] = useState(0)
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(t)
@@ -475,11 +479,14 @@ function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: H
 
   const lastUser = [...captions].reverse().find((c) => c.role === 'user') ?? null
   const lastBot = [...captions].reverse().find((c) => c.role === 'assistant') ?? null
-  const fresh = (c: HubCaption | null): c is HubCaption => !!c && (!c.final || now - c.at < CAPTION_WINDOW_MS)
+  const fresh = (c: HubCaption | null): c is HubCaption =>
+    !!c && c.at > hiddenAt && now - c.at < (c.final ? CAPTION_WINDOW_MS : CAPTION_STUCK_MS)
   const lines = [lastUser, lastBot].filter(fresh).sort((a, b) => a.at - b.at)
-  const recent = actions.filter((a) => a.status === 'running' || a.status === 'planned' || now - a.at < TRAIL_WINDOW_MS)
+  const recent = actions.filter(
+    (a) => a.at > hiddenAt && (a.status === 'running' || a.status === 'planned' || now - a.at < TRAIL_WINDOW_MS)
+  )
   const trail = recent.slice(-3)
-  const all = actions.slice(-12).reverse()
+  const all = actions.filter((a) => a.at > hiddenAt).slice(-12).reverse()
   const open = lines.length > 0 || trail.length > 0 || (expanded && all.length > 0)
   const { mounted, closing } = usePresence(open, 220)
   useEffect(() => {
@@ -489,6 +496,19 @@ function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: H
 
   return (
     <div className="crail" data-state={closing ? 'closing' : 'open'} data-expanded={expanded ? 'true' : undefined} aria-live="polite">
+      <button
+        type="button"
+        className="crail__hide"
+        title="Hide this box. It comes back when Forge says something new."
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          setExpanded(false)
+          setHiddenAt(Date.now())
+        }}
+      >
+        <Icon name="close" size={10} />
+        Hide
+      </button>
       {lines.map((c) => (
         <p key={c.id + (c.final ? ':f' : '')} className="crail__line" data-role={c.role} data-final={c.final ? 'true' : undefined}>
           <span className="crail__who">{c.role === 'user' ? 'You' : 'Forge'}</span>

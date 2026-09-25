@@ -917,6 +917,25 @@ class TerminalHost {
     return this.entries.get(paneId)?.geometry ?? DEFAULT_PANE_GEOMETRY
   }
 
+  /**
+   * A life-size tile grew past its terminal: grow the terminal to fill it.
+   *
+   * Grow only. A tile smaller than its terminal crops it (a glance must never
+   * reflow a pane down), but a tile bigger than it would otherwise show the
+   * old small grid in one corner with the rest of the tile empty — the pane
+   * born in a crowded wall that never catches up when the wall thins out.
+   * The caller has already sized `container` to `size`; this remembers it, so
+   * the next mount starts there, and wishes the PTY to match.
+   */
+  growPeek(paneId: string, size: PaneGeometry): void {
+    const entry = this.entries.get(paneId)
+    if (!entry || entry.mode !== 'peek') return
+    const had = entry.geometry ?? DEFAULT_PANE_GEOMETRY
+    if (size.width <= had.width && size.height <= had.height) return
+    entry.geometry = { width: Math.max(had.width, size.width), height: Math.max(had.height, size.height) }
+    this.fit(paneId)
+  }
+
   /** True while a full-screen TUI (vim, htop, an agent) owns the screen. */
   isAltBuffer(paneId: string): boolean {
     return this.entries.get(paneId)?.term.buffer.active.type === 'alternate'

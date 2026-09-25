@@ -222,6 +222,41 @@
   animation: comp-sink 220ms var(--ease-in-out) both;
 }
 
+/* Always there while the box is up, so a stuck reply can be put away. */
+.crail {
+  position: relative;
+}
+
+.crail__hide {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--glass-line);
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  pointer-events: auto;
+}
+
+.crail__hide:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-line);
+}
+
+.crail__line:first-of-type {
+  padding-right: 64px;
+}
+
 .crail__line {
   display: grid;
   grid-template-columns: 70px minmax(0, 1fr);
