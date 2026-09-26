@@ -1,5 +1,11 @@
 # Handoff
 
+## Project picker: in-use projects first (2026-09-26, not committed)
+
+- **Asked (Steve):** projects you are working in, and any project in use, should come to the top of the picker.
+- **Built:** `shared/project-order.ts`. Order is draw-only (saved order is not rewritten): pinned projects stay the top block, then the project you are in, then one that is working or waiting, then one with panes open, then the rest. Pinned rows use a stronger tint (`ProjectRail.css`). Web rail and the phone list use the same order. Web has no "still printing" signal, so there "working" means a pane is waiting on you.
+- **Checked:** `npm run rail:check`. Not looked at on screen.
+
 ## Forge Watch UI rebuilt in Compose for Wear (2026-09-25, not committed)
 
 - **Asked (Steve):** watch app "not up to scratch"; basic, small, voice. Problem picked: looks bad / too big. Chose Compose for Wear over tidying the Views.

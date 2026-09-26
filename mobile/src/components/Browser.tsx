@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { sortProjectsForPicker } from '@shared/project-order'
 import type { ClaudePermissionMode, LayoutNode, PaneLeaf, Project, Workspace } from '@shared/types'
 import type { MobileSession } from '@shared/mobile'
 import type { LinkPicture } from '../lib/link'
@@ -90,7 +91,11 @@ export function Browser({
           </div>
         </header>
         <ul className="list">
-          {picture.projects.map((p) => (
+          {sortProjectsForPicker(picture.projects, (p) => {
+            const workspace = picture.workspaces[p.id]
+            const open = workspace ? workspace.tabs.some((t) => leavesOf(t.root).length > 0) : false
+            return { active: false, working: false, open, pinned: Boolean(p.pinned) }
+          }).map((p) => (
             <ProjectRow key={p.id} project={p} picture={picture} onOpen={() => onOpenProject(p.id)} />
           ))}
           {picture.projects.length === 0 && <li className="empty">No projects open on the desktop.</li>}

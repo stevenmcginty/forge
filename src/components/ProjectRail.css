@@ -64,6 +64,20 @@
  * when the list below is short enough that nothing would scroll: it is telling
  * you the block is a different place, not that there is more to see.
  */
+/*
+ * In-use projects, above the pin block and outside the scroller, so the folder
+ * you are in does not scroll away. No hairline: that line is the pin seam, and
+ * this block is not one.
+ */
+.rail__live {
+  flex: none;
+  padding: var(--s-2) var(--s-3) 0;
+}
+
+.rail[data-collapsed='true'] .rail__live {
+  padding: var(--s-2) 0 0;
+}
+
 .rail__pinned {
   flex: none;
   padding: var(--s-2) var(--s-3) var(--s-3);
@@ -146,6 +160,20 @@
 }
 
 /*
+ * A pinned row is a filled chip in that project's colour, so the top block
+ * does not look like the idle list. The live row and a waiting row, below,
+ * still win when they apply.
+ */
+.rail .prow[data-pinned='true'] {
+  background: color-mix(in srgb, var(--prow-tint, var(--accent)) 22%, var(--bg-active));
+  border-color: color-mix(in srgb, var(--prow-tint, var(--accent)) 40%, transparent);
+}
+
+.rail .prow[data-pinned='true']:hover {
+  background: color-mix(in srgb, var(--prow-tint, var(--accent)) 30%, var(--bg-active));
+}
+
+/*
  * The live project: a wash, a faint rim and the seam. Quieter than it was — the
  * row only has to be findable, and the seam in the project's own colour does
  * most of that on its own.
@@ -153,6 +181,11 @@
 .rail .prow[data-active='true'] {
   background: color-mix(in srgb, var(--prow-tint, var(--accent)) 10%, var(--bg-hover));
   border-color: color-mix(in srgb, var(--prow-tint, var(--accent)) 24%, transparent);
+}
+
+.rail .prow[data-pinned='true'][data-active='true'] {
+  background: color-mix(in srgb, var(--prow-tint, var(--accent)) 28%, var(--bg-active));
+  border-color: color-mix(in srgb, var(--prow-tint, var(--accent)) 48%, transparent);
 }
 
 /*

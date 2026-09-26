@@ -1,6 +1,7 @@
 import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { collectLeaves } from '@/lib/splitTree'
 import { Icon } from '@/components/Icon'
+import { sortProjectsForPicker } from '@shared/project-order'
 import type { Project } from '@shared/types'
 import { shortPath } from '../lib/paths'
 import { useForge } from '../state'
@@ -46,6 +47,12 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
    */
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
 
+  const openCount = (project: Project): number => {
+    const workspace = workspaces[project.id]
+    if (!workspace) return 0
+    return workspace.tabs.reduce((n, tab) => n + collectLeaves(tab.root).length, 0)
+  }
+
   const paneCount = (project: Project): number => {
     const workspace = workspaces[project.id]
     if (!workspace) return 0
@@ -58,6 +65,13 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
     if (!workspace) return false
     return workspace.tabs.some((tab) => collectLeaves(tab.root).some((leaf) => state.asking.has(leaf.id)))
   }
+
+  const ordered = sortProjectsForPicker(projects, (project) => ({
+    active: project.id === state.projectId,
+    working: attention(project),
+    open: openCount(project) > 0,
+    pinned: Boolean(project.pinned)
+  }))
 
   return (
     <div className="rail" data-collapsed={collapsed}>
@@ -97,7 +111,7 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
       </div>
 
       <div className="rail__list">
-        {projects.map((project) => {
+        {ordered.map((project) => {
           const panes = paneCount(project)
           const select = (): void => actions.selectProject(project.id)
           return (
@@ -113,6 +127,7 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
               role="button"
               tabIndex={0}
               data-active={project.id === state.projectId}
+              data-pinned={project.pinned ? 'true' : undefined}
               data-attention={attention(project) ? 'true' : undefined}
               title={`${project.name} — ${project.path}`}
               style={{ '--prow-tint': project.color } as CSSProperties}

@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useReducer, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { projectPickerBucket, projectPickerTier, type PickerFacts } from '@shared/project-order'
 import type { Project } from '@shared/types'
 import { useAnyAttention, useAnyBusy } from '@/hooks/usePaneRuntime'
 import { ACCENT_PALETTE } from '@/lib/agents'
 import { shortPath } from '@/lib/paths'
 import { collectLeaves } from '@/lib/splitTree'
+import { terminalHost } from '@/lib/terminals'
 import { useApp } from '@/state/AppState'
 import { AddProjectMenu } from './AddProjectMenu'
 import { AgentBadge } from './AgentBadge'
@@ -39,6 +41,11 @@ import './ProjectRail.css'
  * the scroller would still be a row *in* the list, and would slide under itself
  * on the way past.
  *
+ * **In-use projects sit under that block, still above the idle list.** A pin
+ * stays in the top block even when another folder is the one you are in. The
+ * saved order is not rewritten. Dragging into the pinned block still pins;
+ * dragging into the live block does not.
+ *
  * This is also the only section that cannot be switched off, and the only one
  * with no height of its own — it takes the stack's slack. Both facts live in
  * src/lib/railstack.ts rather than here.
@@ -55,16 +62,42 @@ export function ProjectRail(): ReactNode {
   const openAddMenu = (e: MouseEvent<HTMLElement>): void =>
     setAddMenu({ open: true, anchor: e.currentTarget })
 
+  // Re-sort when a terminal starts or stops working, or starts waiting.
+  const [, bumpBusy] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    const stopBusy = terminalHost.subscribeBusy(bumpBusy)
+    const stopAttention = terminalHost.subscribeAttention(bumpBusy)
+    return () => {
+      stopBusy()
+      stopAttention()
+    }
+  }, [])
+
   /*
    * Every project, carrying the index it holds in `state.projects` — which is
    * the index the drag handlers move by. Splitting the rows for display must not
    * renumber them, or a drop would move the wrong project.
    */
-  const rows = state.projects.map((project, index) => ({ project, index }))
-  const pinned = rows.filter((r) => r.project.pinned)
-  const rest = rows.filter((r) => !r.project.pinned)
+  const rows = state.projects.map((project, index) => {
+    const workspace = state.workspaces[project.id]
+    const paneIds = workspace ? workspace.tabs.flatMap((t) => collectLeaves(t.root).map((l) => l.id)) : []
+    const facts: PickerFacts = {
+      active: project.id === state.activeProjectId,
+      working: terminalHost.anyBusy(paneIds) || terminalHost.anyAttention(paneIds),
+      open: paneIds.length > 0,
+      pinned: Boolean(project.pinned)
+    }
+    return { project, index, tier: projectPickerTier(facts) }
+  })
+  rows.sort((a, b) => a.tier - b.tier || a.index - b.index)
+  const live = rows.filter((r) => projectPickerBucket(r.tier) === 'live')
+  const pinned = rows.filter((r) => projectPickerBucket(r.tier) === 'pinned')
+  const rest = rows.filter((r) => projectPickerBucket(r.tier) === 'rest')
 
-  const row = ({ project, index }: { project: Project; index: number }): ReactNode => (
+  const row = (
+    { project, index }: { project: Project; index: number },
+    dropGroup: 'live' | 'pinned' | 'rest'
+  ): ReactNode => (
     <ProjectRow
       key={project.id}
       project={project}
@@ -73,12 +106,14 @@ export function ProjectRail(): ReactNode {
       active={project.id === state.activeProjectId}
       dragFrom={dragFrom}
       setDragFrom={setDragFrom}
+      dropGroup={dropGroup}
     />
   )
 
   const list = (
     <>
-      {pinned.length > 0 ? <div className="rail__pinned">{pinned.map(row)}</div> : null}
+      {pinned.length > 0 ? <div className="rail__pinned">{pinned.map((entry) => row(entry, 'pinned'))}</div> : null}
+      {live.length > 0 ? <div className="rail__live">{live.map((entry) => row(entry, 'live'))}</div> : null}
       <div className="rail__list">
         {state.projects.length === 0 ? (
           collapsed ? null : (
@@ -95,7 +130,7 @@ export function ProjectRail(): ReactNode {
             />
           )
         ) : (
-          rest.map(row)
+          rest.map((entry) => row(entry, 'rest'))
         )}
       </div>
     </>
@@ -170,7 +205,8 @@ function ProjectRow({
   collapsed,
   active,
   dragFrom,
-  setDragFrom
+  setDragFrom,
+  dropGroup
 }: {
   project: Project
   index: number
@@ -178,6 +214,8 @@ function ProjectRow({
   active: boolean
   dragFrom: number | null
   setDragFrom: (i: number | null) => void
+  /** Which block this row is drawn in. A drop into `pinned` or `rest` is the pin seam. */
+  dropGroup: 'live' | 'pinned' | 'rest'
 }): ReactNode {
   const { state, actions } = useApp()
   const rowRef = useRef<HTMLDivElement | null>(null)
@@ -241,8 +279,15 @@ function ProjectRow({
         if (from === null || from === index) return
         const moved = state.projects[from]
         if (!moved) return
-        if (Boolean(moved.pinned) !== Boolean(project.pinned)) {
-          actions.updateProject(moved.id, { pinned: Boolean(project.pinned) })
+        /*
+         * The live block is not a pin zone: a project is there because it is in
+         * use, pinned or not. Crossing into the pinned block or back into the
+         * scrolling list is still what pins and unpins.
+         */
+        if (dropGroup === 'pinned' && !moved.pinned) {
+          actions.updateProject(moved.id, { pinned: true })
+        } else if (dropGroup === 'rest' && moved.pinned) {
+          actions.updateProject(moved.id, { pinned: false })
         }
         actions.moveProject(from, index)
       }}

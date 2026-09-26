@@ -36,6 +36,7 @@ registerHooks({
 })
 
 const R = await import('../shared/rail.ts')
+const P = await import('../shared/project-order.ts')
 const S = await import('../src/lib/railstack.ts')
 
 let pass = 0
@@ -262,6 +263,41 @@ ok(
   /railOpen:.*isRailSectionId/s.test(storeSrc),
   'railOpen is filtered against the shared id list on load'
 )
+
+/* ------------------------------------------------------- project picker */
+
+console.log('\nproject picker order')
+ok(P.projectPickerTier({ active: true, working: true, open: true, pinned: true }) === 0, 'a pin stays first even when it is the open project')
+ok(P.projectPickerTier({ active: false, working: false, open: false, pinned: true }) === 0, 'an idle pin is in the same top block')
+ok(P.projectPickerTier({ active: true, working: true, open: true, pinned: false }) === 1, 'the open project leads the unpinned rows')
+ok(P.projectPickerTier({ active: false, working: true, open: true, pinned: false }) === 2, 'a working project is next')
+ok(P.projectPickerTier({ active: false, working: false, open: true, pinned: false }) === 3, 'an open project follows')
+ok(P.projectPickerTier({ active: false, working: false, open: false, pinned: false }) === 4, 'an idle project is last')
+ok(P.projectPickerBucket(0) === 'pinned', 'tier 0 is the pin block')
+ok(P.projectPickerBucket(1) === 'live' && P.projectPickerBucket(3) === 'live', 'in-use tiers sit under the pins')
+ok(P.projectPickerBucket(4) === 'rest', 'idle rows scroll')
+
+const picker = P.sortProjectsForPicker(
+  [{ id: 'idle' }, { id: 'working' }, { id: 'current' }, { id: 'open' }, { id: 'pin' }],
+  (project) =>
+    ({
+      idle: { active: false, working: false, open: false, pinned: false },
+      working: { active: false, working: true, open: true, pinned: false },
+      current: { active: true, working: false, open: true, pinned: false },
+      open: { active: false, working: false, open: true, pinned: true },
+      pin: { active: false, working: false, open: false, pinned: true }
+    })[project.id]
+).map((project) => project.id)
+ok(
+  JSON.stringify(picker) === JSON.stringify(['open', 'pin', 'current', 'working', 'idle']),
+  'pins, then current, then working, then the rest',
+  picker.join(',')
+)
+const tied = P.sortProjectsForPicker(
+  [{ id: 'a' }, { id: 'b' }],
+  () => ({ active: false, working: false, open: false, pinned: false })
+).map((project) => project.id)
+ok(JSON.stringify(tied) === JSON.stringify(['a', 'b']), 'the same tier keeps the saved order')
 
 /* -------------------------------------------------------------------- end */
 
