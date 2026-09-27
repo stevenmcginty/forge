@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { toDataURL } from 'qrcode'
 import type { RemoteYesStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Card, Row, Section, StateChip, maskKey, type ChipTone } from './parts'
@@ -124,12 +123,15 @@ export function RemoteYesSection(): ReactNode {
       return
     }
     let stale = false
-    toDataURL(link, {
-      errorCorrectionLevel: 'M',
-      margin: 3,
-      width: 220,
-      color: { dark: '#000000', light: '#ffffff' }
-    })
+    void import('qrcode')
+      .then(({ toDataURL }) =>
+        toDataURL(link, {
+          errorCorrectionLevel: 'M',
+          margin: 3,
+          width: 220,
+          color: { dark: '#000000', light: '#ffffff' }
+        })
+      )
       .then((url) => {
         if (!stale) setQr(url)
       })

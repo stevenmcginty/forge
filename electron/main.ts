@@ -997,7 +997,7 @@ function registerAppHandlers(): void {
     if (before.shareTools !== next.shareTools) {
       writeBridgeConfig()
       syncQwenConfig()
-      syncAgyConfig()
+      syncAgyConfig().catch((err) => console.error('[share] agy sync failed:', err))
     }
     // Flipping the phone link on or repointing it at another Firebase project
     // should take effect now, not at the next launch. Restarting the service is
@@ -1433,9 +1433,10 @@ void app
       // flag: Qwen's config file, written directly, and Antigravity's, written
       // for us by `agy mcp add`. Both are a no-op — including a *removal* — when
       // the setting is off, so a machine that never asked for this ends up with
-      // nothing in ~/.qwen and nothing in `agy mcp list`.
+      // nothing in ~/.qwen and nothing in `agy mcp list`. The agy call is slow,
+      // so it runs in the background and the window does not wait for it.
       syncQwenConfig()
-      syncAgyConfig()
+      syncAgyConfig().catch((err) => console.error('[share] agy sync failed:', err))
       // Before the PTY host builds its manager: the marker path goes into every
       // pane's CLAUDE_CLIENT_PRESENCE_FILE, and init also clears a marker left
       // behind by a crash (a stale one would mute the phone for good).

@@ -48,6 +48,8 @@ const FLUSH_BYTES = 64 * 1024
 /** Gemini's personal OAuth/Code Assist route is retired; API-key panes use the API. */
 const GEMINI_CLI_MODEL = 'gemini-3.6-flash'
 const REPLAY_LIMIT = 192 * 1024
+/** How far `replay` and `deskLog` may run past REPLAY_LIMIT before `remember` cuts them. See `trimReplay`. */
+const REPLAY_SLACK = REPLAY_LIMIT / 2
 
 /**
  * Home, erase the screen, erase the scrollback. What a replay buffer is reset
@@ -78,6 +80,8 @@ const widths = new Map<string, number>()
  * Remote viewers still get `replay`: they cannot resize their grid to match.
  */
 const deskLog = new Map<string, PtyReplaySegment[]>()
+/** Each `deskLog` entry's total data length, kept as it changes rather than summed per chunk. */
+const deskBytes = new Map<string, number>()
 let flushTimer: NodeJS.Timeout | null = null
 
 /**
@@ -199,6 +203,7 @@ export function addPtySink(sink: PtySink): () => void {
  */
 export function getReplay(id: string): string {
   flush()
+  trimReplay(id)
   return withoutQuestions(replay.get(id) ?? '')
 }
 
@@ -262,12 +267,40 @@ function flush(): void {
 
 function remember(id: string, data: string): void {
   const next = (replay.get(id) ?? '') + data
-  replay.set(id, next.length > REPLAY_LIMIT ? next.slice(next.length - REPLAY_LIMIT) : next)
-  const log = deskLog.get(id) ?? []
+  replay.set(id, next)
+  let log = deskLog.get(id)
+  if (!log) {
+    log = []
+    deskLog.set(id, log)
+    deskBytes.set(id, 0)
+  }
   if (log.length === 0) log.push({ cols: widths.get(id) ?? 0, data: '' })
   log[log.length - 1]!.data += data
-  // The same byte budget as `replay`, cut from the oldest end.
-  let over = log.reduce((sum, s) => sum + s.data.length, 0) - REPLAY_LIMIT
+  const bytes = (deskBytes.get(id) ?? 0) + data.length
+  deskBytes.set(id, bytes)
+  // Let both run past the budget before cutting, so a busy pane pays for one
+  // 192KB copy per REPLAY_SLACK of output rather than one per chunk.
+  if (next.length > REPLAY_LIMIT + REPLAY_SLACK || bytes > REPLAY_LIMIT + REPLAY_SLACK) trimReplay(id)
+  // The same bytes, counted rather than kept: this is the only place in main
+  // that sees every chunk a pane prints, and "has this pane been quiet" is what
+  // decides whether another agent may type into it. See electron/share-link.ts.
+  link?.noteOutput(id)
+}
+
+/**
+ * Cut one pane's `replay` and `deskLog` back to exactly REPLAY_LIMIT, from the
+ * oldest end. `remember` only calls it once they are REPLAY_SLACK over, so every
+ * reader calls it first: what a reader sees is the same as if the buffers were
+ * cut on every chunk. Keeping a suffix of a suffix is the same suffix.
+ */
+function trimReplay(id: string): void {
+  const text = replay.get(id)
+  if (text !== undefined && text.length > REPLAY_LIMIT) replay.set(id, text.slice(text.length - REPLAY_LIMIT))
+  const log = deskLog.get(id)
+  if (!log) return
+  let over = (deskBytes.get(id) ?? 0) - REPLAY_LIMIT
+  if (over <= 0) return
+  deskBytes.set(id, REPLAY_LIMIT)
   while (over > 0) {
     const first = log[0]!
     if (log.length > 1 && first.data.length <= over) {
@@ -278,11 +311,6 @@ function remember(id: string, data: string): void {
       over = 0
     }
   }
-  deskLog.set(id, log)
-  // The same bytes, counted rather than kept: this is the only place in main
-  // that sees every chunk a pane prints, and "has this pane been quiet" is what
-  // decides whether another agent may type into it. See electron/share-link.ts.
-  link?.noteOutput(id)
 }
 
 /**
@@ -330,6 +358,7 @@ function noteWidth(id: string, cols: number): void {
 
 /** `deskLog` for one pane, questions removed like `getReplay`. Null when empty. */
 function deskReplay(id: string): PtyReplaySegment[] | null {
+  trimReplay(id)
   const log = deskLog.get(id)
   if (!log || !log.some((s) => s.data)) return null
   return log.map((s) => ({ cols: s.cols, data: withoutQuestions(s.data) }))
@@ -644,6 +673,7 @@ export function viewerGone(viewer: string, id?: string): void {
 export function killPane(id: string): boolean {
   replay.delete(id)
   deskLog.delete(id)
+  deskBytes.delete(id)
   widths.delete(id)
   pending.delete(id)
   live.delete(id)
@@ -1007,6 +1037,7 @@ export function registerPtyHandlers(): void {
 
     replay.delete(spec.id)
     deskLog.delete(spec.id)
+    deskBytes.delete(spec.id)
     return result
   })
 

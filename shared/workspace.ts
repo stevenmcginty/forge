@@ -1,5 +1,10 @@
 import type { ClaudePermissionMode, MosaicState, MosaicTile, TerminalTab, Workspace } from './types'
-import { TAB_NAME_POOL, TAB_TEXT_PALETTE } from './agents'
+import {
+  BUILTIN_AGENT_PROFILES,
+  RETIRED_BUILTIN_PROFILE_IDS,
+  TAB_NAME_POOL,
+  TAB_TEXT_PALETTE
+} from './agents'
 import { collectLeaves, makeLeaf } from './splitTree'
 import { makeId } from './ids'
 import { terminalName } from './terminal-names'
@@ -107,9 +112,48 @@ export function nextTabName(tabs: TerminalTab[], cursor: number): { title: strin
 }
 
 /**
+ * Agent, vendor, shell or generic role names that should never be used as a
+ * terminal's human name. Any new terminal requested with one of these falls
+ * through to the next free name in TAB_NAME_POOL.
+ */
+const DESCRIPTIVE_AGENT_OR_SHELL_NAMES: ReadonlySet<string> = new Set([
+  // Shells and generic roles
+  'powershell',
+  'pwsh',
+  'cmd',
+  'bash',
+  'zsh',
+  'sh',
+  'terminal',
+  'shell',
+  'console',
+  'agent',
+  // Agent and vendor names
+  'claude',
+  'claude code',
+  'codex',
+  'gemini',
+  'antigravity',
+  'agy',
+  'antigravity cli',
+  'glm',
+  'kimi',
+  'opencode',
+  'qwen',
+  'grok',
+  'deepseek',
+  ...RETIRED_BUILTIN_PROFILE_IDS.map((id) => id.toLowerCase()),
+  ...BUILTIN_AGENT_PROFILES.flatMap((p) => [
+    p.id.toLowerCase(),
+    p.name.toLowerCase(),
+    p.command.trim().split(/\s+/)[0]?.replace(/^["']|["']$/g, '').split(/[\\/]/).pop()?.replace(/\.(cmd|bat|exe|ps1)$/i, '').toLowerCase() ?? ''
+  ]).filter(Boolean)
+])
+
+/**
  * Detect path-based or automatic descriptive names (such as "update: ...",
- * "install: ...", "claude", "powershell", "/path/to/folder", etc.) that should
- * not be automatically assigned to newly opened terminals.
+ * "install: ...", "claude", "antigravity", "powershell", "/path/to/folder", etc.)
+ * that should not be automatically assigned to newly opened terminals.
  */
 export function isDescriptiveOrPathName(name: string): boolean {
   const trimmed = name.trim()
@@ -122,9 +166,10 @@ export function isDescriptiveOrPathName(name: string): boolean {
   if (/^(update|install|run|build|test|fix|task|brief|cmd|exec|tool):\s*/i.test(trimmed)) {
     return true
   }
-  // Shell or generic tool names
+  // Shell, generic tool, or agent/vendor names (including numbered or role-suffixed variants e.g. "Antigravity 2", "Claude agent")
   const lower = trimmed.toLowerCase()
-  if (['powershell', 'pwsh', 'cmd', 'bash', 'zsh', 'sh', 'terminal', 'shell', 'console'].includes(lower)) {
+  const base = lower.replace(/\s+agent$/, '').replace(/\s+\d+$/, '')
+  if (DESCRIPTIVE_AGENT_OR_SHELL_NAMES.has(lower) || DESCRIPTIVE_AGENT_OR_SHELL_NAMES.has(base)) {
     return true
   }
   return false

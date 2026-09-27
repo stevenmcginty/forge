@@ -371,7 +371,8 @@ registerHooks({
           'export const shell = { openPath: () => {} }',
           'export const clipboard = { readText: () => "", writeText: () => {} }',
           'export const dialog = { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) }',
-          'export const screen = { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 0, height: 0 } }) }'
+          'export const screen = { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 0, height: 0 } }) }',
+          'export const desktopCapturer = { getSources: async () => [] }'
         ].join('\n')
       }
     }

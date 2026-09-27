@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
 import { useMobile } from '../lib/mobile'
@@ -8,7 +8,6 @@ import { useWebUpdate } from '../lib/update'
 import { AgentChooser } from './AgentChooser'
 import { GitHubMode } from './GitHubMode'
 import { MobilePanes } from './MobilePanes'
-import { Mirror } from './Mirror'
 import { useTextScale } from './MoreSheet'
 import { OfflineBanner } from './OfflineBanner'
 import { ProjectSheet } from './ProjectSheet'
@@ -22,6 +21,10 @@ import { DeckBackdrop, DeckDock, DeckSheetHost, DeckStage } from '../deck/Deck'
 import { useDeckTheme } from '../deck/theme'
 import { useBarPlace, useDeckView } from '../deck/view'
 import { DeckKeys } from '../deck/VoiceBar'
+
+// Rarely opened, so it is not worth its own share of every phone's initial
+// download: see the xterm WebGL addon in lib/terminals.ts for the same pattern.
+const Mirror = lazy(() => import('./Mirror').then((m) => ({ default: m.Mirror })))
 
 /**
  * Forge Web: three regions, two faces, not a copy of the desktop IDE.
@@ -336,7 +339,11 @@ export function Workspace(): ReactNode {
 
       {mobile && gridShown ? null : notice}
 
-      {watching ? <Mirror onClose={() => setWatching(false)} /> : null}
+      {watching ? (
+        <Suspense fallback={null}>
+          <Mirror onClose={() => setWatching(false)} />
+        </Suspense>
+      ) : null}
 
       {mobile ? <ProjectSheet open={drawerOpen} onClose={closeDrawer} onNewAgent={newAgentIn} /> : null}
 

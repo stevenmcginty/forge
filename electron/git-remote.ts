@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { resolve } from 'node:path'
 
 /**
  * A remote URL minus its embedded credentials, because everywhere Forge repeats
@@ -31,6 +32,12 @@ export function stripRemoteCredentials(url: string): string {
  * business becoming async for this. The timeout bounds the pathological case (a
  * hung git, a network drive that has gone away) rather than the normal one.
  *
+ * Remembered per folder for REMOTE_TTL_MS, null answers included. That process
+ * spawn is ~150ms on Steve's PC, all of it on the main thread with the whole app
+ * frozen, and opening a layout spawns several panes in the same folder at once.
+ * The price is that a remote added this second shows up within half a minute
+ * rather than at once, which both callers can live with.
+ *
  * Every failure is the same answer: null. No git, not a repo, no origin, a
  * timeout — none of them are errors here, they are just "this project has no
  * remote yet", which is a perfectly ordinary state for a folder to be in.
@@ -38,6 +45,28 @@ export function stripRemoteCredentials(url: string): string {
 export function gitRemoteOrigin(dir: string): string | null {
   const cwd = (dir ?? '').trim()
   if (!cwd) return null
+  const key = folderKey(cwd)
+  const now = Date.now()
+  const hit = remotes.get(key)
+  if (hit && now - hit.at < REMOTE_TTL_MS) return hit.url
+  const url = askGit(cwd)
+  for (const [k, v] of remotes) if (now - v.at >= REMOTE_TTL_MS) remotes.delete(k)
+  remotes.set(key, { url, at: now })
+  return url
+}
+
+const REMOTE_TTL_MS = 30_000
+
+/** gitRemoteOrigin's answers, by folderKey. */
+const remotes = new Map<string, { url: string | null; at: number }>()
+
+/** One folder, however it was spelled: resolved, no trailing slash, case-folded on Windows. */
+function folderKey(dir: string): string {
+  const full = resolve(dir).replace(/[\\/]+$/, '') || resolve(dir)
+  return process.platform === 'win32' ? full.toLowerCase() : full
+}
+
+function askGit(cwd: string): string | null {
   try {
     const out = execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], {
       timeout: 1500,

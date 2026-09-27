@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { toDataURL } from 'qrcode'
 import { normaliseNgrokDomain } from '@shared/mobile'
 import type { ForgeTvStatus, MobileDeviceRecord, MobilePairOffer, MobileStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
@@ -119,12 +118,15 @@ export function MobileSection(): ReactNode {
       return
     }
     let stale = false
-    toDataURL(offer.link, {
-      errorCorrectionLevel: 'M',
-      margin: 3,
-      width: 256,
-      color: { dark: '#000000', light: '#ffffff' }
-    })
+    void import('qrcode')
+      .then(({ toDataURL }) =>
+        toDataURL(offer.link, {
+          errorCorrectionLevel: 'M',
+          margin: 3,
+          width: 256,
+          color: { dark: '#000000', light: '#ffffff' }
+        })
+      )
       .then((url) => {
         if (!stale) setQr(url)
       })

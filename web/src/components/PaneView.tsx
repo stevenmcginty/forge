@@ -649,8 +649,14 @@ export function PaneView({
     let attached = false
     const host = mountTerm(holder, {
       fontSize: fontPxRef.current,
-      fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+      fontFamily: mobile
+        ? "'Cascadia Mono', ui-monospace, SFMono-Regular, Menlo, 'Roboto Mono', Consolas, monospace"
+        : "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
       accent: profile.accent,
+      minimumContrastRatio: mobile ? 4.5 : undefined,
+      drawBoldTextInBrightColors: true,
+      fontWeight: mobile ? '500' : undefined,
+      fontWeightBold: mobile ? '700' : undefined,
       // Everything xterm produces goes up the wire, not merely the keystrokes:
       // the DSR reply to `CSI 6 n` travels this way too, and a client that
       // filtered it would put ConPTY back to waiting out a 39-second timeout on
@@ -711,7 +717,7 @@ export function PaneView({
     // deliberately *not* here — a dropped socket keeps this terminal, and the
     // effect below is what makes it stop taking input instead. `fontSize` is a
     // construction-time input in the same way, and changes only with the layout.
-  }, [leaf.id, cached, fontSize])
+  }, [leaf.id, cached, fontSize, mobile])
 
   /* ----------------------------------------------------- the frozen twin */
 
@@ -720,8 +726,14 @@ export function PaneView({
     if (!holder || !cached) return
     const host = mountTerm(holder, {
       fontSize: fontPxRef.current,
-      fontFamily: "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
+      fontFamily: mobile
+        ? "'Cascadia Mono', ui-monospace, SFMono-Regular, Menlo, 'Roboto Mono', Consolas, monospace"
+        : "'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace",
       accent: profile.accent,
+      minimumContrastRatio: mobile ? 4.5 : undefined,
+      drawBoldTextInBrightColors: true,
+      fontWeight: mobile ? '500' : undefined,
+      fontWeightBold: mobile ? '700' : undefined,
       onData: () => {
         /* nothing to type into */
       },
@@ -740,7 +752,7 @@ export function PaneView({
       hostRef.current = null
     }
     // Same reason as above: the accent is a construction-time input.
-  }, [leaf.id, cached, state.cached, fontSize])
+  }, [leaf.id, cached, state.cached, fontSize, mobile])
 
   /* ------------------------------------------------- input follows the link */
 

@@ -975,11 +975,11 @@ console.log('\nthe Antigravity sync')
    * asserted by source rather than called. Its runner is injectable so that this
    * file never spawns the real `agy`, and never writes to Steve's own config.
    */
-  const body = /export function syncAgyConfig\(([\s\S]*?)\n\}/.exec(src)?.[0] ?? ''
+  const body = /export async function syncAgyConfig\(([\s\S]*?)\n\}/.exec(src)?.[0] ?? ''
   ok(body.length > 0, 'syncAgyConfig exists')
   ok(/run: AgyRunner = runAgy/.test(body), 'its command runner is injectable, defaulting to the real one')
   ok(/wanted\(\) && script \? script : null/.test(body), 'nothing is registered while the setting is off')
-  ok(/wantedScript \? null : run\(AGY_LIST_ARGS\)/.test(body), 'and the list is only run when deciding a removal')
+  ok(/wantedScript \? null : await run\(AGY_LIST_ARGS\)/.test(body), 'and the list is only run when deciding a removal')
   ok(/if \(plan\.action === 'none'\) return/.test(body), 'a plan of nothing spawns nothing')
   const runner = /function runAgy\(([\s\S]*?)\n\}/.exec(src)?.[0] ?? ''
   ok(/timeout: 10_000/.test(runner), 'the spawn is bounded by a timeout')

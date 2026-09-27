@@ -40,8 +40,29 @@ function isRunnable(path: string): boolean {
   }
 }
 
+/**
+ * Every answer whichCommand has found, by the exact string it was asked.
+ *
+ * The walk is PATH dirs × PATHEXT stats on the main thread, and every pane
+ * create asks it. Only finds are kept, and each is re-checked with one
+ * existsSync before it is trusted: "not found" is never remembered, because the
+ * very next thing a person does after that notice is install the CLI and retry.
+ */
+const found = new Map<string, string>()
+
 /** Absolute path of `command` on PATH, or null. */
 export function whichCommand(command: string): string | null {
+  const hit = found.get(command)
+  if (hit !== undefined) {
+    if (existsSync(hit)) return hit
+    found.delete(command)
+  }
+  const path = walkPath(command)
+  if (path) found.set(command, path)
+  return path
+}
+
+function walkPath(command: string): string | null {
   const exe = command.trim().split(/\s+/)[0]
   if (!exe) return null
 

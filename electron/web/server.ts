@@ -981,7 +981,17 @@ export class WebServer {
     const wss = new WebSocketServer({
       noServer: true,
       maxPayload: MAX_FRAME_BYTES,
-      handleProtocols: (protocols) => (protocols.has(WEB_SUBPROTOCOL) ? WEB_SUBPROTOCOL : false)
+      handleProtocols: (protocols) => (protocols.has(WEB_SUBPROTOCOL) ? WEB_SUBPROTOCOL : false),
+      // permessage-deflate: this socket often runs over a slow Cloudflare
+      // tunnel, and terminal text plus JSON frames compress very well.
+      // `level: 1` keeps the CPU cost low (this is not where we want to spend
+      // it), `threshold` skips the tiny frames where deflate would only add
+      // overhead. Browsers and OkHttp negotiate the extension themselves; a
+      // client that does not offer it just gets plain frames as before.
+      perMessageDeflate: {
+        zlibDeflateOptions: { level: 1 },
+        threshold: 1024
+      }
     })
 
     http.on('upgrade', (req, socket, head) => {

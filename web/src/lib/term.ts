@@ -1,4 +1,4 @@
-import { Terminal, type ITheme } from '@xterm/xterm'
+import { Terminal, type ITheme, type FontWeight } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SHARE_CAPTURE_MAX_LINES } from '@shared/share'
 import { planPointerDelta, wheelDeltaPx, type ScrollCarry } from '@shared/touch-scroll'
@@ -191,6 +191,14 @@ export interface TermOptions {
   onResize: (cols: number, rows: number) => void
   /** A read-only frozen transcript takes no input and shows no cursor. */
   readOnly?: boolean
+  /** Minimum contrast ratio (1-21) to ensure text readability against background (e.g. 4.5 for WCAG AA). */
+  minimumContrastRatio?: number
+  /** Draw bold text in bright colors. */
+  drawBoldTextInBrightColors?: boolean
+  /** Font weight for terminal text. */
+  fontWeight?: FontWeight
+  /** Font weight for bold terminal text. */
+  fontWeightBold?: FontWeight
 }
 
 /**
@@ -570,6 +578,10 @@ export function mountTerm(container: HTMLElement, options: TermOptions): TermHos
   const term = new Terminal({
     fontSize: options.fontSize,
     fontFamily: options.fontFamily,
+    ...(options.minimumContrastRatio !== undefined ? { minimumContrastRatio: options.minimumContrastRatio } : {}),
+    ...(options.drawBoldTextInBrightColors !== undefined ? { drawBoldTextInBrightColors: options.drawBoldTextInBrightColors } : {}),
+    ...(options.fontWeight !== undefined ? { fontWeight: options.fontWeight } : {}),
+    ...(options.fontWeightBold !== undefined ? { fontWeightBold: options.fontWeightBold } : {}),
     // Enough rows that the first paint is not a one-line window; fit() corrects
     // it as soon as the container has a size.
     cols: 80,

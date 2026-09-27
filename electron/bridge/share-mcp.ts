@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { spawnSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -422,23 +422,29 @@ export function planAgy(script: string | null, listOutput: string | null): AgyPl
 }
 
 /** Runs one `agy mcp …`, and hands back what it said. Null when it could not run. */
-export type AgyRunner = (args: readonly string[]) => string | null
+export type AgyRunner = (args: readonly string[]) => Promise<string | null>
 
-function runAgy(args: readonly string[]): string | null {
+async function runAgy(args: readonly string[]): Promise<string | null> {
   const exe = agyExe()
   if (!exe) return null
   try {
-    const r = spawnSync(exe, [...args], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
-    if (r.error) {
-      console.error(`[share] agy ${args.join(' ')} could not run:`, r.error)
-      return null
-    }
-    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
-    if (r.status !== 0) {
-      console.error(`[share] agy ${args.join(' ')} exited ${r.status}: ${out.trim()}`)
-      return null
-    }
-    return out
+    return await new Promise<string | null>((resolve) => {
+      execFile(exe, [...args], { encoding: 'utf8', timeout: 10_000, windowsHide: true }, (error, stdout, stderr) => {
+        const out = `${stdout ?? ''}${stderr ?? ''}`
+        if (error) {
+          // A numeric code is the CLI's own exit status; anything else (ENOENT,
+          // a timeout's kill) means it never got to answer.
+          if (typeof error.code === 'number') {
+            console.error(`[share] agy ${args.join(' ')} exited ${error.code}: ${out.trim()}`)
+          } else {
+            console.error(`[share] agy ${args.join(' ')} could not run:`, error)
+          }
+          resolve(null)
+          return
+        }
+        resolve(out)
+      })
+    })
   } catch (err) {
     console.error(`[share] agy ${args.join(' ')} failed:`, err)
     return null
@@ -446,25 +452,38 @@ function runAgy(args: readonly string[]): string | null {
 }
 
 /**
+ * Every sync waits for the one before it, so two quick flips of the setting can
+ * never interleave one run's list with the other's add or remove.
+ */
+let agyQueue: Promise<void> = Promise.resolve()
+
+/**
  * Add or remove `forge_share` in Antigravity's user-scoped MCP config.
  *
  * The second vendor with no launch flag, and the opposite answer to Qwen's: `agy`
  * owns the file (`~/.gemini/antigravity-cli/`), it offers an idempotent upsert,
  * and asking the CLI is cheaper than learning the format of a config nobody has
- * promised to keep. It costs one ~200 ms spawn on the paths that call it — app
- * start, and flipping the setting — which is why it is not on the pane path.
+ * promised to keep. Each spawn is slow — `agy mcp list` alone took ~1.5 s on
+ * Steve's machine — so it runs off the main thread and its callers (app start,
+ * and flipping the setting) do not wait for it. It is not on the pane path.
  *
- * Never throws, on purpose. Antigravity registration failing is a log line; a
- * pane not launching is not.
+ * Never rejects, on purpose. Antigravity registration failing is a log line; a
+ * pane not launching is not. Calls are queued (see agyQueue), and the setting is
+ * read when a call's turn comes, not when it was queued.
  *
  * `run` is injectable so share-check can assert the shapes without an `agy` on
  * the machine, and without writing to the real one.
  */
-export function syncAgyConfig(run: AgyRunner = runAgy): void {
-  const script = shareBridgeScript()
-  const wantedScript = wanted() && script ? script : null
-  // Only a removal needs to know what is there; an upsert does not.
-  const plan = planAgy(wantedScript, wantedScript ? null : run(AGY_LIST_ARGS))
-  if (plan.action === 'none') return
-  run(plan.args)
+export async function syncAgyConfig(run: AgyRunner = runAgy): Promise<void> {
+  const turn = agyQueue.then(async () => {
+    const script = shareBridgeScript()
+    const wantedScript = wanted() && script ? script : null
+    // Only a removal needs to know what is there; an upsert does not.
+    const plan = planAgy(wantedScript, wantedScript ? null : await run(AGY_LIST_ARGS))
+    if (plan.action === 'none') return
+    await run(plan.args)
+  })
+  // The queue itself never rejects, so one failed sync cannot stall the next.
+  agyQueue = turn.catch(() => undefined)
+  return turn
 }

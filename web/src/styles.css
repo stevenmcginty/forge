@@ -2867,6 +2867,9 @@ body {
 
 .app[data-mobile] .pane__terminal .xterm {
   padding: var(--s-2) 0 var(--s-2) var(--s-2);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 /* One pane at a time. */
@@ -4782,6 +4785,11 @@ button.astatus__mode:not(:disabled):hover {
   color: var(--text-secondary);
   font: 12.5px / 1.45 var(--font-mono);
   white-space: pre-wrap;
+}
+
+[data-mobile] .preview__term {
+  color: var(--text-primary);
+  font-size: 13.5px;
 }
 
 @media (prefers-reduced-transparency: reduce) {
