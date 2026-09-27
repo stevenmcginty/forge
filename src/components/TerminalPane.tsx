@@ -24,6 +24,7 @@ import { selectActiveWorkspace, useActions, useAppSelector, useAppStateGetter, t
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
+import { AttachButton } from './AttachButton'
 import { ForemanFooter, ForemanSeed, ForemanToggle } from './ForemanBar'
 import { HandoffMenu } from './HandoffMenu'
 import { Icon } from './Icon'
@@ -406,7 +407,12 @@ export const TerminalPane = memo(function TerminalPane({
     // place you picked it up. It arrives as a path rather than a file for the
     // reason set out on PATH_DRAG_TYPE.
     const tracked = e.dataTransfer.getData(PATH_DRAG_TYPE)
-    const quoted = tracked ? [`"${tracked}"`] : droppedFilePaths(e).map((p) => `"${p}"`)
+    onAttach(tracked ? [tracked] : droppedFilePaths(e))
+  }
+
+  /** Files dropped on the pane or picked with its paperclip: their quoted paths, typed in. */
+  const onAttach = (paths: string[]): void => {
+    const quoted = paths.map((p) => `"${p}"`)
     if (quoted.length === 0) return
     claimFocus()
     terminalHost.focus(leaf.id)
@@ -605,6 +611,7 @@ export const TerminalPane = memo(function TerminalPane({
               <Icon name="restart" size={13} />
             </button>
           ) : null}
+          <AttachButton name={name} className="ghost-btn pane__action" size={13} onPaths={onAttach} />
           {handoffAble ? (
             <button
               ref={handoffBtnRef}

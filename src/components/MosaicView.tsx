@@ -68,6 +68,7 @@ import {
 } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
+import { AttachButton } from './AttachButton'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { StateChip } from './shell/StateChip'
@@ -1484,6 +1485,115 @@ export function PeekStage({
   )
 }
 
+/* ------------------------------------------------------------- scroll bar */
+
+/**
+ * A scroll bar down the right of a tile. xterm's own bar sits on the
+ * terminal's far right, and a life-size tile crops that edge off, so the Wall
+ * showed no sign of where in its history a tile was, and gave nothing to drag.
+ *
+ * Shown only while there is history to move through. Drag the thumb, or press
+ * the track to jump there and keep dragging; the wheel over it scrolls the
+ * tile like the wheel over the picture. It only moves the picture: nothing is
+ * written, focused or selected, so it never starts typing into the tile.
+ *
+ * Its own component, so a tile streaming output re-renders this bar and not
+ * the tile around it.
+ */
+function TileScrollbar({ paneId, status }: { paneId: string; status: string }): ReactNode {
+  const [info, setInfo] = useState<{ top: number; max: number; rows: number } | null>(null)
+  const trackRef = useRef<HTMLDivElement | null>(null)
+  const grab = useRef<number | null>(null)
+
+  // Re-subscribed on a status change: a relaunched pane is a new terminal.
+  useEffect(() => {
+    const read = (): void => {
+      const next = terminalHost.scrollInfo(paneId)
+      setInfo((prev) =>
+        prev && next && prev.top === next.top && prev.max === next.max && prev.rows === next.rows ? prev : next
+      )
+    }
+    read()
+    return terminalHost.watchScroll(paneId, read)
+  }, [paneId, status])
+
+  // Native and non-passive, for the same reason as the hit sheet's.
+  const hasBar = info !== null
+  useEffect(() => {
+    const track = trackRef.current
+    if (!track) return
+    const onWheel = (e: WheelEvent): void => {
+      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      const box = track.closest('.mtile')?.querySelector<HTMLElement>('.mtile__natural')
+      const scale = box && box.offsetHeight > 0 ? box.getBoundingClientRect().height / box.offsetHeight : 1
+      if (!terminalHost.scrollPeek(paneId, e.deltaY, e.deltaMode, scale)) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    track.addEventListener('wheel', onWheel, { passive: false })
+    return () => track.removeEventListener('wheel', onWheel)
+  }, [hasBar, paneId])
+
+  if (!info) return null
+  const size = Math.max(0.08, info.rows / (info.max + info.rows))
+  const at = info.top / info.max
+
+  /** The line to put at the top for a thumb whose top edge is at clientY − offset. */
+  const lineAt = (clientY: number, offset: number): number => {
+    const track = trackRef.current
+    if (!track) return info.top
+    const r = track.getBoundingClientRect()
+    const room = r.height * (1 - size)
+    const f = room > 0 ? (clientY - r.top - offset) / room : 1
+    return Math.min(1, Math.max(0, f)) * info.max
+  }
+
+  return (
+    <div
+      ref={trackRef}
+      className="mtile__scroll"
+      role="scrollbar"
+      aria-label="Scroll this terminal"
+      aria-orientation="vertical"
+      aria-valuemin={0}
+      aria-valuemax={info.max}
+      aria-valuenow={info.top}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        const track = e.currentTarget
+        const r = track.getBoundingClientRect()
+        const thumbTop = r.top + at * r.height * (1 - size)
+        const thumbH = r.height * size
+        const onThumb = e.clientY >= thumbTop && e.clientY <= thumbTop + thumbH
+        // On the thumb: hold it where it was taken. On the track: centre it
+        // under the pointer, and carry on from there as a drag.
+        grab.current = onThumb ? e.clientY - thumbTop : thumbH / 2
+        if (!onThumb) terminalHost.scrollToLine(paneId, lineAt(e.clientY, grab.current))
+        track.setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        if (grab.current === null) return
+        terminalHost.scrollToLine(paneId, lineAt(e.clientY, grab.current))
+      }}
+      onPointerUp={(e) => {
+        grab.current = null
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }}
+      onPointerCancel={() => {
+        grab.current = null
+      }}
+    >
+      <div
+        className="mtile__scroll-thumb"
+        style={{ height: `${size * 100}%`, top: `${at * (1 - size) * 100}%` }}
+      />
+    </div>
+  )
+}
+
 /* ------------------------------------------------------------------- tile */
 
 /** The eight resize grips, and which edges each of them drags. */
@@ -1662,7 +1772,12 @@ const MosaicTile = memo(function MosaicTile({
       })
       return
     }
-    const quoted = droppedFilePaths(e).map((p) => `"${p}"`)
+    onAttach(droppedFilePaths(e))
+  }
+
+  /** Files dropped on the tile or picked with its paperclip: their quoted paths, typed in. */
+  const onAttach = (paths: string[]): void => {
+    const quoted = paths.map((p) => `"${p}"`)
     if (quoted.length === 0) return
     /*
      * Focus first, text a frame later — the path arrives as a bracketed
@@ -1782,8 +1897,10 @@ const MosaicTile = memo(function MosaicTile({
           ) : null}
         </div>
 
-        {/* Expand and the X are always there, never under the hover fade: a
-            tile must never hide how to go full screen or how to close. */}
+        {/* The paperclip, Expand and the X are always there, never under the
+            hover fade: a tile must never hide how to go full screen or how to
+            close, and handing a file over is as common as either. */}
+        <AttachButton name={name} className="ghost-btn mtile__expand" size={12} onPaths={onAttach} />
         <button
           type="button"
           className="ghost-btn mtile__expand"
@@ -1834,6 +1951,8 @@ const MosaicTile = memo(function MosaicTile({
           onClick={() => onToggleInteract(paneId)}
         />
       )}
+
+      <TileScrollbar paneId={paneId} status={runtime.status} />
 
       {HANDLES.map((handle) => (
         <div

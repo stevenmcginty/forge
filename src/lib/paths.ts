@@ -41,8 +41,13 @@ export function maybeFiles(e: React.DragEvent): boolean {
  * component down with it.
  */
 export function droppedFilePaths(e: React.DragEvent): string[] {
+  return filePaths(e.dataTransfer.files)
+}
+
+/** The same, for files chosen in a file box — the paperclip on a pane's bar. */
+export function filePaths(files: FileList | null): string[] {
   const out: string[] = []
-  for (const file of Array.from(e.dataTransfer.files)) {
+  for (const file of Array.from(files ?? [])) {
     try {
       const path = window.forge.pathForFile(file)
       if (path) out.push(path)

@@ -1061,6 +1061,50 @@ class TerminalHost {
   }
 
   /**
+   * Where a pane's view sits in its history, for the scroll bar on a Wall
+   * tile — xterm's own bar is on the terminal's far right, which a life-size
+   * tile crops off. `top` is the first line on screen, `max` the line it sits
+   * at when following the output. Null when there is nothing to scroll: no
+   * terminal, no history yet, or a program on the alternate screen, whose
+   * history lives inside the program.
+   */
+  scrollInfo(paneId: string): { top: number; max: number; rows: number } | null {
+    const entry = this.entries.get(paneId)
+    if (!entry) return null
+    const buffer = entry.term.buffer.active
+    if (buffer.type === 'alternate' || buffer.baseY <= 0) return null
+    return { top: buffer.viewportY, max: buffer.baseY, rows: entry.term.rows }
+  }
+
+  /**
+   * Calls `listener`, at most once a frame, whenever `scrollInfo` may have
+   * changed: a scroll, new output, or a switch to or from the alternate screen.
+   */
+  watchScroll(paneId: string, listener: () => void): () => void {
+    const entry = this.entries.get(paneId)
+    if (!entry) return () => {}
+    const { term } = entry
+    let raf = 0
+    const kick = (): void => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        listener()
+      })
+    }
+    const subs = [term.onScroll(kick), term.onWriteParsed(kick), term.buffer.onBufferChange(kick)]
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      for (const sub of subs) sub.dispose()
+    }
+  }
+
+  /** Puts `line` at the top of a pane's view. Moves the picture only; writes nothing. */
+  scrollToLine(paneId: string, line: number): void {
+    this.entries.get(paneId)?.term.scrollToLine(Math.round(line))
+  }
+
+  /**
    * The last `lines` lines of a pane, as text. Null for a pane this window has no
    * terminal for.
    *

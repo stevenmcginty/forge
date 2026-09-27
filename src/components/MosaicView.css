@@ -754,6 +754,39 @@
   background: var(--accent-softer);
 }
 
+/*
+ * The tile's scroll bar (TileScrollbar): a slim track down the right, inside
+ * the resize edge, over the picture and the hit sheet so a press on it is
+ * never a click to type. Where the tile is in its history is told by the
+ * thumb's place and length, not by any colour.
+ */
+.mtile__scroll {
+  position: absolute;
+  top: calc(var(--tile-head-h, var(--pane-head-h)) + 4px);
+  right: 8px;
+  bottom: 10px;
+  z-index: var(--z-divider);
+  width: 10px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  cursor: default;
+  touch-action: none;
+}
+
+.mtile__scroll-thumb {
+  position: absolute;
+  right: 1px;
+  left: 1px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.mtile__scroll:hover .mtile__scroll-thumb,
+.mtile__scroll:active .mtile__scroll-thumb {
+  background: var(--text-primary);
+}
+
 /* Keyboard on the tile: the ring goes round the whole tile, head included. */
 .mtile:has(> .mtile__hit:focus-visible) {
   outline: var(--focus-ring);

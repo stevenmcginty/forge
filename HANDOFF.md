@@ -1,5 +1,11 @@
 # Handoff
 
+## Wall tile scroll bar; paperclip on every pane bar (2026-09-27 14:30, pushed)
+
+- **Scroll bar:** "can't scroll in the Wall" meant "there is no scroll bar". Steve is on a laptop touchpad, and two-finger scroll already worked. xterm's own bar is on the terminal's far right, which a life-size tile crops off. New `TileScrollbar` in `MosaicView.tsx` (+ `.mtile__scroll` CSS) draws a slim bar inside the right resize edge. It shows only while there is history. Drag the thumb, press the track to jump, or use the wheel over it. It never starts typing. `terminalHost.scrollInfo / watchScroll / scrollToLine` feed it. Checked: typecheck, throwaway test (drag to top → viewportY 0, track middle → 181/362, wheel on bar moves, tile stays not-typing).
+- A page reload at 13:51 did NOT fix anything, so the stale-renderer idea was wrong.
+- **Paperclip:** new `src/components/AttachButton.tsx`, a small (12/13 px) paperclip on every Wall tile bar (beside Expand, always shown) and in the Full screen pane actions. It opens the file box, and the picked paths go in as a quoted paste, exactly like a file drop (`filePaths` in `src/lib/paths.ts`; `onAttach` in MosaicView and TerminalPane). Checked: typecheck, throwaway test (path typed into the tile, tile switched to typing).
+
 ## Phone: Listen (voice agent) + spoken pane alerts (2026-09-27, a5659ff, pushed)
 
 - **Asked (Steve):** voice agents on the phone, to relay what the agents are doing. Picked option 1 (web page, not a native app). This reverses the 23 Sep decision D (no spoken replies on the phone) for Listen only.
