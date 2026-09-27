@@ -44,6 +44,7 @@ import { AgentStatus } from './AgentStatus'
 import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
 import { ModelChip } from './ModelChip'
+import { PhoneListen, PhoneListenLine, usePhoneVoice } from './PhoneListen'
 
 /**
  * The one text box for this browser, with the agent's status strip over it.
@@ -167,6 +168,8 @@ export function SessionComposer({
     voiceRef.current = next
     setVoiceState(next)
   }, [])
+  /** The phone's mic is opening (the browser may be asking): Listen's mic is held from the press. */
+  const [micOpening, setMicOpening] = useState(false)
   const recording = useRef<Recording | null>(null)
   /** The recording's loudness, for the meter, the silence check and auto-stop. */
   const levelRef = useRef<LevelMonitor | null>(null)
@@ -622,7 +625,13 @@ export function SessionComposer({
     () =>
       isDictationSupported()
         ? {
-            start: face === 'deck' ? () => toggleDeckDictation(true) : () => void startVoice(),
+            start:
+              face === 'deck'
+                ? () => toggleDeckDictation(true)
+                : () => {
+                    setMicOpening(true)
+                    void startVoice().finally(() => setMicOpening(false))
+                  },
             mode: setVoiceMode,
             stop: () => void finishVoice(),
             cancel: cancelVoice,
@@ -631,6 +640,14 @@ export function SessionComposer({
         : undefined,
     [cancelVoice, face, finishVoice, setVoiceMode, startVoice, undoReview]
   )
+
+  /*
+   * The phone's Listen — the voice agent the deck's bar runs — gets its link,
+   * its moves and its lifetime here, and its mic held shut while this box
+   * dictates, so the agent never hears the dictation. The deck's DeckKeys
+   * does all of this for the deck's own box.
+   */
+  usePhoneVoice(face !== 'deck', micOpening || voice.phase === 'recording' || voice.phase === 'transcribing')
 
   /*
    * The deck's D button runs this same dictation — commands, review, send —
@@ -971,6 +988,8 @@ export function SessionComposer({
         bar={face === 'deck'}
         lead={face === 'deck' ? lead : undefined}
         voiceKey={face === 'deck' ? dictationKeyName(dKey) : undefined}
+        listen={face === 'deck' ? undefined : <PhoneListen />}
+        listenLine={face === 'deck' ? undefined : <PhoneListenLine />}
       />
     </div>
   )

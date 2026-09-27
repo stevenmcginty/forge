@@ -129,7 +129,9 @@ export function Composer({
   onShowChat,
   lead,
   bar = false,
-  voiceKey
+  voiceKey,
+  listen,
+  listenLine
 }: {
   draft: string
   disabled: boolean
@@ -220,6 +222,16 @@ export function Composer({
   bar?: boolean
   /** The dictation's key on the deck ("Right Alt"), for the mic's title and name. */
   voiceKey?: string
+  /**
+   * The phone's Listen (PhoneListen.tsx): the voice agent's squared block, at
+   * the front of the row — a conversation, where the disc is dictation.
+   */
+  listen?: ReactNode
+  /**
+   * Listen's voice line, drawn on the box's face while the box is empty and
+   * no dictation runs; the first letter typed, or a dictation, takes it back.
+   */
+  listenLine?: ReactNode
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -640,6 +652,7 @@ export function Composer({
           />
         ) : null}
         <div className="composer__row">
+          {listen}
           {onShowChat ? (
             <button
               type="button"
@@ -734,6 +747,7 @@ export function Composer({
                 Sending in a moment. Undo keeps the words.
               </span>
             ) : null}
+            {phase === 'idle' && !hasDraft ? listenLine : null}
           </div>
           {micPrimary && phase !== 'idle' ? null : stopMode ? (
             <button

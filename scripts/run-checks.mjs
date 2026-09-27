@@ -80,6 +80,7 @@ const CHECKS = [
   { name: 'dictation:check', lane: 'fast', note: 'talk-key gestures + warm-start wiring' },
   { name: 'voice:check', lane: 'fast', note: 'the live OpenRouter tier is opt-in via env' },
   { name: 'realtime:check', lane: 'fast', note: 'token shapes over fake fetches; sessions over fake WebRTC' },
+  { name: 'voice-alerts:check', lane: 'fast', note: 'pane alerts from voice-context text, poll by poll' },
   { name: 'brain-adapters:check', lane: 'fast', note: 'CLI brains via fake shims; no real CLI, no key' },
   { name: 'gemini-live:check', lane: 'fast', note: 'the worklets in a vm; the session over a fake WebSocket' },
   { name: 'voice-hotkey:check', lane: 'fast' },

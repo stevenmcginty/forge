@@ -24,6 +24,7 @@ import type {
 import { buildRolloverSummary } from '@/lib/realtime/summary'
 import { toolLabel } from '@/lib/toolLabels'
 import { ClaudeVoiceSession } from './claudeVoice'
+import { alertNote, PaneAlertTracker, parsePaneStates, type PaneAlert } from './voice-alerts'
 import { readVoiceAgent, updateDesktopWords, voiceFailureWords, type WebVoicePhase } from './voice-words'
 
 /**
@@ -52,14 +53,19 @@ import { readVoiceAgent, updateDesktopWords, voiceFailureWords, type WebVoicePha
  *                  tab, a project): the desktop resolves where, and this page
  *                  goes there on its own deck (`setVoiceNavigator`)
  *   voice-context  polled while live; a change is told to the model, at most
- *                  every `contextMinGapMs` — ContextTracker's rule
+ *                  every `contextMinGapMs` — ContextTracker's rule. The same
+ *                  poll watches the panes (./voice-alerts.ts): one that
+ *                  finishes its turn or starts asking is said out loud, for
+ *                  every agent, Claude too — he may be miles from the desk.
  *
  * The conversation ends the way the desk's does (src/state/VoiceHubController
  * .tsx): "that's all" / "stop listening", a second press, or `idleTimeoutMs`
- * listening to quiet; Connecting… or Thinking… that never moves on is ended by
- * the same watchdog. A session Gemini cannot resume rolls over into a new one
- * carrying a short summary. An older desktop answers "does not understand",
- * and the switch says to update it.
+ * listening to quiet — but not while a pane is still working, up to
+ * IDLE_HOLD_MAX_MS after he last spoke; Connecting… or Thinking… that never
+ * moves on is ended by the same watchdog. While it is live the screen is held
+ * on, so a phone does not sleep and take the mic with it. A session Gemini
+ * cannot resume rolls over into a new one carrying a short summary. An older
+ * desktop answers "does not understand", and the switch says to update it.
  *
  * Which agent is this browser's own choice (the chip beside Listen),
  * remembered here and never sent to the desktop's `agentBrain` setting.
@@ -93,6 +99,10 @@ const AGENT_KEY = 'forge-web-voice-agent'
 const CONTEXT_POLL_MS = 5000
 const MAX_CAPTIONS = 40
 const MAX_ACTIONS = 20
+/** A pane still working holds the conversation open, but not for longer than this after he last spoke. */
+const IDLE_HOLD_MAX_MS = 20 * 60_000
+/** A caption of his still growing this recently: he is mid-sentence, and an alert waits. */
+const TALKING_GRACE_MS = 8000
 
 function storedAgent(): WebVoiceProvider {
   try {
@@ -188,6 +198,19 @@ let contextTimer: number | null = null
 let idleTimer: number | null = null
 let stuckTimer: number | null = null
 let stopTimer: number | null = null
+const paneAlerts = new PaneAlertTracker()
+/** Alerts waiting for the session to be listening: never said over him or over itself. */
+let heldAlerts: PaneAlert[] = []
+/** Notes handed to Claude as a turn: its echo of one is not him speaking. */
+const alertTurns = new Set<string>()
+/** When he last said anything, for the idle hold's cap. */
+let lastSpokeAt = 0
+/** When his words last grew without ending (0: they ended). */
+let talkingAt = 0
+/** The quiet rule was being held open at the last look. */
+let idleHeld = false
+let wakeLock: WakeLockSentinel | null = null
+let wakeAsking = false
 
 /** DeckKeys hands over the current link whenever it changes: a reconnect may replace it. */
 export function setVoiceLink(next: VoiceLink | null): void {
@@ -251,16 +274,90 @@ function onPhase(): void {
       fail(stuckReason(label, stuck, ms))
     }, ms)
   }
-  if (state.phase === 'listening') armIdle()
-  else idleTimer = clearTimer(idleTimer)
+  if (state.phase === 'listening') {
+    deliverAlerts()
+    armIdle()
+  } else idleTimer = clearTimer(idleTimer)
 }
 
-/** Quiet while listening for `idleTimeoutMs` ends the conversation. Anything he says restarts it. */
+/** A pane still working, or an alert not yet said: quiet is not the end of the conversation. */
+function holdingIdle(): boolean {
+  return paneAlerts.anyWorking() || heldAlerts.length > 0
+}
+
+/**
+ * Quiet while listening for `idleTimeoutMs` ends the conversation. Anything he
+ * says restarts it. While the panes hold it open, only IDLE_HOLD_MAX_MS since
+ * he last spoke ends it; once they stop, the quiet is counted from then.
+ */
 function armIdle(): void {
   idleTimer = clearTimer(idleTimer)
+  idleHeld = holdingIdle()
   const ms = setup?.idleTimeoutMs
   if (!ms || !session || state.phase !== 'listening') return
+  const capIn = lastSpokeAt + IDLE_HOLD_MAX_MS - Date.now()
+  if (idleHeld && capIn > 0) {
+    idleTimer = window.setTimeout(() => endConversation({ kind: 'idle', ms: IDLE_HOLD_MAX_MS }), capIn)
+    return
+  }
   idleTimer = window.setTimeout(() => endConversation({ kind: 'idle', ms }), ms)
+}
+
+/**
+ * The held alerts, as one note, once the session is listening with nothing of
+ * its own running. A realtime model is asked to speak (`respond`), past the
+ * context gate; Claude gets it as a turn — its session has read_pane too.
+ */
+function deliverAlerts(): void {
+  const live = session
+  if (!live || !heldAlerts.length || state.phase !== 'listening' || state.muted) return
+  if (toolsRunning > 0 || desktopTools > 0) return
+  if (talkingAt && Date.now() - talkingAt < TALKING_GRACE_MS) return
+  const note = alertNote(heldAlerts)
+  heldAlerts = []
+  if (!note) return
+  if (setup?.provider === 'claude') {
+    alertTurns.add(note)
+    live.sendText(note)
+  } else {
+    live.sendContext(note, true)
+  }
+}
+
+/* The screen, held on while a session is live: a phone that sleeps takes the mic with it. */
+function holdScreen(): void {
+  if (!session || wakeLock || wakeAsking || document.visibilityState !== 'visible') return
+  if (!('wakeLock' in navigator) || !navigator.wakeLock) return
+  wakeAsking = true
+  navigator.wakeLock
+    .request('screen')
+    .then((lock) => {
+      wakeAsking = false
+      if (!session) {
+        void lock.release().catch(() => undefined)
+        return
+      }
+      wakeLock = lock
+      lock.addEventListener('release', () => {
+        if (wakeLock === lock) wakeLock = null
+      })
+    })
+    .catch(() => {
+      // Refused (battery saver, no user gesture yet): the conversation goes on without it.
+      wakeAsking = false
+    })
+}
+
+function releaseScreen(): void {
+  document.removeEventListener('visibilitychange', onVisibility)
+  const lock = wakeLock
+  wakeLock = null
+  if (lock) void lock.release().catch(() => undefined)
+}
+
+/* The browser drops the lock whenever the page is hidden; coming back takes it again. */
+function onVisibility(): void {
+  if (document.visibilityState === 'visible') holdScreen()
 }
 
 function upsertCaption(c: RealtimeCaption): void {
@@ -285,6 +382,8 @@ function answerWords(name: string, answer: RealtimeToolAnswer): string {
 /** VoiceHubController's `onUserCaption`: a stop phrase ends it; one still growing waits a beat. */
 function onUserCaption(c: RealtimeCaption): void {
   stopTimer = clearTimer(stopTimer)
+  lastSpokeAt = Date.now()
+  talkingAt = c.final ? 0 : lastSpokeAt
   if (state.phase === 'listening') armIdle()
   const stop = stopPhraseOf(c.text)
   if (!stop) return
@@ -396,6 +495,12 @@ function teardown(): void {
   session = null
   desktopTools = 0
   clearTimers()
+  paneAlerts.reset()
+  heldAlerts = []
+  alertTurns.clear()
+  idleHeld = false
+  talkingAt = 0
+  releaseScreen()
   old?.stop()
 }
 
@@ -437,6 +542,8 @@ async function open(carryover: string | null): Promise<void> {
     },
     onCaption: (c) => {
       if (session !== live) return
+      // An alert handed to Claude comes back as "his" turn: it is neither shown nor him speaking.
+      if (c.role === 'user' && alertTurns.delete(c.text)) return
       upsertCaption(c)
       if (c.role === 'user') onUserCaption(c)
     },
@@ -467,8 +574,14 @@ async function open(carryover: string | null): Promise<void> {
     lastContextAt = 0
     const first = takeContext(res.setup.context, Date.now(), 0)
     if (first) live.sendContext(first, false)
-    // Claude's turns carry the context from the desktop itself; nothing to poll.
-    if (res.setup.provider !== 'claude') contextTimer = window.setInterval(() => void pollContext(live), CONTEXT_POLL_MS)
+    // The panes as they are now are not news: this primes the alerts (or the first poll will).
+    paneAlerts.reset()
+    paneAlerts.feed(parsePaneStates(res.setup.context))
+    // Every agent polls, for the pane alerts; only a realtime one is told the context
+    // (Claude's turns carry it from the desktop itself).
+    contextTimer = window.setInterval(() => void pollContext(live), CONTEXT_POLL_MS)
+    document.addEventListener('visibilitychange', onVisibility)
+    holdScreen()
     onPhase()
   } catch (err) {
     live.stop()
@@ -482,8 +595,16 @@ async function open(carryover: string | null): Promise<void> {
 async function pollContext(live: LiveSession): Promise<void> {
   const res = await ask({ kind: 'voice-context' })
   if (session !== live || res.kind !== 'voice-context') return
-  const fresh = takeContext(res.text, Date.now(), setup?.contextMinGapMs ?? 0)
-  if (fresh) live.sendContext(fresh, false)
+  if (setup?.provider !== 'claude') {
+    const fresh = takeContext(res.text, Date.now(), setup?.contextMinGapMs ?? 0)
+    if (fresh) live.sendContext(fresh, false)
+  }
+  const news = paneAlerts.feed(parsePaneStates(res.text))
+  if (news.length) heldAlerts = [...heldAlerts, ...news]
+  if (state.phase !== 'listening') return
+  deliverAlerts()
+  // The hold began or ended: the quiet is counted again from here.
+  if (holdingIdle() !== idleHeld) armIdle()
 }
 
 /**
@@ -518,6 +639,7 @@ export function startWebVoice(): void {
   if (session || state.phase === 'connecting') return
   captions = []
   actions = []
+  lastSpokeAt = Date.now()
   show({ caption: null, lastAction: null })
   void open(null)
 }
@@ -566,6 +688,7 @@ export function setWebVoiceAgent(next: WebVoiceProvider): void {
   teardown()
   captions = []
   actions = []
+  lastSpokeAt = Date.now()
   show({ caption: null, lastAction: null })
   set({ agent: next })
   void open(null)
