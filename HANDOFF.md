@@ -1,5 +1,37 @@
 # Handoff
 
+## Phone: Listen (voice agent) + spoken pane alerts (2026-09-27, a5659ff, pushed)
+
+- **Asked (Steve):** voice agents on the phone, to relay what the agents are doing. Picked option 1 (web page, not a native app). This reverses the 23 Sep decision D (no spoken replies on the phone) for Listen only.
+- **Built (web only, no desktop restart):** `web/src/components/PhoneListen.{tsx,css}`, a Listen control left of the phone text box, mounted from `SessionComposer.tsx` (phone face only; `Composer.tsx` got `listen`/`listenLine` props). While live, the text box shows the state word, the agent and a caption. The agent picker opens from the chevron. `web/src/deck/voice-alerts.ts` + `voiceAgent.ts`: alerts are read from `voice-context` text polls (5 s), every brain. DONE = working then ready/idle on 2 polls. ASKING is sent at once. Alerts coalesce and are spoken only while listening (realtime `sendContext(note, true)`, Claude `sendText`). Idle hold while any pane works (cap 20 min). Screen wake lock while live.
+- **Checked:** typecheck, lint:hooks, voice-alerts:check 35/0 (fast lane), realtime:check 28, dictation:check 31, scratch vite build. Screenshots are in the session scratchpad `phone-listen/`.
+- **Not tested:** anything live: alerts on each brain, the wake lock on the Pixel, and the navigator and mic hold against a real desktop.
+- **Limits:** alerts cover the open project only, and only while Listen is on (Web Push covers the rest). The Listen UI hides on a project with no tabs (SessionComposer returns null). Glyph/AgentMark SVGs are copied from `web/src/deck/VoiceBar.tsx` and could be shared later.
+
+## Panes and tiles stop re-rendering on unrelated changes (2026-09-27, pushed)
+
+- **Asked (Steve):** plan B of the audit below ("the big fix"). Rule from Steve: terminals must still refit on every size change (small screens).
+- **Found first:** PTY output never dispatches, and nothing dispatches per second. Re-renders came from user gestures times the number of tiles, so the targeted fix (panes/tiles only, 9 files) replaced the planned 80-file split. The other ~110 `useApp()` sites are unchanged and still re-render as before.
+- **Built (builder, in worktree `.claude/worktrees/appstate-split`, patch applied to this checkout):** `AppState.tsx` has a subscribe/getSnapshot store plus `useActions()` (stable for the provider's lifetime; every action reads `liveStateRef`, which also fixes `openToolPane`'s stale `updatesAutoRun`), `useAppSelector(selector, isEqual)`, `shallowEqual`; the six helper hooks use selectors; `useApp()` unchanged. `MosaicTile`, `TerminalPane`, `SplitView`, `TerminalGrid`, `StripTile` memo'd with stable props (`src/hooks/useStableCallback.ts`). `useHandoffFlow` hands out a stable `handOff`.
+- **Checked:** typecheck, lint:hooks, mosaic:check 113, electron-vite build. Throwaway Forge, Wall with 4 tiles: rail toggle 0 tiles re-render, unrelated setting 0, rename a tab 1 (only that tile). Cols follow width: 96 at 1500px, 55 at 900px, 91 in Full screen.
+- **Known:** in `mosaicText:'scaled'` (not the default, not Steve's setting) the wall reference re-measures only when the set of panes changes, so a scale can go stale after a geometry change. Applying the patch hot-reloaded the live renderer; it threw once mid-HMR ("useApp must be used inside <AppStateProvider>", two module copies) and the watchdog reload fixed it.
+
+## Performance audit (2026-09-27, read-only, nothing built)
+
+- **Asked (Steve):** where can Forge be optimised. Four read-only agents (main, renderer, Forge Web, startup).
+- **Quick wins (S effort):** `perMessageDeflate` is off on the Forge Web socket (`electron/web/server.ts:981`); every PTY chunk is its own JSON frame to the phone (`server.ts:1097`, `:3486`); pane create runs `execFileSync('git')` up to 1.5 s (`electron/pty-host.ts:872` -> `git-remote.ts:42`) and a sync PATH walk (`pty-host.ts:820`, `which.ts:44`) on the main thread; `syncAgyConfig` does `spawnSync('agy')` (10 s timeout) before `createWindow` (`electron/bridge/share-mcp.ts:463`, `main.ts:1427-1568`); `qrcode` and web `Mirror` are static imports.
+- **Medium:** replay buffer rebuilds a 192 KB string per raw chunk (`pty-host.ts:263`, `:270` reduce); no code splitting (desktop 2.48 MB, web 1.49 MB single chunks).
+- **Big:** one AppState context (`src/state/AppState.tsx:2531`) read at 121 sites; no `memo` on `TerminalPane`, so any dispatch re-renders every pane.
+- **Not Forge:** the `playwright@claude-plugins-official` plugin in Steve's user Claude config starts ~200 MB of npx/node per Claude session; forge-bridge already has a browser. gemini-bridge + share-bridge are kept apart on purpose (key isolation, `bridge/share-bridge.mjs:20`).
+- **Built (quick wins, not committed):** deflate on the web socket (level 1, threshold 1 KB); `gitRemoteOrigin` 30 s per-folder cache (still sync); `whichCommand` caches hits only; replay/deskLog trim amortized at 1.5x with a byte counter (`trimReplay`, readers trim first); `syncAgyConfig` async + serialized, not awaited at boot or on settings change (`agy mcp list` measured 1.5 s); `qrcode` and web `Mirror` lazy (Mirror chunk 38 kB). Web batching dropped: pty-host already batches every 12 ms.
+- **Checked:** typecheck, lint:hooks, web:io, pty:smoke, share:check 307/0, agents:check, gh:check, replay-trim equivalence script (old vs new identical, 32 cases).
+- **Needs:** a Forge restart for the main-process parts. Next big item: the AppState split.
+
+## Gemini Live / GPT voice "can't reach it" (2026-09-27 08:09)
+
+- Both failed at the token mint in main (`electron/realtime/tokens.ts`), `ws=none`. At the same minute dev.log shows cloudflared "no recent network activity" and web-push `ECONNRESET`: the PC's network dropped. At 08:12 both token endpoints answered in <700 ms x10 from Node. The hub shows only "can't reach it"; the raw error is not logged.
+- **Cause: NordVPN (NordLynx) was connected.** The phone also showed "laptop asleep" at once. Steve turned the VPN off: the phone connected, and Gemini Live opened at 08:27 (setupComplete 714 ms, mic 16 kHz flowing). No code change.
+
 ## Project picker: in-use projects first (2026-09-26, not committed)
 
 - **Asked (Steve):** projects you are working in, and any project in use, should come to the top of the picker.

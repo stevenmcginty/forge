@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -57,7 +58,14 @@ import { useForeman } from '@/state/Foreman'
 import { askToClose } from './CloseConfirm'
 import { enterOnce, glideFrom, reducedMotion, useFlipChildren, type Box } from '@/lib/motion'
 import { usePaneActivity } from '@/lib/paneActivity'
-import { useActiveWorkspace, useApp } from '@/state/AppState'
+import { useStableCallback } from '@/hooks/useStableCallback'
+import {
+  selectActiveWorkspace,
+  useActions,
+  useActiveWorkspace,
+  useAppSelector,
+  useAppStateGetter
+} from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { EmptyState } from './EmptyState'
@@ -131,6 +139,27 @@ export function cellsOf(tabs: TerminalTab[]): Cell[] {
 }
 
 /**
+ * `cellsOf`, keeping each cell object from the last call whose pane and tab are
+ * unchanged. The tiles are memoised on their cell, and `cellsOf` mints every
+ * cell afresh — renaming one tab would otherwise re-render every tile.
+ */
+export function useStableCells(tabs: TerminalTab[]): Cell[] {
+  const cache = useRef(new Map<string, Cell>())
+  return useMemo(() => {
+    const prev = cache.current
+    const next = new Map<string, Cell>()
+    const cells = cellsOf(tabs).map((cell) => {
+      const old = prev.get(cell.leaf.id)
+      const kept = old && old.leaf === cell.leaf && old.tab === cell.tab ? old : cell
+      next.set(kept.leaf.id, kept)
+      return kept
+    })
+    cache.current = next
+    return cells
+  }, [tabs])
+}
+
+/**
  * One scale for a whole row of scale-model tiles, taken from the largest pane
  * among them — see the note on `reference` in MosaicView.
  */
@@ -161,49 +190,49 @@ export function wallReference(cells: Cell[]): PaneGeometry {
  * at once.
  */
 export function useCloseTerminal(): (paneId: string) => void {
-  const { actions } = useApp()
+  const actions = useActions()
   const foreman = useForeman()
-  const workspace = useActiveWorkspace()
-  return useCallback(
-    (paneId: string) => {
-      const tab = workspace.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === paneId))
-      if (!tab) return
-      const close = (): void => {
-        if (countLeaves(tab.root) === 1) {
-          actions.closeTab(tab.id)
-          return
-        }
-        const back = workspace.activeTabId
-        actions.revealPane(paneId)
-        actions.closePane(paneId)
-        if (back && back !== tab.id) actions.selectTab(back)
-      }
-      const driven = foreman.paneState(paneId).status
-      const why =
-        driven === 'starting' || driven === 'driving' || driven === 'waiting'
-          ? 'is being driven by Foreman'
-          : terminalHost.isBusy(paneId)
-            ? 'is working'
-            : null
-      if (!why) {
-        close()
+  const getState = useAppStateGetter()
+  // Stable, and reading the workspace when the X is pressed: every tile on the
+  // wall is handed this, and a new function per dispatch re-rendered them all.
+  return useStableCallback((paneId: string) => {
+    const workspace = selectActiveWorkspace(getState())
+    const tab = workspace.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === paneId))
+    if (!tab) return
+    const close = (): void => {
+      if (countLeaves(tab.root) === 1) {
+        actions.closeTab(tab.id)
         return
       }
-      const name = paneNameInTab(tab, paneId)
-      // The question sits on the X that was pressed — or on the tile, for a
-      // middle-click, which leaves no button with the focus.
-      const tiles = Array.from(document.querySelectorAll<HTMLElement>(`[data-pane-id="${CSS.escape(paneId)}"]`))
-      const pressed = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      const tile = tiles.find((t) => pressed && t.contains(pressed)) ?? tiles[0]
-      const anchor =
-        (pressed && tile?.contains(pressed) ? pressed : null) ??
-        tile?.querySelector<HTMLElement>('[aria-label^="Close"]') ??
-        tile ??
-        document.body
-      askToClose({ name, why, anchor, close })
-    },
-    [actions, foreman, workspace]
-  )
+      const back = workspace.activeTabId
+      actions.revealPane(paneId)
+      actions.closePane(paneId)
+      if (back && back !== tab.id) actions.selectTab(back)
+    }
+    const driven = foreman.paneState(paneId).status
+    const why =
+      driven === 'starting' || driven === 'driving' || driven === 'waiting'
+        ? 'is being driven by Foreman'
+        : terminalHost.isBusy(paneId)
+          ? 'is working'
+          : null
+    if (!why) {
+      close()
+      return
+    }
+    const name = paneNameInTab(tab, paneId)
+    // The question sits on the X that was pressed — or on the tile, for a
+    // middle-click, which leaves no button with the focus.
+    const tiles = Array.from(document.querySelectorAll<HTMLElement>(`[data-pane-id="${CSS.escape(paneId)}"]`))
+    const pressed = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const tile = tiles.find((t) => pressed && t.contains(pressed)) ?? tiles[0]
+    const anchor =
+      (pressed && tile?.contains(pressed) ? pressed : null) ??
+      tile?.querySelector<HTMLElement>('[aria-label^="Close"]') ??
+      tile ??
+      document.body
+    askToClose({ name, why, anchor, close })
+  })
 }
 
 /**
@@ -295,14 +324,15 @@ export function MosaicView({
   /** Show this pane in Full screen — a tile's Expand button, or Enter on the ring. */
   onOpenFull: (paneId: string) => void
 }): ReactNode {
-  const { state, actions } = useApp()
+  const actions = useActions()
+  const view = useAppSelector((state) => state.view)
   const closeTerminal = useCloseTerminal()
 
   const mosaic = workspace.mosaic ?? emptyMosaic()
   const custom = mosaic.mode === 'custom'
 
   /** Every pane in tab order — the order the tiles sit in the DOM. */
-  const tabCells = useMemo<Cell[]>(() => cellsOf(workspace.tabs), [workspace.tabs])
+  const tabCells = useStableCells(workspace.tabs)
   // The same panes in the grid's reading order: the slots the user dragged
   // tiles into, then everything else in tab order. The grid places each tile
   // with CSS `order` rather than by moving it in the DOM, so a reorder never
@@ -318,7 +348,7 @@ export function MosaicView({
   const slotOf = useMemo(() => new Map(cells.map((c, i) => [c.leaf.id, i])), [cells])
 
   /** The wall's default: refit every terminal to its tile at life-size type. */
-  const lifesize = state.settings.mosaicText !== 'scaled'
+  const lifesize = useAppSelector((state) => state.settings.mosaicText !== 'scaled')
 
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
   const [picked, setPicked] = useState<string | null>(null)
@@ -413,8 +443,18 @@ export function MosaicView({
    * counted here, so refitting one tile never rescales the rest of the wall.
    */
   // Re-measured whenever the wall's membership changes — which is also the
-  // only time a tile is mounted and could need a different scale.
-  const reference = useMemo<PaneGeometry>(() => wallReference(cells), [cells])
+  // only time a tile is mounted and could need a different scale. Keyed on the
+  // pane ids, not the cells: a renamed or recoloured tab is a new cells array
+  // with the same panes, and re-measuring then re-rendered every tile.
+  const membership = cells.map((c) => c.leaf.id).join(',')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const measured = useMemo<PaneGeometry>(() => wallReference(cells), [membership])
+  // Held by value: a tile is memoised, and a re-measure that came out the same
+  // must not hand every tile a new object.
+  const reference = useMemo<PaneGeometry>(
+    () => ({ width: measured.width, height: measured.height }),
+    [measured.width, measured.height]
+  )
 
   /* --------------------------------------------------------------- layout */
 
@@ -894,7 +934,7 @@ export function MosaicView({
     // reach the shell, not move the selection ring.
     if (interactiveId) return
     // Settings, a sheet or the composer on top: the arrows belong to them.
-    if (state.view !== 'terminals') return
+    if (view !== 'terminals') return
     const onKey = (e: KeyboardEvent): void => {
       if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return
       if (document.activeElement?.closest('[data-shell-overlay]')) return
@@ -946,7 +986,7 @@ export function MosaicView({
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cells, columns, custom, interactiveId, openFull, selectedId, state.view, tiles])
+  }, [cells, columns, custom, interactiveId, openFull, selectedId, view, tiles])
 
   /* ---------------------------------------------------- keyboard: interact */
 
@@ -970,6 +1010,18 @@ export function MosaicView({
   useEffect(() => {
     if (interactiveId && !cells.some((c) => c.leaf.id === interactiveId)) setInteractiveId(null)
   }, [cells, interactiveId])
+
+  /*
+   * What the tiles are handed: one function each for the view's lifetime. The
+   * tiles are memoised, and the callbacks above change with the selection, the
+   * typing tile and every re-measure — passed as they are, one click re-rendered
+   * the whole wall.
+   */
+  const tileOpenFull = useStableCallback(openFull)
+  const tileBeginDrag = useStableCallback(beginDrag)
+  const tileFitGrid = useStableCallback(fitGrid)
+  const tileToggleFit = useStableCallback(toggleFit)
+  const tileToggleInteract = useStableCallback(toggleInteract)
 
   /* ------------------------------------------------------------- render */
 
@@ -1033,13 +1085,13 @@ export function MosaicView({
               slot={slotOf.get(cell.leaf.id) ?? 0}
               fit={mosaic.tiles[cell.leaf.id]?.fit}
               {...(custom && tiles[cell.leaf.id] ? { rect: tiles[cell.leaf.id]! } : {})}
-              onOpenFull={openFull}
+              onOpenFull={tileOpenFull}
               onClose={closeTerminal}
               onSelect={setPicked}
-              onBeginDrag={beginDrag}
-              onFitGrid={fitGrid}
-              onToggleFit={toggleFit}
-              onToggleInteract={toggleInteract}
+              onBeginDrag={tileBeginDrag}
+              onFitGrid={tileFitGrid}
+              onToggleFit={tileToggleFit}
+              onToggleInteract={tileToggleInteract}
             />
           ))}
           <div className="mosaic__ghost" ref={ghostRef} />
@@ -1141,7 +1193,7 @@ function WallName({
  * block with a bold word, the other is an outline with a light one.
  */
 export function WallLayoutSwitch(): ReactNode {
-  const { actions } = useApp()
+  const actions = useActions()
   const workspace = useActiveWorkspace()
   const mosaic = workspace.mosaic ?? emptyMosaic()
   const free = mosaic.mode === 'custom'
@@ -1229,9 +1281,11 @@ export function PeekStage({
   interactive?: boolean
   className?: string
 }): ReactNode {
-  const { state } = useApp()
+  const agentProfiles = useAppSelector((state) => state.settings.agentProfiles)
+  const fontSize = useAppSelector((state) => state.settings.terminalFontSize)
+  const fontFamily = useAppSelector((state) => state.settings.terminalFontFamily)
   const paneId = cell.leaf.id
-  const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
+  const profile = resolveProfile(agentProfiles, cell.leaf.profileId)
 
   const stageRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
@@ -1239,8 +1293,8 @@ export function PeekStage({
   const spec: TerminalSpec = {
     cwd: project.path,
     bootstrapCommand: launchCommand(profile, leafPermissionMode(cell.leaf)),
-    fontSize: state.settings.terminalFontSize,
-    fontFamily: state.settings.terminalFontFamily,
+    fontSize,
+    fontFamily,
     accent: profile.accent,
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, cell.leaf.title),
@@ -1444,7 +1498,12 @@ const HANDLES: Array<{ key: string; edges: MosaicEdges }> = [
   { key: 'se', edges: { ...NO_EDGES, bottom: true, right: true } }
 ]
 
-function MosaicTile({
+/*
+ * Memoised, and every prop it gets is stable (MosaicView's tile* callbacks,
+ * useStableCells), so a tile re-renders only for its own pane, its own tab, or
+ * a wall-wide change it shows — not for a click somewhere else in Forge.
+ */
+const MosaicTile = memo(function MosaicTile({
   cell,
   project,
   reference,
@@ -1492,10 +1551,11 @@ function MosaicTile({
   onToggleFit: (paneId: string) => void
   onToggleInteract: (paneId: string) => void
 }): ReactNode {
-  const { state, actions } = useApp()
-  const workspaceTasks = useActiveWorkspace().tasks
+  const actions = useActions()
+  const getState = useAppStateGetter()
+  const agentProfiles = useAppSelector((state) => state.settings.agentProfiles)
   const paneId = cell.leaf.id
-  const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
+  const profile = resolveProfile(agentProfiles, cell.leaf.profileId)
   const runtime = usePaneRuntime(paneId)
   const activity = usePaneActivity(paneId, runtime)
   const dead = isPaneDead(runtime)
@@ -1592,7 +1652,7 @@ function MosaicTile({
     // never submitted, card off the tray only once the text really landed.
     const taskId = e.dataTransfer.getData(TASK_DRAG_TYPE)
     if (taskId) {
-      const card = (workspaceTasks ?? []).find((t) => t.id === taskId)
+      const card = (selectActiveWorkspace(getState()).tasks ?? []).find((t) => t.id === taskId)
       if (!card) return
       if (!interactive) onToggleInteract(paneId)
       terminalHost.focus(paneId)
@@ -1787,4 +1847,4 @@ function MosaicTile({
       ))}
     </section>
   )
-}
+})

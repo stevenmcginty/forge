@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
@@ -7,7 +7,16 @@ import { fadeIn, useFlipChildren } from '@/lib/motion'
 import { toolsHost as toolsHostStore, useHost } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
 import { uiCommands } from '@/lib/uiCommands'
-import { useActiveProject, useActiveTab, useActiveWorkspace, useApp, useMosaic, usePaneCount, useViewMode } from '@/state/AppState'
+import {
+  useActions,
+  useActiveProject,
+  useActiveTab,
+  useActiveWorkspace,
+  useAppSelector,
+  useMosaic,
+  usePaneCount,
+  useViewMode
+} from '@/state/AppState'
 import { AgentChooser } from './AgentChooser'
 import { CommandsButton } from './CommandsFlyout'
 import { EmptyState } from './EmptyState'
@@ -39,8 +48,15 @@ export interface NewTabDetail {
  * Wall switch) flips the two sizes and the tab shortcuts still step through
  * the tabs Full screen shows.
  */
-export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNode {
-  const { state, actions } = useApp()
+/*
+ * Memoised, and reading only what it draws: App re-renders on every dispatch,
+ * and this is the root of every pane and Wall tile.
+ */
+export const TerminalGrid = memo(function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNode {
+  const actions = useActions()
+  const ready = useAppSelector((state) => state.ready)
+  const appView = useAppSelector((state) => state.view)
+  const tinted = useAppSelector((state) => state.settings.tabTextColours)
   const project = useActiveProject()
   const workspace = useActiveWorkspace()
   const tab = useActiveTab()
@@ -90,7 +106,6 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
    * that paints.
    */
   const tabs = workspace.tabs
-  const tinted = state.settings.tabTextColours
   useEffect(() => {
     for (const t of tabs) {
       for (const leaf of collectLeaves(t.root)) {
@@ -128,7 +143,7 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
   const fullScreen = !beside && viewMode === 'tabs' && Boolean(tab)
   const focusPaneId = tab?.activePaneId ?? null
   useEffect(() => {
-    if (!fullScreen || state.view !== 'terminals') return
+    if (!fullScreen || appView !== 'terminals') return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.defaultPrevented) return
       const el = document.activeElement
@@ -140,7 +155,7 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [actions, focusPaneId, fullScreen, state.view])
+  }, [actions, focusPaneId, fullScreen, appView])
 
   /*
    * The glides. A pane that survives a re-layout — a sibling closed, a split
@@ -158,7 +173,7 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
     if (bodyRef.current) fadeIn(bodyRef.current)
   }, [switchKey])
 
-  if (!state.ready) return <div className="grid grid--booting" data-view={beside ? 'beside' : undefined} />
+  if (!ready) return <div className="grid grid--booting" data-view={beside ? 'beside' : undefined} />
 
   if (!project) {
     // Beside a surface there is nothing to strip yet; the surface has the stage.
@@ -280,7 +295,7 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
       {chooser}
     </div>
   )
-}
+})
 
 /* ------------------------------------------------------ mosaic text size */
 
@@ -293,8 +308,8 @@ export function TerminalGrid({ beside = false }: { beside?: boolean }): ReactNod
  * Appearance has the same switch for anyone who goes looking there first.
  */
 function MosaicTextToggle(): ReactNode {
-  const { state, actions } = useApp()
-  const lifesize = state.settings.mosaicText !== 'scaled'
+  const actions = useActions()
+  const lifesize = useAppSelector((state) => state.settings.mosaicText !== 'scaled')
 
   return (
     <button
@@ -328,8 +343,8 @@ function MosaicTextToggle(): ReactNode {
  * restores the lot. Nothing to redo, so nothing to fear about pressing it.
  */
 function TabTintToggle(): ReactNode {
-  const { state, actions } = useApp()
-  const on = state.settings.tabTextColours
+  const actions = useActions()
+  const on = useAppSelector((state) => state.settings.tabTextColours)
 
   return (
     <button

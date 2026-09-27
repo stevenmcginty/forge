@@ -10,7 +10,7 @@ import {
   supportsPermissionModes
 } from '@/lib/agents'
 import { useCommandPresence } from '@/hooks/useCommandPresence'
-import { useApp } from '@/state/AppState'
+import { useActions, useAppSelector } from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
@@ -44,7 +44,8 @@ export function AgentChooser({
   align = 'start',
   selectedId
 }: Props): ReactNode {
-  const { state, actions } = useApp()
+  const actions = useActions()
+  const agentProfiles = useAppSelector((state) => state.settings.agentProfiles)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
@@ -79,7 +80,7 @@ export function AgentChooser({
     onClose()
   }
 
-  const { shells, agents } = splitProfiles(state.settings.agentProfiles)
+  const { shells, agents } = splitProfiles(agentProfiles)
 
   // Asked while the popover is open — a chooser that offers Codex on a machine
   // without Codex is the exact moment the fact is worth having. Nothing is

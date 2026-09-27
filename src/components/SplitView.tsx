@@ -1,14 +1,18 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useRef, useState, type ReactNode } from 'react'
 import type { LayoutNode, Project } from '@shared/types'
-import { useApp } from '@/state/AppState'
+import { useActions } from '@/state/AppState'
 import { TerminalPane } from './TerminalPane'
 import './SplitView.css'
 
 /**
  * Renders a pane layout tree. Splits are flex rows/columns with a draggable
  * hairline divider; leaves are terminals.
+ *
+ * Memoised on its props, which are all pieces of the tree or primitives: the
+ * reducer replaces only the branch that changed, so a divider drag or a rename
+ * re-renders that branch and leaves every other pane alone.
  */
-export function SplitView({
+export const SplitView = memo(function SplitView({
   node,
   project,
   activePaneId,
@@ -30,7 +34,7 @@ export function SplitView({
     )
   }
   return <Split node={node} project={project} activePaneId={activePaneId} />
-}
+})
 
 function Split({
   node,
@@ -41,7 +45,7 @@ function Split({
   project: Project
   activePaneId: string
 }): ReactNode {
-  const { actions } = useApp()
+  const actions = useActions()
   const hostRef = useRef<HTMLDivElement | null>(null)
   const frame = useRef<number | null>(null)
   const [dragging, setDragging] = useState(false)

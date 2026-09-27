@@ -384,7 +384,22 @@ export function HandoffProvider({ children }: { children: ReactNode }): ReactNod
     [projectId]
   )
 
-  const value = useMemo<HandoffFlow>(() => ({ records, handOff, reveal }), [records, handOff, reveal])
+  /*
+   * What the panes are handed is one function for the provider's lifetime.
+   * `handOff` itself follows the workspace, so handing it out as it is changed
+   * this context — and re-rendered every pane — on every rename and focus.
+   */
+  const handOffRef = useRef(handOff)
+  handOffRef.current = handOff
+  const stableHandOff = useCallback(
+    (paneId: string, target: HandoffTarget): Promise<void> => handOffRef.current(paneId, target),
+    []
+  )
+
+  const value = useMemo<HandoffFlow>(
+    () => ({ records, handOff: stableHandOff, reveal }),
+    [records, stableHandOff, reveal]
+  )
 
   return <HandoffContext.Provider value={value}>{children}</HandoffContext.Provider>
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Project, TerminalTab, Workspace } from '@shared/types'
 import { paneNameInTab } from '@shared/workspace'
 import { usePaneRuntime } from '@/hooks/usePaneRuntime'
@@ -8,11 +8,11 @@ import { usePaneActivity } from '@/lib/paneActivity'
 import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { reducedMotion } from '@/lib/motion'
 import { terminalHost } from '@/lib/terminals'
-import { useApp } from '@/state/AppState'
+import { useActions, useAppSelector } from '@/state/AppState'
 import { ActivityDot } from '../ActivityDot'
 import { AgentBadge } from '../AgentBadge'
 import { Icon } from '../Icon'
-import { PeekStage, cellsOf, useCloseTerminal, wallReference, type Cell } from '../MosaicView'
+import { PeekStage, useCloseTerminal, useStableCells, wallReference, type Cell } from '../MosaicView'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from '../Popover'
 import { Toggle } from '../settings/parts'
 import { StateChip } from './StateChip'
@@ -54,11 +54,15 @@ export function WallStrip({
   /** Every terminal at once: the Wall. */
   onWall: () => void
 }): ReactNode {
-  const { state } = useApp()
   const close = useCloseTerminal()
-  const cells = useMemo<Cell[]>(() => cellsOf(workspace.tabs), [workspace.tabs])
-  const reference = useMemo(() => wallReference(cells), [cells])
-  const lifesize = state.settings.mosaicText !== 'scaled'
+  const cells = useStableCells(workspace.tabs)
+  const measured = useMemo(() => wallReference(cells), [cells])
+  // By value, so a re-measure that came out the same leaves the memoised tiles be.
+  const reference = useMemo(
+    () => ({ width: measured.width, height: measured.height }),
+    [measured.width, measured.height]
+  )
+  const lifesize = useAppSelector((state) => state.settings.mosaicText !== 'scaled')
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId)
   const activePaneId = activeTab?.activePaneId ?? null
   const rowRef = useRef<HTMLDivElement | null>(null)
@@ -114,7 +118,8 @@ export function WallStrip({
 
 /* ------------------------------------------------------------------ tile */
 
-function StripTile({
+/* Memoised: every prop is stable or a primitive (see WallStrip). */
+const StripTile = memo(function StripTile({
   cell,
   project,
   reference,
@@ -138,9 +143,10 @@ function StripTile({
   onOpen: (paneId: string) => void
   onClose: (paneId: string) => void
 }): ReactNode {
-  const { state, actions } = useApp()
+  const actions = useActions()
+  const agentProfiles = useAppSelector((state) => state.settings.agentProfiles)
   const paneId = cell.leaf.id
-  const profile = resolveProfile(state.settings.agentProfiles, cell.leaf.profileId)
+  const profile = resolveProfile(agentProfiles, cell.leaf.profileId)
   const runtime = usePaneRuntime(paneId)
   const activity = usePaneActivity(paneId, runtime)
   // The terminal's one name ("Zeb", "Zeb 2") — see shared/terminal-names.ts.
@@ -332,7 +338,7 @@ function StripTile({
       />
     </div>
   )
-}
+})
 
 /* -------------------------------------------------------------- tab menu */
 
@@ -366,8 +372,8 @@ function TabMenu({
   onClose: () => void
   onRename: () => void
 }): ReactNode {
-  const { state, actions } = useApp()
-  const { agents, shells } = splitProfiles(state.settings.agentProfiles)
+  const actions = useActions()
+  const { agents, shells } = splitProfiles(useAppSelector((state) => state.settings.agentProfiles))
   const settings = tab.settings
 
   return (

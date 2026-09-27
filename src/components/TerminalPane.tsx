@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import type { PaneLeaf, Project } from '@shared/types'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import type { PaneLeaf, Project, TerminalTab } from '@shared/types'
 import { useHandoffFlow } from '@/hooks/useHandoffFlow'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
 import {
@@ -20,7 +20,7 @@ import { remoteControlName, REMOTE_CONTROL_URL } from '@shared/remote'
 import { paneNameInTab } from '@shared/workspace'
 import { enterOnce } from '@/lib/motion'
 import { usePaneActivity } from '@/lib/paneActivity'
-import { useActiveWorkspace, useApp } from '@/state/AppState'
+import { selectActiveWorkspace, useActions, useAppSelector, useAppStateGetter, type AppState } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
@@ -64,12 +64,23 @@ function watcherChip(runtime: { phone: boolean; browser: boolean }): { label: st
   return null
 }
 
+/** The tab in the active project that holds this pane, if any. */
+function tabHolding(state: AppState, paneId: string): TerminalTab | null {
+  return (
+    selectActiveWorkspace(state).tabs.find((t) => collectLeaves(t.root).some((l) => l.id === paneId)) ?? null
+  )
+}
+
 /**
  * One terminal: a slim header (badge, editable title, activity dot, split and
  * close affordances) over a live xterm. The xterm itself is owned by
  * terminalHost — this component only lends it a container.
+ *
+ * Memoised, and subscribed to the few pieces of app state it shows — not to
+ * the whole of it — so a click elsewhere in Forge does not re-render every
+ * pane. Anything read only when a button is pressed comes from `getState()`.
  */
-export function TerminalPane({
+export const TerminalPane = memo(function TerminalPane({
   leaf,
   project,
   focused,
@@ -80,9 +91,13 @@ export function TerminalPane({
   focused: boolean
   onlyPane: boolean
 }): ReactNode {
-  const { state, actions } = useApp()
-  const workspace = useActiveWorkspace()
-  const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
+  const actions = useActions()
+  const getState = useAppStateGetter()
+  const agentProfiles = useAppSelector((state) => state.settings.agentProfiles)
+  const fontSize = useAppSelector((state) => state.settings.terminalFontSize)
+  const fontFamily = useAppSelector((state) => state.settings.terminalFontFamily)
+  const remoteControlDefault = useAppSelector((state) => state.settings.remoteControlDefault)
+  const profile = resolveProfile(agentProfiles, leaf.profileId)
   // The pane's own permission override beats the profile's default, and is what
   // actually goes on the command line — see launchCommand.
   const override = leafPermissionMode(leaf)
@@ -135,22 +150,34 @@ export function TerminalPane({
    * tab it lives in, not to whichever one happens to be selected.
    */
   const handoff = useHandoffFlow()
-  const paneTab = workspace.tabs.find((t) => collectLeaves(t.root).some((l) => l.id === leaf.id)) ?? null
+  // Primitives off the pane's tab rather than the tab itself: a divider drag or
+  // a split elsewhere in the tab replaces the tab object, and must not re-render
+  // this pane for it.
+  const paneTabId = useAppSelector((state) => tabHolding(state, leaf.id)?.id ?? null)
   // The terminal's one name: its tab's ("Zeb") for the first pane, "Zeb 2" or
   // its own title for a split. See shared/terminal-names.ts.
-  const name = paneTab ? paneNameInTab(paneTab, leaf.id) : paneDisplayTitle(profile, leaf.title)
-  const firstInTab = paneTab ? collectLeaves(paneTab.root)[0]?.id === leaf.id : false
+  const tabName = useAppSelector((state) => {
+    const tab = tabHolding(state, leaf.id)
+    return tab ? paneNameInTab(tab, leaf.id) : null
+  })
+  const name = tabName ?? paneDisplayTitle(profile, leaf.title)
+  const firstInTab = useAppSelector((state) => {
+    const tab = tabHolding(state, leaf.id)
+    return tab ? collectLeaves(tab.root)[0]?.id === leaf.id : false
+  })
   const handoffAble = !isShellProfile(profile)
-  const handoffAutoSend = paneTab?.settings?.handoffAutoSend === true
+  const handoffAutoSend = useAppSelector((state) => tabHolding(state, leaf.id)?.settings?.handoffAutoSend === true)
   const handoffChip = paneHandoffChip(leaf.id, handoff.records)
   // Only while the menu is open: this walks every pane in the project, and a
   // wall of twelve panes would walk it twelve times on every render otherwise.
-  const targets = handoffOpen
+  // Subscribed only then, too — shut, the pane does not follow the workspace.
+  const handoffWorkspace = useAppSelector((state) => (handoffOpen ? selectActiveWorkspace(state) : null))
+  const targets = handoffWorkspace
     ? handoffTargets({
         paneId: leaf.id,
-        tab: paneTab,
-        workspace,
-        profiles: state.settings.agentProfiles,
+        tab: handoffWorkspace.tabs.find((t) => t.id === paneTabId) ?? null,
+        workspace: handoffWorkspace,
+        profiles: agentProfiles,
         records: handoff.records,
         isLive: (id) => terminalHost.runtime(id).status === 'live'
       })
@@ -161,8 +188,8 @@ export function TerminalPane({
   const specRef = useRef<TerminalSpec>({
     cwd: project.path,
     bootstrapCommand: launchCommand(profile, override),
-    fontSize: state.settings.terminalFontSize,
-    fontFamily: state.settings.terminalFontFamily,
+    fontSize,
+    fontFamily,
     accent: profile.accent,
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, leaf.title),
@@ -172,8 +199,8 @@ export function TerminalPane({
   specRef.current = {
     cwd: project.path,
     bootstrapCommand: launchCommand(profile, override),
-    fontSize: state.settings.terminalFontSize,
-    fontFamily: state.settings.terminalFontFamily,
+    fontSize,
+    fontFamily,
     accent: profile.accent,
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, leaf.title),
@@ -256,8 +283,8 @@ export function TerminalPane({
     // tab; a split pane has a title of its own, and clearing it gives back
     // "Zeb 2". Main hears the new name from useHubRuntime, which tells it
     // every terminal's name as it changes.
-    if (paneTab && firstInTab) {
-      if (title) actions.renameTab(paneTab.id, title)
+    if (paneTabId && firstInTab) {
+      if (title) actions.renameTab(paneTabId, title)
     } else {
       actions.renamePane(leaf.id, title)
     }
@@ -293,7 +320,7 @@ export function TerminalPane({
    * card dealt to the wrong pane.
    */
   const onDropTask = (taskId: string): void => {
-    const card = (workspace.tasks ?? []).find((t) => t.id === taskId)
+    const card = (selectActiveWorkspace(getState()).tasks ?? []).find((t) => t.id === taskId)
     if (!card) return
     claimFocus()
     terminalHost.focus(leaf.id)
@@ -315,7 +342,8 @@ export function TerminalPane({
    * same contract dictation honours.
    */
   const onDropTab = async (tabId: string): Promise<void> => {
-    const tab = workspace.tabs.find((t) => t.id === tabId)
+    const state = getState()
+    const tab = selectActiveWorkspace(state).tabs.find((t) => t.id === tabId)
     if (!tab) return
     const donors = collectLeaves(tab.root).filter((l) => l.id !== leaf.id && l.sessionId)
     const claude = donors.filter((l) =>
@@ -395,8 +423,7 @@ export function TerminalPane({
    * Code. Recomputed rather than reported back from main so the header updates
    * the moment the setting changes, without a round trip.
    */
-  const remoteOn =
-    state.settings.remoteControlDefault && profile.remoteControl === true && isClaudeCommand(profile.command)
+  const remoteOn = remoteControlDefault && profile.remoteControl === true && isClaudeCommand(profile.command)
 
   // The title the session was launched under, not the one it now wears — see
   // terminalHost.launchedAs.
@@ -754,7 +781,7 @@ export function TerminalPane({
         open={handoffOpen}
         onClose={() => setHandoffOpen(false)}
         targets={targets}
-        profiles={state.settings.agentProfiles}
+        profiles={agentProfiles}
         autoSend={handoffAutoSend}
         onPick={(target) => {
           setHandoffOpen(false)
@@ -774,4 +801,4 @@ export function TerminalPane({
       />
     </section>
   )
-}
+})

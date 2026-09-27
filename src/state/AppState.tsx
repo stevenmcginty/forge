@@ -3,9 +3,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
+  useSyncExternalStore,
   type ReactNode
 } from 'react'
 import {
@@ -1639,6 +1641,28 @@ interface Ctx {
 
 const AppStateContext = createContext<Ctx | null>(null)
 
+/**
+ * The same state, for components that must not re-render on every dispatch.
+ *
+ * `useApp()` hands out one context value that changes on every reducer step, so
+ * everything under it re-renders on every click anywhere — a rename, the rail,
+ * a setting — times the number of terminals on the Wall. The store below is
+ * what `useAppSelector` reads instead: a component subscribes to the one slice
+ * it shows and is left alone when anything else changes.
+ *
+ * The snapshot is written during the provider's render (like liveStateRef), so
+ * a child rendering in the same pass reads the state that pass is about; the
+ * subscribers are told after commit, so a memoised child that sat the pass out
+ * catches up before paint. Both contexts below hold values that never change.
+ */
+interface AppStore {
+  get(): AppState
+  subscribe(listener: () => void): () => void
+}
+
+const AppStoreContext = createContext<AppStore | null>(null)
+const AppActionsContext = createContext<AppActions | null>(null)
+
 /* -------------------------------------------------------------- provider */
 
 export function AppStateProvider({ children }: { children: ReactNode }): ReactNode {
@@ -1656,6 +1680,25 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
    */
   const liveStateRef = useRef(state)
   liveStateRef.current = state
+
+  /* -------------------------------------------------------------- store */
+
+  const listeners = useRef(new Set<() => void>())
+  const store = useMemo<AppStore>(
+    () => ({
+      get: () => liveStateRef.current,
+      subscribe: (listener) => {
+        listeners.current.add(listener)
+        return () => {
+          listeners.current.delete(listener)
+        }
+      }
+    }),
+    []
+  )
+  useLayoutEffect(() => {
+    for (const listener of [...listeners.current]) listener()
+  }, [state])
 
   /* ------------------------------------------------------------ hydrate */
 
@@ -1971,19 +2014,25 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
 
   /* -------------------------------------------------------------- actions */
 
-  const defaultProfileFor = useCallback(
-    (projectId: string | null): string => {
-      const project = state.projects.find((p) => p.id === projectId)
-      return project?.defaultProfileId ?? DEFAULT_PROFILE_ID
-    },
-    [state.projects]
-  )
+  /*
+   * Every action reads the state it needs through liveStateRef, never from this
+   * render's closure, so `actions` is one object for the provider's lifetime.
+   * Anything holding it — every pane and tile — is then not re-rendered just
+   * because the rail was toggled or a theme saved. A dispatch applies against
+   * the reducer's own current state whenever it runs; the reads here only build
+   * payloads and guards, and the ref is at least as fresh as a closure was.
+   */
+  const defaultProfileFor = useCallback((projectId: string | null): string => {
+    const project = liveStateRef.current.projects.find((p) => p.id === projectId)
+    return project?.defaultProfileId ?? DEFAULT_PROFILE_ID
+  }, [])
 
   const actions = useMemo<AppActions>(() => {
     return {
       async addProject() {
         const folder = await window.forge.pickFolder()
         if (!folder) return
+        const state = liveStateRef.current
         if (state.projects.some((p) => p.path.toLowerCase() === folder.toLowerCase())) {
           const existing = state.projects.find((p) => p.path.toLowerCase() === folder.toLowerCase())!
           dispatch({ type: 'selectProject', projectId: existing.id })
@@ -2005,6 +2054,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         })
       },
       addProjectPath(path, name) {
+        const state = liveStateRef.current
         const existing = state.projects.find((p) => p.path.toLowerCase() === path.toLowerCase())
         if (existing) {
           dispatch({ type: 'selectProject', projectId: existing.id })
@@ -2035,17 +2085,18 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       moveProject: (from, to) => dispatch({ type: 'moveProject', from, to }),
       selectProject: (id) => dispatch({ type: 'selectProject', projectId: id }),
       revealProject: (id) => {
-        const project = state.projects.find((p) => p.id === id)
+        const project = liveStateRef.current.projects.find((p) => p.id === id)
         if (project) void window.forge.openPath(project.path)
       },
-      toggleRail: () => dispatch({ type: 'patchSettings', patch: { railCollapsed: !state.settings.railCollapsed } }),
+      toggleRail: () =>
+        dispatch({ type: 'patchSettings', patch: { railCollapsed: !liveStateRef.current.settings.railCollapsed } }),
       setVoiceHub: (patch) =>
         dispatch({
           type: 'patchSettings',
-          patch: { voiceHub: { ...(state.settings.voiceHub ?? DEFAULT_HUB), ...patch } }
+          patch: { voiceHub: { ...(liveStateRef.current.settings.voiceHub ?? DEFAULT_HUB), ...patch } }
         }),
       toggleVoiceHubCard: () => {
-        const hub = state.settings.voiceHub ?? DEFAULT_HUB
+        const hub = liveStateRef.current.settings.voiceHub ?? DEFAULT_HUB
         // `expand` reaches the card from docked *and* from floating — one key,
         // one destination, wherever the hub was. See nextHubMode's table.
         const mode = nextHubMode(hub.mode, hub.mode === 'expanded' ? 'minimise' : 'expand')
@@ -2069,7 +2120,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       saveProfile: (profile) => dispatch({ type: 'saveProfile', profile }),
       deleteProfile: (id) => dispatch({ type: 'deleteProfile', id }),
       duplicateProfile: (id) => {
-        const source = state.settings.agentProfiles.find((p) => p.id === id)
+        const source = liveStateRef.current.settings.agentProfiles.find((p) => p.id === id)
         if (!source) return
         dispatch({
           type: 'saveProfile',
@@ -2085,7 +2136,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       newTab: (profileId, permissionMode) =>
         dispatch({
           type: 'newTab',
-          profileId: profileId ?? defaultProfileFor(activeProjectId),
+          profileId: profileId ?? defaultProfileFor(liveStateRef.current.activeProjectId),
           ...(permissionMode ? { permissionMode } : {})
         }),
       openToolPane: (title, command, submit) => {
@@ -2094,6 +2145,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         // the button says. The built-in pwsh profile is re-seeded by the store
         // if it is ever deleted, but a renamed or hand-edited settings.json is
         // still allowed to have moved it, so any shell profile will do.
+        const state = liveStateRef.current
         const shell =
           state.settings.agentProfiles.find((p) => p.id === 'pwsh') ??
           state.settings.agentProfiles.find((p) => isShellProfile(p))
@@ -2139,7 +2191,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           paneId,
           ...(projectId && projectId !== live.activeProjectId ? { projectId } : {}),
           profileId:
-            wanted && state.settings.agentProfiles.some((p) => p.id === wanted)
+            wanted && live.settings.agentProfiles.some((p) => p.id === wanted)
               ? wanted
               : defaultProfileFor(projectId),
           // Every agent tab takes the next pool name, like one opened by hand —
@@ -2216,13 +2268,14 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
 
       setTheme: (id) => dispatch({ type: 'patchSettings', patch: { themeId: id } }),
       saveCustomTheme: (theme) => {
-        const rest = state.settings.customThemes.filter((t) => t.id !== theme.id)
+        const rest = liveStateRef.current.settings.customThemes.filter((t) => t.id !== theme.id)
         dispatch({
           type: 'patchSettings',
           patch: { customThemes: [...rest, { ...theme, custom: true }], themeId: theme.id }
         })
       },
       deleteCustomTheme: (id) => {
+        const state = liveStateRef.current
         const customThemes = state.settings.customThemes.filter((t) => t.id !== id)
         // Deleting the theme you are wearing has to leave you wearing something.
         const themeId = state.settings.themeId === id ? 'volt' : state.settings.themeId
@@ -2233,16 +2286,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       setAccountName: (name) => dispatch({ type: 'patchSettings', patch: { accountName: name.trim().slice(0, 40) } }),
       setAccountColor: (color) => dispatch({ type: 'patchSettings', patch: { accountColor: color } })
     }
-  }, [
-    activeProjectId,
-    defaultProfileFor,
-    state.projects,
-    state.settings.agentProfiles,
-    state.settings.customThemes,
-    state.settings.themeId,
-    state.settings.railCollapsed,
-    state.settings.voiceHub
-  ])
+  }, [defaultProfileFor])
 
   /* ------------------------------------------------- forge mobile commands
    *
@@ -2531,11 +2575,15 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions])
 
   return (
-    <AppStateContext.Provider value={value}>
-      {children}
-      {/* The tile X's "close a working agent?" — one host for every caller. */}
-      <CloseConfirmHost />
-    </AppStateContext.Provider>
+    <AppStoreContext.Provider value={store}>
+      <AppActionsContext.Provider value={actions}>
+        <AppStateContext.Provider value={value}>
+          {children}
+          {/* The tile X's "close a working agent?" — one host for every caller. */}
+          <CloseConfirmHost />
+        </AppStateContext.Provider>
+      </AppActionsContext.Provider>
+    </AppStoreContext.Provider>
   )
 }
 
@@ -2547,31 +2595,101 @@ export function useApp(): Ctx {
   return ctx
 }
 
-export function useActiveProject(): Project | null {
-  const { state } = useApp()
-  return state.projects.find((p) => p.id === state.activeProjectId) ?? null
+/** The actions alone: one object for the app's lifetime, so no re-renders. */
+export function useActions(): AppActions {
+  const actions = useContext(AppActionsContext)
+  if (!actions) throw new Error('useActions must be used inside <AppStateProvider>')
+  return actions
 }
 
-export function useActiveWorkspace(): Workspace {
-  const { state } = useApp()
+function useAppStore(): AppStore {
+  const store = useContext(AppStoreContext)
+  if (!store) throw new Error('useAppSelector must be used inside <AppStateProvider>')
+  return store
+}
+
+/**
+ * The latest state, read on demand — for event handlers that need a field the
+ * component does not show, so it need not subscribe to it. Stable.
+ */
+export function useAppStateGetter(): () => AppState {
+  return useAppStore().get
+}
+
+/**
+ * One slice of the state; the component re-renders only when that slice
+ * changes (`isEqual`, `Object.is` by default).
+ *
+ * A selector that builds a fresh array or object each call must pass an
+ * `isEqual` that sees through that (`shallowEqual`), or it would re-render on
+ * every dispatch — the last equal value is handed back, so what the component
+ * receives stays referentially stable.
+ */
+export function useAppSelector<T>(selector: (state: AppState) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
+  const store = useAppStore()
+  const last = useRef<{ state: AppState; selector: (state: AppState) => T; value: T } | null>(null)
+  const getSnapshot = (): T => {
+    const state = store.get()
+    const prev = last.current
+    if (prev && prev.state === state && prev.selector === selector) return prev.value
+    const next = selector(state)
+    const value = prev && isEqual(prev.value, next) ? prev.value : next
+    last.current = { state, selector, value }
+    return value
+  }
+  return useSyncExternalStore(store.subscribe, getSnapshot)
+}
+
+/** Same keys, and `Object.is` on each value — one level deep. */
+export function shallowEqual<T>(a: T, b: T): boolean {
+  if (Object.is(a, b)) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const ka = Object.keys(a)
+  const kb = Object.keys(b)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false
+    if (!Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false
+  }
+  return true
+}
+
+/** The active project's workspace, or the shared empty one. */
+export function selectActiveWorkspace(state: AppState): Workspace {
   return workspaceOf(state, state.activeProjectId)
 }
 
+/**
+ * The empty wall, as one object: `mosaicOf` mints a fresh one per call, which
+ * a selector would read as a change on every dispatch.
+ */
+const NO_MOSAIC: MosaicState = emptyMosaic()
+
+export function useActiveProject(): Project | null {
+  return useAppSelector((state) => state.projects.find((p) => p.id === state.activeProjectId) ?? null)
+}
+
+export function useActiveWorkspace(): Workspace {
+  return useAppSelector(selectActiveWorkspace)
+}
+
 export function useActiveTab(): TerminalTab | null {
-  const ws = useActiveWorkspace()
-  return ws.tabs.find((t) => t.id === ws.activeTabId) ?? null
+  return useAppSelector((state) => {
+    const ws = selectActiveWorkspace(state)
+    return ws.tabs.find((t) => t.id === ws.activeTabId) ?? null
+  })
 }
 
 export function useViewMode(): WorkspaceViewMode {
-  return useActiveWorkspace().viewMode ?? 'tabs'
+  return useAppSelector((state) => selectActiveWorkspace(state).viewMode ?? 'tabs')
 }
 
 /** The active project's wall layout — Grid (auto) until someone switches it to Free. */
 export function useMosaic(): MosaicState {
-  return mosaicOf(useActiveWorkspace())
+  return useAppSelector((state) => selectActiveWorkspace(state).mosaic ?? NO_MOSAIC)
 }
 
 export function usePaneCount(): { used: number; max: number } {
-  const { state } = useApp()
-  return { used: totalPanes(state), max: MAX_SESSIONS }
+  return useAppSelector((state) => ({ used: totalPanes(state), max: MAX_SESSIONS }), shallowEqual)
 }
