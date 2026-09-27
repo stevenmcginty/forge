@@ -780,7 +780,7 @@ interface Client {
   /**
    * The resume ticket this socket's `hello-ok` carried, or null. Handed back to
    * `auth.resumeClosed` when the socket goes, which starts its
-   * PASSKEY_RESUME_MS. See `WebHelloOkFrame.resume`.
+   * RESUME_IDLE_MS. See `WebHelloOkFrame.resume`.
    */
   resume: string | null
   /** This socket's identity for the grid-ownership rule. See `viewerSeq`. */
@@ -1544,8 +1544,8 @@ export class WebServer {
       // socket that never said hello never owned anything and this costs a walk
       // of an empty map.
       this.host.release?.(client.viewer)
-      // The page behind a passkey unlock has PASSKEY_RESUME_MS from now to come
-      // back on its ticket without a second fingerprint.
+      // The page behind an unlock has RESUME_IDLE_MS from now to come back on
+      // its remembered-phone ticket without the PIN or a fingerprint.
       if (client.resume) {
         this.host.auth.resumeClosed(client.resume)
         client.resume = null
@@ -2042,8 +2042,8 @@ export class WebServer {
       // desktop that would not understand the ask. No field at all when there
       // is nothing to announce, exactly as before these existed.
       ...(features.length ? { features } : {}),
-      // The next hello's way past the fingerprint, for PASSKEY_RESUME_MS after
-      // this socket closes. Only a passkey's (or a ticket's) socket gets one.
+      // The next hello's way past the PIN, for RESUME_IDLE_MS after this
+      // socket closes. Every socket unlocked under a PIN gets one.
       ...(client.resume ? { resume: client.resume } : {})
     })
     // Straight after the hello, never inside it: a browser that connects while

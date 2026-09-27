@@ -565,17 +565,14 @@ export const TOKEN_REFRESH_MS = 50 * 60_000
  * described on this wire: what travels is what somebody typed, once, over a
  * socket already inside TLS and already past a verified Firebase ID token.
  *
- * There is no "trust this browser for thirty days", and the only thing that
- * excuses the question *at the door* is having just answered it. The PIN is
- * not a device credential — it is the thing that says the person holding the
- * account is the person who set it up — so the desktop still asks on every
- * connection, and nothing on disk remembers a yes. What PIN_GRACE_MS buys is
- * narrower: the *page* may replay digits it already typed, from memory and
- * never from disk, so a phone that dropped its socket when the tab was hidden
- * does not make somebody retype four digits they typed thirty seconds ago. A
- * reload, a discarded tab, or a longer absence sends no PIN and is asked
- * again. A passkey answer cannot be replayed that way, so its equivalent is
- * the desktop's own single-use ticket — see PASSKEY_RESUME_MS.
+ * The PIN itself is never remembered: the page may replay digits it already
+ * typed, from memory and never from disk, for PIN_GRACE_MS — so a phone that
+ * dropped its socket when the tab was hidden does not make somebody retype
+ * four digits they typed thirty seconds ago — and a reload forgets them. What
+ * *is* remembered is the phone: every unlock under a PIN, by digits, passkey
+ * or ticket, hands the page a single-use "remember this phone" ticket that
+ * answers the question on the next connection instead, until the phone goes
+ * RESUME_IDLE_MS unused or the PIN changes — see RESUME_IDLE_MS.
  */
 
 /**
@@ -605,24 +602,41 @@ export const PIN_MAX_DIGITS = 12
 export const PIN_GRACE_MS = 10 * 60 * 1000
 
 /**
- * How long after a passkey-unlocked socket closes its page may come back
- * without a second fingerprint.
+ * How long a remembered phone may go unused before it is asked for the PIN
+ * (or a fingerprint) again: seven days.
  *
- * PIN_GRACE_MS for passkeys, and narrower on purpose. An assertion is signed
- * over a single-use challenge, so the page has nothing of its own to replay;
- * instead the desktop hands a passkey-admitted socket a `resume` ticket on
- * `hello-ok` — 32 random bytes, held by the page in RAM only and by the
- * desktop as a SHA-256 in memory only. A `hello` carrying it, and no PIN and
- * no passkey, is admitted with a passkey's rights (never a PIN's) while its
- * socket is still open or until this long after it closed, from the same
- * browser, page and PIN — once: every use spends it and the `hello-ok` brings
- * a fresh one. Anything else about it is answered as a `hello` with no
+ * "Remember this phone". Every unlock under a PIN — typed digits, a passkey,
+ * or a ticket — hands the socket a `resume` ticket on `hello-ok`: 32 random
+ * bytes, kept by the page in localStorage and by the desktop only as a
+ * SHA-256, in `web-remembered.json` in its data directory, so it survives the
+ * screen going off, the tab being killed, a reload and a desktop restart. A
+ * `hello` carrying it, and no PIN and no passkey, is admitted with a
+ * passkey's rights (never a PIN's, so a ticket can never enrol a passkey)
+ * while its socket is still open or until this long after it closed, from the
+ * same account, browser, page and PIN — once: every use spends it and the
+ * `hello-ok` brings a fresh one, so "unused" means no connection at all for
+ * this long. Anything else about it is answered as a `hello` with no
  * credential at all, `pin-required`, and never struck: 256 random bits are
- * not a secret anybody guesses. Never issued after a PIN unlock, which has
- * PIN_GRACE_MS, nor when no PIN is set. An older desktop sends none, and the
- * page simply asks as it always did.
+ * not a secret anybody guesses. Changing the PIN voids every ticket, the
+ * desktop's settings can forget one phone or all of them, and signing the
+ * page out forgets its own. Never issued when no PIN is set. An older desktop
+ * sends none, and the page simply asks as it always did.
  */
-export const PASSKEY_RESUME_MS = 30_000
+export const RESUME_IDLE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * One remembered phone, as the desktop's settings list it — one row per
+ * browser, however many live tickets it holds. See RESUME_IDLE_MS. Desktop
+ * IPC only; never on the wire to a browser.
+ */
+export interface WebRememberedPhone {
+  /** The browser's per-profile id, which is what "Forget" names. */
+  deviceId: string
+  /** What the browser called itself. Untrusted display text. */
+  deviceName: string
+  /** The last time it was connected (now, while it is). */
+  lastUsedAt: number
+}
 
 /* ----------------------------------------------------------------- passkeys
  *
@@ -838,12 +852,11 @@ export interface WebHelloFrame {
    * `pin-required`, and the next carries what the person typed — a round trip,
    * bought so a desktop with no PIN set never causes one to be typed at all.
    *
-   * Asked on **every** connection at the door. There is no "remember this
-   * browser" and nothing on the desktop that could remember one. After a
-   * successful unlock the *page* may replay the same digits from memory for
-   * PIN_GRACE_MS after it was last visible, so a phone that hid the tab does
-   * not re-prompt immediately. A reload forgets them; they are never written
-   * down. (After a *passkey* unlock the equivalent is `resume`, below.)
+   * Asked at the door on every connection that does not carry a live
+   * `resume` ticket — the "remember this phone" ticket every unlock earns,
+   * below and at RESUME_IDLE_MS. After a successful unlock the *page* may
+   * also replay the same digits from memory for PIN_GRACE_MS after it was
+   * last visible. A reload forgets them; the digits are never written down.
    */
   pin?: string
   /**
@@ -855,9 +868,9 @@ export interface WebHelloFrame {
    */
   passkey?: WebPasskeyAssertion
   /**
-   * The single-use ticket the last passkey-unlocked `hello-ok` carried, sent
-   * in place of a fresh fingerprint — see PASSKEY_RESUME_MS. Only when there
-   * is neither `pin` nor `passkey`: either of those is judged and this is
+   * The single-use "remember this phone" ticket the last `hello-ok` carried,
+   * sent in place of the PIN or a fingerprint — see RESUME_IDLE_MS. Only when
+   * there is neither `pin` nor `passkey`: either of those is judged and this is
    * ignored. Optional field, added without a WEB_PROTO bump on the rule at the
    * top of this file; an older desktop never reads it and asks as before.
    */
@@ -1686,12 +1699,12 @@ export interface WebHelloOkFrame {
   features?: string[]
   /**
    * A fresh single-use ticket this page may present as `WebHelloFrame.resume`
-   * on its next `hello`, instead of asking for the fingerprint again — see
-   * PASSKEY_RESUME_MS. Sent only to a socket that was admitted by a passkey or
-   * by a ticket; absent after a PIN unlock, with no PIN set, and from an older
-   * desktop. The ticket itself is the announcement, so no features entry.
-   * Held in RAM only. Optional field, added without a WEB_PROTO bump on the
-   * rule at the top of this file.
+   * on its next `hello`, instead of asking for the PIN or fingerprint again —
+   * see RESUME_IDLE_MS. Sent to every socket unlocked under a PIN, whether by
+   * the digits, a passkey or a ticket; absent with no PIN set and from an
+   * older desktop. The ticket itself is the announcement, so no features
+   * entry. The page keeps it in localStorage. Optional field, added without a
+   * WEB_PROTO bump on the rule at the top of this file.
    */
   resume?: string
 }

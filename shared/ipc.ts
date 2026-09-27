@@ -483,6 +483,15 @@ export const IPC = {
    */
   webPinClear: 'web:pin-clear',
   /**
+   * The remembered phones — browsers whose next connection needs no PIN
+   * because they unlocked once and have not gone RESUME_IDLE_MS unused (see
+   * shared/web.ts) — and forgetting one by device id, or all of them. Each
+   * answers with the list as it stands after.
+   */
+  webRememberedList: 'web:remembered-list',
+  webRememberedForget: 'web:remembered-forget',
+  webRememberedForgetAll: 'web:remembered-forget-all',
+  /**
    * A layout operation arriving from a browser. Main → renderer, and now only
    * for `select-project`: everything else is performed in main against the
    * authoritative layout (electron/layout-engine.ts) and pushed back down on

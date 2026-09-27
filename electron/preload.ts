@@ -235,6 +235,9 @@ const api: ForgeApi = {
     // renderer is not the thing that should be settling that.
     setPin: (pin) => ipcRenderer.invoke(IPC.webPinSet, pin ?? ''),
     clearPin: () => ipcRenderer.invoke(IPC.webPinClear),
+    rememberedList: () => ipcRenderer.invoke(IPC.webRememberedList),
+    rememberedForget: (deviceId) => ipcRenderer.invoke(IPC.webRememberedForget, deviceId ?? ''),
+    rememberedForgetAll: () => ipcRenderer.invoke(IPC.webRememberedForgetAll),
     onStatus: (cb) => subscribe(IPC.webStatusEvent, cb),
     onCommand: (cb) => subscribe(IPC.webCommand, cb),
     onProjectAdd: (cb) => subscribe(IPC.webProjectAdd, cb),

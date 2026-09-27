@@ -101,7 +101,14 @@ import type {
   ForemanToolRequest,
   ForemanToolResult
 } from './foreman'
-import type { WebMirrorChunk, WebMirrorConfig, WebProjectRemoveEvent, WebVoiceAskEvent, WebVoiceAskReply } from './web'
+import type {
+  WebMirrorChunk,
+  WebMirrorConfig,
+  WebProjectRemoveEvent,
+  WebRememberedPhone,
+  WebVoiceAskEvent,
+  WebVoiceAskReply
+} from './web'
 import type { HandoffStartRemoteEvent } from './handoffview'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
@@ -787,6 +794,15 @@ export interface ForgeApi {
      * screen *control* is refused outright — see `webControlEnabled`.
      */
     clearPin(): Promise<WebStatus>
+    /**
+     * The phones whose next connection needs no PIN, most recently used
+     * first, and forgetting one or all — each answers with the list after.
+     * See RESUME_IDLE_MS in shared/web.ts. Optional because a stale preload
+     * bundle has none: callers must use `?.`.
+     */
+    rememberedList?(): Promise<WebRememberedPhone[]>
+    rememberedForget?(deviceId: string): Promise<WebRememberedPhone[]>
+    rememberedForgetAll?(): Promise<WebRememberedPhone[]>
     onStatus(cb: (s: WebStatus) => void): () => void
     /**
      * A layout operation arrived from a browser. The renderer owns tabs and

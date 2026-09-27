@@ -353,7 +353,7 @@ async function main() {
 
   /**
    * Hang an admitted browser up and wait until the desktop has noticed — the
-   * moment a resume ticket's PASSKEY_RESUME_MS starts. Named, because other
+   * moment a remembered-phone ticket's RESUME_IDLE_MS starts. Named, because other
    * sockets may be closing at the same time.
    */
   async function hangUp(browser, name) {
@@ -369,8 +369,8 @@ async function main() {
 
   /** Why the desktop said no to the last passkey — the log line the browser never sees. */
   const why = () => logLines.filter((l) => l.startsWith('web auth: passkey refused')).at(-1) ?? ''
-  /** Why the desktop said no to the last resume ticket — also the log's alone. */
-  const whyResume = () => logLines.filter((l) => l.startsWith('web auth: resume ticket refused')).at(-1) ?? ''
+  /** Why the desktop said no to the last remembered-phone ticket — also the log's alone. */
+  const whyResume = () => logLines.filter((l) => l.startsWith('web auth: remembered-phone ticket refused')).at(-1) ?? ''
   /** Log lines saying a correct answer over a stale challenge was asked again. */
   const retries = () => logLines.filter((l) => l.includes('correctly — asking again')).length
 
@@ -528,15 +528,22 @@ async function main() {
       browser.socket.close()
     }
 
-    /* ------------------------------------------------------ resume tickets */
+    /* -------------------------------------------- remembered-phone tickets */
     {
       const isTicket = (t) => typeof t === 'string' && Buffer.from(t, 'base64url').length === 32
       const asked = (frame) => frame.type === 'refused' && frame.reason === 'pin-required'
       const first = await hello({ passkey: phoneA.get((await unlockOptions()).passkey), deviceName: 'Resume-1' })
       log(first.frame.type === 'hello-ok' && isTicket(first.frame.resume), 'a passkey hello-ok carries a 32-byte resume ticket')
-      const byPin = await hello({ pin: PIN })
-      log(byPin.frame.type === 'hello-ok' && !('resume' in byPin.frame), 'a PIN hello-ok carries no ticket')
-      byPin.browser.socket.close()
+      const byPin = await hello({ pin: PIN, deviceName: 'Resume-Pin' })
+      log(byPin.frame.type === 'hello-ok' && isTicket(byPin.frame.resume), 'a PIN hello-ok carries a ticket too')
+      await hangUp(byPin.browser, 'Resume-Pin')
+      const fromPin = await hello({ resume: byPin.frame.resume })
+      const fromPinList = fromPin.frame.type === 'hello-ok' ? await request(fromPin.browser, { kind: 'passkey-list' }) : null
+      log(
+        fromPin.frame.type === 'hello-ok' && isTicket(fromPin.frame.resume) && fromPinList?.canRegister === false,
+        `a ticket first earned by a PIN admits with a passkey's rights, not a PIN's: it may not enrol (${fromPin.frame.type})`
+      )
+      fromPin.browser.socket.close()
 
       // The desktop has not noticed the phone's old socket die yet: still good.
       const whileOpen = await hello({ resume: first.frame.resume, deviceName: 'Resume-2' })
@@ -547,13 +554,18 @@ async function main() {
       await hangUp(first.browser, 'Resume-1')
       await hangUp(whileOpen.browser, 'Resume-2')
 
-      skew += 29_000
+      // Past the old 30 s window: a remembered phone is good for RESUME_IDLE_MS
+      // (checked on a fake clock in scripts/web-auth-check.mjs).
+      skew += 31_000
       const resumed = await hello({ resume: whileOpen.frame.resume, deviceName: 'Resume-3' })
       log(
         resumed.frame.type === 'hello-ok' && isTicket(resumed.frame.resume) && resumed.frame.resume !== whileOpen.frame.resume,
-        `a ticket 29 s after its socket closed is admitted with no PIN and no passkey, and handed a new, different one (${resumed.frame.type})`
+        `a ticket 31 s after its socket closed is admitted with no PIN and no passkey, and handed a new, different one (${resumed.frame.type})`
       )
-      log(logLines.some((l) => l.includes('"Resume-3" admitted') && l.includes('with a resume ticket')), 'and the desk log says it came in on a ticket')
+      log(
+        logLines.some((l) => l.includes('"Resume-3" admitted') && l.includes('with a remembered-phone ticket')),
+        'and the desk log says it came in on a remembered-phone ticket'
+      )
       const listed = await request(resumed.browser, { kind: 'passkey-list' })
       const begun = await request(resumed.browser, { kind: 'passkey-register-begin' })
       log(
@@ -568,9 +580,6 @@ async function main() {
       )
 
       await hangUp(resumed.browser, 'Resume-3')
-      skew += 31_000
-      const late = await hello({ resume: resumed.frame.resume })
-      log(asked(late.frame) && whyResume().endsWith('expired'), `a ticket 31 s after its socket closed is asked for the PIN (${whyResume()})`)
 
       const fresh = await hello({ passkey: phoneA.get((await unlockOptions()).passkey) })
       const otherDevice = await hello({ resume: fresh.frame.resume, deviceId: 'dev-2' })

@@ -514,8 +514,12 @@ export interface PasskeyStorage {
   write: (text: string) => void
 }
 
-/** A PasskeyStorage on one file, written temp-then-rename like electron/web/push.ts. */
-export function filePasskeyStorage(path: string): PasskeyStorage {
+/**
+ * A PasskeyStorage on one file, written temp-then-rename like electron/web/push.ts.
+ * Also the shape electron/web/auth.ts keeps its remembered-phone tickets in;
+ * `what` names the contents in the warning a failed save logs.
+ */
+export function filePasskeyStorage(path: string, what = 'passkeys'): PasskeyStorage {
   return {
     read: () => {
       try {
@@ -531,7 +535,7 @@ export function filePasskeyStorage(path: string): PasskeyStorage {
         writeFileSync(temp, text, 'utf8')
         renameSync(temp, path)
       } catch (err) {
-        console.warn(`[web] could not save passkeys: ${String(err)}`)
+        console.warn(`[web] could not save ${what}: ${String(err)}`)
       }
     }
   }

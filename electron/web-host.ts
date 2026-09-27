@@ -18,6 +18,7 @@ import {
   type WebPasskeyAssertion,
   type WebPasskeyRequestOptions,
   type WebProjectRemoveEvent,
+  type WebRememberedPhone,
   type WebVoiceAskEvent,
   type WebVoiceAskReply,
   type WebVoiceToolAnswer
@@ -422,6 +423,10 @@ function getAuth(): WebAuth {
       // directory. Public keys only; voided whenever `webPin` changes — see
       // electron/web/passkey.ts.
       passkeys: filePasskeyStorage(join(getDataDir(), 'web-passkeys.json')),
+      // Remembered phones, so a phone that unlocked once is not asked again
+      // until it goes RESUME_IDLE_MS unused. Ticket digests only, never a
+      // ticket; voided whenever `webPin` changes — see electron/web/auth.ts.
+      resumes: filePasskeyStorage(join(getDataDir(), 'web-remembered.json'), 'remembered phones'),
       log: (line) => console.log(`[web] ${line}`)
     })
   }
@@ -2159,6 +2164,22 @@ export function registerWebHandlers(): void {
     setSettings({ webPin: '' })
     report('The PIN is off — browsers signed in as this account get in without one.')
     return webStatus()
+  })
+
+  /**
+   * The phones that need no PIN on their next connection, and forgetting
+   * them. Each answers with the list as it stands after. See RESUME_IDLE_MS
+   * in shared/web.ts; `getAuth()` costs nothing if Forge Web never started.
+   */
+  ipcMain.handle(IPC.webRememberedList, (): WebRememberedPhone[] => getAuth().rememberedList())
+  ipcMain.handle(IPC.webRememberedForget, (_e, deviceId: unknown): WebRememberedPhone[] => {
+    const id = typeof deviceId === 'string' ? deviceId : ''
+    if (id) getAuth().rememberedForget(id)
+    return getAuth().rememberedList()
+  })
+  ipcMain.handle(IPC.webRememberedForgetAll, (): WebRememberedPhone[] => {
+    getAuth().rememberedForgetAll()
+    return getAuth().rememberedList()
   })
 
   /**

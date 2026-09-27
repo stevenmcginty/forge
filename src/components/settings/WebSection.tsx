@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { normaliseNgrokDomain } from '@shared/mobile'
-import { PIN_MAX_DIGITS, PIN_MIN_DIGITS } from '@shared/web'
+import { PIN_MAX_DIGITS, PIN_MIN_DIGITS, type WebRememberedPhone } from '@shared/web'
 import type { WebStatus, WebTunnelMode } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { ForgeAccountForm } from './ForgeAccountForm'
@@ -134,6 +134,12 @@ export function WebSection(): ReactNode {
   const [pinConfirm, setPinConfirm] = useState('')
   const [pinEditing, setPinEditing] = useState(false)
   const [pinError, setPinError] = useState('')
+  /*
+   * The remembered phones — see RESUME_IDLE_MS in shared/web.ts. Null until
+   * the first answer, and for good on a stale preload that has no such call,
+   * in which case the block simply is not drawn.
+   */
+  const [remembered, setRemembered] = useState<WebRememberedPhone[] | null>(null)
 
   // Live rather than polled: main pushes a whole `WebStatus` on every change it
   // makes — a socket opening, a tunnel dying, a sign-in landing — and this
@@ -213,6 +219,38 @@ export function WebSection(): ReactNode {
       setBusy(false)
     }
   }, [pinDraft])
+
+  /*
+   * Re-read on mount, and whenever the PIN comes or goes (a change voids
+   * every phone) or a browser connects or leaves (an unlock remembers one).
+   * Guarded: a stale preload has no `rememberedList`, and an unguarded call
+   * would take the whole renderer down.
+   */
+  const pinSet = status?.pinSet ?? false
+  const connected = status?.connected ?? 0
+  useEffect(() => {
+    if (!pinSet) return
+    let live = true
+    void window.forge.web
+      .rememberedList?.()
+      .then((list) => {
+        if (live) setRemembered(list)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [pinSet, connected])
+
+  const forgetPhone = useCallback(async (deviceId: string) => {
+    const list = await window.forge.web.rememberedForget?.(deviceId)
+    if (list) setRemembered(list)
+  }, [])
+
+  const forgetAllPhones = useCallback(async () => {
+    const list = await window.forge.web.rememberedForgetAll?.()
+    if (list) setRemembered(list)
+  }, [])
 
   const cancelPinEdit = useCallback(() => {
     setPinDraft('')
@@ -616,6 +654,34 @@ export function WebSection(): ReactNode {
 
         {pinLocalError && <p className="web-error">{pinLocalError}</p>}
         {pinError && <p className="web-error">{pinError}</p>}
+
+        {/* Remembered phones: the ones that will not be asked for the PIN on
+            their next connection. Words on every state, never colour alone. */}
+        {status.pinSet && remembered !== null && (
+          <>
+            <Row
+              label="Remembered phones"
+              hint="A phone that unlocked once stays unlocked until it goes 7 days unused. Changing the PIN forgets every phone."
+            >
+              {remembered.length > 1 ? (
+                <button type="button" className="sbtn sbtn--danger" onClick={() => void forgetAllPhones()}>
+                  Forget all
+                </button>
+              ) : null}
+            </Row>
+            {remembered.length === 0 ? (
+              <p className="scard__hint">No phones remembered yet.</p>
+            ) : (
+              remembered.map((phone, i) => (
+                <Row key={`${phone.deviceId}-${i}`} label={phone.deviceName} hint={`Last used ${ago(phone.lastUsedAt)}`}>
+                  <button type="button" className="sbtn" onClick={() => void forgetPhone(phone.deviceId)}>
+                    Forget
+                  </button>
+                </Row>
+              ))
+            )}
+          </>
+        )}
       </Card>
 
       {/*

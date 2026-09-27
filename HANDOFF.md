@@ -1,5 +1,19 @@
 # Handoff
 
+## Remember this phone: 7-day unlock ticket (2026-09-27, built, NOT committed, NOT pushed)
+
+- **Asked (Steve):** picked option 1 below. 7 days is my default; Steve did not name a number.
+- **Built (builder in a worktree, patch applied here, left unstaged):** every unlock with a PIN set (PIN, passkey or ticket) now earns a single-use ticket. A spent ticket always has passkey rights, so it can never enrol a passkey. The desktop keeps digests only, in `web-remembered.json` in the data dir. A ticket expires `RESUME_IDLE_MS` (7 d) after its socket closes. On load, open entries get closedAt = load time. A PIN change voids all. Eviction: 8 per phone, 256 in total, oldest first. `rememberedList/Forget/ForgetAll` on `WebAuth`, 3 IPC channels (optional in ForgeApi), and a "Remembered phones" block in the Settings "Getting in" card (`WebSection.tsx`, all calls use `?.`). Client: `localStorage['forge-web-remembered']` (fixed key; the client never sees the uid), read fresh at every hello, dropped on a refusal, cleared on sign-out; the 30 s drop is gone. `PASSKEY_RESUME_MS` renamed.
+- **Checked:** typecheck (all configs) 0, lint:hooks, web:auth 100/0, web:passkey 81/0, scratch vite build. The foreman re-ran all of them.
+- **Needs:** commit + push (web deploys from CI), then a Forge restart for the desktop side. Until the restart, the old desktop still issues 30 s RAM tickets, and the Settings block stays hidden (the preload is stale). Not yet seen on screen or on the Pixel.
+
+## Phone keeps asking to unlock after sleep (2026-09-27 21:10, read-only)
+
+- **Asked (Steve):** phone browser logs out too often after screen-off or leaving the app; find why and list fixes.
+- **Found:** the Google (Firebase) session is NOT lost: `localStorage['forge-web-auth']`, no expiry (`web/src/lib/auth.ts:25`). What returns is the desktop PIN gate. The PIN is never stored: RAM only, 10 min grace (`PIN_GRACE_MS`, `shared/web.ts:605`; `web/src/lib/client.ts:757-913`), wiped on reload, tab kill or >10 min hidden. The passkey resume ticket lasts 30 s after the socket closes (`PASSKEY_RESUME_MS`, `shared/web.ts:625`), RAM-only on both sides (`electron/web/auth.ts:535`), lost on desktop restart. A PIN unlock gets no resume ticket at all (`auth.ts:683-685`). By design: "There is no 'remember this desktop.'" (`shared/web.ts:838-846`).
+- **Log:** all 38 recent refusals are `pin-required`, each followed by `"Chrome on Android" admitted ... with a passkey`, so each return costs a fingerprint.
+- **Options put to Steve:** (1) "Remember this phone": a signed device ticket issued after PIN/passkey, kept in localStorage and on the desktop disk, bound to uid + deviceId + page origin, rotated on use, idle expiry, voided on PIN change, revocable from the desktop. (2) Stretch the timers: resume 30 s -> ~15 min, PIN grace 10 min -> longer, give PIN unlocks a ticket, keep it in sessionStorage. Does not survive a desktop restart. Recommended (1). Waiting on his pick.
+
 ## Phone Listen capsule finished; phone tap targets ≥ 44px (2026-09-27 17:30, pushed)
 
 - **Asked (Steve):** continue Tomas's paused work: phone tap targets ≥ 44px, fix SynthesizerIndicator and PhoneListen.css. Scope: web/src/components, web/src/deck.

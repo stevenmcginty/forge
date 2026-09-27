@@ -2,14 +2,15 @@ import { X509Certificate, createHash, createVerify, randomBytes, timingSafeEqual
 import type { KeyObject } from 'node:crypto'
 import { AUTH_LOCKOUT_MS, AUTH_MAX_FAILURES } from '@shared/mobile'
 import {
-  PASSKEY_RESUME_MS,
   PIN_MAX_DIGITS,
   PIN_MIN_DIGITS,
+  RESUME_IDLE_MS,
   type WebPasskeyAssertion,
   type WebPasskeyCreationOptions,
   type WebPasskeyInfo,
   type WebPasskeyRequestOptions,
-  type WebRefusal
+  type WebRefusal,
+  type WebRememberedPhone
 } from '@shared/web'
 import {
   PasskeyChallenges,
@@ -53,13 +54,18 @@ import { verifyPin } from './pin'
  * relaxation. The rule underneath it is the one that carries over: **nothing
  * written to settings.json may be usable as a credential.** Mobile satisfies
  * that by storing a one-way image of its token. Forge Web satisfies it by
- * having nothing to store at all — this module writes no record of any browser,
- * so there is no list of admissions to steal, to leak, or to go stale.
+ * having no admission list at all — nothing to steal, to leak, or to go stale.
  *
  * The one secret this feature does write down is the unlock PIN, and it obeys
  * that rule too: electron/web/pin.ts stores a scrypt image of it and never the
  * digits. What that does and does not buy is set out in full in that file's
  * header, honestly, because four digits are not entropy.
+ *
+ * The one record of a browser it does keep obeys it as well: the
+ * remembered-phone tickets (RESUME_IDLE_MS in shared/web.ts) are written to
+ * disk as SHA-256 digests only, so the file holds nothing that opens the door.
+ * It is not a list to be on — a phone missing from it is asked for the PIN,
+ * exactly as before — only a way past the question for one that answered it.
  *
  * ## The door is the account plus a PIN, and nothing else
  *
@@ -83,8 +89,9 @@ import { verifyPin } from './pin'
  *  - the uid must match, and a token for another account is refused;
  *  - the PIN, which is the one thing a stolen Firebase password does not come
  *    with, and which is asked afresh of every browser on every connection —
- *    there is no list to be on, and nothing excuses it bar a passkey unlock
- *    seconds ago on this same browser (`takeResume`);
+ *    there is no list to be on, and nothing excuses it bar an unlock on this
+ *    same browser, under this same PIN, that has not gone RESUME_IDLE_MS
+ *    unused (`takeResume`);
  *  - the per-bucket lockout below, which is what makes a short PIN defensible.
  *
  * With no PIN set the account alone gets in, which is the state this desktop
@@ -340,6 +347,13 @@ export interface WebAuthHost {
    * `hello-ok` announces nothing.
    */
   passkeys?: PasskeyStorage
+  /**
+   * Where remembered-phone tickets live, as digests — `web-remembered.json`
+   * beside the passkeys (see electron/web-host.ts). Absent means they are
+   * kept in memory only and a restart forgets every phone, which is what a
+   * one-line test server wants. See RESUME_IDLE_MS in shared/web.ts.
+   */
+  resumes?: PasskeyStorage
   /** Injected so a check script can drive expiry and lockout on a fake clock. */
   now?: () => number
   log?: (line: string) => void
@@ -387,9 +401,9 @@ export type WebAuthOutcome =
       device: WebDevice
       claims: WebTokenClaims
       /**
-       * A fresh resume ticket for `hello-ok`, when this socket was admitted by
-       * a passkey or by a ticket. The caller hands it back to `resumeClosed`
-       * when the socket goes. See PASSKEY_RESUME_MS in shared/web.ts.
+       * A fresh remembered-phone ticket for `hello-ok`, whenever this socket
+       * was unlocked under a PIN. The caller hands it back to `resumeClosed`
+       * when the socket goes. See RESUME_IDLE_MS in shared/web.ts.
        */
       resume?: string
     }
@@ -504,21 +518,68 @@ interface Strike {
 }
 
 /**
- * One outstanding resume ticket, keyed by the SHA-256 of the ticket — the
- * ticket itself is never kept. What it may be spent from: the same account,
- * browser, page and PIN it was issued under. See `takeResume`.
+ * One outstanding remembered-phone ticket, keyed by the SHA-256 of the ticket
+ * — the ticket itself is never kept, in memory or on disk. What it may be
+ * spent from: the same account, browser, page and PIN it was issued under.
+ * See `takeResume`.
  */
 interface ResumeTicket {
   uid: string
   deviceId: string
+  /** What the browser called itself. Display text for the desktop's list only. */
+  deviceName: string
   origin: string
   pinDigest: string
+  /** When this phone was first remembered — carried from ticket to ticket. */
+  issuedAt: number
+  /** When this ticket was issued, which is the unlock that earned it. */
+  lastUsedAt: number
   /** When the socket holding it closed, or 0 while that socket is open. */
   closedAt: number
 }
 
-/** Blunt backstop on the ticket map — see `pruneResumes`. One person's phones, many times over. */
+/** `web-remembered.json`. See `WebAuthHost.resumes`. */
+interface RememberedFile {
+  version: 1
+  /** Ticket digest → ticket. */
+  tickets: Record<string, ResumeTicket>
+}
+
+/** Ceiling on the ticket map — see `pruneResumes`. One person's phones, many times over. */
 const MAX_RESUME_TICKETS = 256
+
+/**
+ * Ceiling per browser. A phone holds one live ticket at a time, but a PIN
+ * replay or a second tab leaves the one before unspent until it lapses, so a
+ * few more than one pile up; past this the oldest go first.
+ */
+const MAX_RESUME_PER_DEVICE = 8
+
+/** How recently a ticket was in use, for eviction: an open socket is in use now. */
+function resumeRecency(entry: ResumeTicket): number {
+  return entry.closedAt ? Math.max(entry.closedAt, entry.lastUsedAt) : Number.POSITIVE_INFINITY
+}
+
+/** A ticket read back off disk, or null when the entry is not one. Total: the file is hand-editable. */
+function readResumeTicket(value: unknown): ResumeTicket | null {
+  if (!value || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  const text = (key: string): string | null => (typeof v[key] === 'string' ? (v[key] as string) : null)
+  const time = (key: string): number | null => {
+    const n = v[key]
+    return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : null
+  }
+  const uid = text('uid')
+  const deviceId = text('deviceId')
+  const origin = text('origin')
+  const digest = text('pinDigest')
+  const issuedAt = time('issuedAt')
+  const lastUsedAt = time('lastUsedAt')
+  const closedAt = time('closedAt')
+  if (!uid || !deviceId || !origin || !digest || issuedAt === null || lastUsedAt === null || closedAt === null) return null
+  const deviceName = printable((text('deviceName') ?? '').slice(0, 64)) || 'Browser'
+  return { uid, deviceId, deviceName, origin, pinDigest: digest, issuedAt, lastUsedAt, closedAt }
+}
 
 /** The map key for a ticket: its SHA-256, so the map never holds one it could hand out. */
 function resumeKey(ticket: string): string {
@@ -531,8 +592,13 @@ export class WebAuth {
   private readonly host: WebAuthHost
   private readonly now: () => number
   private strikes = new Map<string, Strike>()
-  /** Outstanding resume tickets, in memory only. See PASSKEY_RESUME_MS in shared/web.ts. */
+  /**
+   * Outstanding remembered-phone tickets, by digest. Mirrored to
+   * `host.resumes` when there is one, and read from it on first use — see
+   * `loadResumes`. See RESUME_IDLE_MS in shared/web.ts.
+   */
   private resumes = new Map<string, ResumeTicket>()
+  private resumesLoaded = false
   /** Null when the host gave no storage — see `WebAuthHost.passkeys`. */
   private readonly passkeys: PasskeyStore | null
   private readonly challenges: PasskeyChallenges
@@ -576,8 +642,8 @@ export class WebAuth {
    *     (electron/web/passkey.ts): a yes is a correct PIN and every kind of no
    *     is a wrong one, in the same bucket — bar a correct answer over a stale
    *     challenge, which is asked again. The one thing that excuses the
-   *     question is a resume ticket from a passkey unlock moments ago
-   *     (`takeResume`); a bad one is simply asked, never struck.
+   *     question is a remembered-phone ticket from an earlier unlock on this
+   *     browser (`takeResume`); a bad one is simply asked, never struck.
    *
    * ## Which failures count against which bucket
    *
@@ -631,22 +697,18 @@ export class WebAuth {
     const stored = this.host.pinHash?.() ?? ''
     const origin = input.origin ?? ''
     let unlock: WebDevice['unlock']
-    let resumed = false
-    if (
-      stored &&
-      !String(input.pin ?? '').trim() &&
-      !input.passkey &&
-      input.resume &&
-      this.takeResume(input.resume, uid, deviceId, origin, stored)
-    ) {
-      // A ticket this desktop handed a passkey-unlocked socket moments ago —
-      // PASSKEY_RESUME_MS in shared/web.ts. The rights of the passkey that
-      // earned it and never more, so a ticket can no more enrol a passkey than
-      // the passkey could. Any other ticket falls through to the branch below
-      // with no PIN in hand, which is `pin-required` and no strike, exactly as
-      // a hello that carried nothing at all.
+    const ticket =
+      stored && !String(input.pin ?? '').trim() && !input.passkey && input.resume
+        ? this.takeResume(input.resume, uid, deviceId, origin, stored)
+        : null
+    if (ticket) {
+      // A remembered-phone ticket this desktop handed an unlocked socket on
+      // this browser — RESUME_IDLE_MS in shared/web.ts. A passkey's rights
+      // and never more, whatever earned the first ticket, so a ticket can
+      // never enrol a passkey. Any other ticket falls through to the branch
+      // below with no PIN in hand, which is `pin-required` and no strike,
+      // exactly as a hello that carried nothing at all.
       unlock = { by: 'passkey', pinDigest: pinDigest(stored) }
-      resumed = true
     } else if (stored && !String(input.pin ?? '').trim() && input.passkey) {
       // A passkey instead of the PIN. Judged exactly as the PIN would be: a
       // yes is a correct PIN, and every kind of no is a wrong one, struck
@@ -678,11 +740,14 @@ export class WebAuth {
       if (stored) unlock = { by: 'pin', pinDigest: pinDigest(stored) }
     }
 
-    const how = resumed ? ' with a resume ticket' : unlock?.by === 'passkey' ? ' with a passkey' : ''
+    const how = ticket ? ' with a remembered-phone ticket' : unlock?.by === 'passkey' ? ' with a passkey' : ''
     this.host.log?.(`"${deviceName}" admitted from ${input.source}${how}`)
-    // Only a passkey's socket (or a ticket's, which is the same rights) is
-    // handed the next ticket. A PIN's has the page's own replay instead.
-    const resume = unlock?.by === 'passkey' && origin ? this.issueResume(uid, deviceId, origin, unlock.pinDigest) : undefined
+    // Every unlock under a PIN — digits, passkey or ticket — is handed the
+    // next ticket, so the phone is remembered until it goes RESUME_IDLE_MS
+    // unused. `unlock` is only set when a PIN is.
+    const resume = unlock && origin
+      ? this.issueResume(uid, deviceId, deviceName, origin, unlock.pinDigest, ticket?.issuedAt)
+      : undefined
     return {
       ok: true,
       device: { id: deviceId, name: deviceName, uid, ...(unlock ? { unlock } : {}) },
@@ -691,65 +756,216 @@ export class WebAuth {
     }
   }
 
-  /* ------------------------------------------------------------ resume tickets */
+  /* --------------------------------------------------- remembered-phone tickets */
 
   /**
    * The socket holding this ticket has closed: from now it has
-   * PASSKEY_RESUME_MS left. Until this is called a ticket is live however
+   * RESUME_IDLE_MS left. Until this is called a ticket is live however
    * long ago it was issued, because a phone's dead socket is often still open
    * as far as this desktop knows when the phone dials again.
    */
   resumeClosed(ticket: string): void {
+    this.loadResumes()
     const entry = this.resumes.get(resumeKey(ticket))
-    if (entry && !entry.closedAt) entry.closedAt = this.now()
+    if (!entry || entry.closedAt) return
+    entry.closedAt = this.now()
+    this.saveResumes()
   }
 
-  /** A fresh ticket for an admitted socket. Only its digest is kept. */
-  private issueResume(uid: string, deviceId: string, origin: string, digest: string): string {
+  /**
+   * The phones this desktop remembers, one row per browser, most recently
+   * used first — for the desktop's own settings, never the wire. A ticket
+   * voided by a PIN change or lapsed is gone before this is read.
+   */
+  rememberedList(): WebRememberedPhone[] {
+    this.loadResumes()
+    if (this.pruneResumes()) this.saveResumes()
+    const now = this.now()
+    const rows = new Map<string, WebRememberedPhone>()
+    for (const entry of this.resumes.values()) {
+      const lastUsedAt = entry.closedAt ? Math.max(entry.closedAt, entry.lastUsedAt) : now
+      const key = `${entry.uid}\n${entry.deviceId}`
+      const row = rows.get(key)
+      if (!row || lastUsedAt > row.lastUsedAt) {
+        rows.set(key, { deviceId: entry.deviceId, deviceName: entry.deviceName, lastUsedAt })
+      }
+    }
+    return [...rows.values()].sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+  }
+
+  /** Forget one browser: every ticket it holds. Its next hello is asked for the PIN. Returns how many went. */
+  rememberedForget(deviceId: string): number {
+    this.loadResumes()
+    let gone = 0
+    for (const [key, entry] of this.resumes) {
+      if (entry.deviceId !== deviceId) continue
+      this.resumes.delete(key)
+      gone++
+    }
+    if (gone) {
+      this.saveResumes()
+      this.host.log?.(`web auth: forgot a remembered phone (${gone} ticket${gone === 1 ? '' : 's'})`)
+    }
+    return gone
+  }
+
+  /** Forget every phone. Returns how many tickets went. */
+  rememberedForgetAll(): number {
+    this.loadResumes()
+    const gone = this.resumes.size
+    this.resumes.clear()
+    this.saveResumes()
+    if (gone) this.host.log?.(`web auth: forgot every remembered phone (${gone} ticket${gone === 1 ? '' : 's'})`)
+    return gone
+  }
+
+  /**
+   * A fresh ticket for an admitted socket. Only its digest is kept. `since`
+   * is the spent ticket's `issuedAt`, so a phone keeps its "remembered since"
+   * across rotations.
+   */
+  private issueResume(
+    uid: string,
+    deviceId: string,
+    deviceName: string,
+    origin: string,
+    digest: string,
+    since?: number
+  ): string {
+    this.loadResumes()
     this.pruneResumes()
+    // Room for the new one: this browser's oldest first, then anybody's.
+    this.evictResumes((entry) => entry.uid === uid && entry.deviceId === deviceId, MAX_RESUME_PER_DEVICE - 1)
+    this.evictResumes(() => true, MAX_RESUME_TICKETS - 1)
+    const now = this.now()
     const ticket = randomBytes(32).toString('base64url')
-    this.resumes.set(resumeKey(ticket), { uid, deviceId, origin, pinDigest: digest, closedAt: 0 })
+    this.resumes.set(resumeKey(ticket), {
+      uid,
+      deviceId,
+      deviceName,
+      origin,
+      pinDigest: digest,
+      issuedAt: since ?? now,
+      lastUsedAt: now,
+      closedAt: 0
+    })
+    this.saveResumes()
     return ticket
   }
 
   /**
-   * Spend a ticket: true only when it is known, still live, and was issued to
-   * this account, browser and page under the PIN set now. Spent whatever the
-   * answer, so a ticket is presented once.
+   * Spend a ticket: the entry only when it is known, still live, and was
+   * issued to this account, browser and page under the PIN set now, else
+   * null. Spent whatever the answer, so a ticket is presented once.
    *
    * A no here is never struck — 256 random bits are not something anybody
    * guesses, so repeated wrong tickets are noise, as bad tokens are — and the
    * caller answers it as a hello with no credential. Why is for the log only.
    */
-  private takeResume(ticket: string, uid: string, deviceId: string, origin: string, stored: string): boolean {
+  private takeResume(ticket: string, uid: string, deviceId: string, origin: string, stored: string): ResumeTicket | null {
+    this.loadResumes()
     const key = resumeKey(ticket)
     const entry = this.resumes.get(key)
-    this.resumes.delete(key)
-    const no = (why: string): false => {
-      this.host.log?.(`web auth: resume ticket refused — ${why}`)
-      return false
+    if (entry) {
+      this.resumes.delete(key)
+      this.saveResumes()
+    }
+    const no = (why: string): null => {
+      this.host.log?.(`web auth: remembered-phone ticket refused — ${why}`)
+      return null
     }
     if (!entry) return no('unknown or already spent')
-    if (entry.closedAt && this.now() - entry.closedAt > PASSKEY_RESUME_MS) return no('expired')
+    if (entry.closedAt && this.now() - entry.closedAt > RESUME_IDLE_MS) return no('expired')
     if (!sameString(entry.uid, uid)) return no('another account')
     if (!sameString(entry.deviceId, deviceId)) return no('another browser')
     if (!origin || !sameString(entry.origin, origin)) return no('another page')
     if (!sameString(entry.pinDigest, pinDigest(stored))) return no('the PIN has changed')
+    return entry
+  }
+
+  /**
+   * Drop tickets that can never be spent: lapsed past RESUME_IDLE_MS, or
+   * issued under a PIN other than the one set now (or with none set at all).
+   * True when anything went, so the caller knows to save.
+   */
+  private pruneResumes(): boolean {
+    const now = this.now()
+    const stored = this.host.pinHash?.() ?? ''
+    const digest = stored ? pinDigest(stored) : ''
+    let changed = false
+    for (const [key, entry] of this.resumes) {
+      const lapsed = entry.closedAt && now - entry.closedAt > RESUME_IDLE_MS
+      if (lapsed || !digest || entry.pinDigest !== digest) {
+        this.resumes.delete(key)
+        changed = true
+      }
+    }
+    return changed
+  }
+
+  /**
+   * Keep at most `keep` of the tickets `match` picks, dropping the least
+   * recently used first — an open socket's is in use now, so it goes last.
+   * Dropping a ticket only ever costs one more PIN, never a way in. True when
+   * anything went.
+   */
+  private evictResumes(match: (entry: ResumeTicket) => boolean, keep: number): boolean {
+    const matching = [...this.resumes].filter(([, entry]) => match(entry))
+    if (matching.length <= keep) return false
+    matching.sort(([, a], [, b]) => {
+      const ra = resumeRecency(a)
+      const rb = resumeRecency(b)
+      return ra === rb ? a.lastUsedAt - b.lastUsedAt : ra < rb ? -1 : 1
+    })
+    for (const [key] of matching.slice(0, matching.length - keep)) this.resumes.delete(key)
     return true
   }
 
   /**
-   * Drop tickets whose window has lapsed, and clear the map outright past a
-   * blunt backstop — the `pruneStrikes` rule. Dropping a ticket only ever
-   * means one more fingerprint, never a way in, so erring towards empty errs
-   * safely.
+   * Read `host.resumes` into the map, once, on first use. A ticket whose
+   * socket was open when the file was written died with that process, so its
+   * idle clock starts now. Lapsed, voided and malformed entries are dropped.
+   * No storage, or an unreadable file, is an empty map: the cost is one PIN.
    */
-  private pruneResumes(): void {
-    const now = this.now()
-    for (const [key, entry] of this.resumes) {
-      if (entry.closedAt && now - entry.closedAt > PASSKEY_RESUME_MS) this.resumes.delete(key)
+  private loadResumes(): void {
+    if (this.resumesLoaded) return
+    this.resumesLoaded = true
+    const text = this.host.resumes?.read() ?? ''
+    if (!text) return
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      this.host.log?.('web auth: the remembered-phone file is unreadable — starting with none')
+      return
     }
-    if (this.resumes.size >= MAX_RESUME_TICKETS) this.resumes.clear()
+    const file = parsed as Partial<RememberedFile> | null
+    if (!file || typeof file !== 'object' || file.version !== 1 || !file.tickets || typeof file.tickets !== 'object') return
+    const now = this.now()
+    let changed = false
+    for (const [key, value] of Object.entries(file.tickets)) {
+      const entry = readResumeTicket(value)
+      // A SHA-256 in base64url is 43 characters; anything else is not a key this class wrote.
+      if (!entry || !/^[A-Za-z0-9_-]{43}$/.test(key)) {
+        changed = true
+        continue
+      }
+      if (!entry.closedAt) {
+        entry.closedAt = now
+        changed = true
+      }
+      this.resumes.set(key, entry)
+    }
+    if (this.pruneResumes()) changed = true
+    if (this.evictResumes(() => true, MAX_RESUME_TICKETS)) changed = true
+    if (changed) this.saveResumes()
+  }
+
+  /** Mirror the map to `host.resumes`, when there is one. Digests only, as the map holds. */
+  private saveResumes(): void {
+    if (!this.host.resumes) return
+    const file: RememberedFile = { version: 1, tickets: Object.fromEntries(this.resumes) }
+    this.host.resumes.write(JSON.stringify(file))
   }
 
   /**

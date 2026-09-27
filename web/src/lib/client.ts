@@ -1,7 +1,6 @@
 import {
   HEARTBEAT_MS,
   MAX_WRITE_CHARS,
-  PASSKEY_RESUME_MS,
   PIN_GRACE_MS,
   TOKEN_REFRESH_MS,
   WEB_PROTO,
@@ -378,6 +377,33 @@ export interface ForgeCredentials {
    * that might still succeed into one that cannot.
    */
   refindUrl?: () => Promise<string>
+}
+
+/**
+ * Where the "remember this phone" ticket lives — see RESUME_IDLE_MS in
+ * shared/web.ts. One fixed key: this class never learns the uid, a ticket
+ * issued to another account is refused by the desktop (unstruck) and then
+ * dropped, and sign-out clears it anyway.
+ */
+const REMEMBERED_KEY = 'forge-web-remembered'
+
+/** The stored ticket ('' for none), or null when storage cannot be read at all. */
+function readRemembered(): string | null {
+  try {
+    return localStorage.getItem(REMEMBERED_KEY) ?? ''
+  } catch {
+    return null
+  }
+}
+
+/** Store a ticket, or remove it for ''. A storage failure leaves the RAM copy to carry on. */
+function writeRemembered(ticket: string): void {
+  try {
+    if (ticket) localStorage.setItem(REMEMBERED_KEY, ticket)
+    else localStorage.removeItem(REMEMBERED_KEY)
+  } catch {
+    /* private mode or storage blocked: the RAM copy is all there is */
+  }
 }
 
 /**
@@ -767,15 +793,16 @@ export class ForgeClient {
   /** The hello in flight carried a passkey (and no PIN). Read by `hello-ok` and the refusal. */
   private sentPasskey = false
   /**
-   * The desktop's single-use resume ticket from the last `hello-ok`, so a
-   * reconnect soon after a passkey unlock needs no second fingerprint. RAM
-   * only — never localStorage, sessionStorage or IndexedDB; spent by the next
-   * hello that carries it, dropped after PASSKEY_RESUME_MS hidden, and
-   * forgotten wherever the PIN is. See PASSKEY_RESUME_MS in shared/web.ts.
+   * The RAM copy of the desktop's single-use "remember this phone" ticket.
+   * The real home is localStorage (`readRemembered`), so the phone stays
+   * unlocked across a screen-off, a killed tab and a reload; this copy is
+   * only read when storage holds nothing, which covers storage that is
+   * blocked or full — the ticket is then good for as long as this page lives.
+   * See RESUME_IDLE_MS in shared/web.ts.
    */
   private resume = ''
-  /** The hello in flight carried the ticket. Read by `hello-ok`, as `sentPasskey` is. */
-  private sentResume = false
+  /** The ticket the hello in flight carried, or ''. Read by `hello-ok` and the refusal, as `sentPasskey` is. */
+  private sentResume = ''
 
   constructor(handlers: ForgeHandlers) {
     this.handlers = handlers
@@ -855,6 +882,8 @@ export class ForgeClient {
     this.subs.clear()
     this.chats.clear()
     this.forgetPin()
+    // Only ever called on sign-out, and a signed-out phone is not remembered.
+    this.forgetResume()
     this.failWaiting('The link to the desktop closed.')
   }
 
@@ -883,21 +912,38 @@ export class ForgeClient {
     this.rememberedPin = ''
     this.sentPin = ''
     this.pin = ''
-    this.resume = ''
   }
 
   /**
-   * The resume ticket this `hello` should carry, spent either way: the desktop
-   * burns it on sight, and the `hello-ok` it earns brings the next one. None
-   * once the tab has been hidden past PASSKEY_RESUME_MS — the desktop would
-   * refuse it, and a refusal is the fingerprint prompt anyway.
+   * The remembered-phone ticket this `hello` should carry, read fresh from
+   * storage because another tab may have spent and replaced it since. Left
+   * in place until the desktop answers: `hello-ok` replaces it, a
+   * `pin-required` drops it (the desktop burned it on sight), and a socket
+   * that dies before either keeps it for the next try.
    */
   private resumeForHello(): string {
-    const ticket = this.resume
+    return readRemembered() || this.resume
+  }
+
+  /** Keep the desktop's newest ticket. */
+  private keepResume(ticket: string): void {
+    this.resume = ticket
+    writeRemembered(ticket)
+  }
+
+  /**
+   * Drop a ticket the desktop has spent — only if it is still the one held,
+   * so a tab that lost a race does not throw away the ticket the winner kept.
+   */
+  private dropResume(ticket: string): void {
+    if (this.resume === ticket) this.resume = ''
+    if (readRemembered() === ticket) writeRemembered('')
+  }
+
+  /** Forget this phone outright. Sign-out. */
+  private forgetResume(): void {
     this.resume = ''
-    if (!ticket) return ''
-    if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PASSKEY_RESUME_MS) return ''
-    return ticket
+    writeRemembered('')
   }
 
   private watchPinGrace(): void {
@@ -907,7 +953,6 @@ export class ForgeClient {
         return
       }
       if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PIN_GRACE_MS) this.forgetPin()
-      if (this.pinHiddenAt && Date.now() - this.pinHiddenAt > PASSKEY_RESUME_MS) this.resume = ''
       this.pinHiddenAt = 0
     })
   }
@@ -1495,7 +1540,7 @@ export class ForgeClient {
       const passkey = pin ? null : this.passkeyAnswer
       this.passkeyAnswer = null
       this.sentPasskey = passkey !== null
-      this.sentResume = false
+      this.sentResume = ''
 
       socket.onopen = () => {
         if (superseded()) return
@@ -1504,13 +1549,13 @@ export class ForgeClient {
         if (this.connectTimer !== null) clearTimeout(this.connectTimer)
         this.connectTimer = null
         this.lastFrameAt = Date.now()
-        // The ticket is taken here, on a socket that reached the desktop, rather
+        // The ticket is read here, on a socket that reached the desktop, rather
         // than with the PIN above: a wrong ticket is never struck, so there is no
         // stale replay to guard against, and a dial that never connected should
-        // not cost a fingerprint. Only when nothing else answers the question —
-        // the desktop ignores it beside a PIN or a passkey.
+        // not cost a PIN. Only when nothing else answers the question — the
+        // desktop ignores it beside a PIN or a passkey.
         const resume = pin || passkey ? '' : this.resumeForHello()
-        this.sentResume = resume !== ''
+        this.sentResume = resume
         // No ping until `hello-ok`. The desktop honours *nothing* but `hello`
         // before a browser has been let in — it answers anything else with an
         // `error` frame and closes the socket (see `handle` in
@@ -1618,9 +1663,12 @@ export class ForgeClient {
         this.reauthed = false
         this.reAsked.clear()
         if (this.sentPin) this.rememberedPin = this.sentPin
-        // Replaced, not kept: a PIN's hello-ok (or an older desktop's) brings
-        // none, and the PIN replay above covers that page instead.
-        this.resume = typeof frame.resume === 'string' ? frame.resume : ''
+        // Every unlock under a PIN brings the next ticket; keep it. None comes
+        // with no PIN set or from an older desktop — then drop only a ticket
+        // this hello spent, and leave alone one it never carried.
+        const nextResume = typeof frame.resume === 'string' ? frame.resume : ''
+        if (nextResume) this.keepResume(nextResume)
+        else if (this.sentResume) this.dropResume(this.sentResume)
         setDeskFacts({
           features: Array.isArray(frame.features) ? frame.features.filter((f): f is string => typeof f === 'string') : [],
           // A ticket carries a passkey's rights, so the page offers what it
@@ -1629,7 +1677,7 @@ export class ForgeClient {
         })
         this.sentPin = ''
         this.sentPasskey = false
-        this.sentResume = false
+        this.sentResume = ''
         this.handlers.onPicture(frame)
         this.handlers.onConnection({ state: 'live', desktopName: frame.desktopName, appVersion: frame.appVersion })
         // Both timers start here rather than at `onopen`, because this frame is
@@ -1888,7 +1936,8 @@ export class ForgeClient {
     this.sentPasskey = false
     // A refused ticket is not a failed fingerprint: the gate asks exactly as it
     // would have with no ticket, so `afterPasskey` stays false.
-    this.sentResume = false
+    const sentResume = this.sentResume
+    this.sentResume = ''
     if (!isWebRefusal(rawReason)) {
       this.stopped = true
       this.handlers.onConnection({
@@ -1909,6 +1958,9 @@ export class ForgeClient {
       // A wrong PIN must not be replayed — each replay is a strike. A missing
       // PIN is the ordinary first ask and leaves `rememberedPin` empty anyway.
       if (reason === 'pin-invalid') this.forgetPin()
+      // A ticket that reached the PIN gate was spent there, good or not. A
+      // refusal before that gate (a token, a lockout) never touched it.
+      if (sentResume) this.dropResume(sentResume)
       // A lockout that arrives on the pin path still carries its window, and
       // the pin screen is where the countdown belongs — see PinPrompt.
       this.handlers.onConnection({

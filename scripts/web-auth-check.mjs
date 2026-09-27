@@ -23,7 +23,7 @@
  * source and a shared one would mean check 3's strikes silently failing check 9.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createSign, generateKeyPairSync } from 'node:crypto'
+import { createSign, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
@@ -651,6 +651,215 @@ async function main() {
     !readFileSync(settingsPath, 'utf8').includes('smuggled-in'),
     'and nothing about it reaches settings.json — there is no way back to a device list'
   )
+
+  /* ===================================================== 22. remembered phones
+   *
+   * RESUME_IDLE_MS in shared/web.ts: every unlock under a PIN is handed a
+   * single-use ticket that answers the question on the next hello, for a week
+   * of non-use, across a restart, until the PIN changes. Each case gets its own
+   * WebAuth over an in-memory stand-in for `web-remembered.json`, on the fake
+   * clock, so a week passes by assignment and a restart is a second instance
+   * over the same file.
+   */
+
+  const ORIGIN = 'https://forge-web-check.web.app'
+  const DAY = 24 * 60 * 60 * 1000
+  const isTicket = (t) => typeof t === 'string' && Buffer.from(t, 'base64url').length === 32
+  function memoryFile() {
+    const file = { text: '', read: () => file.text, write: (text) => (file.text = text) }
+    return file
+  }
+  const ticketsIn = (file) => (file.text ? JSON.parse(file.text).tickets : {})
+  function desk(file, lines = []) {
+    return new WebAuth({
+      fetchJwks: async () => ({ body: JSON.stringify(served), cacheControl: 'public, max-age=21600' }),
+      projectId: () => projectId,
+      uid: () => uid,
+      pinHash: () => pinHash,
+      resumes: file,
+      now: () => clock,
+      log: (line) => lines.push(line)
+    })
+  }
+  const door = (a, deviceId, extra = {}) =>
+    a.authenticate(hello('10.9.0.1', mint(), deviceId, `Phone ${deviceId}`, { origin: ORIGIN, ...extra }))
+  const refusedWhy = (lines) => lines.filter((l) => l.startsWith('web auth: remembered-phone ticket refused')).at(-1) ?? ''
+
+  // 22a. Earned by a PIN, spent with a passkey's rights, good for a week.
+  {
+    const lines = []
+    const a = desk(memoryFile(), lines)
+    const byPin = await door(a, 'phone-1', { pin: PIN })
+    log(byPin.ok && isTicket(byPin.resume) && byPin.device.unlock?.by === 'pin', 'a PIN unlock is handed a remembered-phone ticket')
+    const noOrigin = await a.authenticate(hello('10.9.0.1', mint(), 'phone-1', 'Phone', { pin: PIN }))
+    log(noOrigin.ok && !('resume' in noOrigin), 'but not a socket with no page origin to bind it to')
+    const savedPin = pinHash
+    pinHash = ''
+    const noPin = await door(a, 'phone-1')
+    pinHash = savedPin
+    log(noPin.ok && !('resume' in noPin), 'and nothing at all with no PIN set')
+
+    a.resumeClosed(byPin.resume)
+    clock += 6 * DAY
+    const sixDays = await door(a, 'phone-1', { resume: byPin.resume })
+    log(
+      sixDays.ok && sixDays.device.unlock?.by === 'passkey' && isTicket(sixDays.resume) && sixDays.resume !== byPin.resume,
+      "6 days after its socket closed the ticket admits with a passkey's rights (never a PIN's), and a fresh ticket"
+    )
+    log(lines.some((l) => l.includes('admitted') && l.includes('with a remembered-phone ticket')), 'and the log says so')
+    const twice = await door(a, 'phone-1', { resume: byPin.resume })
+    log(!twice.ok && twice.reason === 'pin-required' && refusedWhy(lines).includes('already spent'), 'a ticket is single-use')
+
+    a.resumeClosed(sixDays.resume)
+    clock += 7 * DAY
+    const sevenDays = await door(a, 'phone-1', { resume: sixDays.resume })
+    log(sevenDays.ok && isTicket(sevenDays.resume), 'exactly 7 days after its socket closed it still admits')
+    a.resumeClosed(sevenDays.resume)
+    clock += 7 * DAY + 1
+    const late = await door(a, 'phone-1', { resume: sevenDays.resume })
+    log(
+      !late.ok && late.reason === 'pin-required' && refusedWhy(lines).endsWith('expired'),
+      `7 days + 1 ms after its socket closed it is asked for the PIN (${refusedWhy(lines)})`
+    )
+  }
+
+  // 22b. A restart: the same file under a new instance.
+  {
+    const file = memoryFile()
+    const lines = []
+    const before = desk(file, lines)
+    const stillOpen = await door(before, 'phone-2', { pin: PIN })
+    const alsoOpen = await door(before, 'phone-3', { pin: PIN })
+    const closed = await door(before, 'phone-4', { pin: PIN })
+    before.resumeClosed(closed.resume)
+    const closedAt = clock
+    log(
+      [stillOpen, alsoOpen, closed].every((o) => o.ok && !file.text.includes(o.resume)),
+      'the file holds no ticket itself, only digests'
+    )
+    clock += DAY
+    const loadedAt = clock
+    const after = desk(file, lines)
+    const listed = after.rememberedList()
+    const byDevice = (id) => Object.values(ticketsIn(file)).find((t) => t.deviceId === id)
+    log(
+      byDevice('phone-2')?.closedAt === loadedAt && byDevice('phone-3')?.closedAt === loadedAt,
+      'a ticket whose socket was open at the restart has its idle clock started at load time'
+    )
+    log(byDevice('phone-4')?.closedAt === closedAt, 'while a closed one keeps the time it closed')
+    log(listed.length === 3, `the restarted desktop lists all three phones (${listed.length})`)
+    const survived = await door(after, 'phone-4', { resume: closed.resume })
+    log(survived.ok && isTicket(survived.resume), 'a ticket survives the restart and admits')
+    clock = loadedAt + 7 * DAY
+    const edge = await door(after, 'phone-2', { resume: stillOpen.resume })
+    log(edge.ok, '7 days after the load an open-at-restart ticket still admits')
+    clock = loadedAt + 7 * DAY + 1
+    const past = await door(after, 'phone-3', { resume: alsoOpen.resume })
+    log(!past.ok && past.reason === 'pin-required' && refusedWhy(lines).endsWith('expired'), 'and 1 ms later it is asked')
+  }
+
+  // 22c. Changing the PIN voids every ticket, and the list hides them.
+  {
+    const lines = []
+    const a = desk(memoryFile(), lines)
+    const earned = await door(a, 'phone-5', { pin: PIN })
+    a.resumeClosed(earned.resume)
+    log(a.rememberedList().length === 1, 'the phone is listed')
+    const savedPin = pinHash
+    pinHash = hashPin('24681357')
+    const voided = await door(a, 'phone-5', { resume: earned.resume })
+    log(
+      !voided.ok && voided.reason === 'pin-required' && refusedWhy(lines).endsWith('the PIN has changed'),
+      `after the PIN changes its ticket is asked for the PIN (${refusedWhy(lines)})`
+    )
+    const other = await door(a, 'phone-6', { pin: '24681357' })
+    pinHash = savedPin
+    log(other.ok && a.rememberedList().length === 0, 'and a ticket earned under the other PIN is hidden once it changes back')
+  }
+
+  // 22d. Forgetting one phone, and all of them.
+  {
+    const file = memoryFile()
+    const a = desk(file)
+    const first = await door(a, 'phone-7', { pin: PIN })
+    const second = await door(a, 'phone-7', { pin: PIN })
+    const eight = await door(a, 'phone-8', { pin: PIN })
+    const nine = await door(a, 'phone-9', { pin: PIN })
+    for (const o of [first, second, eight, nine]) {
+      a.resumeClosed(o.resume)
+      clock += 1000
+    }
+    const rows = a.rememberedList()
+    log(rows.length === 3 && rows.filter((r) => r.deviceId === 'phone-7').length === 1, 'one row per phone, however many tickets it holds')
+    log(rows[0].deviceName === 'Phone phone-9', "each row carries the phone's name")
+    log(a.rememberedForget('phone-7') === 2 && a.rememberedList().length === 2, 'forgetting a phone drops every ticket it holds')
+    const forgotten = await door(a, 'phone-7', { resume: second.resume })
+    log(!forgotten.ok && forgotten.reason === 'pin-required', 'and its next hello is asked for the PIN')
+    log(a.rememberedForgetAll() === 2 && a.rememberedList().length === 0, 'forget all empties the list')
+    const gone = await door(a, 'phone-8', { resume: eight.resume })
+    log(!gone.ok && gone.reason === 'pin-required' && Object.keys(ticketsIn(file)).length === 0, 'and the file, and every ticket is refused')
+  }
+
+  // 22e. The per-phone cap and the global ceiling drop the oldest, never the newest.
+  {
+    const lines = []
+    const a = desk(memoryFile(), lines)
+    const issued = []
+    for (let i = 0; i < 10; i++) {
+      const o = await door(a, 'phone-10', { pin: PIN })
+      a.resumeClosed(o.resume)
+      issued.push(o.resume)
+      clock += 1000
+    }
+    const oldest = await door(a, 'phone-10', { resume: issued[0] })
+    const next = await door(a, 'phone-10', { resume: issued[1] })
+    log(
+      !oldest.ok && !next.ok && refusedWhy(lines).includes('unknown'),
+      'past 8 tickets on one phone its two oldest are dropped'
+    )
+    const newest = await door(a, 'phone-10', { resume: issued[9] })
+    const third = await door(a, 'phone-10', { resume: issued[2] })
+    log(newest.ok && third.ok, 'while its newest and the 8th-newest are kept')
+
+    const file = memoryFile()
+    const b = desk(file)
+    const keep = await door(b, 'phone-keep', { pin: PIN })
+    b.resumeClosed(keep.resume)
+    const real = Object.values(ticketsIn(file))[0]
+    const crowd = { ...ticketsIn(file) }
+    for (let i = 0; i < 300; i++) {
+      crowd[randomBytes(32).toString('base64url')] = {
+        ...real,
+        deviceId: `crowd-${i}`,
+        deviceName: `Crowd ${i}`,
+        issuedAt: clock - DAY - i,
+        lastUsedAt: clock - DAY - i,
+        closedAt: clock - DAY - i
+      }
+    }
+    file.text = JSON.stringify({ version: 1, tickets: crowd })
+    const c = desk(file)
+    const kept = await door(c, 'phone-keep', { resume: keep.resume })
+    const left = Object.values(ticketsIn(file))
+    log(
+      kept.ok && left.length <= 256 && left.some((t) => t.deviceId === 'phone-keep'),
+      `a file of 301 tickets loads down to the ceiling keeping the most recent, and that phone still gets in (${left.length} kept)`
+    )
+    log(!left.some((t) => t.deviceId === 'crowd-299'), 'the least recently used went first')
+  }
+
+  // 22f. A bad ticket is never struck.
+  {
+    const a = desk(memoryFile())
+    let asked = 0
+    for (let i = 0; i < AUTH_MAX_FAILURES + 2; i++) {
+      const junk = await door(a, 'phone-11', { resume: i % 2 ? randomBytes(32).toString('base64url') : 'not a ticket' })
+      if (!junk.ok && junk.reason === 'pin-required') asked++
+    }
+    log(asked === AUTH_MAX_FAILURES + 2, `${AUTH_MAX_FAILURES + 2} bad tickets are each asked for the PIN, none struck`)
+    const pinAfter = await door(a, 'phone-11', { pin: PIN })
+    log(pinAfter.ok, 'and the correct PIN still gets in afterwards')
+  }
 }
 
 main()
