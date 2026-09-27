@@ -1,5 +1,6 @@
 import { useMemo, useSyncExternalStore } from 'react'
 import type { VoiceHubProvider } from '@shared/types'
+import type { HubLook } from './hubLook'
 import { useVoiceHubController, type HubAction, type HubCaption, type HubPhase, type VoiceHubController } from '@/state/VoiceHubController'
 
 /**
@@ -132,12 +133,8 @@ export function useHubView(): HubView {
 
 /* ------------------------------------------------------------------ words */
 
-/**
- * What the UI calls a state. `muted` and `offline` are not phases of their
- * own in the engine — muted is a flag over any live phase, offline is `off` —
- * but to the eye they are states, so they get their own word and glyph.
- */
-export type HubLook = 'offline' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted' | 'error'
+/** What the UI calls a state; defined in ./hubLook so leaf components can import it alone. */
+export type { HubLook }
 
 export function hubLook(phase: HubPhase, muted: boolean): HubLook {
   if (phase === 'off') return 'offline'

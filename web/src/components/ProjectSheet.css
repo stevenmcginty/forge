@@ -433,6 +433,11 @@
   overflow: hidden;
 }
 
+/* The track's 1px border sits inside its height; the segments get the full 44. */
+.app[data-mobile] .pjseg {
+  height: calc(var(--p-hit) + 2px);
+}
+
 .pjseg__btn {
   min-width: 0;
   padding: 0 var(--p-1);

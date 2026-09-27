@@ -1,5 +1,15 @@
 # Handoff
 
+## Phone Listen capsule finished; phone tap targets ≥ 44px (2026-09-27 17:30, pushed)
+
+- **Asked (Steve):** continue Tomas's paused work: phone tap targets ≥ 44px, fix SynthesizerIndicator and PhoneListen.css. Scope: web/src/components, web/src/deck.
+- **Root cause of 121 web type errors:** `import type { HubLook } from hubView` pulled `VoiceHubController` and the whole desktop renderer into `tsconfig.webclient.json`. `HubLook` now lives in `src/components/hub/hubLook.ts` (no imports); hubView re-exports it.
+- **Listen capsule (`web/src/components/PhoneListen.{tsx,css}`):** Tomas's direction kept (mic + synth left, agent chip + chevron right; the chevron replaces long-press). Both buttons 44 px tall (mic 60×44, agent 48×44). Blocked uses `aria-disabled`, so a tap still says why. ON = mic filled with ink (not hue only); error/blocked = dashed rim. Legacy `.plisten` block CSS, `ListenGlyph`, hold code removed. Picker subtitle now says "Tap the chevron by Listen".
+- **SynthesizerIndicator:** canvas sized in first paint; static looks redraw on `transitionend` (was stuck in the old lime); one cached `getComputedStyle`; reduced motion shows dots when off (was same as on).
+- **Tap targets:** audit at the session scratchpad `tap-targets-audit.md` (61 OK, 10 FIX). Fixes under `pointer: coarse` or `.app[data-mobile]` in AnswerCard, ChatView, LiveFiles, Sheets.phone, ProjectSheet, Mirror CSS. Desktop look unchanged.
+- **Checked:** `npm run typecheck` 0 errors, webclient 0 (was 121), lint:hooks, scratch vite build. Harness at 390×844 measured the capsule. Not tried on a real phone.
+- **Open:** (1) Deck on a finger tablet has ~20 targets under 44 (tile buttons 22×20) — Deck is never shown on a phone (`Workspace.tsx:70`); needs a decision. (2) `.mchip` can shrink under 44 wide at 360–390 px; terminal keys 39 px wide under 360 px. (3) 7 small targets in `web/src/styles.css`, listed in the audit, not changed. (4) Tomas's own edits in `web/src/lib/term.ts` and `web/src/styles.css` (sticky tab strip, blur composer on terminal touch) were pushed as he had them, at Steve's choice; nobody reviewed them.
+
 ## Wall tile scroll bar; paperclip on every pane bar (2026-09-27 14:30, pushed)
 
 - **Scroll bar:** "can't scroll in the Wall" meant "there is no scroll bar". Steve is on a laptop touchpad, and two-finger scroll already worked. xterm's own bar is on the terminal's far right, which a life-size tile crops off. New `TileScrollbar` in `MosaicView.tsx` (+ `.mtile__scroll` CSS) draws a slim bar inside the right resize edge. It shows only while there is history. Drag the thumb, press the track to jump, or use the wheel over it. It never starts typing. `terminalHost.scrollInfo / watchScroll / scrollToLine` feed it. Checked: typecheck, throwaway test (drag to top → viewportY 0, track middle → 181/362, wheel on bar moves, tile stays not-typing).

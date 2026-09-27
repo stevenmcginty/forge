@@ -693,3 +693,8 @@ export function setWebVoiceAgent(next: WebVoiceProvider): void {
   set({ agent: next })
   void open(null)
 }
+
+/** Read live microphone and output levels for UI visualization. */
+export function readWebVoiceLevels(): { mic: number; out: number } {
+  return session ? session.levels() : { mic: 0, out: 0 }
+}

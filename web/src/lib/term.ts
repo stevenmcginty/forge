@@ -1176,6 +1176,10 @@ function enableTouchScroll(
       scrolling = false
       return
     }
+    const active = typeof document !== 'undefined' ? document.activeElement : null
+    if (active instanceof HTMLElement && active.matches('.session-composer .composer__input')) {
+      active.blur()
+    }
     stopInertia()
     tracking = true
     scrolling = false
@@ -1188,6 +1192,7 @@ function enableTouchScroll(
 
   const onMove = (event: TouchEvent): void => {
     if (!tracking || event.touches.length !== 1) return
+    if (event.cancelable) event.preventDefault()
     const y = event.touches[0]!.clientY
 
     if (!scrolling) {
@@ -1205,7 +1210,6 @@ function enableTouchScroll(
     lastT = now
     lastY = y
     applyDelta(dy)
-    event.preventDefault()
   }
 
   const onEnd = (): void => {

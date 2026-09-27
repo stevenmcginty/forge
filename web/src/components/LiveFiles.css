@@ -107,6 +107,14 @@ button.lf__crumb:active {
   cursor: default;
 }
 
+/* Under a finger a short folder ("ui", "a") is still 44px wide; the row scrolls. */
+@media (pointer: coarse) {
+  .lf__crumb {
+    min-width: var(--p-hit);
+    justify-content: center;
+  }
+}
+
 .lf__sep {
   flex: none;
   color: var(--p-ink-3);

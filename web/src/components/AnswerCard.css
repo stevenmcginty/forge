@@ -207,3 +207,18 @@
   margin-left: 16px;
   margin-right: 16px;
 }
+
+/* Under a finger the terminal link is drawn at 32px and hit at 44: the extra
+ * 6px each way lands in the 8px gap above it and the card's 8px padding below,
+ * never on an answer row. */
+@media (pointer: coarse) {
+  .answer__terminal {
+    position: relative;
+  }
+
+  .answer__terminal::before {
+    content: '';
+    position: absolute;
+    inset: -6px 0;
+  }
+}

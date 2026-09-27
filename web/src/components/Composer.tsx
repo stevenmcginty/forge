@@ -223,7 +223,7 @@ export function Composer({
   /** The dictation's key on the deck ("Right Alt"), for the mic's title and name. */
   voiceKey?: string
   /**
-   * The phone's Listen (PhoneListen.tsx): the voice agent's squared block, at
+   * The phone's Listen (PhoneListen.tsx): the voice agent's capsule (mic + agent chip), at
    * the front of the row — a conversation, where the disc is dictation.
    */
   listen?: ReactNode

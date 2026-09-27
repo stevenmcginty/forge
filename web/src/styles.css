@@ -1813,6 +1813,25 @@ body {
 
 .app[data-mobile] .app__body {
   position: relative;
+  overflow: hidden;
+}
+
+.app[data-mobile] .app__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app[data-mobile] .grid {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 /*
@@ -2237,6 +2256,10 @@ body {
  * The pill is drawn 40px tall and hit 48px tall (`::before`).
  */
 .app[data-mobile] .tabstrip {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-tabbar, 10);
+  flex: none;
   align-items: center;
   height: 56px;
   padding: 0 var(--p-2) 0 var(--p-3);
@@ -5420,25 +5443,12 @@ button.astatus__mode:not(:disabled):hover {
  * from focus to blur (`hold` in lib/term.ts), so the fold and the keyboard's
  * slide are drawn against the bottom of the box rather than sent to the PTY.
  */
-.app[data-mobile] .tabstrip {
-  transition:
-    height var(--p-dur) var(--p-ease),
-    opacity var(--p-dur-fast) var(--p-ease);
-}
-
 .app[data-mobile] .mpanes__chips {
   max-height: 64px;
   transition:
     max-height var(--p-dur) var(--p-ease),
     padding var(--p-dur) var(--p-ease),
     opacity var(--p-dur-fast) var(--p-ease);
-}
-
-.app[data-mobile]:has(.session-composer .composer__input:focus) .tabstrip {
-  height: 0;
-  overflow: hidden;
-  opacity: 0;
-  border-bottom-width: 0;
 }
 
 .app[data-mobile]:has(.session-composer .composer__input:focus) .mpanes__chips {

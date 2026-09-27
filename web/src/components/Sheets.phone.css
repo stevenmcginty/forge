@@ -718,6 +718,13 @@
   outline-offset: -2px;
 }
 
+/* Under a finger a short step ("C:", "a") is still 44px wide; the path scrolls. */
+@media (pointer: coarse) {
+  .fpk__crumb {
+    min-width: var(--p-hit);
+  }
+}
+
 .fpk__list {
   flex: 1;
   min-height: 0;

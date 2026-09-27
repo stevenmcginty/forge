@@ -497,6 +497,25 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
+/* Under a finger: the block clips at its top edge, so the -4px above the
+ * header was never hit (40px, not 44). The button keeps to the 36px header —
+ * the word where it was — and its hit hangs 8px down into the code's 12px top
+ * padding, lifted over the code's mask layer. */
+@media (pointer: coarse) {
+  .chatview__prose .md__copy-btn {
+    position: relative;
+    z-index: 1;
+    min-height: 36px;
+    margin: 0;
+  }
+
+  .chatview__prose .md__copy-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0 0 -8px;
+  }
+}
+
 .chatview__prose .md__code {
   margin: 0;
   padding: var(--s-5) var(--s-6);

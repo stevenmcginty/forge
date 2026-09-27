@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { reducedMotion } from '@/lib/motion'
-import type { HubLook } from './hubView'
+import type { HubLook } from './hubLook'
 
 const MOVING_LOOKS: ReadonlySet<HubLook> = new Set(['listening', 'speaking', 'thinking', 'connecting'])
 
@@ -51,20 +51,21 @@ export function SynthesizerIndicator({
     const totalBarsW = barCount * barW + (barCount - 1) * barGap
     const startX = Math.round((w - totalBarsW) / 2)
     const midY = h / 2
+    // A live object: read once per effect, its .color follows the CSS as it changes.
+    const style = getComputedStyle(canvas)
 
     const draw = (t: number): void => {
       ctx.clearRect(0, 0, w, h)
 
-      const style = getComputedStyle(canvas)
-      const color = style.color || '#c6ff4a'
-      ctx.fillStyle = color
+      ctx.fillStyle = style.color || '#c6ff4a'
 
       const levels = readRef.current()
       levelMic += (levels.mic - levelMic) * 0.22
       levelOut += (levels.out - levelOut) * 0.22
 
-      if (still) {
-        // Reduced motion: static aesthetic equalizer baseline
+      if (still && MOVING_LOOKS.has(look)) {
+        // Reduced motion: a static equalizer stands in for the moving looks;
+        // the resting looks fall through to their dots, so on still reads apart from off.
         const staticHeights = [4, 8, 12, 7, 4]
         for (let i = 0; i < barCount; i++) {
           const bh = Math.min(h - 2, staticHeights[i])
@@ -146,14 +147,21 @@ export function SynthesizerIndicator({
     }
 
     const onVisibility = (): void => (document.hidden ? stop() : start())
+    // A still look is drawn once, while the CSS colour transition may still be
+    // running; draw it again in the colour it settled on.
+    const onTransitionEnd = (): void => {
+      if (!running) draw(performance.now())
+    }
 
     draw(performance.now())
     start()
     document.addEventListener('visibilitychange', onVisibility)
+    canvas.addEventListener('transitionend', onTransitionEnd)
 
     return () => {
       stop()
       document.removeEventListener('visibilitychange', onVisibility)
+      canvas.removeEventListener('transitionend', onTransitionEnd)
     }
   }, [look, width, height])
 
@@ -162,6 +170,8 @@ export function SynthesizerIndicator({
       ref={ref}
       className={className ? `synth-indicator ${className}` : 'synth-indicator'}
       data-look={look}
+      // Sized in the first paint; the effect only sets the backing store after it.
+      style={{ width, height }}
       aria-hidden="true"
     />
   )

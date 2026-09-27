@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
 import type { WebVoiceProvider } from '@shared/web'
 import { Icon } from '@/components/Icon'
+import { SynthesizerIndicator } from '@/components/hub/SynthesizerIndicator'
+import type { HubLook } from '@/components/hub/hubLook'
 import {
   holdWebVoiceMic,
+  readWebVoiceLevels,
   setVoiceLink,
   setVoiceNavigator,
   setWebVoiceAgent,
@@ -22,13 +25,13 @@ import './PhoneListen.css'
  * Live, ChatGPT or Claude, ../deck/voiceAgent.ts), as a conversation rather
  * than dictation.
  *
- * Two things on screen, two silhouettes, as on the deck: Listen is a squared
- * block at the front of the box's row (a person and what the voice is doing);
- * the dictation mic stays the round disc at the bottom right. One tap turns
- * Listen on and it is hands-free from there — a pause sends, the reply is
- * spoken, it listens again, and talking over it interrupts. One tap turns it
- * off. A hold opens the agent picker (the deck's three rows, in the phone's
- * sheet).
+ * Two things on screen, two silhouettes, as on the deck: Listen is a capsule
+ * at the front of the box's row (a mic with the equalizer beside it, then the
+ * agent's mark and a chevron); the dictation mic stays the round disc at the
+ * bottom right. One tap on the mic half turns Listen on and it is hands-free
+ * from there — a pause sends, the reply is spoken, it listens again, and
+ * talking over it interrupts. One tap turns it off. A tap on the agent half
+ * opens the agent picker (the deck's three rows, in the phone's sheet).
  *
  * While it is on, the box's own face carries the voice line — the state in a
  * shape and a word, and the newest words heard or said — in place, so the dock
@@ -36,10 +39,6 @@ import './PhoneListen.css'
  * dictation) takes the box back.
  */
 
-/** How long a press must be held to open the picker instead of toggling. */
-const HOLD_MS = 450
-/** A finger that wanders this far is scrolling, not holding. */
-const HOLD_SLOP_PX = 10
 /** How long "Ended — …" stays on the box before it hands the box back. */
 const ENDED_SHOW_MS = 6000
 /** The longest caption tail the line carries; two lines show the newest of it. */
@@ -100,7 +99,7 @@ export function usePhoneVoice(enabled: boolean, dictating: boolean): void {
 
 /* --------------------------------------------------------------- picker */
 
-/** The picker is opened from Listen (a hold) and from the line; one flag for both. */
+/** The picker is opened from Listen (its agent half) and from the line; one flag for both. */
 let pickerOpen = false
 const pickerListeners = new Set<() => void>()
 
@@ -121,14 +120,12 @@ function usePickerOpen(): boolean {
 
 /* ---------------------------------------------------------------- looks */
 
-type Look = 'off' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted' | 'failed'
-
-function lookOf(voice: WebVoiceState): Look {
+function lookOf(voice: WebVoiceState): HubLook {
   switch (voice.phase) {
     case 'off':
-      return 'off'
+      return 'offline'
     case 'error':
-      return 'failed'
+      return 'error'
     case 'listening':
       return voice.muted ? 'muted' : 'listening'
     default:
@@ -148,7 +145,7 @@ function useLive(): boolean {
 
 /* --------------------------------------------------------------- Listen */
 
-/** Listen, wired: the block at the front of the row and the picker it opens. */
+/** Listen, wired: the cohesive capsule button at the front of the row and the picker it opens. */
 export function PhoneListen(): ReactNode {
   const voice = useWebVoice()
   const live = useLive()
@@ -156,12 +153,12 @@ export function PhoneListen(): ReactNode {
   const open = usePickerOpen()
   return (
     <>
-      <ListenBlock
+      <ListenUnit
         voice={voice}
         live={live}
         supported={webVoiceSupported()}
         onToggle={toggleWebVoice}
-        onHold={() => setPicker(true)}
+        onOpenPicker={() => setPicker(true)}
         onRefused={actions.setNotice}
       />
       <VoicePicker
@@ -182,24 +179,29 @@ export function PhoneListen(): ReactNode {
 }
 
 /**
- * The block: tap to talk, tap again to stop, hold for the picker. Its state
- * is the glyph's shape and the block's fill — outlined at rest, filled with
- * ink while a conversation is open, a dashed rim when it failed or cannot
- * start — and the words are on the voice line and in its name.
+ * The capsule: two buttons, each a full touch target, in one pill.
+ *
+ * Left: the mic, a switch — tap to talk, tap again to stop — with the
+ * equalizer beside it (dots at rest, bars that move with the voice). Right:
+ * the agent's mark and a chevron, which opens the picker. Its state is a fill
+ * and a shape, never a hue alone: the mic half filled with ink while a
+ * conversation is open, a dashed rim when it failed or cannot start; the
+ * words are on the voice line and in the switch's name. A switch that cannot
+ * start stays tappable (aria-disabled), so the tap can say why.
  */
-export function ListenBlock({
+export function ListenUnit({
   voice,
   live,
   supported,
   onToggle,
-  onHold,
+  onOpenPicker,
   onRefused
 }: {
   voice: WebVoiceState
   live: boolean
   supported: boolean
   onToggle: () => void
-  onHold: () => void
+  onOpenPicker: () => void
   onRefused: (words: string) => void
 }): ReactNode {
   const on = isOn(voice)
@@ -213,138 +215,70 @@ export function ListenBlock({
       : null
   const word = voicePhaseWord(voice.phase, voice.muted)
 
-  const hold = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null)
-  const clearHold = (): void => {
-    if (hold.current) window.clearTimeout(hold.current.timer)
+  const handleToggle = (e: MouseEvent): void => {
+    e.preventDefault()
+    if (blocked) onRefused(blocked)
+    else onToggle()
   }
-  useEffect(() => clearHold, [])
+
+  const handleOpenPicker = (e: MouseEvent): void => {
+    e.preventDefault()
+    onOpenPicker()
+  }
 
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      className="plisten"
-      data-look={look}
+    <span
+      className="plisten-unit"
+      role="group"
       data-on={on ? 'true' : undefined}
+      data-recording={look === 'listening' ? 'true' : undefined}
+      data-look={look}
       data-blocked={blocked ? 'true' : undefined}
-      data-word={on || failed ? undefined : 'true'}
-      aria-label={`Listen — talk to ${agent}: ${blocked ? 'unavailable' : word}. Hold to pick the voice agent.`}
-      title={
-        blocked ??
-        (on
-          ? `Listen is on with ${agent} — tap to stop. Hold to pick another agent.`
-          : failed
-            ? `${agent} failed — tap to try again. Hold to pick another agent.`
-            : `Tap to talk to ${agent}, hands-free. Hold to pick Gemini, ChatGPT or Claude.`)
-      }
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        clearHold()
-        const at = { timer: 0, x: e.clientX, y: e.clientY, fired: false }
-        at.timer = window.setTimeout(() => {
-          at.fired = true
-          navigator.vibrate?.(12)
-          onHold()
-        }, HOLD_MS)
-        hold.current = at
-      }}
-      onPointerMove={(e) => {
-        const at = hold.current
-        if (at && !at.fired && Math.hypot(e.clientX - at.x, e.clientY - at.y) > HOLD_SLOP_PX) clearHold()
-      }}
-      onPointerUp={clearHold}
-      onPointerCancel={clearHold}
-      onPointerLeave={clearHold}
-      onContextMenu={(e) => e.preventDefault()}
-      onClick={() => {
-        const at = hold.current
-        hold.current = null
-        if (at?.fired) return
-        if (blocked) onRefused(blocked)
-        else onToggle()
-      }}
+      aria-label="Agent voice controls"
     >
-      <ListenGlyph look={look} on={on} />
-      {/* At rest the block says what it is; once on, the voice line says the state. */}
-      {on || failed ? null : (
-        <span className="plisten__word" aria-hidden="true">
-          Listen
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        className="plisten__btn"
+        data-on={on ? 'true' : undefined}
+        title={
+          blocked ??
+          (on
+            ? `Listen is on with ${agent} — tap to stop.`
+            : failed
+              ? `${agent} failed — tap to try again.`
+              : `Tap to talk to ${agent}, hands-free.`)
+        }
+        aria-label={`Listen: ${on ? 'on' : 'off'} — ${agent}: ${word}`}
+        aria-disabled={blocked ? true : undefined}
+        onClick={handleToggle}
+      >
+        <span className="plisten__mic-wrap" aria-hidden="true">
+          <Icon name="mic" size={15} className="plisten__mic-icon" />
         </span>
-      )}
-      <AgentMark agent={voice.agent} className="plisten__mark" />
-    </button>
-  )
-}
+        <SynthesizerIndicator
+          look={look}
+          readLevels={readWebVoiceLevels}
+          width={24}
+          height={14}
+          className="plisten__synth"
+        />
+      </button>
 
-/*
- * Sound waves out of the mouth: arcs of circles centred just before it, radii
- * 2.6, 5.2 and 7.8, each from -50 to +50 degrees. The deck's glyph, drawn the
- * same so the two faces speak one language.
- */
-const WAVE_ARCS = [
-  'M14.07 5.61A2.6 2.6 0 0 1 14.07 9.59',
-  'M15.74 3.62A5.2 5.2 0 0 1 15.74 11.58',
-  'M17.41 1.62A7.8 7.8 0 0 1 17.41 13.58'
-]
-
-/**
- * A person, and beside the mouth what the voice is doing — one shape per
- * state, so none rests on colour:
- *
- *   off           an outlined person, two quiet waves
- *   connecting    a filled person, an arc turning
- *   listening     four bars, breathing — it hears you
- *   thinking      three dots, a light running across them
- *   speaking      three bold waves, pulsing out
- *   muted         the two waves struck through (dictation has the mic)
- *   failed        an outlined person and a warning triangle
- */
-function ListenGlyph({ look, on }: { look: Look; on: boolean }): ReactNode {
-  return (
-    <svg className="plisten__glyph" data-look={look} width="30" height="25" viewBox="0 0 22 18" aria-hidden="true">
-      <g className="plisten__person" data-filled={on ? 'true' : undefined}>
-        <circle cx="6.4" cy="5.6" r="3" />
-        <path d="M1.2 16.6C1.2 12.9 3.5 11 6.4 11s5.2 1.9 5.2 5.6Z" />
-      </g>
-      {look === 'off' || look === 'muted' ? (
-        <g className="plisten__waves">
-          <path d={WAVE_ARCS[0]} />
-          <path d={WAVE_ARCS[1]} />
-        </g>
-      ) : null}
-      {look === 'muted' ? <path className="plisten__strike" d="M13.2 13.6 19.6 1.6" /> : null}
-      {look === 'speaking' ? (
-        <g className="plisten__waves" data-bold="true">
-          {WAVE_ARCS.map((d) => (
-            <path key={d} d={d} />
-          ))}
-        </g>
-      ) : null}
-      {look === 'connecting' ? <path className="plisten__turn" d="M17.2 4.4A3.2 3.2 0 1 1 14 7.6" /> : null}
-      {look === 'listening' ? (
-        <g className="plisten__bars">
-          <rect x="13.2" y="3.6" width="1.6" height="8" rx="0.8" />
-          <rect x="15.4" y="3.6" width="1.6" height="8" rx="0.8" />
-          <rect x="17.6" y="3.6" width="1.6" height="8" rx="0.8" />
-          <rect x="19.8" y="3.6" width="1.6" height="8" rx="0.8" />
-        </g>
-      ) : null}
-      {look === 'thinking' ? (
-        <g className="plisten__dots">
-          <circle cx="14.4" cy="7.6" r="1.15" />
-          <circle cx="17" cy="7.6" r="1.15" />
-          <circle cx="19.6" cy="7.6" r="1.15" />
-        </g>
-      ) : null}
-      {look === 'failed' ? (
-        <g className="plisten__warn">
-          <path d="M17.2 1.6 21.3 10.2H13.1Z" />
-          <path d="M17.2 4.6V6.9" />
-          <circle cx="17.2" cy="8.5" r="0.6" />
-        </g>
-      ) : null}
-    </svg>
+      <button
+        type="button"
+        className="plisten__agent-btn"
+        title={`Voice agent: ${agent} — tap to pick Gemini, ChatGPT or Claude`}
+        aria-label={`Voice agent: ${agent}. Pick Gemini, ChatGPT or Claude`}
+        onClick={handleOpenPicker}
+      >
+        <span className="plisten__agent-tile" aria-hidden="true">
+          <AgentMark agent={voice.agent} size={13} />
+        </span>
+        <Icon name="chevronDown" size={10} className="plisten__chev" />
+      </button>
+    </span>
   )
 }
 
@@ -564,7 +498,7 @@ export function VoicePicker({
       open={open}
       onClose={onClose}
       label="Voice agent"
-      subtitle="Who Listen talks to. Hold Listen to come back here."
+      subtitle="Who Listen talks to. Tap the chevron by Listen to come back here."
       testId="voice-agent-sheet"
     >
       <div role="radiogroup" aria-label="Voice agent">

@@ -862,3 +862,27 @@ button.mirror__status:focus-visible {
   width: var(--p-hit);
   height: var(--p-hit);
 }
+
+/* The cards over the picture (the limits note, the PIN, "Try again"), at a
+   thumb's size: the field grows to 44px; the desk's 32px pills and the note's
+   24px close keep their drawing and hit 44px through the card's gaps. */
+.app[data-mobile] .mirror__card .gate__input {
+  height: var(--p-hit);
+}
+
+.app[data-mobile] .mirror__card .cta-btn:not(.mirror__passkey),
+.app[data-mobile] .mirror__card-header .ghost-btn {
+  position: relative;
+}
+
+.app[data-mobile] .mirror__card .cta-btn:not(.mirror__passkey)::before {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+
+.app[data-mobile] .mirror__card-header .ghost-btn::before {
+  content: '';
+  position: absolute;
+  inset: -10px -9px;
+}
