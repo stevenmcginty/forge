@@ -6,23 +6,25 @@ import './PaneCarousel.css'
 export interface PaneCarouselProps {
   /** The stage the terminals sit on (kept for caller compatibility). */
   rootRef?: RefObject<HTMLElement | null>
-  /** Terminals in the project — the carousel's length. */
+  /** Stops in the project — each terminal, and each chat tab as one. */
   count: number
 }
 
 /**
  * Full screen's carousel: left and right navigation arrows that step to the
- * previous and next terminal, wrapping at both ends.
+ * previous and next terminal or chat tab, wrapping at both ends.
  *
  * They are the keyboard's Previous / Next panel (Ctrl+PageUp / Ctrl+PageDown,
  * or whatever Steve rebound them to) with a mouse on them: a click runs that
- * very command, so the order is the Agents menu's (tabs in order, each tab's
- * panes in order), the switch is the one the menu and the voice tools make,
- * and focus lands in the new terminal the same way.
+ * very command, so the order is lib/paneStops' (tabs in order, each tab's
+ * panes in order, a chat tab as one stop), a terminal is switched to the way
+ * the menu and the voice tools do it, and a chat by selecting its tab. On a
+ * chat tab the page is kept clear of the paddles (ChatPane's placement), since
+ * it is drawn above everything here.
  *
  * Consistently visible and easily identifiable floating glass paddles that sit
  * cleanly at the stage edges without being visually intrusive or distracting.
- * Not drawn with only one terminal — there is nowhere to go.
+ * Not drawn with only one stop — there is nowhere to go.
  */
 export function PaneCarousel({
   count

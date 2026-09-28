@@ -4,6 +4,7 @@ import { XTERM_TEXTAREA } from '@/lib/dictation'
 import { focusNavTarget, getHubRuntime } from '@/lib/hubRuntime'
 import { comboFromEvent } from '@/lib/keymap'
 import { commandForCombo, hasHandler, runCommand, setCommandHandler, type CommandHandler } from '@/lib/keymapRegistry'
+import { stepStop } from '@/lib/paneStops'
 import { terminalHost } from '@/lib/terminals'
 import { useActiveTab, useActiveWorkspace, useApp } from '@/state/AppState'
 import { useVoiceHubController } from '@/state/VoiceHubController'
@@ -64,11 +65,17 @@ export function useShortcuts(): void {
       const i = tabs.findIndex((t) => t.id === L().workspace.activeTabId)
       L().actions.selectTab(tabs[(i + delta + tabs.length) % tabs.length]!.id)
     }
+    // Full screen's Previous / Next: every terminal, and each chat tab as one
+    // stop (lib/paneStops). A chat is reached by selecting its tab.
     const stepPane = (delta: number): CommandHandler => () => {
-      const panes = getHubRuntime()?.panes() ?? []
-      if (panes.length < 2) return
-      const i = Math.max(0, panes.findIndex((p) => p.paneId === activePaneId()))
-      focusNavTarget({ kind: 'pane', pane: panes[(i + delta + panes.length) % panes.length]! }, 'keyboard')
+      const stop = stepStop(L().workspace, delta)
+      if (!stop) return
+      if (stop.kind === 'chat') {
+        L().actions.selectTab(stop.tabId)
+        return
+      }
+      const pane = getHubRuntime()?.panes().find((p) => p.paneId === stop.paneId)
+      if (pane) focusNavTarget({ kind: 'pane', pane }, 'keyboard')
     }
     const stepProject = (delta: number): CommandHandler => () => {
       const { projects, activeProjectId } = L().state

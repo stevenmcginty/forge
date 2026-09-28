@@ -24,7 +24,8 @@ import './ChatPane.css'
  *             the window resizing) the page hides, and comes back at the
  *             settled box ~90 ms later.
  *   covered   a pop-up, menu or sheet over the box hides it (./browser/
- *             overlays.ts); the dock's risers trim its bottom edge. On the
+ *             overlays.ts); the dock's risers trim its bottom edge, and Full
+ *             screen's Previous / Next paddles its sides. On the
  *             Wall a tile dragged across it hides it too, and the wall's own
  *             scroll box trims it.
  *   hidden    the owner says so.
@@ -37,6 +38,13 @@ import './ChatPane.css'
 
 /** How long the box must hold still before the page is shown on it. */
 const SETTLE_MS = 90
+
+/**
+ * Full screen's Previous / Next paddles (shell/PaneCarousel), at the stage's
+ * left and right edges. The page would be drawn over them, so it stops short
+ * of them instead. Only Full screen mounts them, only with two stops or more.
+ */
+const SIDE_TRIMS = '.pcar__btn'
 
 function same(a: ChatViewBounds | null, b: ChatViewBounds | null): boolean {
   if (!a || !b) return a === b
@@ -114,6 +122,17 @@ export function useChatPlacement(
         const b = o.getBoundingClientRect()
         if (overlaps(box, b)) box.bottom = Math.min(box.bottom, b.top - 8)
       }
+      for (const o of document.querySelectorAll<HTMLElement>(SIDE_TRIMS)) {
+        const b = o.getBoundingClientRect()
+        if (!overlaps(box, b)) continue
+        // The paddle's laid-out edges, not its pressed-in scale, so a click
+        // does not read as the box moving and blink the page off.
+        const left = (o.offsetParent?.getBoundingClientRect().left ?? b.left) + o.offsetLeft
+        const right = left + o.offsetWidth
+        if (left + right < box.left + box.right) box.left = Math.max(box.left, right + 8)
+        else box.right = Math.min(box.right, left - 8)
+      }
+      if (box.right - box.left < 60) return null
       if (box.bottom - box.top < 60) return null
       return {
         x: Math.round(box.left),

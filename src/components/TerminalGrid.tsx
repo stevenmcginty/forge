@@ -4,6 +4,7 @@ import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { collectLeaves, countLeaves } from '@/lib/splitTree'
 import { fadeIn, useFlipChildren } from '@/lib/motion'
+import { paneStops } from '@/lib/paneStops'
 import { toolsHost as toolsHostStore, useHost } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
 import { uiCommands } from '@/lib/uiCommands'
@@ -269,7 +270,7 @@ export const TerminalGrid = memo(function TerminalGrid({ beside = false }: { bes
                 targetKey={tab.activePaneId}
                 enabled={countLeaves(tab.root) > 1}
               />
-              <PaneCarousel rootRef={bodyRef} count={workspace.tabs.reduce((n, t) => n + countLeaves(t.root), 0)} />
+              <PaneCarousel rootRef={bodyRef} count={paneStops(workspace.tabs).length} />
             </>
           ) : (
             <EmptyState
