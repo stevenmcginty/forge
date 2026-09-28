@@ -16,6 +16,7 @@ import { CHATBOTS, type ChatBotId } from '@shared/chatbots'
 import type { ChatNavAction, ChatViewBounds, ChatViewState } from '@shared/api'
 import { prepareBrowserSession } from '../browser-panes/manager'
 import { chatUrl, forgetChat, setChatUrl } from './registry'
+import type { ChatPage } from './agent-ops'
 
 /**
  * The chat pages themselves: one WebContentsView per chat leaf, laid over the
@@ -30,8 +31,10 @@ import { chatUrl, forgetChat, setChatUrl } from './registry'
  * handler. Those are the browser's to set.
  *
  * Not a browser surface. A chat page is not in the surface list, not on the
- * board and not reachable by the browser tools: Steve drives it himself, and
- * nothing here reads, types into or scripts a page.
+ * board and not reachable by the browser tools. Agents reach it only through
+ * the chat tools (shared/chat-tools.ts): `agentPage` below hands
+ * ./agent-ops.ts a page to type a message into, send, and read the reply of —
+ * in the open, on the tab Steve can watch. Nothing reads cookies or storage.
  *
  * A view is made the first time its pane is on screen and kept while its leaf
  * is in some project's layout — switching tabs only hides it, so a half-typed
@@ -41,6 +44,8 @@ import { chatUrl, forgetChat, setChatUrl } from './registry'
 
 /** Where a page waits while no pane shows it: off-screen-sized, so it lays out sensibly. */
 const HIDDEN = { x: 0, y: 0, width: 1280, height: 800 }
+/** How long one page script may take before the page is called not responding. */
+const PAGE_SCRIPT_MS = 10_000
 
 interface ChatView {
   view: WebContentsView
@@ -147,6 +152,9 @@ export class ChatViews {
     })
     view.setBackgroundColor('#ffffff')
     const wc = view.webContents
+    // An agent's chat_send waits for a reply on a tab nobody is looking at: a
+    // throttled hidden page would hold the reply's words back until shown.
+    wc.setBackgroundThrottling(false)
     const cv: ChatView = { view, bot, visible: false, bounds: { ...HIDDEN }, project: this.deps.projectOf(leafId), error: '' }
     this.views.set(leafId, cv)
 
@@ -268,6 +276,72 @@ export class ChatViews {
       if (wc.isDestroyed()) continue
       forgetChat(leafId)
       void wc.loadURL(CHATBOTS[bot].homeUrl).catch(() => undefined)
+    }
+  }
+
+  /** The leaf's page, if it is open, for chat_list: where it is and what it is called. */
+  openPage(leafId: string): { url: string; title: string } | null {
+    const wc = this.views.get(leafId)?.view.webContents
+    if (!wc || wc.isDestroyed()) return null
+    return { url: wc.getURL(), title: wc.getTitle() }
+  }
+
+  /**
+   * The leaf's page for an agent's chat tool (./agent-ops.ts), made and loading
+   * if no pane has shown it yet — hidden until one does.
+   */
+  agentPage(leafId: string, bot: ChatBotId): ChatPage | null {
+    let wc: WebContents
+    try {
+      wc = this.ensure(leafId, bot).webContents
+    } catch {
+      return null
+    }
+    const alive = (): boolean => !wc.isDestroyed() && !wc.isCrashed()
+    const gone = (): Error => new Error('the chat page closed')
+    return {
+      alive,
+      url: () => (alive() ? wc.getURL() : ''),
+      run: async <T>(script: string): Promise<T> => {
+        if (!alive()) throw gone()
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const late = new Promise<never>((_, rej) => {
+          timer = setTimeout(() => rej(new Error('the chat page is not responding')), PAGE_SCRIPT_MS)
+        })
+        try {
+          return (await Promise.race([wc.executeJavaScript(script, true), late])) as T
+        } finally {
+          clearTimeout(timer)
+        }
+      },
+      insertText: async (text: string) => {
+        if (!alive()) throw gone()
+        await wc.insertText(text)
+      },
+      pressEnter: () => {
+        if (!alive()) return
+        wc.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+        wc.sendInputEvent({ type: 'char', keyCode: '\r' })
+        wc.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
+      },
+      load: async (url: string) => {
+        if (!alive()) throw gone()
+        await wc.loadURL(url).catch(() => undefined)
+      },
+      settled: (ms: number) =>
+        new Promise<void>((resolve) => {
+          if (!alive() || !wc.isLoading()) {
+            resolve()
+            return
+          }
+          const done = (): void => {
+            clearTimeout(timer)
+            if (!wc.isDestroyed()) wc.off('did-stop-loading', done)
+            resolve()
+          }
+          const timer = setTimeout(done, ms)
+          wc.once('did-stop-loading', done)
+        })
     }
   }
 

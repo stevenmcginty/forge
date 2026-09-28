@@ -40,6 +40,7 @@
     "canvas:check": "node scripts/canvas-check.mjs",
     "artifact:check": "node scripts/artifact-check.mjs",
     "browser:check": "node scripts/browser-check.mjs",
+    "chat-tools:check": "node scripts/chat-tools-check.mjs",
     "voice:brain": "node scripts/voice-brain-smoke.mjs",
     "voice:luna": "node scripts/voice-luna-smoke.mjs",
     "foreman:check": "node scripts/foreman-check.mjs",

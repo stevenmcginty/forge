@@ -47,9 +47,11 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { BROWSER_HANDLERS, BROWSER_INSTRUCTIONS, BROWSER_TOOLS } from './browser-tools.mjs'
+import { CHAT_HANDLERS, CHAT_INSTRUCTION_LINE, CHAT_TOOLS } from './chat-tools.mjs'
 
-// Forge's built-in browser rides along for the CLIs whose only MCP server is
-// this one. Claude gets it from forge-bridge, so its copy is started with it off.
+// Forge's built-in browser — and the chat tabs, which ride the same pipe —
+// come along for the CLIs whose only MCP server is this one. Claude gets both
+// from forge-bridge, so its copy is started with them off.
 const WITH_BROWSER = process.env['FORGE_BROWSER_TOOLS'] !== 'off'
 
 const SERVER_NAME = 'forge-share'
@@ -780,15 +782,16 @@ const HANDLERS = {
   share_panes: sharePanes,
   pane_send: paneSend,
   pane_read: paneRead,
-  ...(WITH_BROWSER ? BROWSER_HANDLERS : {})
+  ...(WITH_BROWSER ? BROWSER_HANDLERS : {}),
+  ...(WITH_BROWSER ? CHAT_HANDLERS : {})
 }
 
 const server = new Server(
   { name: SERVER_NAME, version: SERVER_VERSION },
-  { capabilities: { tools: {} }, ...(WITH_BROWSER ? { instructions: BROWSER_INSTRUCTIONS } : {}) }
+  { capabilities: { tools: {} }, ...(WITH_BROWSER ? { instructions: `${BROWSER_INSTRUCTIONS}\n${CHAT_INSTRUCTION_LINE}` } : {}) }
 )
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: WITH_BROWSER ? [...TOOLS, ...BROWSER_TOOLS] : TOOLS }))
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: WITH_BROWSER ? [...TOOLS, ...BROWSER_TOOLS, ...CHAT_TOOLS] : TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params

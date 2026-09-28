@@ -273,6 +273,21 @@ export function askAnchoredAppAction(action: Record<string, unknown>): Promise<s
   return runAppAction(action)
 }
 
+/* ------------------------------------------------------------ chat tools */
+
+type ChatRunner = (paneId: string, name: string, args: Record<string, unknown>) => Promise<string>
+
+let chatRunner: ChatRunner | null = null
+
+/**
+ * How Foreman's chat tools reach the chat tabs. Installed by
+ * electron/browser-panes/ipc.ts when the link starts (it already imports this
+ * file, so the hook points that way round rather than making a cycle).
+ */
+export function setForemanChatRunner(run: ChatRunner | null): void {
+  chatRunner = run
+}
+
 /* -------------------------------------------------------------------- host */
 
 function ensureHost(): ForemanHost {
@@ -303,7 +318,9 @@ function ensureHost(): ForemanHost {
     getDriveModel: () => getSettings().foremanDriveModel || DEFAULT_FOREMAN_DRIVE_MODEL,
     getStandingBrief: () => getSettings().foremanBrief,
     runAppAction,
-    getBridgeServer: bridgeServer
+    getBridgeServer: bridgeServer,
+    runChatTool: (paneId, name, args) =>
+      chatRunner ? chatRunner(paneId, name, args) : Promise.resolve("Forge's chat tabs are not ready yet.")
   })
   // The renderer's attention transitions are the trigger for the whole loop.
   // Subscribed here rather than in the host so the host stays Electron-free.

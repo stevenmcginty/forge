@@ -3,8 +3,9 @@ import { VOICE_OWNER, type BrowserAgentReply, type BrowserOwner } from '@shared/
 import { getDataDir, getProjects } from '../store'
 import { liveSessions } from '../pty-host'
 import { askRendererTool } from '../voice-agent/ipc'
-import { askAnchoredAppAction } from '../foreman/ipc'
+import { askAnchoredAppAction, setForemanChatRunner } from '../foreman/ipc'
 import { anchoredOpenAction, paneOpenReply } from '../foreman/pane-caller'
+import { runChatOp } from '../chat-panes/ipc'
 import { setBrainBrowserRunner } from './brain'
 import { setBrowserLinkFile } from './env'
 import { BrowserService, type BrowserServiceDeps } from './service'
@@ -44,12 +45,25 @@ export function registerBrowserPanes(): void {
     appOp: async (op, args, caller) => {
       const anchored = op === 'open_agent_pane' ? anchoredOpenAction(args, caller.id) : null
       return paneOpenReply(anchored ? await askAnchoredAppAction(anchored) : await askRendererTool(op, args))
-    }
+    },
+    // chat_list / chat_send / chat_read: the chat tabs (electron/chat-panes/).
+    chatOp: runChatOp
   })
   service.registerIpc(ipcMain)
   setBrowserLinkFile(service.linkFile)
   setBrainBrowserRunner((op, args) => service?.run(op, args, VOICE_OWNER) ?? Promise.resolve(notReady()))
+  // Foreman's chat tools run as the pane it drives, so they land in that pane's project.
+  setForemanChatRunner(async (paneId, name, args) => (await runLinkOp(name, args, { id: `pane:${paneId}`, label: 'Foreman', agent: '' })).text)
   service.start().catch((err) => console.error('[browser] link failed to start:', err))
+}
+
+/**
+ * One call on the link from inside main, as if it had come down the pipe from
+ * `caller` — Foreman's chat tools, as the pane it drives (`pane:<id>`), so they
+ * work in that pane's project exactly as the pane's own agent would.
+ */
+export function runLinkOp(op: string, args: Record<string, unknown>, caller: BrowserOwner): Promise<BrowserAgentReply> {
+  return service ? service.run(op, args, caller) : Promise.resolve(notReady())
 }
 
 function notReady(): BrowserAgentReply {

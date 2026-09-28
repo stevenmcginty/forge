@@ -35,6 +35,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { autoPost, SHOW_ON_BOARD_TOOL, showOnBoardHandler } from './canvas-tools.mjs'
 import { BROWSER_HANDLERS, BROWSER_INSTRUCTIONS, BROWSER_TOOLS } from './browser-tools.mjs'
 import { APP_HANDLERS, APP_INSTRUCTION_LINE, APP_TOOLS } from './forge-app-tools.mjs'
+import { CHAT_HANDLERS, CHAT_INSTRUCTION_LINE, CHAT_TOOLS } from './chat-tools.mjs'
 
 const SERVER_NAME = 'forge-bridge'
 const SERVER_VERSION = '1.0.0'
@@ -380,7 +381,8 @@ const TOOLS = [
   },
   SHOW_ON_BOARD_TOOL,
   ...BROWSER_TOOLS,
-  ...APP_TOOLS
+  ...APP_TOOLS,
+  ...CHAT_TOOLS
 ]
 
 /* ------------------------------------------------------------- text (REST)
@@ -1404,7 +1406,8 @@ const HANDLERS = {
   make_video: makeVideo,
   show_on_board: showOnBoardHandler(ok, fail),
   ...BROWSER_HANDLERS,
-  ...APP_HANDLERS
+  ...APP_HANDLERS,
+  ...CHAT_HANDLERS
 }
 
 /**
@@ -1419,7 +1422,8 @@ const CALLABLE = {
 const server = new Server(
   { name: SERVER_NAME, version: SERVER_VERSION },
   { capabilities: { tools: {} }, instructions: `${BROWSER_INSTRUCTIONS}
-${APP_INSTRUCTION_LINE}` }
+${APP_INSTRUCTION_LINE}
+${CHAT_INSTRUCTION_LINE}` }
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))

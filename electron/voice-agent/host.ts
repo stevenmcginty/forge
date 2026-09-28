@@ -41,7 +41,7 @@ import { VOICE_PERSONA } from './persona'
 import { brainHubTools } from '../hub-brain-tools'
 import { brainSpecAllowed, brainSpecTools } from '../brain-tools-mcp'
 import { refuseAppLaunch, refuseCommand, routeOpenTarget } from './launch-guard'
-import { BRAIN_BROWSER_ALLOWED, brainBrowserTools } from '../browser-panes/brain'
+import { BRAIN_BROWSER_ALLOWED, BRAIN_CHAT_ALLOWED, brainBrowserTools, brainChatTools } from '../browser-panes/brain'
 
 /**
  * The voice brain: one persistent Claude Agent SDK session, living for as long
@@ -1011,6 +1011,8 @@ export class VoiceAgentHost {
         ),
 
         ...brainBrowserTools().map((t) => tool(t.name, t.description, t.shape, t.handler)),
+        // chat_list, chat_send, chat_read — the chat tabs (shared/chat-tools.ts).
+        ...brainChatTools().map((t) => tool(t.name, t.description, t.shape, t.handler)),
         // open_agent_pane, type_into_pane, help_prompt, read_pane — generated
         // from shared/brain-tools.ts, the same specs every brain gets.
         ...brainSpecTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler)),
@@ -1141,6 +1143,7 @@ export class VoiceAgentHost {
       'mcp__forge__describe_self',
       ...brainSpecAllowed(),
       ...BRAIN_BROWSER_ALLOWED,
+      ...BRAIN_CHAT_ALLOWED,
       ...(bridge
         ? [
             'mcp__forge-bridge__make_image',

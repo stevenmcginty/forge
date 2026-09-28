@@ -43,6 +43,11 @@ const TOOL_LABELS: Record<string, string> = {
   browser_type: 'typing in the browser',
   browser_screenshot: 'looking at the browser',
 
+  /* -------------------------------------------------------- the chat tabs */
+  chat_list: 'looking at the chat tabs',
+  chat_send: 'handing it to a chatbot',
+  chat_read: 'reading a chatbot',
+
   /* ------------------------------------------- the SDK's read-only built-ins */
   Read: 'reading a file',
   Glob: 'finding files',
