@@ -1,5 +1,14 @@
 # Handoff
 
+## Agents, the brain and Foreman hand off to the chat tabs (2026-09-28, branch claude/laughing-gauss-ronf71)
+
+- **Asked (Steve):** agents, Forge and the brain must be able to hand off to the chatbots inside Forge. The case: a Claude pane in the Bet365 project could not reach the Gemini chat tab Steve had opened (in another project) to brief it about a bet before a flight. Earlier the bridge could not see or type into a chat tab at all (see "CLIs and chat tabs" below).
+- **Built:** three tools, one definition in `shared/chat-tools.ts`: `chat_list`, `chat_send(chat, text, new_chat?, wait?)`, `chat_read(chat, messages?)`. `chat` is a chat id or a bot by name. By name it looks in the caller's project first, then the project on screen, then any project, and only if there is none opens a tab in the caller's project without taking the screen (`openChatTabQuietly`). `chat_send` types into the box, presses send (button, else Enter), waits up to 90 s for the reply to stop moving, and returns it. Unsent words already in the box are refused, never typed over. Main answers in `electron/chat-panes/agent-ops.ts`; the in-page scripts are `electron/chat-panes/page-scripts.ts`; per-bot selectors are `drive` in `shared/chatbots.ts`. Chat pages now run with background throttling off, so a reply streams on a hidden tab.
+- **Who gets them:** pane agents (`bridge/chat-tools.mjs`, in forge-bridge and forge-share, over the browser pipe, in the pane's project); the Claude brain and CLI brains (`browser-panes/brain.ts` `brainChatTools`); the realtime voice models (`src/lib/realtime/tools-chat.ts`); Foreman (`runChatTool`, run as the driven pane). A line in `shared/brain-persona.ts`, `foreman/persona.ts` and every CLI's instructions line (`cli-register.ts`).
+- **Checked:** typecheck 0; new `chat-tools:check` 77/0 (words match the bridge copy; resolution through the real layout engine; the real pipe end to end; the page scripts in a real Chromium against stand-in pages for all three sites, including multi-line messages, button and Enter sends, streamed replies). share:check 295/0, bridge:smoke (absent tier) 170/0, realtime 28, launch-guard 91, foreman 132, layout-engine 70, agent-bar 43.
+- **Not tried on the real sites.** The `drive` selectors are best-known values, not verified live. If a site renamed something, the fix is a line in `shared/chatbots.ts`. Needs a Forge restart (main process) and reopened panes (the bridge config is read at launch).
+- **Known:** Codex's own MCP tool timeout may cut a waiting `chat_send` short; `wait: false` then `chat_read` avoids it.
+
 ## Dictate key + mic button, and the bar aims at the pane by default (2026-09-28, pushed to master)
 
 - **Asked (Steve):** start dictation with the Dictate key (now Right Shift; Right Alt is the Agent key, his swap), stop it with the bar's mic button, and it should send. Also: the bar's target chip should default to the terminal, with Forge one click away.

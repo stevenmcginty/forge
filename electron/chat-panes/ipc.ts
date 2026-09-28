@@ -2,9 +2,11 @@ import { ipcMain, type BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
 import { isChatBotId } from '@shared/chatbots'
 import type { ChatNavAction, ChatNewTabResult, ChatViewBounds } from '@shared/api'
+import type { BrowserAgentReply } from '@shared/browser'
 import type { Workspace } from '@shared/types'
 import { getProjects, getWorkspace } from '../store'
 import { layoutEngine } from '../layout-engine'
+import { ChatAgentOps, openChatTabQuietly, type ChatCaller } from './agent-ops'
 import { chatSignOut, chatStatus, watchChatStatus } from './signin'
 import { ChatViews } from './views'
 
@@ -16,6 +18,7 @@ import { ChatViews } from './views'
  */
 
 let views: ChatViews | null = null
+let agentOps: ChatAgentOps | null = null
 let window: BrowserWindow | null = null
 let unwatch: (() => void) | null = null
 
@@ -52,6 +55,17 @@ export function registerChatPanes(): void {
   const v = new ChatViews({ projectOf })
   views = v
   if (window) v.setWindow(window)
+  agentOps = new ChatAgentOps({
+    projects: () => getProjects().map((p) => ({ id: p.id, name: p.name })),
+    workspace: (projectId) => layoutEngine()?.workspace(projectId) ?? getWorkspace(projectId),
+    openChatTab: (projectId, bot) => {
+      const engine = layoutEngine()
+      return engine ? openChatTabQuietly(engine, projectId, bot) : { ok: false, error: 'Forge is still starting.' }
+    },
+    page: (leafId, bot) => v.agentPage(leafId, bot),
+    openPage: (leafId) => v.openPage(leafId),
+    signedIn: chatStatus
+  })
 
   ipcMain.on(IPC.chatEnsure, (_e, leafId: unknown, bot: unknown) => {
     if (typeof leafId !== 'string' || !leafId || !isChatBotId(bot)) return
@@ -87,6 +101,15 @@ export function registerChatPanes(): void {
   })
 }
 
+/**
+ * One chat tool call (shared/chat-tools.ts) from any caller, already resolved
+ * to its project by electron/browser-panes/service.ts. Never rejects.
+ */
+export function runChatOp(op: string, args: Record<string, unknown>, caller: ChatCaller): Promise<BrowserAgentReply> {
+  if (!agentOps) return Promise.resolve({ ok: false, text: 'Forge\'s chat tabs are not ready yet — try again in a moment.' })
+  return agentOps.run(op, args, caller)
+}
+
 /** The window pages are laid into. Call after createWindow, and with null when it closes. */
 export function setChatWindow(win: BrowserWindow | null): void {
   window = win
@@ -102,6 +125,7 @@ export function pruneChatViews(projectId: string, workspace: Workspace | null): 
 export function disposeChatPanes(): void {
   unwatch?.()
   unwatch = null
+  agentOps = null
   views?.dispose()
   views = null
 }

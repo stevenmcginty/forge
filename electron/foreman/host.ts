@@ -26,7 +26,9 @@ import {
   type ForemanState,
   type ForemanStatus
 } from '@shared/foreman'
+import { CHAT_TOOL_SPECS, isChatTool } from '@shared/chat-tools'
 import type { AttentionEvent } from '../attention-bus'
+import { brainSpecAllowed, zodShapeOf } from '../brain-tools-mcp'
 import { FOREMAN_PERSONA } from './persona'
 import { claudeSdkExecutable } from '../claude-exe'
 
@@ -205,6 +207,12 @@ export interface ForemanDeps {
    * be found, which is not an error.
    */
   getBridgeServer?(): McpServerConfig | null
+  /**
+   * chat_list / chat_send / chat_read (shared/chat-tools.ts), run as the
+   * driven pane would run them — in its project. Absent (the check's harness),
+   * the chat tools answer that there are none.
+   */
+  runChatTool?(paneId: string, name: string, args: Record<string, unknown>): Promise<string>
   /**
    * The brain. Absent (every real run) it is the SDK's `query()`; supplied, it
    * is whatever the check hands over. See the seam note at the top.
@@ -1084,6 +1092,12 @@ export class ForemanHost {
       }
 
       default:
+        if (isChatTool(name)) {
+          if (!this.deps.runChatTool) return 'This Forge has no chat tabs to hand to.'
+          const answer = await this.deps.runChatTool(paneId, name, args)
+          if (name === 'chat_send') this.log(driven, 'note', `To ${String(args['chat'] ?? 'a chatbot')}: ${String(args['text'] ?? '')}`)
+          return answer
+        }
         return `${name} is not a Foreman tool.`
     }
   }
@@ -1289,7 +1303,10 @@ export class ForemanHost {
           'The job is done, verified, and you have seen it verified. This closes the job and ends your session, so it is the last thing you call and never a way of saying "I think that is probably it". If a suite is red, if a step is unconfirmed, if you are guessing — send another instruction instead.',
           { summary: z.string().describe('What was built and how you know it works') },
           async (args) => run('finish', { summary: args.summary })
-        )
+        ),
+
+        // chat_list, chat_send, chat_read — the chat tabs, from shared/chat-tools.ts.
+        ...CHAT_TOOL_SPECS.map((spec) => tool(spec.name, spec.description, zodShapeOf(spec), async (args) => run(spec.name, args)))
       ]
     })
   }
@@ -1338,6 +1355,7 @@ export class ForemanHost {
       'mcp__foreman__set_plan',
       'mcp__foreman__note',
       'mcp__foreman__finish',
+      ...brainSpecAllowed(CHAT_TOOL_SPECS).map((n) => n.replace('mcp__forge__', 'mcp__foreman__')),
       ...(bridge
         ? [
             'mcp__forge-bridge__make_image',

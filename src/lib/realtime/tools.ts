@@ -10,6 +10,7 @@ import type { RealtimeToolAnswer } from './session'
 import { geminiToolDeclarations, openAIToolSpecs } from './tool-format'
 import { HUB_REALTIME_TOOLS, runHubTool } from './tools-hub'
 import { BROWSER_REALTIME_TOOLS, runBrowserHubTool } from './tools-browser'
+import { CHAT_REALTIME_TOOLS, runChatHubTool } from './tools-chat'
 import { MAIN_REALTIME_TOOLS, runMainAgentTool } from './tools-main'
 
 /**
@@ -118,7 +119,8 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
   },
   ...MAIN_REALTIME_TOOLS,
   ...HUB_REALTIME_TOOLS,
-  ...BROWSER_REALTIME_TOOLS
+  ...BROWSER_REALTIME_TOOLS,
+  ...CHAT_REALTIME_TOOLS
 ]
 
 /* ---------------------------------------------------------------- answers */
@@ -191,6 +193,8 @@ export async function runRealtimeTool(
     if (hub) return hub
     const browser = await runBrowserHubTool(name, args)
     if (browser) return browser
+    const chat = await runChatHubTool(name, args)
+    if (chat) return chat
     switch (name) {
       case 'get_app_state':
       case 'get_project_memory':

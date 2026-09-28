@@ -21,6 +21,8 @@
  * the Electron, renderer and mobile tsconfigs all compile shared/.
  */
 
+import type { ChatToolName } from './chat-tools'
+
 /** The session every surface shares. `persist:` keeps cookies across restarts. */
 export const BROWSER_PARTITION = 'persist:forge-browser'
 
@@ -251,7 +253,8 @@ export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number]
 
 /** One tool call, as the link and the voice-hub IPC carry it. */
 export interface BrowserAgentRequest {
-  op: BrowserToolName
+  /** A browser tool, or a chat tool (shared/chat-tools.ts), which rides the same channel. */
+  op: BrowserToolName | ChatToolName
   args: Record<string, unknown>
 }
 

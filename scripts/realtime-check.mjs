@@ -217,7 +217,7 @@ await check('every field an ACTION_SPECS example names is a typed parameter', ()
   assert.equal(props.submit.type, 'boolean')
 })
 
-await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four hub tools and B3’s eight browser tools, unique names', () => {
+await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four hub tools and B3’s eight browser tools, the three chat tools, unique names', () => {
   const names = tools.REALTIME_TOOLS.map((t) => t.name)
   assert.deepEqual(names, [
     'get_app_state',
@@ -240,7 +240,10 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
     'browser_type',
     'browser_screenshot',
     'browser_close',
-    'browser_upload'
+    'browser_upload',
+    'chat_list',
+    'chat_send',
+    'chat_read'
   ])
   const gem = tools.toGeminiTools()[0].functionDeclarations
   assert.deepEqual(gem.map((d) => d.name), names)

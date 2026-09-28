@@ -50,7 +50,30 @@ export interface ChatBot {
   signOutDomains: string[]
   /** The page's message box, which the phone focuses. */
   composerSelector: string
+  /**
+   * What an agent's chat_send / chat_read looks for on the page
+   * (electron/chat-panes/agent-ops.ts). Each is a list: the first selector that
+   * matches anything wins, so a newer name goes first and an older one stays as
+   * the fallback. Best-known values, like the rest of this file.
+   */
+  drive: ChatBotDrive
 }
+
+export interface ChatBotDrive {
+  /** The message box. */
+  composer: string[]
+  /** The send button. Enter in the box is the fallback. */
+  send: string[]
+  /** Present only while a reply is being written (the Stop button). */
+  busy: string[]
+  /** One element per reply from the bot, in page order. */
+  reply: string[]
+  /** One element per message from the user, in page order. */
+  user: string[]
+}
+
+/** Any Stop button, whichever site: the last resort of every `busy` list. */
+const ANY_STOP = 'button[aria-label^="Stop" i]'
 
 export const CHATBOTS: Record<ChatBotId, ChatBot> = {
   chatgpt: {
@@ -60,7 +83,14 @@ export const CHATBOTS: Record<ChatBotId, ChatBot> = {
     tab: { background: '#FFFFFF', ink: '#0D0D0D', border: 'rgba(13,13,13,0.18)' },
     signIn: { cookies: [{ domain: 'chatgpt.com', prefix: '__Secure-next-auth.session-token' }] },
     signOutDomains: ['chatgpt.com', 'openai.com'],
-    composerSelector: '#prompt-textarea'
+    composerSelector: '#prompt-textarea',
+    drive: {
+      composer: ['#prompt-textarea', 'div.ProseMirror[contenteditable="true"]', 'form textarea'],
+      send: ['button[data-testid="send-button"]', '#composer-submit-button', 'button[aria-label="Send prompt"]'],
+      busy: ['button[data-testid="stop-button"]', ANY_STOP],
+      reply: ['[data-message-author-role="assistant"]'],
+      user: ['[data-message-author-role="user"]']
+    }
   },
   gemini: {
     name: 'Gemini',
@@ -76,7 +106,14 @@ export const CHATBOTS: Record<ChatBotId, ChatBot> = {
       ]
     },
     signOutDomains: ['google.com'],
-    composerSelector: 'rich-textarea [contenteditable="true"]'
+    composerSelector: 'rich-textarea [contenteditable="true"]',
+    drive: {
+      composer: ['rich-textarea [contenteditable="true"]', 'div.ql-editor[contenteditable="true"]'],
+      send: ['button.send-button', 'button[aria-label="Send message"]'],
+      busy: ['button.send-button.stop', 'button[aria-label="Stop response"]', ANY_STOP],
+      reply: ['model-response message-content', 'model-response'],
+      user: ['user-query .query-text', 'user-query']
+    }
   },
   claude: {
     name: 'Claude',
@@ -85,8 +122,31 @@ export const CHATBOTS: Record<ChatBotId, ChatBot> = {
     tab: { background: '#D97757', ink: '#1A1410' },
     signIn: { cookies: [{ domain: 'claude.ai', name: 'sessionKey' }] },
     signOutDomains: ['claude.ai'],
-    composerSelector: 'div.ProseMirror[contenteditable="true"]'
+    composerSelector: 'div.ProseMirror[contenteditable="true"]',
+    drive: {
+      composer: ['div.ProseMirror[contenteditable="true"]', '[data-testid="chat-input"]'],
+      send: ['button[aria-label="Send message"]', 'button[aria-label="Send Message"]'],
+      busy: ['[data-is-streaming="true"]', 'button[aria-label="Stop response"]', ANY_STOP],
+      reply: ['.font-claude-response', '.font-claude-message', '[data-is-streaming]'],
+      user: ['[data-testid="user-message"]']
+    }
   }
+}
+
+/**
+ * A bot from an agent's words: an id ("gemini"), its name ("ChatGPT"), or what
+ * people call it ("gpt", "openai", "bard", "claude.ai"). Null when it is none.
+ */
+export function chatBotFromWords(words: string): ChatBotId | null {
+  const w = String(words ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s._-]+/g, '')
+  if (!w) return null
+  if (w === 'chatgpt' || w === 'gpt' || w === 'openai' || w === 'chatgptcom') return 'chatgpt'
+  if (w === 'gemini' || w === 'bard' || w === 'googlegemini' || w === 'geminigooglecom') return 'gemini'
+  if (w === 'claude' || w === 'claudeai' || w === 'anthropic') return 'claude'
+  return null
 }
 
 /** Wire and disk data: checked, never cast. */

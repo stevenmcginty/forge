@@ -293,6 +293,22 @@ the file is written tmp-then-renamed like every other artefact here.
 
 `summarize_video` remains the tool for *watching* a video.
 
+### `chat_list()`, `chat_send(chat, text, new_chat?, wait?)`, `chat_read(chat, messages?)`
+
+Hand something to ChatGPT, Gemini or Claude: the real websites in Forge's chat
+tabs, signed in as the user. Not a Gemini key road: these ride the browser's
+pipe (`bridge/chat-tools.mjs`, spread in like the browser tools) and main
+answers them in `electron/chat-panes/agent-ops.ts`. They type into the tab's
+message box, press send, wait for the reply to stop moving (90 s at most) and
+return it. The conversation lands in the user's own account, so it is on their
+phone app too. `chat` is a chat id from `chat_list`, or a bot by name. By name
+it picks that bot's tab in the caller's project, then the one on screen, then
+any project, and opens a tab in the caller's project if there is none (without
+taking the screen). Unsent words already in the box are never typed over. The
+brain, the realtime voice models and Foreman get the same three tools from
+`shared/chat-tools.ts`. `scripts/chat-tools-check.mjs` holds the copy here to
+that file word for word.
+
 ---
 
 ## Behaviour common to every tool

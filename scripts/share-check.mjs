@@ -623,6 +623,9 @@ console.log('\nthe MCP server')
           'browser_screenshot',
           'browser_type',
           'browser_upload',
+          'chat_list',
+          'chat_read',
+          'chat_send',
           'pane_read',
           'pane_send',
           'share_clear',
@@ -631,7 +634,7 @@ console.log('\nthe MCP server')
           'share_read',
           'share_write'
         ]),
-      'exactly the five share tools, the two pane tools and the eight browser tools, and nothing else',
+      'exactly the five share tools, the two pane tools, the eight browser tools and the three chat tools, and nothing else',
       JSON.stringify(names)
     )
     ok(

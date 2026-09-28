@@ -13,6 +13,7 @@ import {
   type BrowserRect,
   type BrowserViewBounds
 } from '@shared/browser'
+import { isChatTool } from '@shared/chat-tools'
 import { BrowserAgentOps } from './agent-ops'
 import { BrowserLink } from './link'
 import { BrowserManager } from './manager'
@@ -40,6 +41,12 @@ export interface BrowserServiceDeps {
    * the renderer. Absent = refused in words.
    */
   appOp?: (op: string, args: Record<string, unknown>, caller: BrowserOwner) => Promise<BrowserAgentReply>
+  /**
+   * The chat tools (shared/chat-tools.ts), which ride the same pipe: answered
+   * by electron/chat-panes/agent-ops.ts, told the caller's project (its own,
+   * or '' for a caller with none) and the one on screen. Absent = refused.
+   */
+  chatOp?: (op: string, args: Record<string, unknown>, caller: { project: string; screenProject: string }) => Promise<BrowserAgentReply>
 }
 
 /** Pipe ops that are the app's, not the browser's. */
@@ -132,14 +139,21 @@ export class BrowserService {
         : Promise.resolve({ ok: false, text: 'This Forge cannot open panes for agents yet.' })
     }
     let owner = caller
+    let project: string | undefined
     if (caller.id.startsWith('pane:') && this.deps.resolveCaller) {
       try {
         const resolved = this.deps.resolveCaller(caller)
         owner = resolved.owner
+        project = resolved.project
         if (resolved.project) this.ownerProject.set(owner.id, resolved.project)
       } catch (err) {
         console.error('[browser] caller resolver failed:', err)
       }
+    }
+    if (isChatTool(op)) {
+      if (!this.deps.chatOp) return Promise.resolve({ ok: false, text: 'This Forge has no chat tabs to hand to yet.' })
+      // A pane works in its own project; anyone else (the brain) in the one on screen.
+      return this.deps.chatOp(op, args, { project: project ?? '', screenProject: this.activeProject })
     }
     return this.ops.run(op, args, owner)
   }
@@ -180,9 +194,12 @@ export class BrowserService {
       this.activeProject = String(project ?? '')
     })
     // The voice hub: one owner, "Voice", with its own tabs like any agent.
-    ipc.handle(BROWSER_IPC.agent, (_e, req: BrowserAgentRequest) =>
-      this.ops.run(String(req?.op ?? ''), req?.args && typeof req.args === 'object' ? req.args : {}, VOICE_OWNER)
-    )
+    // Its chat tools (src/lib/realtime/tools-chat.ts) come the same way.
+    ipc.handle(BROWSER_IPC.agent, (_e, req: BrowserAgentRequest) => {
+      const op = String(req?.op ?? '')
+      const args = req?.args && typeof req.args === 'object' ? req.args : {}
+      return isChatTool(op) ? this.run(op, args, VOICE_OWNER) : this.ops.run(op, args, VOICE_OWNER)
+    })
   }
 
   dispose(): void {

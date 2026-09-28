@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { BROWSER_PARAM_TEXT, BROWSER_TOOL_DESCRIPTIONS, type BrowserAgentReply, type BrowserToolName } from '@shared/browser'
+import { CHAT_TOOL_SPECS, type ChatToolName } from '@shared/chat-tools'
+import { brainSpecAllowed, brainSpecTools, type BrainSpecTool } from '../brain-tools-mcp'
 
 /**
  * The seven browser tools for the Claude brain (electron/voice-agent/host.ts),
@@ -13,7 +15,7 @@ import { BROWSER_PARAM_TEXT, BROWSER_TOOL_DESCRIPTIONS, type BrowserAgentReply, 
  * brain is one owner ("Voice") with its own tabs, like any agent pane.
  */
 
-type Runner = (op: BrowserToolName, args: Record<string, unknown>) => Promise<BrowserAgentReply>
+type Runner = (op: BrowserToolName | ChatToolName, args: Record<string, unknown>) => Promise<BrowserAgentReply>
 
 let runner: Runner | null = null
 
@@ -113,3 +115,20 @@ export const BRAIN_BROWSER_ALLOWED = [
   'mcp__forge__browser_screenshot',
   'mcp__forge__browser_close'
 ]
+
+/**
+ * chat_list, chat_send and chat_read for the brain — generated from
+ * shared/chat-tools.ts, answered on the same runner as the browser tools: the
+ * service routes them to electron/chat-panes/agent-ops.ts, in the project on
+ * screen.
+ */
+export function brainChatTools(): BrainSpecTool[] {
+  return brainSpecTools(async (name, args) => {
+    if (!runner) return "Forge's chat tabs are not ready yet."
+    const reply = await runner(name as ChatToolName, (args ?? {}) as Record<string, unknown>)
+    return reply.text
+  }, CHAT_TOOL_SPECS)
+}
+
+/** For the host's allowedTools list. */
+export const BRAIN_CHAT_ALLOWED = brainSpecAllowed(CHAT_TOOL_SPECS)

@@ -154,7 +154,7 @@ function fail(text) {
   return { content: [{ type: 'text', text }], isError: true }
 }
 
-function readLinkFile() {
+export function readLinkFile() {
   const path = String(process.env['FORGE_BROWSER_LINK_FILE'] ?? '').trim()
   if (!path) return { error: 'no-env' }
   if (!existsSync(path)) return { error: 'no-file', path }
@@ -187,8 +187,8 @@ function caller() {
   }
 }
 
-/** One request, one reply, one connection. Rejects with why not. */
-export function browserAsk(op, args, link = readLinkFile()) {
+/** One request, one reply, one connection. Rejects with why not. `timeoutMs` for ops that wait longer (chat_send). */
+export function browserAsk(op, args, link = readLinkFile(), timeoutMs = LINK_TIMEOUT_MS) {
   return new Promise((res, rej) => {
     if (link.error) {
       rej(Object.assign(new Error(link.error), { link }))
@@ -205,7 +205,7 @@ export function browserAsk(op, args, link = readLinkFile()) {
       if (err) rej(err)
       else res(value)
     }
-    const timer = setTimeout(() => done(new Error(`Forge did not answer within ${LINK_TIMEOUT_MS / 1000}s`)), LINK_TIMEOUT_MS)
+    const timer = setTimeout(() => done(new Error(`Forge did not answer within ${timeoutMs / 1000}s`)), timeoutMs)
     socket.setEncoding('utf8')
     socket.on('connect', () => {
       socket.write(`${JSON.stringify({ token: link.token, op, args: args ?? {}, from: caller() })}\n`)
