@@ -22,15 +22,16 @@ import { SpeechEngineCard } from './SpeechEngineCard'
  *
  *   1. Main agent    who answers the bar (the ONE `agentBrain` setting),
  *                    one card per engine — MainAgent.tsx
- *   2. Voice keys    the Dictate key and the Listen key, side by side, so
+ *   2. Voice menu    which agents the bar shows before More — VoiceMenu.tsx
+ *   3. Voice keys    the Dictate key and the Listen key, side by side, so
  *                    neither can take the other's — VoiceKeys.tsx
- *   3. Conversation  talking to it hands-free: the pause that ends your turn,
+ *   4. Conversation  talking to it hands-free: the pause that ends your turn,
  *                    when it stops listening, talking over it, spoken replies
- *   4. Dictation     Parakeet into a pane with the Dictate key: auto-send, the
+ *   5. Dictation     Parakeet into a pane with the Dictate key: auto-send, the
  *                    wake word, and the engine's files
- *   5. Speech engine whether Parakeet is installed
- *   6. Voice         which voice speaks the replies
- *   7. Habits        relay, where new projects go, the project summary
+ *   6. Speech engine whether Parakeet is installed
+ *   7. Voice         which voice speaks the replies
+ *   8. Habits        relay, where new projects go, the project summary
  *
  * Plain choices rather than sliders: three or four named values you can read
  * at a glance, plus the stored value when it is none of them.

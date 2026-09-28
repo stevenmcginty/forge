@@ -1,5 +1,14 @@
 # Handoff
 
+## Wall: Grid and Free layout switch uses smaller icons without text (2026-09-28, pushed to master)
+
+- **Asked (Steve):** In wall view, grid and free need just to be smaller icons not text, simple change.
+- **Built:**
+  1. `src/components/MosaicView.tsx`: Removed text labels from `WallLayoutSwitch` buttons, retaining `aria-label` for screen reader accessibility; sized SVG glyphs to 11×11.
+  2. `src/components/shell/DeckBar.css`: Styled `.deckbar__wallmode .wallmode__btn` as 26×26px squares with centered icons to fit seamlessly into the title bar pill without text styling.
+  3. `src/components/MosaicView.css`: Centered button icons and removed text font rules.
+- **Checked:** `npm run typecheck` (0 errors), `npm run lint:hooks` (0 warnings), `node scripts/mosaic-check.mjs` (113/0 passed).
+
 ## Voice picker short list (2026-09-28)
 
 - **Asked (Steve):** the desktop voice picker shows every agent. Default to GPT Live, Gemini Live, and Claude. More in the popout shows the rest. Change who is on that list, and the order, in Settings.

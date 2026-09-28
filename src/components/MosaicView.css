@@ -191,8 +191,8 @@
 
 /*
  * The Grid | Free switch (WallLayoutSwitch), in the menu's Tools. The chosen
- * side is a solid block with a bold word and the other an outline with a light
- * one, so which is on reads by shape and weight, never by colour alone.
+ * side is a solid block and the other an outline, so which is on reads by shape
+ * and weight, never by colour alone.
  */
 .wallmode {
   display: inline-flex;
@@ -208,13 +208,11 @@
 .wallmode__btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: 0 var(--s-3) 0 var(--s-2);
+  justify-content: center;
+  padding: 0 var(--s-2);
   border: 0;
   background: transparent;
   color: var(--text-dim);
-  font-size: var(--t-xs);
-  font-weight: 400;
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease-out),
@@ -233,7 +231,6 @@
 .wallmode__btn[data-on='true'] {
   color: var(--text-on-accent);
   background: var(--accent);
-  font-weight: 700;
   cursor: default;
 }
 
@@ -253,8 +250,6 @@
 .deck .deck-tools > .wallmode .wallmode__btn {
   flex: 1;
   justify-content: center;
-  gap: 8px;
-  font-size: var(--t-md);
 }
 
 /* A tab is overhead and about to be dropped. */

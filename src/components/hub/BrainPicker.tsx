@@ -216,12 +216,9 @@ function BrainMenu({
           role="menuitem"
           className="popover__row bpick__row"
           aria-expanded={more}
-          onClick={() => setMore((open) => !open)}
+          onClick={() => setMore((v) => !v)}
         >
-          <span className="bpick__tile" data-look="plain" aria-hidden="true" />
-          <span className="bpick__text">
-            <span className="bpick__name">{more ? 'Less' : 'More'}</span>
-          </span>
+          {more ? 'Less' : 'More'}
         </button>
       ) : null}
       {more ? rest.map((spec) => rowFor(spec)) : null}

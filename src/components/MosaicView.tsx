@@ -1247,7 +1247,7 @@ function WallName({
  * they were left.
  *
  * The chosen side is told apart by more than its colour: it is a solid filled
- * block with a bold word, the other is an outline with a light one.
+ * block with an icon, the other is an outline.
  */
 export function WallLayoutSwitch(): ReactNode {
   const actions = useActions()
@@ -1263,18 +1263,18 @@ export function WallLayoutSwitch(): ReactNode {
     actions.setMosaicTiles(seedFree(mosaic.tiles, measured, ids), { custom: true })
   }
 
-  const side = (on: boolean, word: string, glyph: ReactNode, title: string, pick: () => void): ReactNode => (
+  const side = (on: boolean, label: string, glyph: ReactNode, title: string, pick: () => void): ReactNode => (
     <button
       type="button"
       role="radio"
       aria-checked={on}
+      aria-label={label}
       className="wallmode__btn"
       data-on={on ? 'true' : undefined}
       title={title}
       onClick={pick}
     >
       {glyph}
-      {word}
     </button>
   )
 
@@ -1283,7 +1283,7 @@ export function WallLayoutSwitch(): ReactNode {
       {side(
         !free,
         'Grid',
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} aria-hidden="true">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} aria-hidden="true">
           <rect x="2" y="2.5" width="5.2" height="4.8" rx="1" />
           <rect x="8.8" y="2.5" width="5.2" height="4.8" rx="1" />
           <rect x="2" y="8.7" width="5.2" height="4.8" rx="1" />
@@ -1295,7 +1295,7 @@ export function WallLayoutSwitch(): ReactNode {
       {side(
         free,
         'Free',
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} aria-hidden="true">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.4} aria-hidden="true">
           <rect x="1.8" y="2" width="7.4" height="5.6" rx="1" />
           <rect x="10.4" y="3.6" width="3.8" height="3.4" rx="1" />
           <rect x="4.6" y="9" width="8.2" height="5" rx="1" />

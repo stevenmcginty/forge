@@ -28,7 +28,9 @@ export function VoiceMenuCard(): ReactNode {
       }
     >
       {menu.map((entry, index) => {
-        const label = AGENT_BRAINS.find((brain) => brain.id === entry.id)?.label ?? entry.id
+        const spec = AGENT_BRAINS.find((brain) => brain.id === entry.id)
+        if (!spec) return null
+        const label = spec.label
         return (
           <Row key={entry.id} label={label}>
             <button
