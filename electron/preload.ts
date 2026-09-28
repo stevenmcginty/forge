@@ -258,6 +258,11 @@ const api: ForgeApi = {
         state: state ?? 'idle',
         prompt: prompt ?? ''
       }),
+    busy: (sessionId, busy) =>
+      ipcRenderer.send(IPC.webBusy, {
+        sessionId: sessionId ?? '',
+        busy: busy === true
+      }),
     // The screen mirror. Sends rather than invokes, on the same reasoning the
     // mobile pair above uses: a chunk is a stream, and a stream that waited for
     // an answer per frame would be a stream with a round trip in it.

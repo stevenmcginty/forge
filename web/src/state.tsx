@@ -160,6 +160,8 @@ export interface ForgeState {
   git: Record<string, GitSnapshot>
   /** Panes that have settled on a question, so a tab you are not looking at can say so. */
   asking: Set<string>
+  /** Panes actively working (producing output), so projects being worked on rise to the top. */
+  busy: Set<string>
   /** The line the desktop extracted for an asking pane, keyed by session id. */
   prompts: Record<string, string>
   /**
@@ -519,6 +521,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   const [projectId, setProjectId] = useState<string | null>(null)
   const [git, setGit] = useState<Record<string, GitSnapshot>>({})
   const [asking, setAsking] = useState<Set<string>>(() => new Set())
+  const [busy, setBusy] = useState<Set<string>>(() => new Set())
   const [prompts, setPrompts] = useState<Record<string, string>>({})
   /** Notice queue. The head is what the page shows; the rest wait their turn. */
   const [notices, setNotices] = useState<QueuedNotice[]>([])
@@ -796,6 +799,14 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
             sessionId
           )
         }
+      },
+      onBusy: (sessionId, isBusy) => {
+        setBusy((current) => {
+          const next = new Set(current)
+          if (isBusy) next.add(sessionId)
+          else next.delete(sessionId)
+          return next
+        })
       },
       onProjects: (projects) => {
         // Only when it is actually a different list. The desktop answers a great
@@ -1279,6 +1290,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setProjectId(null)
         forgetLastProject()
         setGit({})
+        setAsking(new Set())
+        setBusy(new Set())
         setStage({ kind: 'signed-out', error: '' })
       },
       retry: () => client.retry(),
@@ -1419,6 +1432,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       projectId,
       git,
       asking,
+      busy,
       prompts,
       waiting,
       notice,
@@ -1439,6 +1453,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       projectId,
       git,
       asking,
+      busy,
       prompts,
       waiting,
       notice,

@@ -2239,6 +2239,14 @@ export function registerWebHandlers(): void {
     }).catch(() => undefined)
   })
 
+  /** A pane started or stopped actively working (producing output). */
+  ipcMain.on(IPC.webBusy, (_e, payload: { sessionId?: string; busy?: boolean }) => {
+    const sessionId = String(payload?.sessionId ?? '')
+    const busy = Boolean(payload?.busy)
+    if (!sessionId) return
+    server?.pushBusy(sessionId, busy)
+  })
+
   /* ------------------------------------------------------ the screen mirror
    *
    * The renderer's half, all three of them sends: the capture is a stream, not

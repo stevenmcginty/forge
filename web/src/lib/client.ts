@@ -310,6 +310,7 @@ export interface ForgeHandlers {
   onSessions: (sessions: WebSession[]) => void
   onSessionStarted: (session: WebSession) => void
   onAttention: (sessionId: string, asking: boolean, prompt: string) => void
+  onBusy?: (sessionId: string, busy: boolean) => void
   /**
    * One pane's Foreman state moved — the whole state, every time, whether or
    * not this browser is the one that switched it on. See `WebForemanFrame`.
@@ -1760,6 +1761,10 @@ export class ForgeClient {
           frame.asking === true,
           typeof frame.prompt === 'string' ? frame.prompt : ''
         )
+        return
+
+      case 'busy':
+        this.handlers.onBusy?.(frame.sessionId, frame.busy === true)
         return
 
       case 'foreman':

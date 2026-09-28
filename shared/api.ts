@@ -858,6 +858,10 @@ export interface ForgeApi {
      * it, and browsers may not be connected at all.
      */
     attention(sessionId: string, state: 'asking' | 'done' | 'idle', prompt: string): void
+    /**
+     * A pane started or stopped actively working (producing output).
+     */
+    busy?(sessionId: string, busy: boolean): void
 
     /* --------------------------------------------------- the screen mirror
      *

@@ -94,7 +94,15 @@ export function Browser({
           {sortProjectsForPicker(picture.projects, (p) => {
             const workspace = picture.workspaces[p.id]
             const open = workspace ? workspace.tabs.some((t) => leavesOf(t.root).length > 0) : false
-            return { active: false, working: false, open, pinned: Boolean(p.pinned) }
+            const isForemanWorking = workspace
+              ? workspace.tabs.some((t) =>
+                  leavesOf(t.root).some((leaf) => {
+                    const fm = picture.foreman?.[leaf.id]
+                    return fm && (fm.status === 'starting' || fm.status === 'driving' || fm.status === 'waiting')
+                  })
+                )
+              : false
+            return { active: p.id === projectId, working: isForemanWorking, open, pinned: Boolean(p.pinned) }
           }).map((p) => (
             <ProjectRow key={p.id} project={p} picture={picture} onOpen={() => onOpenProject(p.id)} />
           ))}

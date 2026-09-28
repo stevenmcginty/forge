@@ -670,6 +670,7 @@ class TerminalHost {
       this.setAttention(entry, false)
     }
     for (const cb of this.busyListeners) cb()
+    this.tellWebBusy(entry, busy)
   }
 
   /**
@@ -797,6 +798,10 @@ class TerminalHost {
    */
   private tellWeb(entry: Entry, state: 'asking' | 'done' | 'idle', prompt: string): void {
     window.forge?.web?.attention?.(entry.paneId, state, prompt)
+  }
+
+  private tellWebBusy(entry: Entry, busy: boolean): void {
+    window.forge?.web?.busy?.(entry.paneId, busy)
   }
 
   private clearBusy(entry: Entry): void {

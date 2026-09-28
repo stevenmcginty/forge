@@ -1907,6 +1907,15 @@ export interface WebAttentionFrame {
 }
 
 /**
+ * A pane has started or stopped actively working (sustained output).
+ */
+export interface WebBusyFrame {
+  type: 'busy'
+  sessionId: string
+  busy: boolean
+}
+
+/**
  * One agent pane's usage: how full its context window is, and how much of the
  * account's 5-hour and weekly limits are gone.
  *
@@ -2393,6 +2402,7 @@ export type WebServerFrame =
   | WebSessionsFrame
   | WebSessionStartedFrame
   | WebAttentionFrame
+  | WebBusyFrame
   | WebUsageFrame
   | WebForemanFrame
   | WebHandoffFrame

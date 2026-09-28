@@ -864,6 +864,8 @@ export class WebServer {
    * `lastRemoteYes`; pruned against the live pane list when it is replayed.
    */
   private askingNow = new Map<string, string>()
+  /** Panes actively working right now, replayed after hello-ok. */
+  private busyNow = new Set<string>()
   /**
    * The newest `usage` frame per pane, so it can be said again after every
    * `hello-ok` — the same idea as `askingNow`, pruned the same way. Also what a
@@ -1158,6 +1160,13 @@ export class WebServer {
     if (asking) this.askingNow.set(sessionId, prompt ?? '')
     else this.askingNow.delete(sessionId)
     this.broadcast({ type: 'attention', sessionId, asking, ...(prompt ? { prompt } : {}) })
+  }
+
+  /** A pane has started or stopped actively working (sustained output). */
+  pushBusy(sessionId: string, busy: boolean): void {
+    if (busy) this.busyNow.add(sessionId)
+    else this.busyNow.delete(sessionId)
+    this.broadcast({ type: 'busy', sessionId, busy })
   }
 
   /**
@@ -2060,6 +2069,13 @@ export class WebServer {
         continue
       }
       this.send(client, { type: 'attention', sessionId, asking: true, ...(prompt ? { prompt } : {}) })
+    }
+    for (const sessionId of this.busyNow) {
+      if (!live.has(sessionId)) {
+        this.busyNow.delete(sessionId)
+        continue
+      }
+      this.send(client, { type: 'busy', sessionId, busy: true })
     }
     // And every live pane's ring, so a phone back from the lock screen draws
     // true numbers at once rather than after the next status-line redraw. The

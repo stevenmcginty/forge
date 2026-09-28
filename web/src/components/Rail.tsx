@@ -66,9 +66,21 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
     return workspace.tabs.some((tab) => collectLeaves(tab.root).some((leaf) => state.asking.has(leaf.id)))
   }
 
+  const isWorking = (project: Project): boolean => {
+    const workspace = workspaces[project.id]
+    if (!workspace) return false
+    const leaves = workspace.tabs.flatMap((tab) => collectLeaves(tab.root))
+    return leaves.some((leaf) => {
+      if (state.asking.has(leaf.id)) return true
+      if (state.busy.has(leaf.id)) return true
+      const fm = state.picture?.foreman?.[leaf.id]
+      return fm && (fm.status === 'starting' || fm.status === 'driving' || fm.status === 'waiting')
+    })
+  }
+
   const ordered = sortProjectsForPicker(projects, (project) => ({
     active: project.id === state.projectId,
-    working: attention(project),
+    working: isWorking(project),
     open: openCount(project) > 0,
     pinned: Boolean(project.pinned)
   }))
@@ -113,6 +125,8 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
       <div className="rail__list">
         {ordered.map((project) => {
           const panes = paneCount(project)
+          const working = isWorking(project)
+          const waits = attention(project)
           const select = (): void => actions.selectProject(project.id)
           return (
             <div
@@ -128,8 +142,11 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
               tabIndex={0}
               data-active={project.id === state.projectId}
               data-pinned={project.pinned ? 'true' : undefined}
-              data-attention={attention(project) ? 'true' : undefined}
-              title={`${project.name} — ${project.path}`}
+              data-working={working && !waits ? 'true' : undefined}
+              data-attention={waits ? 'true' : undefined}
+              title={`${project.name} — ${project.path}${project.pinned ? ' · pinned' : ''}${
+                working ? ' · working' : ''
+              }${waits ? ' · needs your attention' : ''}`}
               style={{ '--prow-tint': project.color } as CSSProperties}
               onClick={select}
               onKeyDown={(e) => {
@@ -145,7 +162,10 @@ export function Rail({ collapsed }: { collapsed: boolean }): ReactNode {
               ) : (
                 <>
                   <span className="prow__text">
-                    <span className="prow__name truncate">{project.name}</span>
+                    <span className="prow__title">
+                      <span className="prow__name truncate">{project.name}</span>
+                      {project.pinned ? <Icon name="pin" size={11} className="prow__pin" /> : null}
+                    </span>
                     <span className="prow__path mono truncate">{shortPath(project.path)}</span>
                   </span>
                   <span className="prow__panes mono">{panes}</span>

@@ -576,6 +576,8 @@ export const IPC = {
    * blocked on a socket.
    */
   webAttention: 'web:attention',
+  /** A pane actively started or stopped working (producing output). */
+  webBusy: 'web:busy',
 
   /* ------------------------------------------------------ forge web mirror
    *

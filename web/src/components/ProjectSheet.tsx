@@ -12,6 +12,7 @@ import {
   type ReactNode
 } from 'react'
 import type { CommandsFeed } from '@shared/commands'
+import { sortProjectsForPicker } from '@shared/project-order'
 import type { SkillsList } from '@shared/skills'
 import type { GitActionKind, GitFileChange, GitSnapshot, Project } from '@shared/types'
 import { WEB_FEATURE_FILES, WEB_FEATURE_PROJECT_REMOVE } from '@shared/web'
@@ -275,11 +276,35 @@ export function ProjectSheet({
     return workspace.tabs.some((tab) => collectLeaves(tab.root).some((leaf) => state.asking.has(leaf.id)))
   }
 
+  const isWorking = (project: Project): boolean => {
+    const workspace = workspaces[project.id]
+    if (!workspace) return false
+    const leaves = workspace.tabs.flatMap((tab) => collectLeaves(tab.root))
+    return leaves.some((leaf) => {
+      if (state.asking.has(leaf.id)) return true
+      if (state.busy.has(leaf.id)) return true
+      const fm = state.picture?.foreman?.[leaf.id]
+      return fm && (fm.status === 'starting' || fm.status === 'driving' || fm.status === 'waiting')
+    })
+  }
+
+  const isOpen = (project: Project): boolean => {
+    const workspace = workspaces[project.id]
+    if (!workspace) return false
+    return workspace.tabs.some((tab) => collectLeaves(tab.root).length > 0)
+  }
+
   const visible = projects.filter((p) => !removed.has(p.id))
+  const ordered = sortProjectsForPicker(visible, (project) => ({
+    active: project.id === state.projectId,
+    working: isWorking(project),
+    open: isOpen(project),
+    pinned: Boolean(project.pinned)
+  }))
   const needle = query.trim().toLowerCase()
   const listed = needle
-    ? visible.filter((p) => p.name.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle))
-    : visible
+    ? ordered.filter((p) => p.name.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle))
+    : ordered
 
   const select = (id: string): void => {
     if (swallowClick.current) return
@@ -365,6 +390,7 @@ export function ProjectSheet({
                     {listed.map((project) => {
                       const panes = paneCount(project)
                       const waits = asking(project)
+                      const working = isWorking(project)
                       const isCurrent = project.id === state.projectId
                       return (
                         <div
@@ -372,8 +398,14 @@ export function ProjectSheet({
                           className="pjrow"
                           role="listitem"
                           data-current={isCurrent ? 'true' : undefined}
+                          data-pinned={project.pinned ? 'true' : undefined}
+                          data-working={working && !waits ? 'true' : undefined}
+                          data-attention={waits ? 'true' : undefined}
                           data-testid="project-row"
                           data-project={project.id}
+                          title={`${project.name} — ${project.path}${project.pinned ? ' · pinned' : ''}${
+                            working ? ' · working' : ''
+                          }${waits ? ' · waiting' : ''}`}
                           style={{ '--pj-color': project.color } as CSSProperties}
                         >
                           <button
@@ -384,7 +416,10 @@ export function ProjectSheet({
                           >
                             <span className="pjrow__dot" aria-hidden="true" />
                             <span className="pjrow__text">
-                              <span className="pjrow__name">{project.name}</span>
+                              <span className="pjrow__title">
+                                <span className="pjrow__name">{project.name}</span>
+                                {project.pinned ? <Icon name="pin" size={11} className="pjrow__pin" /> : null}
+                              </span>
                               <span className="pjrow__path">{shortPath(project.path)}</span>
                             </span>
                             {panes > 0 ? (

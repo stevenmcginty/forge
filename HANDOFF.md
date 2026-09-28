@@ -1,11 +1,25 @@
 # Handoff
 
-## Remember this phone: 7-day unlock ticket (2026-09-27, built, NOT committed, NOT pushed)
+## Project picker ordering reflects active/working projects on mobile and web (2026-09-28)
+
+- **Asked (Steve):** In Forge mobile browser, the order of the projects needs to reflect projects that are active like desktop app. When projects are being worked on they need to appear at the top of the list.
+- **Root Cause:**
+  1. `web/src/components/ProjectSheet.tsx` rendered projects without sorting, leaving them in static array insertion order regardless of active or working state.
+  2. The desktop previously only pushed attention frames (`state.asking`) to web clients, not active background execution (`busy`).
+- **Built:**
+  1. **IPC & Web Protocol (`shared/ipc.ts`, `shared/api.ts`, `electron/preload.ts`, `shared/web.ts`):** Added `webBusy: 'web:busy'` channel and `WebBusyFrame` (`{ type: 'busy', sessionId, busy }`).
+  2. **Desktop PTY to Web (`src/lib/terminals.ts`, `electron/web-host.ts`, `electron/web/server.ts`):** Forwarded terminal `setBusy` state transitions to the web host, tracking `busyNow` set on the web server and broadcasting to connected web clients with replay on hello-ok.
+  3. **Web Client & State (`web/src/lib/client.ts`, `web/src/state.tsx`):** Added `onBusy` handler and `busy: Set<string>` to `ForgeState`.
+  4. **Project Sheet (`web/src/components/ProjectSheet.tsx`, `ProjectSheet.css`):** Wired `sortProjectsForPicker` using active (`project.id === state.projectId`), working (checks `asking`, `busy`, and Foreman), open, and pinned. Added row attributes `data-working`, `data-attention`, `data-pinned`, pulsating dot glow animation for working projects, and pin icon.
+  5. **Web Rail & Mobile App (`web/src/components/Rail.tsx`, `web/src/styles.css`, `mobile/src/components/Browser.tsx`):** Updated `Rail.tsx` working fact to inspect `state.busy` and Foreman alongside `asking`; updated `Browser.tsx` to sort by active project and Foreman working state.
+- **Checked:** `npm run typecheck` (0 errors across node, web, mobile, webclient), `npm run lint:hooks` (0 warnings), `npm run rail:check` (63/63 passed), `npm test` (50/50 checks passed).
+
+## Remember this phone: 7-day unlock ticket (2026-09-27, 5f4373c, pushed, LIVE)
 
 - **Asked (Steve):** picked option 1 below. 7 days is my default; Steve did not name a number.
 - **Built (builder in a worktree, patch applied here, left unstaged):** every unlock with a PIN set (PIN, passkey or ticket) now earns a single-use ticket. A spent ticket always has passkey rights, so it can never enrol a passkey. The desktop keeps digests only, in `web-remembered.json` in the data dir. A ticket expires `RESUME_IDLE_MS` (7 d) after its socket closes. On load, open entries get closedAt = load time. A PIN change voids all. Eviction: 8 per phone, 256 in total, oldest first. `rememberedList/Forget/ForgetAll` on `WebAuth`, 3 IPC channels (optional in ForgeApi), and a "Remembered phones" block in the Settings "Getting in" card (`WebSection.tsx`, all calls use `?.`). Client: `localStorage['forge-web-remembered']` (fixed key; the client never sees the uid), read fresh at every hello, dropped on a refusal, cleared on sign-out; the 30 s drop is gone. `PASSKEY_RESUME_MS` renamed.
 - **Checked:** typecheck (all configs) 0, lint:hooks, web:auth 100/0, web:passkey 81/0, scratch vite build. The foreman re-ran all of them.
-- **Needs:** commit + push (web deploys from CI), then a Forge restart for the desktop side. Until the restart, the old desktop still issues 30 s RAM tickets, and the Settings block stays hidden (the preload is stale). Not yet seen on screen or on the Pixel.
+- **Live:** Forge restarted 2026-09-27 22:25 at Steve's request. dev.log shows `"Chrome on Android" admitted ... with a remembered-phone ticket`. CI (Checks, Forge Web, Publish Forge) green. Settings list not yet looked at on screen.
 
 ## Phone keeps asking to unlock after sleep (2026-09-27 21:10, read-only)
 
