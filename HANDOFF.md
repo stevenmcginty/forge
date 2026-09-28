@@ -6,6 +6,7 @@
 - **Built:** `src/lib/barDictation.ts` (new) marks a dictation the bar's mic started; `useDictation.ts` gives the button its own start (`dictateIntoBar`) and routes that session's phrases to the bar, ending it when the sidecar is back at idle. `Composer.tsx` puts the words in the bar, shows "Sending… 1.5 s" with Undo (Esc undoes, and never reaches the pane), then sends as Enter. Undo keeps the words to edit. Right Alt stays raw dictation into the focused pane. Listen unchanged. Same desktop speech engine.
 - **Checked:** typecheck 0, lint:hooks 0 warnings, agent-bar-check 43/0, dictation:check 31/0. Steve tested live.
 - **Left out:** the phone's spoken commands ("stop", "yes", "option two", "next tab").
+- **Follow-up, Enter lost now and then:** the bar typed the words, waited a fixed 70 ms, then pressed Enter; Claude Code takes a long line as a paste and swallowed an Enter that came mid-paste, so the words sat on the prompt. `sendToPane` in `Composer.tsx` now waits for the pane's echo plus 150 ms of quiet (`terminalHost.readiness`), 1.5 s at most, then presses Enter. Typecheck and lint clean; pushed on Steve's say-so, not yet confirmed live.
 
 ## Phone Listen dead after a drop (2026-09-28)
 

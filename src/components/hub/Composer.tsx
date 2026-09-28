@@ -55,14 +55,39 @@ import './Composer.css'
  *               in the bar as a new prompt.
  */
 
-/** Fire the keys a hand at the prompt would: the text, a beat, then Enter. */
+/** The Enter waits for the pane's echo of the words, then this much quiet. */
+const ECHO_QUIET_MS = 150
+/** The most the Enter waits: a pane that never goes quiet still gets it. */
+const ECHO_MAX_MS = 1500
+const ECHO_POLL_MS = 30
+
+/**
+ * Fire the keys a hand at the prompt would: the text, then Enter once the pane
+ * has drawn it.
+ *
+ * A fixed beat (it was 70 ms) lost the Enter now and then: Claude Code takes a
+ * long line as a paste, and an Enter that lands while it is still taking the
+ * paste in becomes part of it — the words sat on the prompt line until Steve
+ * pressed Enter himself. So the Enter waits for the echo: output after the
+ * text went in, then a short quiet, by which time the words are in the
+ * agent's box. A shell echoes at once, so it loses nothing.
+ */
 function sendToPane(paneId: string, text: string): boolean {
   if (!terminalHost.has(paneId)) return false
+  const before = terminalHost.readiness(paneId).outputBytes
   const ok = text.includes('\n') ? (terminalHost.paste(paneId, text), true) : terminalHost.type(paneId, text)
   if (!ok) return false
-  // A beat between the text and the Enter: a TUI that has just taken a paste
-  // needs a frame to settle before a carriage return means "send" to it.
-  window.setTimeout(() => terminalHost.submit(paneId), 70)
+  const started = performance.now()
+  const tick = (): void => {
+    const r = terminalHost.readiness(paneId)
+    const echoed = r.outputBytes > before && r.quietForMs >= ECHO_QUIET_MS
+    if (echoed || performance.now() - started >= ECHO_MAX_MS) {
+      terminalHost.submit(paneId)
+      return
+    }
+    window.setTimeout(tick, ECHO_POLL_MS)
+  }
+  window.setTimeout(tick, ECHO_POLL_MS)
   return true
 }
 
