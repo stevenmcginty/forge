@@ -47,6 +47,11 @@ import type { ForemanState } from './foreman'
  * FOREMAN_SEED_MAX from shared/foreman.ts.
  */
 import type { HandoffTargetWire } from './handoffview'
+/*
+ * Chat tabs, the same way again: shared/chat-mirror.ts owns what a `chat:*`
+ * frame may say and how it is read, for Forge Web and for this link alike.
+ */
+import type { ChatClientFrame, ChatServerFrame } from './chat-mirror'
 
 /**
  * A live pane, as the phone sees it.
@@ -360,6 +365,7 @@ export interface OpFrame {
     | 'foreman-start'
     | 'foreman-stop'
     | 'handoff-start'
+    | 'newChatTab'
   projectId: string
   profileId?: string
   /**
@@ -391,6 +397,11 @@ export interface OpFrame {
    * desktop does not know is refused rather than guessed at.
    */
   target?: HandoffTargetWire
+  /**
+   * `newChatTab` only: which chatbot the new chat tab opens (shared/chatbots.ts).
+   * Wire data, read by `isChatBotId` in electron/layout-engine.ts and never cast.
+   */
+  bot?: string
 }
 
 export interface PingFrame {
@@ -716,6 +727,20 @@ export function readMirrorInput(value: unknown): MirrorInput | null {
   }
 }
 
+/**
+ * A chat tab (shared/chat-mirror.ts), on this link.
+ *
+ * The very frames Forge Web carries, with this wire's `t` where that one says
+ * `type` and nothing else changed: `{ t: 'chat:watch', leafId, width, height,
+ * dpr }` up, `{ t: 'chat:frame', leafId, seq, jpeg, width, height }` and
+ * `{ t: 'chat:state', leafId, status, error? }` down. Only a desktop whose
+ * `hello-ok.features` carries CHAT_MIRROR_FEATURE understands them; an older
+ * one refuses them as an unreadable frame.
+ */
+type OnThisWire<F extends { type: string }> = F extends unknown ? Omit<F, 'type'> & { t: F['type'] } : never
+export type MobileChatClientFrame = OnThisWire<ChatClientFrame>
+export type MobileChatServerFrame = OnThisWire<ChatServerFrame>
+
 export type ClientFrame =
   | HelloFrame
   | SubFrame
@@ -729,6 +754,7 @@ export type ClientFrame =
   | MirrorSignalFrame
   | MirrorStopFrame
   | MirrorInputFrame
+  | MobileChatClientFrame
 
 /* ------------------------------------------------------------ server frames */
 
@@ -795,6 +821,13 @@ export interface HelloOkFrame {
    * and a phone may be reading any of them.
    */
   handoff?: { projectId: string; records: HandoffRecord[] }[]
+  /**
+   * What this desktop can do beyond the base protocol, by name — the same list
+   * `WebHelloOkFrame.features` is. Today only CHAT_MIRROR_FEATURE
+   * (shared/chat-mirror.ts): this desktop shows chat tabs to a phone. Optional,
+   * so an older desktop simply offers nothing, and MOBILE_PROTO does not move.
+   */
+  features?: string[]
 }
 
 /**
@@ -985,6 +1018,7 @@ export type ServerFrame =
   | TvPlayFrame
   | MirrorSignalFrame
   | MirrorStopFrame
+  | MobileChatServerFrame
 
 /* ----------------------------------------------------------------- decoding */
 
@@ -1026,6 +1060,12 @@ export function parseFrame(raw: string): ClientFrame | null {
     // crosses this boundary as a shape and becomes an action later, in one
     // place, under a switch that has no default case worth taking.
     case 'mirror-input':
+    // A shape only, like `mirror-input`: what a chat frame may say is decided
+    // by `readChatClientFrame` in shared/chat-mirror.ts, in the server's handler.
+    case 'chat:watch':
+    case 'chat:unwatch':
+    case 'chat:input':
+    case 'chat:focusComposer':
       return value as ClientFrame
     default:
       return null

@@ -20,12 +20,15 @@ import {
   wordPair,
   type ClientFrame,
   type MirrorInput,
+  type MobileChatClientFrame,
+  type MobileChatServerFrame,
   type MobileSession,
   type OpFrame,
   type RemoteYesInfo,
   type ServerFrame
 } from '@shared/mobile'
 import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
+import { CHAT_MIRROR_FEATURE, readChatClientFrame, type ChatMirrorHost } from '@shared/chat-mirror'
 /*
  * The Handoff vocabulary and its one boundary rule, from the file that owns
  * them — the same arrangement this file has with shared/foreman.ts above, and
@@ -250,6 +253,14 @@ export interface MobileServerHost {
    */
   mirrorInput?: (input: MirrorInput) => boolean
 
+  /**
+   * Chat tabs, seen and used from a phone (shared/chat-mirror.ts) — the same
+   * host Forge Web is handed, so the cap on offscreen copies is one cap across
+   * both links. Optional: a host without it does not advertise
+   * CHAT_MIRROR_FEATURE, and a `chat:*` frame is answered with a sentence.
+   */
+  chatMirror?: ChatMirrorHost
+
   /** Where the phone bundle lives on disk. Static hosting is off when absent. */
   webRoot?: string
   /**
@@ -305,6 +316,12 @@ interface Client {
   alive: boolean
   /** Set while a human is being asked about this socket. See beginApproval. */
   approval: ApprovalWait | null
+  /**
+   * This socket's chat-tab gesture budget: the second it belongs to and its
+   * tally. Per socket, as Forge Web's is — see `allowChatInput`.
+   */
+  chatSecond: number
+  chatCount: number
 }
 
 interface ApprovalWait {
@@ -662,7 +679,9 @@ export class MobileServer {
       viewer: `phone-${++viewerSeq}`,
       subs: new Set(),
       alive: true,
-      approval: null
+      approval: null,
+      chatSecond: 0,
+      chatCount: 0
     }
     this.clients.add(client)
 
@@ -709,6 +728,8 @@ export class MobileServer {
       // outliving its viewer is a screen being encoded and sent to a socket
       // that closed — which nothing else in this file would ever notice.
       this.dropViewer(client)
+      // Every chat tab this socket was watching stops being drawn for it.
+      this.host.chatMirror?.release(client.viewer)
       // A phone that has hung up is not a device anybody is typing on, so it
       // stops holding the grid of anything it held. Unconditional, because a
       // socket that never said hello never owned anything and this costs a walk
@@ -1013,7 +1034,82 @@ export class MobileServer {
         })
         return
       }
+
+      case 'chat:watch':
+      case 'chat:unwatch':
+      case 'chat:input':
+      case 'chat:focusComposer':
+        return this.onChat(client, frame)
     }
+  }
+
+  /**
+   * A chat tab on this phone: watch, unwatch, focus its message box, or one
+   * gesture on it — electron/web/server.ts's `onChat`, on this link. Only ever
+   * reached by a paired socket (`handle` drops everything else first), and each
+   * watch's pictures go back to the socket that asked and nowhere else. What a
+   * frame means is decided by `readChatClientFrame`, and which chats exist by
+   * the host, which refuses a leaf id that is not a chat tab on this desktop.
+   *
+   * The mirror is keyed by the paired device's id, which survives a reconnect,
+   * prefixed so a phone's id can never land on a browser's copy in the one
+   * host both links share.
+   */
+  private onChat(client: Client, raw: MobileChatClientFrame): void {
+    const device = client.device
+    if (!device) return
+    const chat = this.host.chatMirror
+    if (!chat) {
+      this.send(client, { t: 'err', code: 'no-window', msg: 'This desktop cannot show chat tabs to a phone.' })
+      return
+    }
+    // Taps and scrolls are pointer traffic, so they spend a budget of their own.
+    if ((raw.t === 'chat:input' || raw.t === 'chat:focusComposer') && !this.allowChatInput(client)) return
+    const frame = readChatClientFrame({ ...raw, type: raw.t })
+    if (!frame) {
+      this.send(client, { t: 'err', code: 'bad-frame', msg: 'That is not a chat gesture this desktop understands.' })
+      return
+    }
+    const key = `phone:${device.id}`
+    switch (frame.type) {
+      case 'chat:watch':
+        chat.watch(key, frame, {
+          viewer: client.viewer,
+          send: (out) => {
+            if (!this.clients.has(client)) return
+            // The same frame, in this wire's dialect: `t` where Forge Web says `type`.
+            const { type, ...rest } = out
+            this.send(client, { t: type, ...rest } as MobileChatServerFrame)
+          },
+          backlog: () => client.socket.bufferedAmount
+        })
+        return
+      case 'chat:unwatch':
+        chat.unwatch(key, frame.leafId, client.viewer)
+        return
+      case 'chat:focusComposer':
+        chat.focusComposer(key, frame.leafId)
+        return
+      case 'chat:input':
+        chat.input(key, frame)
+        return
+    }
+  }
+
+  /**
+   * The chat-tab gesture budget: MAX_INPUT_PER_SECOND a second per socket, then
+   * silence until the next — Forge Web's `allowMirrorInput`, the same number.
+   * Separate from `allowInput`'s counter, so a television driving the desktop's
+   * pointer and a phone scrolling a chat do not spend each other's budget.
+   */
+  private allowChatInput(client: Client): boolean {
+    const second = Math.floor(this.now() / 1000)
+    if (second !== client.chatSecond) {
+      client.chatSecond = second
+      client.chatCount = 0
+    }
+    client.chatCount += 1
+    return client.chatCount <= MAX_INPUT_PER_SECOND
   }
 
   /**
@@ -1113,6 +1209,9 @@ export class MobileServer {
       // Sent only when it is true: absent is what an older desktop says, and a
       // television reads both the same way — no cursor. See `mirrorInput`.
       ...(this.host.mirrorControl?.() ? { canControl: true } : {}),
+      // What this desktop offers beyond the base protocol. Absent when nothing,
+      // which is what an older desktop says too. See `features` in shared/mobile.ts.
+      ...(this.host.chatMirror ? { features: [CHAT_MIRROR_FEATURE] } : {}),
       // Present exactly once, on the connection that paired.
       ...(issuedToken ? { deviceToken: issuedToken } : {})
     })

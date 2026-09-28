@@ -26,10 +26,9 @@ import {
 import { commandExe } from '@shared/agents'
 import { providerSpec } from '@shared/realtime'
 import { isSessionId } from '@shared/session'
-import { chatLeafOf, collectLeaves } from '@shared/splitTree'
+import { collectLeaves } from '@shared/splitTree'
 import type {
   AgentPresence,
-  ChatLeaf,
   CommandPresence,
   GitSnapshot,
   LayoutNode,
@@ -57,7 +56,7 @@ import { filePasskeyStorage } from './web/passkey'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
-import { chatMirrorHost, disposeChatMirrors, pruneChatMirrors } from './chat-panes/phone-mirror'
+import { disposeChatMirrors, findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import { defaultStatusDir, startAgentUsage, type AgentUsage } from './web/agent-usage'
 import { defaultCodexSessionsDir, startCodexUsage, type CodexPane, type CodexUsage } from './web/codex-usage'
@@ -1425,23 +1424,6 @@ function findLeaf(node: LayoutNode, paneId: string): Extract<LayoutNode, { type:
   return findLeaf(node.a, paneId) ?? findLeaf(node.b, paneId)
 }
 
-/**
- * A chat tab's chat, by its leaf id, in any project — or null. What a browser's
- * `chat:watch` is checked against (electron/chat-panes/phone-mirror.ts), so it
- * can only ever open a chat that is really a tab on this desktop. The layout is
- * the engine's when it holds one, the file's otherwise.
- */
-function findChat(leafId: string): ChatLeaf | null {
-  for (const project of getProjects()) {
-    const workspace = layoutEngine()?.workspace(project.id) ?? getWorkspace(project.id)
-    for (const tab of workspace?.tabs ?? []) {
-      const chat = chatLeafOf(tab)
-      if (chat?.id === leafId) return chat
-    }
-  }
-  return null
-}
-
 /** Where this pane's conversation is on disk, or null when there is not one there. */
 function transcriptFor(paneId: string): string | null {
   const session = getManager()
@@ -1711,7 +1693,8 @@ async function start(): Promise<void> {
     mirrorInput: applyInput,
     // Chat tabs on a browser: an offscreen copy of the chat page per phone,
     // its pictures and its taps. Input stays inside that page — never the OS.
-    chatMirror: chatMirrorHost(findChat),
+    // One host for both phone links, so the cap on offscreen copies is shared.
+    chatMirror: sharedChatMirrorHost(),
     // Straight through to electron/web/push.ts, which owns the keypair, the
     // subscription list and the file both live in. The server carries the key
     // out and the subscriptions back; deciding when anything is actually *sent*

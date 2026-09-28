@@ -13,6 +13,9 @@ import {
   type ChatWatchFrame
 } from '@shared/chat-mirror'
 import type { ChatLeaf } from '@shared/types'
+import { chatLeafOf } from '@shared/splitTree'
+import { layoutEngine } from '../layout-engine'
+import { getProjects, getWorkspace } from '../store'
 import { chatUrl } from './registry'
 
 /**
@@ -432,6 +435,34 @@ export function chatMirrorHost(findChat: (leafId: string) => ChatLeaf | null): C
       for (const m of mirrors.values()) if (m.sink?.viewer === viewer) idle(m)
     }
   }
+}
+
+/**
+ * A chat tab's chat, by its leaf id, in any project — or null. What a phone's
+ * `chat:watch` is checked against (see `chatMirrorHost`), so it can only ever
+ * open a chat that is really a tab on this desktop. The layout is the engine's
+ * when it holds one, the file's otherwise.
+ */
+export function findChat(leafId: string): ChatLeaf | null {
+  for (const project of getProjects()) {
+    const workspace = layoutEngine()?.workspace(project.id) ?? getWorkspace(project.id)
+    for (const tab of workspace?.tabs ?? []) {
+      const chat = chatLeafOf(tab)
+      if (chat?.id === leafId) return chat
+    }
+  }
+  return null
+}
+
+let shared: ChatMirrorHost | null = null
+
+/**
+ * The one host both phone links are handed — Forge Web (electron/web-host.ts)
+ * and Forge Mobile (electron/mobile-host.ts) — checked against `findChat`.
+ */
+export function sharedChatMirrorHost(): ChatMirrorHost {
+  shared ??= chatMirrorHost(findChat)
+  return shared
 }
 
 /** Close every copy whose chat tab has gone. Called whenever the workspace may have changed. */

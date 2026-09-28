@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { sortProjectsForPicker } from '@shared/project-order'
-import type { ClaudePermissionMode, LayoutNode, PaneLeaf, Project, Workspace } from '@shared/types'
+import { CHAT_MIRROR_FEATURE } from '@shared/chat-mirror'
+import { CHATBOTS, type ChatBotId } from '@shared/chatbots'
+import type { ChatLeaf, ClaudePermissionMode, LayoutNode, PaneLeaf, Project, Workspace } from '@shared/types'
 import type { MobileSession } from '@shared/mobile'
 import type { LinkPicture } from '../lib/link'
+import { ChatBotTile } from './ChatBadge'
 import { NewTabSheet } from './NewTab'
 import { SendToTvSheet } from './SendToTv'
 
@@ -31,6 +34,10 @@ export interface BrowserProps {
   onOpenPane: (session: MobileSession, title: string) => void
   /** The chooser has already decided both of these; the caller only sends them. */
   onNewTab: (projectId: string, profileId: string, permissionMode?: ClaudePermissionMode) => void
+  /** A chat tab (shared/chatbots.ts), tapped. Only offered where the desktop serves chats. */
+  onOpenChat: (projectId: string, leaf: ChatLeaf) => void
+  /** A chatbot picked in the New tab sheet. */
+  onNewChat: (projectId: string, bot: ChatBotId) => void
   /** A YouTube id, already extracted, bound for whatever television is paired. */
   onSendToTv: (video: string) => void
   onBack: () => void
@@ -50,6 +57,8 @@ export function Browser({
   onOpenProject,
   onOpenPane,
   onNewTab,
+  onOpenChat,
+  onNewChat,
   onSendToTv,
   onBack,
   onRemoteYes
@@ -125,6 +134,11 @@ export function Browser({
   const workspace: Workspace = picture.workspaces[project.id] ?? { tabs: [], activeTabId: null }
   const live = new Set(picture.sessions.map((s) => s.id))
   const sessionOf = (id: string): MobileSession | undefined => picture.sessions.find((s) => s.id === id)
+  // Chat tabs are listed only where the desktop can show one: an older desktop
+  // has them in its layout but nothing to stream, and a row that opens onto
+  // "needs update" is a broken option, not a feature.
+  const chats = picture.features.includes(CHAT_MIRROR_FEATURE)
+  const tabs = workspace.tabs.filter((tab) => chats || tab.root.type !== 'chat')
 
   return (
     <div className="screen">
@@ -135,13 +149,33 @@ export function Browser({
         <div className="bar-title">
           <strong style={{ color: project.color }}>{project.name}</strong>
           <span className="bar-sub">
-            {workspace.tabs.length} {workspace.tabs.length === 1 ? 'tab' : 'tabs'}
+            {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
           </span>
         </div>
       </header>
 
       <ul className="list">
-        {workspace.tabs.map((tab) => {
+        {tabs.map((tab) => {
+          if (tab.root.type === 'chat') {
+            // A chat tab is one website, not panes: one row, wearing its bot's
+            // mark and name and the word "Chat". The paint is on the mark only;
+            // which bot it is lives in the words.
+            const leaf = tab.root
+            const name = CHATBOTS[leaf.bot].name
+            return (
+              <li key={tab.id} className="tab-group">
+                <div className="tab-head">
+                  <span className="tab-name">{tab.title || name}</span>
+                  {tab.id === workspace.activeTabId && <span className="tab-active">on screen</span>}
+                </div>
+                <button type="button" className="pane-row" onClick={() => onOpenChat(project.id, leaf)}>
+                  <ChatBotTile bot={leaf.bot} />
+                  <span className="pane-name">{name}</span>
+                  <span className="chat-kind">Chat</span>
+                </button>
+              </li>
+            )
+          }
           const leaves = leavesOf(tab.root)
           return (
             <li key={tab.id} className="tab-group">
@@ -175,7 +209,7 @@ export function Browser({
             </li>
           )
         })}
-        {workspace.tabs.length === 0 && <li className="empty">No tabs in this project yet.</li>}
+        {tabs.length === 0 && <li className="empty">No tabs in this project yet.</li>}
       </ul>
 
       <div className="screen-foot">
@@ -193,6 +227,14 @@ export function Browser({
             setChoosing(false)
             onNewTab(project.id, profileId, permissionMode)
           }}
+          onChat={
+            chats
+              ? (bot) => {
+                  setChoosing(false)
+                  onNewChat(project.id, bot)
+                }
+              : undefined
+          }
         />
       )}
     </div>

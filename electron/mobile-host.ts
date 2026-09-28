@@ -39,6 +39,7 @@ import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
 import { DiscoveryResponder } from './mobile/discovery'
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
 import { MobileServer, TV_APK_PATH, type MobileApprovalAsk } from './mobile/server'
+import { findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
 import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
 import { listHandoffsFor, onHandoffChanged } from './handoff-watcher'
 import type { HandoffStartRemoteEvent } from '@shared/handoffview'
@@ -345,6 +346,8 @@ async function dispatchOp(op: OpFrame, deviceName: string): Promise<string | nul
       // Killed from here rather than left to the renderer, for the same reason
       // the op was performed here: the renderer might not be there.
       for (const paneId of result.killed) killPane(paneId)
+      // A chat tab this op closed takes every phone's offscreen copy of it too.
+      pruneChatMirrors(findChat)
       return null
     }
     if (result.error !== UNSUPPORTED) return result.error
@@ -694,6 +697,10 @@ async function start(): Promise<void> {
     },
     mirrorControl: canControl,
     mirrorInput: applyInput,
+    // Chat tabs on a phone: the very host Forge Web is handed (see
+    // electron/chat-panes/phone-mirror.ts), so both links share one cap on
+    // offscreen copies. Input stays inside that page — never the OS.
+    chatMirror: sharedChatMirrorHost(),
     ...(mobileWebRoot() ? { webRoot: mobileWebRoot() } : {}),
     // A thunk, not a path: the APK appears while the server is running, and a
     // path resolved here would 404 until the next restart.
@@ -1056,6 +1063,8 @@ export function publishRemoteYes(info: RemoteYesInfo): void {
 
 export function publishMobileState(projectId?: string): void {
   if (!server) return
+  // A chat tab that closed takes the phone's offscreen copy of it with it.
+  pruneChatMirrors(findChat)
   const workspace = projectId ? getWorkspace(projectId) : null
   server.pushState({
     projects: getProjects(),

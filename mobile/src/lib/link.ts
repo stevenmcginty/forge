@@ -12,6 +12,14 @@ import {
   type ServerFrame
 } from '@shared/mobile'
 import type { AgentProfile, HandoffRecord, Project, Workspace } from '@shared/types'
+import {
+  CHAT_MIRROR_FEATURE,
+  type ChatFrameFrame,
+  type ChatInputFrame,
+  type ChatStateFrame,
+  type ChatWatchFrame
+} from '@shared/chat-mirror'
+import type { ChatBotId } from '@shared/chatbots'
 import type { ForemanState } from '@shared/foreman'
 import type { HandoffTargetWire } from '@shared/handoffview'
 
@@ -111,7 +119,22 @@ export interface LinkPicture {
    * shared/mobile.ts.
    */
   remoteYes: RemoteYesInfo
+  /**
+   * What this desktop says it can do, off `hello-ok.features` — for now only
+   * CHAT_MIRROR_FEATURE (shared/chat-mirror.ts). Empty from a desktop too old
+   * to say, which reads the same as "can do none of them": a phone must not
+   * offer a chat it cannot show.
+   */
+  features: string[]
 }
+
+/** What a chat surface on screen is told. See `watchChat`. */
+export interface ChatWatcher {
+  onFrame: (frame: ChatFrameFrame) => void
+  onState: (frame: ChatStateFrame) => void
+}
+
+type ChatSize = Omit<ChatWatchFrame, 'type' | 'leafId'>
 
 export interface LinkHandlers {
   /**
@@ -259,6 +282,12 @@ export class Link {
    * exactly once however the link ended.
    */
   private mirroring = false
+  /**
+   * Every chat tab on screen, by leaf id, with the size it was asked at. Kept
+   * across a reconnect and re-sent after `hello-ok`, like `subscriptions`: the
+   * desktop let each copy go idle when the old socket closed. See `watchChat`.
+   */
+  private chatWatches = new Map<string, { watcher: ChatWatcher; size: ChatSize }>()
 
   constructor(handlers: LinkHandlers) {
     this.handlers = handlers
@@ -286,6 +315,7 @@ export class Link {
     this.unlisten()
     this.dropSocket()
     this.subscriptions.clear()
+    this.chatWatches.clear()
     this.handlers.onState('idle', '')
   }
 
@@ -457,6 +487,47 @@ export class Link {
   sendMirrorInput(input: MirrorInputFrame): void {
     if (!this.mirroring) return
     this.send(input)
+  }
+
+  /* ------------------------------------------------------------- chat tabs */
+
+  /**
+   * Open a chat tab (shared/chatbots.ts) in a project — the layout engine's
+   * `newChatTab`, carried as an ordinary `op` so the project's tab limit and
+   * the bot check are the engine's (electron/layout-engine.ts). A refusal
+   * arrives as an `err`, like any op's.
+   */
+  newChatTab(projectId: string, bot: ChatBotId): void {
+    this.send({ t: 'op', op: 'newChatTab', projectId, bot })
+  }
+
+  /**
+   * Watch a chat at a size, or re-send the size of one already watched — the
+   * picture of it arrives as `chat:frame`s (shared/chat-mirror.ts). Returns the
+   * release, which unwatches; the caller runs it when its surface goes, and
+   * when the app goes to the background.
+   */
+  watchChat(leafId: string, size: ChatSize, watcher: ChatWatcher): () => void {
+    const entry = { watcher, size }
+    this.chatWatches.set(leafId, entry)
+    this.send({ t: 'chat:watch', leafId, ...size })
+    return () => {
+      if (this.chatWatches.get(leafId) !== entry) return
+      this.chatWatches.delete(leafId)
+      this.send({ t: 'chat:unwatch', leafId })
+    }
+  }
+
+  /** One gesture on a watched chat. The body only, so the discriminant is written here. */
+  sendChatInput(input: Omit<ChatInputFrame, 'type'>): void {
+    if (!this.chatWatches.has(input.leafId)) return
+    this.send({ t: 'chat:input', ...input })
+  }
+
+  /** Put the caret in the chat site's own message box. */
+  focusChatComposer(leafId: string): void {
+    if (!this.chatWatches.has(leafId)) return
+    this.send({ t: 'chat:focusComposer', leafId })
   }
 
   /* -------------------------------------------------------------- internals */
@@ -687,6 +758,11 @@ export class Link {
         // Re-arm every subscription the UI still believes it has. Each answers
         // with a replay frame, which is what repaints the terminal.
         for (const id of this.subscriptions) this.send({ t: 'sub', id })
+        // And every chat on screen, for the same reason — but only where this
+        // desktop serves chats at all.
+        if (this.picture.features.includes(CHAT_MIRROR_FEATURE)) {
+          for (const [leafId, { size }] of this.chatWatches) this.send({ t: 'chat:watch', leafId, ...size })
+        }
         return
       }
 
@@ -858,6 +934,40 @@ export class Link {
         this.handlers.onMirrorStop(typeof frame.reason === 'string' ? frame.reason : '')
         return
 
+      /* ------------------------------------------------------- chat tabs */
+
+      // A chat's pictures, several a second, belong to the one surface
+      // watching it and have no business in the picture. Coerced, not trusted,
+      // like every handler here: a picture that is not a string of JPEG and a
+      // size is dropped rather than drawn.
+      case 'chat:frame': {
+        const entry = typeof frame.leafId === 'string' ? this.chatWatches.get(frame.leafId) : undefined
+        if (!entry || typeof frame.jpeg !== 'string') return
+        if (!Number.isFinite(frame.width) || !Number.isFinite(frame.height)) return
+        entry.watcher.onFrame({
+          type: 'chat:frame',
+          leafId: frame.leafId,
+          seq: typeof frame.seq === 'number' ? frame.seq : 0,
+          jpeg: frame.jpeg,
+          width: frame.width,
+          height: frame.height
+        })
+        return
+      }
+
+      case 'chat:state': {
+        const entry = typeof frame.leafId === 'string' ? this.chatWatches.get(frame.leafId) : undefined
+        if (!entry) return
+        if (frame.status !== 'loading' && frame.status !== 'live' && frame.status !== 'error') return
+        entry.watcher.onState({
+          type: 'chat:state',
+          leafId: frame.leafId,
+          status: frame.status,
+          ...(typeof frame.error === 'string' ? { error: frame.error } : {})
+        })
+        return
+      }
+
       case 'pong':
         return
     }
@@ -897,8 +1007,14 @@ function pictureOf(frame: HelloOkFrame): LinkPicture {
     // carrying the old picture over is deliberate: a `uac: true` remembered
     // across a reconnect to a desktop that has since been answered is a card
     // pointing at a prompt that is no longer there.
-    remoteYes: REMOTE_YES_OFF
+    remoteYes: REMOTE_YES_OFF,
+    // Strings only, and absent reads as none: an older desktop offers nothing.
+    features: featuresOf(frame.features)
   }
+}
+
+function featuresOf(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((f): f is string => typeof f === 'string' && f.length <= 64) : []
 }
 
 /** No Remote Yes: what a desktop that has not mentioned it is taken to mean. */

@@ -1404,7 +1404,99 @@ async function main() {
     'and the refusal is said once per watch — a held button must not fill the screen with it'
   )
 
+  log(denied.first('hello-ok').features === undefined, 'a desktop with no chat host offers no features in hello-ok')
+
   await serverD.stop()
+
+  /* ================================ PHASE F — a chat tab on the phone
+   *
+   * The `chat:*` frames (shared/chat-mirror.ts) in this wire's `t` dialect,
+   * routed to an injected ChatMirrorHost the way electron/web/server.ts routes
+   * them for a browser: read and clamped at the boundary, keyed by the paired
+   * device, answered on the socket that asked, released when it hangs up.
+   */
+
+  const chatCalls = []
+  let chatSink = null
+  const authF = new MobileAuth(store)
+  const serverF = new MobileServer({
+    auth: authF,
+    appVersion: '0.0.0-smoke',
+    sessions: () => manager.list(),
+    replay: () => '',
+    write: () => true,
+    resize: () => true,
+    snapshot: () => ({ projects: PROJECTS, profiles: PROFILES, workspaces: {} }),
+    dispatchOp: async () => null,
+    chatMirror: {
+      watch: (device, frame, sink) => {
+        chatSink = sink
+        chatCalls.push(['watch', device, frame, sink.viewer])
+      },
+      unwatch: (device, leafId, viewer) => chatCalls.push(['unwatch', device, leafId, viewer]),
+      focusComposer: (device, leafId) => chatCalls.push(['focusComposer', device, leafId]),
+      input: (device, frame) => chatCalls.push(['input', device, frame]),
+      release: (viewer) => chatCalls.push(['release', viewer])
+    }
+  })
+  active = serverF
+  await serverF.start({ host: '127.0.0.1', port: PORT })
+
+  /* ------------------------------------------------ 35. the feature, at hello */
+
+  const chatter = await authenticatedClient(authF, 'phone-chat', 'Pixel')
+  log(
+    JSON.stringify(chatter.first('hello-ok').features) === JSON.stringify(['chat-mirror']),
+    'a desktop with a chat host says so in hello-ok.features'
+  )
+
+  /* ---------------------------------------- 36. watch, clamped, to the host */
+
+  chatter.send({ t: 'chat:watch', leafId: 'chat-1', width: 390, height: 99999, dpr: 3 })
+  await waitFor(() => chatCalls.some((c) => c[0] === 'watch'), 5000, 'the watch to reach the host')
+  const watchCall = chatCalls.find((c) => c[0] === 'watch')
+  log(
+    watchCall[1] === 'phone:phone-chat' && watchCall[2].type === 'chat:watch' && watchCall[2].height === 2400 && watchCall[2].dpr === 2,
+    'a chat:watch reaches the host keyed by the paired device, read and clamped',
+    JSON.stringify(watchCall)
+  )
+
+  chatSink.send({ type: 'chat:state', leafId: 'chat-1', status: 'live' })
+  await waitFor(() => chatter.first('chat:state'), 5000, 'the chat state on the phone')
+  log(
+    chatter.first('chat:state').status === 'live' && chatter.first('chat:state').type === undefined,
+    'the host’s frames reach the phone in this wire’s dialect (`t`, not `type`)'
+  )
+
+  /* -------------------------------------- 37. gestures, garbage, unwatch */
+
+  chatter.send({ t: 'chat:input', leafId: 'chat-1', kind: 'tap', x: 10, y: 20 })
+  chatter.send({ t: 'chat:focusComposer', leafId: 'chat-1' })
+  const errsBeforeGarbage = chatter.of('err').length
+  chatter.send({ t: 'chat:input', leafId: 'chat-1', kind: 'key', key: 'F12' })
+  await waitFor(() => chatter.of('err').length > errsBeforeGarbage, 5000, 'the refusal of a bad key')
+  log(chatter.of('err').at(-1).code === 'bad-frame', 'a chat gesture outside the protocol is refused as bad-frame')
+  log(
+    chatCalls.some((c) => c[0] === 'input' && c[2].kind === 'tap' && c[2].x === 10) &&
+      chatCalls.some((c) => c[0] === 'focusComposer' && c[2] === 'chat-1') &&
+      !chatCalls.some((c) => c[0] === 'input' && c[2].kind === 'key'),
+    'a tap and a focusComposer reach the host; the refused key does not'
+  )
+
+  chatter.send({ t: 'chat:unwatch', leafId: 'chat-1' })
+  await waitFor(() => chatCalls.some((c) => c[0] === 'unwatch'), 5000, 'the unwatch to reach the host')
+  log(
+    chatCalls.find((c) => c[0] === 'unwatch')[3] === watchCall[3],
+    'a chat:unwatch names the same socket the watch did'
+  )
+
+  /* ------------------------------------------------ 38. a hang-up releases */
+
+  chatter.socket.close()
+  await waitFor(() => chatCalls.some((c) => c[0] === 'release'), 5000, 'the release on hang-up')
+  log(chatCalls.some((c) => c[0] === 'release' && c[1] === watchCall[3]), 'a phone that hangs up releases its chat watches')
+
+  await serverF.stop()
 
   /* ---------------------------------------------------------------- done */
 

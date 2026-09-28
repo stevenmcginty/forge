@@ -1,0 +1,211 @@
+/*
+ * A chat tab on the phone: the bot's label (ChatBadge.tsx), its row in the
+ * tab list and the New tab sheet, and its live picture (ChatMirror.tsx). The
+ * bot's paint arrives as --chat-bg / --chat-ink / --chat-border from
+ * `chatTabStyle`; everything else is the app's own tokens (styles.css). Every
+ * state carries a shape and a word; colour only agrees.
+ */
+
+/* ------------------------------------------------------------ the label */
+
+.chat-mark {
+  flex: 0 0 auto;
+  display: block;
+}
+
+/* The mark on the bot's paint, the size of a `.pane-badge` so a chat row lines
+   up with the agent rows beside it. */
+.chat-tile-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--chat-bg);
+  color: var(--chat-ink);
+  box-shadow: inset 0 0 0 1px var(--chat-border);
+  flex: 0 0 auto;
+}
+
+/* The word "Chat" beside the bot's name, in lists: what kind of tab it is. */
+.chat-kind {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* -------------------------------------------------------- the live chat */
+
+.chat-mirror {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.chat-mirror-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 6px 12px 6px 4px;
+  background: var(--chat-bg);
+  color: var(--chat-ink);
+  box-shadow: inset 0 -1px 0 var(--chat-border);
+}
+
+.chat-mirror-back {
+  background: none;
+  border: 0;
+  color: inherit;
+  font-size: 30px;
+  line-height: 1;
+  padding: 0 8px;
+  min-width: 44px;
+  min-height: 44px;
+  flex: 0 0 auto;
+}
+
+.chat-mirror-name {
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-mirror-kind {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.chat-mirror-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chat-mirror-glyph {
+  flex: 0 0 auto;
+  display: block;
+}
+
+.chat-mirror-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #07080a;
+  /* Every gesture here is the page's, not this one's: no browser pan or zoom. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.chat-mirror-picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* No picture has arrived yet: nothing to draw, not a broken-image box. */
+.chat-mirror-stage:not([data-pictured]) .chat-mirror-picture {
+  visibility: hidden;
+}
+
+.chat-mirror-notice {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 50%;
+  margin: 0;
+  transform: translateY(-50%);
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.chat-mirror[data-state='error'] .chat-mirror-notice {
+  border-color: var(--bad);
+}
+
+.chat-mirror-hint {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 13px;
+}
+
+/* The bottom inset for the same reason `.screen-foot` has it: under Android's
+   gesture bar the Send button would read as broken rather than covered. */
+.chat-mirror-compose {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px calc(10px + var(--sa-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.chat-mirror-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 48px;
+  max-height: 128px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  /* 16px keeps a phone from zooming the page when the box takes the caret. */
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.35;
+  resize: none;
+  field-sizing: content;
+}
+
+.chat-mirror-input:focus-visible {
+  outline: 2px solid var(--volt);
+  outline-offset: 1px;
+}
+
+.chat-mirror-send {
+  flex: 0 0 auto;
+  min-width: 72px;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--volt);
+  color: #0b0c0e;
+  font: 600 16px/1 system-ui, sans-serif;
+}
+
+.chat-mirror-send:disabled {
+  opacity: 0.5;
+}

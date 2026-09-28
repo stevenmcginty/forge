@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { MOBILE_PORT, MOBILE_PROTO, type MobileSession } from '@shared/mobile'
 import { isClaudeCommand, isShellProfile, resolveProfile } from '@shared/agents'
 import { collectLeaves } from '@shared/splitTree'
-import type { TerminalTab } from '@shared/types'
+import type { ChatLeaf, TerminalTab } from '@shared/types'
+import { CHAT_MIRROR_FEATURE } from '@shared/chat-mirror'
 import { handoffTargetWire, handoffTargets, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import { Link, deviceId, type LinkPicture, type LinkState } from './lib/link'
 import {
@@ -19,6 +20,7 @@ import {
 import { canScan, scanPairingCode } from './lib/scan'
 import { servedFromOrigin, shouldOfferInstall } from './lib/pwa'
 import { Browser, leavesOf } from './components/Browser'
+import { ChatMirror } from './components/ChatMirror'
 import { PaneView, paneListeners } from './components/PaneView'
 import { TvConnect } from './components/TvConnect'
 import { TvDashboard } from './components/TvDashboard'
@@ -53,7 +55,10 @@ import { CURRENT_VERSION_NAME, openRustDesk, startAutoUpdate, updateStore } from
  */
 const BAKED = toOrigin(__BAKED_ORIGIN__, MOBILE_PORT)
 
-type Screen = { at: 'browse'; projectId: string | null } | { at: 'pane'; session: MobileSession; title: string }
+type Screen =
+  | { at: 'browse'; projectId: string | null }
+  | { at: 'pane'; session: MobileSession; title: string }
+  | { at: 'chat'; projectId: string; leafId: string }
 
 export function App(): React.JSX.Element {
   const [state, setState] = useState<LinkState>('idle')
@@ -485,6 +490,14 @@ export function App(): React.JSX.Element {
   const paneTab = paneProject ? tabOfSession(picture, paneProject, paneSessionId) : null
 
   /**
+   * The chat screen's leaf, read off the live picture rather than kept from
+   * the tap: a chat tab closed at the desk simply stops resolving, and the
+   * screen falls back to that project's tab list instead of a dead picture.
+   */
+  const chatLeaf = screen.at === 'chat' ? chatLeafOf(picture, screen.projectId, screen.leafId) : null
+  const chats = picture.features.includes(CHAT_MIRROR_FEATURE)
+
+  /**
    * Remote Yes, tapped — from the card below or from the quiet row in Browser.
    *
    * Fire-and-report: the deep link either lands in RustDesk or it does not,
@@ -549,7 +562,15 @@ export function App(): React.JSX.Element {
         </p>
       )}
 
-      {screen.at === 'pane' ? (
+      {screen.at === 'chat' && chatLeaf ? (
+        <ChatMirror
+          link={link}
+          leaf={chatLeaf}
+          live={state === 'live'}
+          supported={chats}
+          onBack={() => setScreen({ at: 'browse', projectId: screen.projectId })}
+        />
+      ) : screen.at === 'pane' ? (
         <PaneView
           link={link}
           /*
@@ -605,6 +626,11 @@ export function App(): React.JSX.Element {
           onNewTab={(projectId, profileId, permissionMode) => {
             link.op({ op: 'create-tab', projectId, profileId, ...(permissionMode ? { permissionMode } : {}) })
             setNotice('Asked the desktop for a new tab…')
+          }}
+          onOpenChat={(projectId, leaf) => setScreen({ at: 'chat', projectId, leafId: leaf.id })}
+          onNewChat={(projectId, bot) => {
+            link.newChatTab(projectId, bot)
+            setNotice('Asked the desktop for a new chat tab…')
           }}
           onSendToTv={(video) => {
             link.tvPlay(video)
@@ -934,6 +960,14 @@ function Connect({
  * A pane's id *is* its PTY session id (see PaneLeaf in shared/types.ts), which
  * is what makes this a lookup rather than a join.
  */
+/** A chat tab's leaf in a project, or null once the desk has closed it. */
+function chatLeafOf(picture: LinkPicture, projectId: string, leafId: string): ChatLeaf | null {
+  for (const tab of picture.workspaces[projectId]?.tabs ?? []) {
+    if (tab.root.type === 'chat' && tab.root.id === leafId) return tab.root
+  }
+  return null
+}
+
 /** The layout leaf behind a pane id, or null for a pane no tab names. */
 function sessionLeafOf(picture: LinkPicture, sessionId: string): { profileId: string; sessionId?: string } | null {
   for (const workspace of Object.values(picture.workspaces)) {
