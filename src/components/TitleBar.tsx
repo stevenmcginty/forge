@@ -52,7 +52,6 @@ export function TitleBar(): ReactNode {
         </span>
         <span className="deckbar__wordmark">Forge</span>
         {isDevChannel ? <span className="deckbar__channel">DEV</span> : null}
-        <ProjectChip />
         <AgentControls />
       </div>
 
@@ -66,6 +65,7 @@ export function TitleBar(): ReactNode {
 
       <div className="deckbar__right">
         {place === 'top' ? <ModePill /> : null}
+        <ProjectChip />
         <DeckMenu />
         {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
         <div className="deckbar__controls-gap" />
@@ -352,7 +352,8 @@ function DeckMenu(): ReactNode {
   }, [open])
 
   // The shelf is folded away, so a fresh screenshot has to announce itself on
-  // the button: a count of shots that arrived since the menu was last opened.
+  // the button: a count of shots that arrived since the menu was last opened,
+  // and a notice.
   const [fresh, setFresh] = useState(0)
   const known = useRef<Set<string> | null>(null)
   useEffect(() => {
@@ -364,12 +365,15 @@ function DeckMenu(): ReactNode {
       }
       const added = shots.filter((s) => !known.current!.has(s.id)).length
       known.current = ids
-      if (added > 0 && shellSheet.get() !== 'shelf') setFresh((n) => n + added)
+      if (added > 0) {
+        if (shellSheet.get() !== 'shelf') setFresh((n) => n + added)
+        actions.setNotice(added === 1 ? 'Screenshot captured' : `${added} screenshots captured`)
+      }
     }
     const off = window.forge.shots.onUpdated(receive)
     void window.forge.shots.list().then(receive)
     return off
-  }, [])
+  }, [actions])
   useEffect(() => {
     if (open) setFresh(0)
   }, [open])

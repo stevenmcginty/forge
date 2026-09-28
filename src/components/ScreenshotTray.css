@@ -285,23 +285,42 @@
   color: var(--danger);
 }
 
-/* ------------------------------------------------------------------ toast */
-
 .tray__toast {
   position: absolute;
-  left: var(--s-5);
-  right: var(--s-5);
+  left: var(--s-4);
+  right: var(--s-4);
   bottom: calc(100% + var(--s-3));
   z-index: var(--z-toast);
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--r-sm);
-  border: 1px solid var(--line-hairline);
-  background: var(--bg-panel-raised);
-  box-shadow: var(--shadow-card);
-  font-size: var(--t-xs);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent-line);
+  background: var(--sheet-bg);
+  box-shadow:
+    0 0 16px -4px var(--accent-glow),
+    var(--shadow-card);
+  font-family: var(--font-display);
+  font-size: var(--t-sm);
+  font-weight: 600;
   line-height: 1.35;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   animation: tray-toast var(--dur-med) var(--ease-out);
+}
+
+.tray__toast-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  border-radius: 1.5px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.tray__toast-text {
+  flex: 1;
 }
 
 @keyframes tray-toast {

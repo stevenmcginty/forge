@@ -252,7 +252,7 @@
   gap: 6px;
   flex: none;
   height: 26px;
-  margin-left: 2px;
+  margin: 0;
   padding: 0 8px 0 9px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
@@ -426,7 +426,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 2px;
+  gap: 6px;
   min-width: 0;
 }
 

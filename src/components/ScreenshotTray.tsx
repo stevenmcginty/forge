@@ -6,7 +6,7 @@ import { useActiveTab, useApp } from '@/state/AppState'
 import { Icon } from './Icon'
 import './ScreenshotTray.css'
 
-const TOAST_MS = 2200
+const TOAST_MS = 3500
 
 /**
  * The shelf. Every screenshot you take (Win+Shift+S, PrtScn) and every image
@@ -15,7 +15,7 @@ const TOAST_MS = 2200
  * them, a thumbnail drags out as a real file, and clicking one copies it.
  */
 export function ScreenshotTray(): ReactNode {
-  const { state } = useApp()
+  const { state, actions } = useApp()
   const tab = useActiveTab()
   const collapsed = state.settings.railCollapsed
 
@@ -107,7 +107,9 @@ export function ScreenshotTray(): ReactNode {
     async (shot: Shot) => {
       const ok = await window.forge.shots.copy(shot.path)
       if (!ok) {
-        setToast('that shot has gone')
+        const msg = 'that shot has gone'
+        setToast(msg)
+        actions.setNotice(msg)
         return
       }
       // Land the path in the terminal you were last working in, so an agent can
@@ -116,12 +118,16 @@ export function ScreenshotTray(): ReactNode {
       if (paneId) {
         terminalHost.paste(paneId, `"${shot.path}" `)
         terminalHost.focus(paneId)
-        setToast('copied — Ctrl+V, or use the path dropped in the pane')
+        const msg = 'Copied — path pasted into pane'
+        setToast(msg)
+        actions.setNotice(msg)
       } else {
-        setToast('copied — Ctrl+V to paste it')
+        const msg = 'Copied — Ctrl+V to paste'
+        setToast(msg)
+        actions.setNotice(msg)
       }
     },
-    [tab?.activePaneId]
+    [actions, tab?.activePaneId]
   )
 
   const removeShot = useCallback(async (shot: Shot) => {
@@ -130,8 +136,10 @@ export function ScreenshotTray(): ReactNode {
 
   const clearAll = useCallback(async () => {
     setShots(await window.forge.shots.clear())
-    setToast('shelf cleared')
-  }, [])
+    const msg = 'shelf cleared'
+    setToast(msg)
+    actions.setNotice(msg)
+  }, [actions])
 
   /* ---------------------------------------------------------- drop inward */
 
@@ -154,7 +162,9 @@ export function ScreenshotTray(): ReactNode {
     void window.forge.shots.adopt(paths).then((n) => {
       setBusy(false)
       markSeen()
-      setToast(n > 0 ? `${n} ${n === 1 ? 'image' : 'images'} added to the shelf` : 'no images in that drop')
+      const msg = n > 0 ? `${n} ${n === 1 ? 'image' : 'images'} added to the shelf` : 'no images in that drop'
+      setToast(msg)
+      if (n > 0) actions.setNotice(msg)
     })
   }
 
@@ -252,7 +262,12 @@ export function ScreenshotTray(): ReactNode {
         </div>
       )}
 
-      {toast ? <div className="tray__toast">{toast}</div> : null}
+      {toast ? (
+        <div className="tray__toast" role="status" aria-live="polite">
+          <span className="tray__toast-mark" aria-hidden="true" />
+          <span className="tray__toast-text">{toast}</span>
+        </div>
+      ) : null}
     </section>
   )
 }
