@@ -5,10 +5,12 @@ import type { GestureIntent } from '@/lib/stt-gesture'
  * The bottom bar's target, and the legacy mic mode.
  *
  *   target   where a typed line goes when you press Enter.
- *              forge    the main agent — the default, "Ask Forge…".
- *              pane     straight into the pane you are in, as keystrokes.
- *            Not remembered: every launch starts on Forge. Esc in the bar
- *            comes back to Forge.
+ *              pane     straight into the pane you are in, as keystrokes —
+ *                       the default (Steve, 2026-09-28: the terminal the bar
+ *                       talks to is the dominant one; Forge is a click away).
+ *              forge    the main agent, "Ask Forge…".
+ *            Not remembered: every launch starts on the pane. Esc in the bar
+ *            comes back to the pane.
  *
  *   mode     LEGACY, pinned to 'dictate'. The bar no longer has a Dictate ⇄
  *            Agent switch: it has one Listen toggle (hub.start / hub.stop),
@@ -42,7 +44,7 @@ function forgetStoredMode(): void {
 if (typeof window !== 'undefined') forgetStoredMode()
 
 const mode = 'dictate' as BarMode
-let target: BarTarget = 'forge'
+let target: BarTarget = 'pane'
 const listeners = new Set<() => void>()
 
 function emit(): void {

@@ -1,5 +1,12 @@
 # Handoff
 
+## Dictate key + mic button, and the bar aims at the pane by default (2026-09-28, pushed to master)
+
+- **Asked (Steve):** start dictation with the Dictate key (now Right Shift; Right Alt is the Agent key, his swap), stop it with the bar's mic button, and it should send. Also: the bar's target chip should default to the terminal, with Forge one click away.
+- **Built:** the press that stops decides. Key start + mic-button stop → "Sending… 1.5 s" with Undo/Esc, then Enter in the pane the words were typed into, or the bar's send if they landed in the bar (`src/lib/barDictation.ts` landing + send-on-end flag, `useDictation.ts` phase effect, `Composer.tsx` pane review). Key start + key stop stays raw. No second Enter when `dictateAutoSend` is on. `barMode.ts` target now defaults to `pane`; Esc in the bar on Forge comes back to the pane; placeholder and chip titles say so.
+- **Checked:** typecheck 0, lint:hooks 0 warnings, agent-bar-check 43/0, dictation:check 31/0. Steve confirmed key start + button stop sends when the chip is on the pane.
+- **Open:** the bar's own send into a Claude pane still sometimes leaves the words on the prompt without the Enter (whole message typed in one chunk; the echo-wait in `sendToPane`, d40f619, did not cure it). Being debugged against a real Claude CLI.
+
 ## Desktop bar mic works like the phone's mic (2026-09-28, pushed to master)
 
 - **Asked (Steve):** the bar's dictation button did not put the words in the input or send them. Wanted it like the phone: dictate, press, it holds, then sends.

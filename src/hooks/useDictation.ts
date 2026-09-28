@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { agentVoiceAlways, agentVoiceNow } from '@/components/hub/barMode'
-import { barDictationPhase, barDictationSink, setBarDictationPhase } from '@/lib/barDictation'
+import {
+  barDictationPhase,
+  barDictationSink,
+  keyDictationLanding,
+  keyDictationSendsOnEnd,
+  setBarDictationPhase,
+  setKeyDictationLanding,
+  setKeyDictationSendsOnEnd
+} from '@/lib/barDictation'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
 import { earconDictationOff, earconDictationOn } from '@/lib/earcon'
 import { formatCombo } from '@/lib/keymap'
@@ -57,7 +65,8 @@ export interface Dictation {
   /**
    * The bar's mic button: start a dictation whose words go into the bar (then
    * review, then send — src/lib/barDictation.ts), or stop the one running.
-   * The Dictate key keeps `toggle`: raw words into whatever has focus.
+   * The Dictate key keeps `toggle`: raw words into whatever has focus. The
+   * press that stops decides: a key dictation this stops is sent too.
    */
   dictateIntoBar: () => void
   /** Drop the sidecar so saved paths take effect; `force` respawns at once. */
@@ -159,6 +168,14 @@ export function useDictationEngine(): Dictation {
       const outcome = insertPhrase(text, target)
       if (outcome === 'clipboard') noticeRef.current('Dictated text copied to the clipboard')
       if (outcome === 'terminal' && target.kind === 'terminal' && autoSendRef.current) terminalHost.submit(target.paneId)
+      // Where it landed, in case the bar's button stops this and sends it.
+      setKeyDictationLanding(
+        outcome === 'terminal' && target.kind === 'terminal'
+          ? { kind: 'pane', paneId: target.paneId }
+          : outcome === 'field' && target.kind === 'field' && barDictationSink()?.ownsField(target.el)
+            ? { kind: 'bar' }
+            : { kind: 'elsewhere' }
+      )
     })
   }, [])
 
@@ -236,11 +253,22 @@ export function useDictationEngine(): Dictation {
    * sidecar sends the last one before it says idle. That end is the bar's cue
    * for the review countdown. Armed and never opened is not an end: a sidecar
    * that is still loading passes through idle on its way to listening.
+   *
+   * A key dictation the bar's button stopped ends the same way, and its end
+   * is the cue to send where its words landed. An error sends nothing.
    */
   useEffect(() => {
     const bar = barDictationPhase()
-    if (bar === 'off') return
     const phase = status.phase
+    if (bar === 'off') {
+      if (!keyDictationSendsOnEnd()) return
+      if (phase === 'error') setKeyDictationSendsOnEnd(false)
+      else if (phase === 'idle' || phase === 'off') {
+        setKeyDictationSendsOnEnd(false)
+        barDictationSink()?.sendKeyWords(keyDictationLanding())
+      }
+      return
+    }
     if (phase === 'listening' || phase === 'finishing') {
       if (bar === 'armed') setBarDictationPhase('live')
       return
@@ -257,6 +285,8 @@ export function useDictationEngine(): Dictation {
   const startDictation = useCallback((intoBar = false): void => {
     if (phaseRef.current === 'finishing') return
     setBarDictationPhase(intoBar ? 'armed' : 'off')
+    setKeyDictationSendsOnEnd(false)
+    if (!intoBar) setKeyDictationLanding({ kind: 'none' })
     remembered.current = resolveInsertTarget(activePaneRef.current)
     void window.forge.stt.start().then((s) => {
       setStatus(s)
@@ -321,7 +351,10 @@ export function useDictationEngine(): Dictation {
   /**
    * The bar's mic button. Its own dictation, not the key's: the words go into
    * the bar. While the agent holds the sidecar the press is the key's, as it
-   * always was. A press while a dictation records stops it, whoever started it.
+   * always was. A press while a dictation records stops it, whoever started it
+   * — and the press that stops decides: a key dictation stopped here is sent,
+   * with the bar's countdown and Undo, then Enter where its words landed.
+   * Not when Dictate presses Enter after each phrase already: one Enter only.
    */
   const dictateIntoBar = useCallback((): void => {
     if (toAgentRef.current) {
@@ -329,6 +362,7 @@ export function useDictationEngine(): Dictation {
       return
     }
     if (phaseRef.current === 'listening') {
+      if (barDictationPhase() === 'off' && !autoSendRef.current) setKeyDictationSendsOnEnd(true)
       void window.forge.stt.stop()
       return
     }
