@@ -1,5 +1,12 @@
 # Handoff
 
+## Phone Listen dead after a drop (2026-09-28)
+
+- **Asked (Steve):** the agent (Listen) button on the phone works, then drops, then a tap does nothing. Dictation still works.
+- **Cause:** `web/src/deck/voiceAgent.ts` `onState`: when a live session ended by itself (Claude's `fail()` on a lost `events` long-poll, e.g. the phone socket blinking), the phase went to `error` but `session` still held the dead session. `toggleWebVoice` → `startWebVoice` returns at once while `session` is set, so every later tap was a no-op until a reload or an agent switch.
+- **Fix:** `closed` (not rolling) tears down and goes `off`; `error` goes through `fail()`, which tears down. The next tap opens a new session. Same module drives the laptop deck's voice bar, so it is fixed there too.
+- **Checked:** webclient typecheck 0, voice-alerts:check 35/0. Not tried on the phone. No web:build here (it reloads the live renderer).
+
 ## Top bar: settings cog icon and theme background color (2026-09-28, pushed to master)
 
 - **Asked (Steve):** Change the settings icon in the top right from three dots to a cog icon, and change the background color of the top panel to match the blue color of the Forge app.

@@ -534,11 +534,21 @@ async function open(carryover: string | null): Promise<void> {
   const live: LiveSession | null = makeSession(res.setup, {
     onState: (st, detail) => {
       if (session !== live) return
+      // The session ended by itself (Claude's link to the desktop dropped, say):
+      // let it go. Kept as `session`, it made every later tap on Listen a no-op,
+      // because startWebVoice refuses while a session is held.
       if (st === 'closed') {
-        if (!rolling) set({ phase: 'off' })
+        if (rolling) return
+        run++
+        teardown()
+        set({ phase: 'off' })
         return
       }
-      set(st === 'error' && detail ? { phase: 'error', error: detail } : { phase: fromState(st) })
+      if (st === 'error') {
+        fail(detail ?? `${label} stopped.`)
+        return
+      }
+      set({ phase: fromState(st) })
     },
     onCaption: (c) => {
       if (session !== live) return
