@@ -1,5 +1,17 @@
 # Handoff
 
+## Top bar: branch/project picker next to settings; prominent image notifications (2026-09-28, pushed to master)
+
+- **Asked (Steve):** Move the branch picker to the right hand side next to settings, agents wall new to the left, and when we put and paste an image make the notification a little more noticeable.
+- **Built:**
+  1. **Top bar layout (`src/components/TitleBar.tsx`, `src/components/shell/DeckBar.css`):** Moved `ProjectChip` (project folder, name, git branch, chevron) to `deckbar__right` immediately preceding `DeckMenu` ("..."), leaving `AgentControls` (Agents menu, Wall switch, New button, WallLayoutControls) on the left beside the Forge wordmark. Updated `deckbar__right` gap to 6px and zeroed project chip margin for clean spacing.
+  2. **Image put & paste notifications (`src/components/ScreenshotTray.tsx`, `src/components/ScreenshotTray.css`, `src/components/shell/Shell.css`, `src/components/TitleBar.tsx`):**
+     - Clicking a thumbnail in the shelf to put and paste its quoted path into the terminal now announces globally via `actions.setNotice()` in addition to the in-shelf toast, ensuring the notice is seen even if the menu closes or the terminal takes focus.
+     - `ScreenshotTray.css`: Upgraded `.tray__toast` styling with semi-bold typography, glowing accent diamond mark (`.tray__toast-mark`), accent border, and `--accent-glow` box shadow. Increased toast display duration from 2.2s to 3.5s.
+     - `Shell.css`: Enhanced `.dtoast` with an accent-tinted border, glowing box shadow, and larger glowing accent diamond.
+     - `TitleBar.tsx`: Fresh screenshot capture from the OS now announces itself with a global notice via `actions.setNotice('Screenshot captured')`.
+- **Checked:** `npm run typecheck` (0 errors across node, web, mobile, webclient). Fast test suite 49/50 passed (only `web:check` skipped due to electron export stub in node env).
+
 ## Chat tabs: ChatGPT, Gemini, Claude websites as tabs (2026-09-28, pushed to master)
 
 - **Asked (Steve):** free web chatbots inside Forge so the data is in one place. Must look like a chatbot, not a CLI. Chats sit beside the CLI tabs and count toward the 9 tabs. Tab colour = brand: Claude orange, Gemini multicolour, ChatGPT white. Logins in Settings. Must work from the phone.
