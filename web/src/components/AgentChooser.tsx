@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AgentProfile, ClaudePermissionMode, CommandPresence } from '@shared/types'
+import { CHATBOT_ORDER, CHATBOTS, type ChatBotId } from '@shared/chatbots'
 import {
   effectivePermissionMode,
   permissionSpec,
@@ -13,6 +14,7 @@ import { Popover, PopoverRow, PopoverSection } from '@/components/Popover'
 import { useMobile } from '../lib/mobile'
 import { useForge, useProfiles } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
+import { ChatBotMark, chatTabStyle } from './ChatBadge'
 import './Sheets.phone.css'
 
 /**
@@ -48,6 +50,7 @@ export function AgentChooser({
   open,
   onClose,
   onPick,
+  onChat,
   title,
   align = 'start',
   selectedId
@@ -57,6 +60,11 @@ export function AgentChooser({
   onClose: () => void
   /** One click here opens the pane; the mode, when given, is that open only. */
   onPick: (profileId: string, permissionMode?: ClaudePermissionMode) => void
+  /**
+   * Opens a chat tab (shared/chatbots.ts). Given, the chooser offers a
+   * "Chatbots" group under the agents; absent, it offers none.
+   */
+  onChat?: (bot: ChatBotId) => void
   /** The heading. Defaults to "Open terminal with" at a desk and "New tab" on a phone. */
   title?: string
   align?: 'start' | 'end' | 'center'
@@ -111,6 +119,13 @@ export function AgentChooser({
     onPick(profile.id, mode)
     onClose()
   }
+
+  const pickChat = onChat
+    ? (bot: ChatBotId): void => {
+        onChat(bot)
+        onClose()
+      }
+    : undefined
 
   const row = (profile: AgentProfile): ReactNode => {
     const ladder = supportsPermissionModes(profile)
@@ -188,6 +203,7 @@ export function AgentChooser({
         missing={missing}
         desktop={desktop}
         pick={pick}
+        pickChat={pickChat}
       />
     )
   }
@@ -197,6 +213,21 @@ export function AgentChooser({
     <Popover anchor={anchor} open={open} onClose={onClose} align={align} width={286} label={heading}>
       <PopoverSection title={heading}>{shells.map(row)}</PopoverSection>
       {agents.length > 0 ? <PopoverSection title="Agents">{agents.map(row)}</PopoverSection> : null}
+      {pickChat ? (
+        <PopoverSection title="Chatbots">
+          {CHATBOT_ORDER.map((bot) => (
+            <div className="agent-chooser__line" key={bot}>
+              <PopoverRow onClick={() => pickChat(bot)}>
+                <span className="chooser-chatmark" style={chatTabStyle(bot)}>
+                  <ChatBotMark bot={bot} size={14} />
+                </span>
+                <span className="agent-chooser__name truncate">{CHATBOTS[bot].name}</span>
+                <span className="agent-chooser__cmd truncate">Chat</span>
+              </PopoverRow>
+            </div>
+          ))}
+        </PopoverSection>
+      ) : null}
     </Popover>
   )
 }
@@ -230,7 +261,8 @@ function ChooserSheet({
   setModeFor,
   missing,
   desktop,
-  pick
+  pick,
+  pickChat
 }: {
   open: boolean
   onClose: () => void
@@ -244,6 +276,7 @@ function ChooserSheet({
   missing: (command: string) => boolean
   desktop: string
   pick: (profile: AgentProfile, mode?: ClaudePermissionMode) => void
+  pickChat?: (bot: ChatBotId) => void
 }): ReactNode {
   const ladderFor = modeFor ? (agents.find((p) => p.id === modeFor) ?? null) : null
 
@@ -335,6 +368,24 @@ function ChooserSheet({
     >
       {agents.length > 0 ? <SheetSection title="Agents">{agents.map(row)}</SheetSection> : null}
       {shells.length > 0 ? <SheetSection title="Shells">{shells.map(row)}</SheetSection> : null}
+      {pickChat ? (
+        <SheetSection title="Chatbots">
+          {CHATBOT_ORDER.map((bot) => (
+            <SheetRow
+              key={bot}
+              icon={
+                <span className="chooser-chatmark" data-size="lg" style={chatTabStyle(bot)}>
+                  <ChatBotMark bot={bot} size={18} />
+                </span>
+              }
+              label={`${CHATBOTS[bot].name} chat`}
+              secondary={`The ${CHATBOTS[bot].name} website, signed in on ${desktop}`}
+              onClick={() => pickChat(bot)}
+              testId={`chat-row-${bot}`}
+            />
+          ))}
+        </SheetSection>
+      ) : null}
     </BottomSheet>
   )
 }

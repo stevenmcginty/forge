@@ -4,6 +4,7 @@ import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import { AgentBadge } from '@/components/AgentBadge'
 import { useForge, useProfiles } from '../state'
+import { ChatMirror } from './ChatMirror'
 import { PaneView } from './PaneView'
 
 /**
@@ -53,6 +54,9 @@ export function MobilePanes({
     setViewing(paneId)
     if (live) void actions.layout({ op: 'focus-pane', paneId })
   }
+
+  // A chat tab is one chatbot page, drawn whole: no panes, no chips.
+  if (node.type === 'chat') return <ChatMirror leaf={node} onScreen={onScreen} />
 
   return (
     <div className="mpanes">

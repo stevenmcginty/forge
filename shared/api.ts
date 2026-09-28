@@ -113,6 +113,7 @@ import type { HandoffStartRemoteEvent } from './handoffview'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
+import type { ChatBotId } from './chatbots'
 import type { BrainTestResult, BrainTestTarget } from './agent-brain'
 import type {
   RealtimeGeminiTokenResult,
@@ -1279,6 +1280,57 @@ export interface ForgeApi {
     /** Ask the host to run something on the real engine. Fire and forget. */
     call(message: unknown): void
   }
+
+  /**
+   * Chat tabs: a chatbot website (shared/chatbots.ts) laid over a pane, the
+   * way the built-in browser lays a page over its surface. Optional because the
+   * desktop hot-reloads the renderer but not the preload: every call is
+   * `window.forge.chat?.x`, and a missing one means "restart Forge".
+   * See electron/chat-panes/.
+   */
+  chat?: {
+    /** Make (or keep) the page for this chat leaf. Loads where it last was, or the bot's home. */
+    ensure(leafId: string, bot: ChatBotId): void
+    /** Where the placeholder is, in CSS pixels, or null to hide the page. One-way. */
+    bounds(leafId: string, rect: ChatViewBounds | null): void
+    nav(leafId: string, action: ChatNavAction): void
+    /** Close the page for good (its tab closed). */
+    close(leafId: string): void
+    /** Open a chat tab in a project — the layout engine's `newChatTab`, so the 9-tab limit is its. */
+    newTab(projectId: string, bot: ChatBotId): Promise<ChatNewTabResult>
+    /** Is Forge's browser session signed in to this bot? */
+    status(bot: ChatBotId): Promise<boolean>
+    onStatus(cb: (event: ChatStatusEvent) => void): () => void
+    onViewState(cb: (state: ChatViewState) => void): () => void
+    /** Clear the bot's cookies, then reload its open chat pages. */
+    signOut(bot: ChatBotId): Promise<void>
+  }
+}
+
+/** A chat page's box, in the renderer's CSS pixels. */
+export interface ChatViewBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type ChatNavAction = 'back' | 'reload' | 'home'
+
+export type ChatNewTabResult = { ok: true; tabId: string } | { ok: false; error: string }
+
+export interface ChatStatusEvent {
+  bot: ChatBotId
+  signedIn: boolean
+}
+
+/** What a chat pane's bar shows about its page. */
+export interface ChatViewState {
+  leafId: string
+  loading: boolean
+  canGoBack: boolean
+  /** Why the last main-frame load failed; '' once a page commits. */
+  error: string
 }
 
 /**

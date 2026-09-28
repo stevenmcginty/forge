@@ -63,6 +63,12 @@ import {
  */
 import { readMirrorInput, type MirrorInput, type RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
+import {
+  CHAT_MIRROR_FEATURE,
+  readChatClientFrame,
+  type ChatClientFrame,
+  type ChatMirrorHost
+} from '@shared/chat-mirror'
 /*
  * Foreman's boundary constants and shapes, from the file that owns them — the
  * seed cap is applied here, beside every other cap this link enforces, and the
@@ -709,6 +715,13 @@ export interface WebServerHost {
    * the browser has to interpret.
    */
   mirrorInput?: (input: MirrorInput) => boolean
+
+  /**
+   * Chat tabs, seen and used from a browser (shared/chat-mirror.ts). Optional:
+   * a host without it (the e2e fixture, an older desktop) never announces
+   * CHAT_MIRROR_FEATURE, and a `chat:*` frame is answered `unsupported`.
+   */
+  chatMirror?: ChatMirrorHost
 
   /**
    * Injected so the smoke test can drive the rate-limit buckets and a short
@@ -1542,6 +1555,8 @@ export class WebServer {
       // its viewer is a screen being encoded and sent to a socket that closed,
       // which nothing else in this file would ever notice.
       this.dropViewer(client)
+      // Every chat tab this socket was watching stops being drawn for it.
+      this.host.chatMirror?.release(client.viewer)
       // Every conversation this browser was reading, let go with it. A tail on
       // a file in `~/.claude` polling for a socket that closed is exactly the
       // watch nobody will ever stop.
@@ -1602,6 +1617,9 @@ export class WebServer {
     // spending the terminal's budget on them would starve the keystrokes this
     // link exists to carry — see MAX_MIRROR_INPUT_PER_SECOND in shared/web.ts.
     if (frame.type === 'mirror-input') return this.onMirrorInput(client, frame)
+    // A chat tab's taps and scrolls are pointer traffic too, so they spend the
+    // same separate budget rather than the terminal's.
+    if (frame.type === 'chat:input' || frame.type === 'chat:focusComposer') return this.onChat(client, frame)
 
     if (!this.allowInput(client, frame)) return
 
@@ -1825,6 +1843,62 @@ export class WebServer {
       case 'mirror-stop':
         this.dropViewer(client)
         return
+
+      case 'chat:watch':
+      case 'chat:unwatch':
+        return this.onChat(client, frame)
+    }
+  }
+
+  /**
+   * A chat tab on this browser: watch, unwatch, focus its message box, or one
+   * gesture on it. Only ever reached by an admitted socket — `handle` drops
+   * everything but `hello` before that — and each watch's pictures go back to
+   * the socket that asked and nowhere else. What a frame means is decided by
+   * `readChatClientFrame`, and which chats exist by the host, which refuses a
+   * leaf id that is not a chat tab on this desktop.
+   */
+  private onChat(client: Client, raw: ChatClientFrame): void {
+    const device = client.device
+    if (!device) return
+    const chat = this.host.chatMirror
+    if (!chat) {
+      this.send(client, {
+        type: 'error',
+        code: 'unsupported',
+        message: 'This desktop cannot show chat tabs to a browser.'
+      })
+      return
+    }
+    if ((raw.type === 'chat:input' || raw.type === 'chat:focusComposer') && !this.allowMirrorInput(client)) return
+    const frame = readChatClientFrame(raw)
+    if (!frame) {
+      this.send(client, {
+        type: 'error',
+        code: 'bad-frame',
+        message: 'That is not a chat gesture this desktop understands.'
+      })
+      return
+    }
+    switch (frame.type) {
+      case 'chat:watch':
+        chat.watch(device.id, frame, {
+          viewer: client.viewer,
+          send: (out) => {
+            if (this.clients.has(client)) this.send(client, out)
+          },
+          backlog: () => client.socket.bufferedAmount
+        })
+        return
+      case 'chat:unwatch':
+        chat.unwatch(device.id, frame.leafId, client.viewer)
+        return
+      case 'chat:focusComposer':
+        chat.focusComposer(device.id, frame.leafId)
+        return
+      case 'chat:input':
+        chat.input(device.id, frame)
+        return
     }
   }
 
@@ -2018,7 +2092,8 @@ export class WebServer {
       ...(this.host.transcribeAudio ? [WEB_FEATURE_DICTATE_STREAM] : []),
       ...(this.host.projectRoot ? [WEB_FEATURE_FILES] : []),
       ...(this.host.projectRemove && this.host.projectRemovePreview ? [WEB_FEATURE_PROJECT_REMOVE] : []),
-      ...(this.host.usage ? [WEB_FEATURE_USAGE] : [])
+      ...(this.host.usage ? [WEB_FEATURE_USAGE] : []),
+      ...(this.host.chatMirror ? [CHAT_MIRROR_FEATURE] : [])
     ]
     this.log(`${outcome.device.name} connected from ${client.source} (client ${wireString(frame.client, 32) || '?'})`)
     this.send(client, {
@@ -3528,6 +3603,7 @@ export class WebServer {
     // idempotent, so the second call is free. The same reasoning, and the same
     // idempotence, for the transcript tails behind this socket.
     this.dropViewer(client)
+    this.host.chatMirror?.release(client.viewer)
     this.stopTranscripts(client)
     this.closeVoiceClaude(client)
     try {
@@ -3685,6 +3761,8 @@ function readLayoutOp(value: unknown): WebLayoutOp | null {
   const paneId = wireString(raw.paneId, 128)
   if (paneId) op.paneId = paneId
   if (raw.direction === 'row' || raw.direction === 'column') op.direction = raw.direction
+  const bot = wireString(raw.bot, 32)
+  if (bot) op.bot = bot
   return op
 }
 

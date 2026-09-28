@@ -353,5 +353,54 @@ console.log('\nan empty project')
   ok(nothing.ok === false && nothing.error === 'There is no pane open to split.', 'and there is nothing in it to split', String(nothing.error))
 }
 
+/* ------------------------------------------------------------- chat tabs */
+
+console.log('\nchat tabs')
+{
+  const { engine, saves } = engineOver()
+  const r = engine.apply('p1', { op: 'newChatTab', projectId: 'p1', bot: 'gemini' })
+  const chat = r.ok ? r.workspace.tabs[r.workspace.tabs.length - 1] : null
+  ok(
+    r.ok === true && chat.root.type === 'chat' && chat.root.bot === 'gemini' && chat.title === 'Gemini',
+    'newChatTab opens a tab whose root is one chat, named after its bot',
+    JSON.stringify(chat?.root)
+  )
+  ok(r.ok === true && r.workspace.activeTabId === chat.id && chat.activePaneId === chat.root.id, 'and brings it to the front')
+  ok(r.ok === true && loadable(r.workspace) && collectLeaves(chat.root).length === 0, 'which would load again, and holds no terminal')
+  ok(saves.length === 1, 'and is saved like any tab', `${saves.length} write(s)`)
+
+  const unknown = engine.apply('p1', { op: 'newChatTab', projectId: 'p1', bot: 'clippy' })
+  ok(unknown.ok === false && /chatbot/.test(unknown.error), 'a bot Forge does not know is refused', String(unknown.error))
+
+  const split = engine.apply('p1', { op: 'create-pane', projectId: 'p1', paneId: chat?.root.id })
+  ok(split.ok === false && /cannot be split/.test(split.error), 'splitting a chat tab is refused', String(split.error))
+  const splitActive = engine.apply('p1', { op: 'create-pane', projectId: 'p1' })
+  ok(splitActive.ok === false && /cannot be split/.test(splitActive.error), 'even when it is only the active tab', String(splitActive.error))
+  ok(saves.length === 1, 'and no refusal wrote anything', `${saves.length} write(s)`)
+
+  const closed = engine.apply('p1', { op: 'close-tab', projectId: 'p1', tabId: chat?.id })
+  ok(closed.ok === true && !tabOf(closed.workspace, chat.id) && closed.workspace.tabs.length === 2, 'close-tab closes a chat tab')
+  ok(closed.ok === true && closed.killed.length === 0, 'and kills no PTY, because there was none', String(closed.killed))
+
+  const again = engine.apply('p1', { op: 'newChatTab', projectId: 'p1', bot: 'claude' })
+  const lone = again.ok ? again.workspace.tabs[again.workspace.tabs.length - 1] : null
+  const x = engine.apply('p1', { op: 'close-pane', projectId: 'p1', paneId: lone?.root.id })
+  ok(x.ok === true && !tabOf(x.workspace, lone.id) && x.killed.length === 0, "and a × on the chat itself closes its tab, like a lone pane's")
+
+  const tabs = []
+  for (let i = 0; i < MAX_TABS_PER_PROJECT - 1; i++) tabs.push(seedTab(`t${i}`, `p${i}`, 1))
+  const nine = engineOver({ p1: { tabs, activeTabId: 't0' } }).engine
+  const ninth = nine.apply('p1', { op: 'newChatTab', projectId: 'p1', bot: 'chatgpt' })
+  ok(ninth.ok === true && ninth.workspace.tabs.length === MAX_TABS_PER_PROJECT, `a chat tab can be the ${MAX_TABS_PER_PROJECT}th tab`)
+  const tenth = nine.apply('p1', { op: 'newChatTab', projectId: 'p1', bot: 'claude' })
+  ok(
+    tenth.ok === false && tenth.error === `That project already holds its ${MAX_TABS_PER_PROJECT} tabs.`,
+    'but not one past the limit — a chat tab counts as a tab',
+    String(tenth.error)
+  )
+  const terminal = nine.apply('p1', { op: 'create-tab', projectId: 'p1' })
+  ok(terminal.ok === false, 'and the chat tab it holds refuses a terminal tab too', String(terminal.error))
+}
+
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

@@ -129,6 +129,7 @@ import type { ChatUpdate } from './chat'
  * at the operating system. Type-only, so nothing is bundled by it.
  */
 import type { MirrorButton, MirrorInputAction, MirrorKey, RemoteYesInfo } from './mobile'
+import type { ChatClientFrame, ChatServerFrame } from './chat-mirror'
 
 /* --------------------------------------------------------- protocol identity */
 
@@ -1003,6 +1004,8 @@ export type WebClientFrame =
   | WebMirrorStartFrame
   | WebMirrorStopFrame
   | WebMirrorInputFrame
+  // A chat tab seen from a browser; see shared/chat-mirror.ts.
+  | ChatClientFrame
 
 /* --------------------------------------------------------- layout operations
  *
@@ -1023,6 +1026,12 @@ export type WebClientFrame =
 export const WEB_LAYOUT_OPS = [
   /** A new tab in a project, with a pane in it. `profileId` picks the agent. */
   'create-tab',
+  /**
+   * A new chat tab: one chatbot website, no terminal (shared/chatbots.ts).
+   * `bot` picks which. Counts toward the project's tab limit like any tab;
+   * closed with `close-tab`, and never split.
+   */
+  'newChatTab',
   /** Close a tab and every pane in it. `tabId`. */
   'close-tab',
   /** Bring a tab to the front. `tabId`. */
@@ -1056,6 +1065,11 @@ export interface WebLayoutOp {
   paneId?: string
   /** `create-pane` only: `row` puts the new pane beside, `column` below. */
   direction?: SplitDirection
+  /**
+   * `newChatTab` only: which chatbot. A plain string off the wire for the same
+   * reason as `permissionMode` — the desktop runs it through `isChatBotId`.
+   */
+  bot?: string
 }
 
 /**
@@ -2419,6 +2433,7 @@ export type WebServerFrame =
   | WebMirrorOkFrame
   | WebMirrorChunkFrame
   | WebMirrorStopFrame
+  | ChatServerFrame
 
 /* ------------------------------------------------------------ screen mirror
  *
@@ -2731,6 +2746,12 @@ export function parseFrame(raw: string): WebClientFrame | null {
     // after the server has established that this socket is the one watching the
     // screen. Nothing here reads `a`, `x` or `key`.
     case 'mirror-input':
+    // The same again for a chat tab: `readChatClientFrame` in
+    // shared/chat-mirror.ts decides what one means, in the server's handler.
+    case 'chat:watch':
+    case 'chat:unwatch':
+    case 'chat:input':
+    case 'chat:focusComposer':
       return value as WebClientFrame
     default:
       return null

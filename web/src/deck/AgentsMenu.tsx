@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
+import { chatLeafOf } from '@/lib/splitTree'
+import type { ChatLeaf, TerminalTab } from '@shared/types'
 import { AgentChooser } from '../components/AgentChooser'
+import { ChatTabChip } from '../components/ChatBadge'
 import { useActiveProject, useForge, useWorkspace } from '../state'
 import { AgentStateChip, bringForward, useDeckAgents, type DeckAgent } from './agents'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
@@ -33,6 +36,20 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
   const [chooserOpen, setChooserOpen] = useState(false)
 
   const waiting = agents.filter((a) => a.leaf.id !== current?.leaf.id && state.asking.has(a.leaf.id))
+  /** Chat tabs (shared/chatbots.ts) have no agent in them, so they are listed on their own. */
+  const chats = workspace.tabs.flatMap((tab) => {
+    const chat = chatLeafOf(tab)
+    return chat ? [{ tab, chat }] : []
+  })
+  const frontChat = chats.find((c) => c.tab.id === activeTabId)?.chat ?? null
+
+  const goChat = async (tab: TerminalTab): Promise<void> => {
+    deckSheet.set(null)
+    onView('focus')
+    if (!live || tab.id === activeTabId) return
+    const refused = await actions.layout({ op: 'select-tab', tabId: tab.id })
+    if (refused) actions.setNotice(refused)
+  }
 
   const go = async (agent: DeckAgent): Promise<void> => {
     deckSheet.set(null)
@@ -59,7 +76,9 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
           style={current ? ({ '--pane-accent': current.profile.accent } as CSSProperties) : undefined}
           onClick={() => deckSheet.toggle('agents')}
         >
-          {current ? (
+          {frontChat ? (
+            <ChatTabChip bot={frontChat.bot} size="sm" />
+          ) : current ? (
             <>
               <AgentBadge profile={current.profile} size="sm" />
               <span className="dk-agents__name truncate">{current.name}</span>
@@ -76,6 +95,9 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
         <DeckSheet id="agents" className="dk-sheet--agents" label="Agents">
           <AgentsList
             agents={agents}
+            chats={chats}
+            activeTabId={activeTabId}
+            onPickChat={(tab) => void goChat(tab)}
             currentId={current?.leaf.id ?? null}
             tabCount={tabCount}
             projectName={project.name}
@@ -116,6 +138,13 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
           onView('focus')
           void actions.layout({ op: 'create-tab', profileId, permissionMode })
         }}
+        onChat={(bot) => {
+          setChooserOpen(false)
+          onView('focus')
+          void actions.layout({ op: 'newChatTab', bot }).then((refused) => {
+            if (refused) actions.setNotice(refused)
+          })
+        }}
         selectedId={project.defaultProfileId}
       />
     </div>
@@ -124,6 +153,9 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
 
 function AgentsList({
   agents,
+  chats,
+  activeTabId,
+  onPickChat,
   currentId,
   tabCount,
   projectName,
@@ -133,6 +165,9 @@ function AgentsList({
   onNew
 }: {
   agents: DeckAgent[]
+  chats: Array<{ tab: TerminalTab; chat: ChatLeaf }>
+  activeTabId: string | null
+  onPickChat: (tab: TerminalTab) => void
   currentId: string | null
   tabCount: number
   projectName: string
@@ -209,7 +244,9 @@ function AgentsList({
           }
         }}
       >
-        {agents.length === 0 ? <div className="dk-sheet__empty">No agents open in this project yet.</div> : null}
+        {agents.length === 0 && chats.length === 0 ? (
+          <div className="dk-sheet__empty">No agents open in this project yet.</div>
+        ) : null}
         {agents.map((agent, i) => {
           const here = agent.leaf.id === currentId
           const confirming = closing === agent.leaf.id
@@ -263,6 +300,64 @@ function AgentsList({
                   aria-label={`Close ${agent.name}`}
                   title={live ? `Close ${agent.name} — asks first` : 'The desktop is not answering, so it cannot close one'}
                   onClick={() => setClosing(agent.leaf.id)}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              )}
+            </div>
+          )
+        })}
+        {chats.map(({ tab, chat }) => {
+          const here = tab.id === activeTabId
+          const confirming = closing === chat.id
+          return (
+            <div
+              key={chat.id}
+              role="option"
+              aria-selected={false}
+              className="dk-arow"
+              data-current={here ? 'true' : undefined}
+              data-confirming={confirming ? 'true' : undefined}
+            >
+              <button
+                type="button"
+                className="dk-arow__go"
+                tabIndex={-1}
+                disabled={confirming}
+                onClick={() => onPickChat(tab)}
+              >
+                <span className="dk-arow__mark mono" aria-hidden="true" />
+                <ChatTabChip bot={chat.bot} />
+                <span className="dk-arow__text" />
+                {here ? <span className="dk-arow__here">Active</span> : null}
+              </button>
+              {confirming ? (
+                <span className="dk-arow__confirm" role="group" aria-label={`Close ${chat.title} chat?`}>
+                  <span className="dk-arow__confirm-q">Close?</span>
+                  <button
+                    type="button"
+                    className="dk-arow__yes"
+                    onClick={() => {
+                      setClosing(null)
+                      void actions.layout({ op: 'close-tab', tabId: tab.id }).then((refused) => {
+                        if (refused) actions.setNotice(refused)
+                      })
+                    }}
+                  >
+                    Close
+                  </button>
+                  <button type="button" className="dk-arow__no" onClick={() => setClosing(null)}>
+                    Keep
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="dk-arow__close"
+                  disabled={!live}
+                  aria-label={`Close ${chat.title} chat`}
+                  title={live ? `Close ${chat.title} chat — asks first` : 'The desktop is not answering, so it cannot close one'}
+                  onClick={() => setClosing(chat.id)}
                 >
                   <Icon name="close" size={12} />
                 </button>

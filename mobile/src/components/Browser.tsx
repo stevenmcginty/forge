@@ -18,6 +18,7 @@ import { SendToTvSheet } from './SendToTv'
 
 /** A tab's panes, left-to-right / top-to-bottom, which is reading order. */
 export function leavesOf(node: LayoutNode): PaneLeaf[] {
+  if (node.type === 'chat') return []
   if (node.type === 'leaf') return [node]
   return [...leavesOf(node.a), ...leavesOf(node.b)]
 }

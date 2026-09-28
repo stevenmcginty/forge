@@ -352,6 +352,11 @@ export function Workspace(): ReactNode {
         open={chooserOpen}
         onClose={() => setChooserOpen(false)}
         onPick={(profileId, permissionMode) => void actions.layout({ op: 'create-tab', profileId, permissionMode })}
+        onChat={(bot) => {
+          void actions.layout({ op: 'newChatTab', bot }).then((refused) => {
+            if (refused) actions.setNotice(refused)
+          })
+        }}
         selectedId={project?.defaultProfileId}
       />
       {deck ? <DeckSheetHost /> : null}

@@ -99,11 +99,13 @@ function savedKeysShown(pref: string): boolean {
 const FOREMAN_DRIVING = new Set(['starting', 'driving', 'waiting'])
 
 function findLeaf(node: LayoutNode, id: string): PaneLeaf | null {
+  if (node.type === 'chat') return null
   if (node.type === 'leaf') return node.id === id ? node : null
   return findLeaf(node.a, id) ?? findLeaf(node.b, id)
 }
 
 function countLeaves(node: LayoutNode): number {
+  if (node.type === 'chat') return 0
   return node.type === 'leaf' ? 1 : countLeaves(node.a) + countLeaves(node.b)
 }
 
@@ -780,6 +782,16 @@ export function SessionComposer({
 
   if (offline && state.offlineMode === 'github') return null
   if (!tab) return null
+  // A chat tab has no terminal to type into: its own box, under the picture,
+  // types into the chat site (ChatMirror). The deck keeps its voice bar.
+  if (tab.root.type === 'chat') {
+    return face === 'deck' && lead ? (
+      <div className="dk-bar-idle">
+        {lead}
+        <span className="dk-bar-idle__words">Type in the chat's own box, under the page</span>
+      </div>
+    ) : null
+  }
 
   /*
    * Who the words go to. The deck names the terminal by its one name and what

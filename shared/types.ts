@@ -169,7 +169,25 @@ export interface PaneSplit {
   b: LayoutNode
 }
 
-export type LayoutNode = PaneLeaf | PaneSplit
+/**
+ * A chatbot website (shared/chatbots.ts) in place of a terminal. No PTY, no
+ * profile: `id` names the page, not a session.
+ *
+ * A chat tab's root is exactly one ChatLeaf; a chat never sits inside a split.
+ * Terminal-only code (collectLeaves, countLeaves, the PTY host, handoff,
+ * readiness, voice typing) skips it — see `isChatTab` in shared/splitTree.ts.
+ */
+/** Which chatbot a chat tab holds. Lives here so this file stays dependency-free; shared/chatbots.ts re-exports it with the data. */
+export type ChatBotId = 'chatgpt' | 'gemini' | 'claude'
+
+export interface ChatLeaf {
+  type: 'chat'
+  id: string
+  bot: ChatBotId
+  title: string
+}
+
+export type LayoutNode = PaneLeaf | PaneSplit | ChatLeaf
 
 export interface TerminalTab {
   id: string

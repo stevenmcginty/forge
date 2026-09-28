@@ -1,4 +1,5 @@
-import type { ClaudePermissionMode, LayoutNode, PaneLeaf, SplitDirection } from '@shared/types'
+import type { ChatBotId, ChatLeaf, ClaudePermissionMode, LayoutNode, PaneLeaf, SplitDirection, TerminalTab } from '@shared/types'
+import { CHATBOTS, isChatBotId } from './chatbots'
 import { newSessionId } from '@shared/session'
 import { makeId } from './ids'
 
@@ -6,6 +7,11 @@ import { makeId } from './ids'
  * Pure operations on a pane layout: a binary tree where every leaf is a
  * terminal and every branch is a split with a ratio. All functions return new
  * trees — nothing is mutated, so React sees real changes.
+ *
+ * A chat tab's root is a single `ChatLeaf` instead (shared/chatbots.ts). Every
+ * walker here is terminal-only and passes over it: collectLeaves and
+ * countLeaves never see one, and splitting, removing or updating by id leaves
+ * it as it is. Ask `isChatTab` / `chatLeafOf` for the chat itself.
  */
 
 export function makeLeaf(profileId: string, title = '', permissionMode?: ClaudePermissionMode): PaneLeaf {
@@ -20,10 +26,15 @@ export function makeLeaf(profileId: string, title = '', permissionMode?: ClaudeP
   return leaf
 }
 
+/** A chat tab's one leaf, titled after its bot. */
+export function makeChatLeaf(bot: ChatBotId): ChatLeaf {
+  return { type: 'chat', id: makeId('chat'), bot, title: CHATBOTS[bot].name }
+}
+
 export function collectLeaves(node: LayoutNode, out: PaneLeaf[] = []): PaneLeaf[] {
   if (node.type === 'leaf') {
     out.push(node)
-  } else {
+  } else if (node.type === 'split') {
     collectLeaves(node.a, out)
     collectLeaves(node.b, out)
   }
@@ -31,10 +42,22 @@ export function collectLeaves(node: LayoutNode, out: PaneLeaf[] = []): PaneLeaf[
 }
 
 export function countLeaves(node: LayoutNode): number {
+  if (node.type === 'chat') return 0
   return node.type === 'leaf' ? 1 : countLeaves(node.a) + countLeaves(node.b)
 }
 
+/** A chat tab: its root is one ChatLeaf, and it has no terminal in it. */
+export function isChatTab(tab: Pick<TerminalTab, 'root'>): boolean {
+  return tab.root.type === 'chat'
+}
+
+/** The chat a tab holds, or null for a terminal tab. */
+export function chatLeafOf(tab: Pick<TerminalTab, 'root'>): ChatLeaf | null {
+  return tab.root.type === 'chat' ? tab.root : null
+}
+
 export function findLeaf(node: LayoutNode, id: string): PaneLeaf | null {
+  if (node.type === 'chat') return null
   if (node.type === 'leaf') return node.id === id ? node : null
   return findLeaf(node.a, id) ?? findLeaf(node.b, id)
 }
@@ -46,6 +69,7 @@ export function splitLeaf(
   direction: SplitDirection,
   leaf: PaneLeaf
 ): LayoutNode {
+  if (node.type === 'chat') return node
   if (node.type === 'leaf') {
     if (node.id !== targetId) return node
     return { type: 'split', id: makeId('split'), direction, ratio: 0.5, a: node, b: leaf }
@@ -58,6 +82,7 @@ export function splitLeaf(
 
 /** Remove a leaf, collapsing the split it lived in. Returns null if the tree empties. */
 export function removeLeaf(node: LayoutNode, id: string): LayoutNode | null {
+  if (node.type === 'chat') return node
   if (node.type === 'leaf') return node.id === id ? null : node
   const a = removeLeaf(node.a, id)
   if (a === null) return node.b
@@ -68,6 +93,7 @@ export function removeLeaf(node: LayoutNode, id: string): LayoutNode | null {
 }
 
 export function updateLeaf(node: LayoutNode, id: string, patch: Partial<Omit<PaneLeaf, 'type' | 'id'>>): LayoutNode {
+  if (node.type === 'chat') return node
   if (node.type === 'leaf') return node.id === id ? { ...node, ...patch } : node
   const a = updateLeaf(node.a, id, patch)
   const b = a === node.a ? updateLeaf(node.b, id, patch) : node.b
@@ -76,7 +102,7 @@ export function updateLeaf(node: LayoutNode, id: string, patch: Partial<Omit<Pan
 }
 
 export function setSplitRatio(node: LayoutNode, splitId: string, ratio: number): LayoutNode {
-  if (node.type === 'leaf') return node
+  if (node.type !== 'split') return node
   if (node.id === splitId) {
     const clamped = Math.min(0.88, Math.max(0.12, ratio))
     return clamped === node.ratio ? node : { ...node, ratio: clamped }
@@ -99,7 +125,7 @@ export function neighbourAfterClose(root: LayoutNode, id: string): string | null
 }
 
 function findSibling(node: LayoutNode, id: string): LayoutNode | null {
-  if (node.type === 'leaf') return null
+  if (node.type !== 'split') return null
   if (node.a.type === 'leaf' && node.a.id === id) return node.b
   if (node.b.type === 'leaf' && node.b.id === id) return node.a
   return findSibling(node.a, id) ?? findSibling(node.b, id)
@@ -110,6 +136,8 @@ export function isValidLayout(node: unknown, depth = 0): node is LayoutNode {
   if (depth > 12 || !node || typeof node !== 'object') return false
   const n = node as Partial<LayoutNode>
   if (n.type === 'leaf') return typeof n.id === 'string' && typeof (n as PaneLeaf).profileId === 'string'
+  // Only ever a tab's whole root: a chat never sits inside a split.
+  if (n.type === 'chat') return depth === 0 && typeof n.id === 'string' && isChatBotId((n as ChatLeaf).bot)
   if (n.type === 'split') {
     const s = n as { id?: unknown; direction?: unknown; ratio?: unknown; a?: unknown; b?: unknown }
     return (

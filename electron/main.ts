@@ -73,6 +73,7 @@ import {
   setBrowserShotHook,
   setBrowserWindow
 } from './browser-panes/ipc'
+import { disposeChatPanes, pruneChatViews, registerChatPanes, setChatWindow } from './chat-panes/ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import {
@@ -467,6 +468,7 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null
     setBrowserWindow(null)
+    setChatWindow(null)
     // Before anything else: its sweep asks a destroyed window whether it is
     // visible, and a watchdog outliving the thing it watches is a timer that
     // can only ever be wrong.
@@ -536,6 +538,7 @@ function createWindow(): void {
   setVoiceAgentTarget(mainWindow)
   setForemanTarget(mainWindow)
   setBrowserWindow(mainWindow)
+  setChatWindow(mainWindow)
   // The main window is the overlay's *host*: it holds the one voice agent, so
   // it is the end the relay pushes state from and delivers callbacks to.
   setOverlayHost(mainWindow)
@@ -950,6 +953,7 @@ function previewDevCommand(dir: string): PreviewDevCommand | null {
  */
 function saveRemoteWorkspace(projectId: string, workspace: Workspace): void {
   setWorkspace(projectId, workspace)
+  pruneChatViews(projectId, workspace)
   const event: WorkspaceReplacedEvent = { projectId, workspace, reason: 'remote-op' }
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(IPC.workspaceReplaced, event)
@@ -1062,6 +1066,8 @@ function registerAppHandlers(): void {
     // made at the desk a minute ago would vanish the moment somebody closed a
     // pane from away. See `replace` in electron/layout-engine.ts.
     layoutEngine()?.replace(id, workspace)
+    // A chat tab closed at the desk takes its page with it.
+    pruneChatViews(id, workspace)
     // Every tab and pane change the renderer makes lands here, whatever caused
     // it — a click, a shortcut, a drag on a divider. So this is the one place
     // that knows the layout moved, and therefore the right place to tell the
@@ -1074,7 +1080,10 @@ function registerAppHandlers(): void {
     // is told, so neither can be shown a layout that is not yet on disk.
     publishWebState(id)
   })
-  ipcMain.handle(IPC.storeDeleteWorkspace, (_e, projectId: string) => deleteWorkspace(String(projectId)))
+  ipcMain.handle(IPC.storeDeleteWorkspace, (_e, projectId: string) => {
+    pruneChatViews(String(projectId), null)
+    return deleteWorkspace(String(projectId))
+  })
   ipcMain.handle(IPC.storeReveal, () => shell.openPath(getDataDir()))
 
   // Per-project memory. The store is handed a directory rather than importing
@@ -1460,6 +1469,7 @@ void app
       registerShotsHandlers()
       registerHubHandlers()
       registerBrowserPanes()
+      registerChatPanes()
       // The browser's screenshots land on the canvas board. A tab's owner is
       // labelled by its pane's one name, which the PTY host already holds.
       setBrowserShotHook((path, _owner, id, project) => postToBoard(project || null, path, `Browser ${id}`))
@@ -1636,6 +1646,7 @@ app.on('before-quit', () => {
   // nobody watching it.
   safely('disposeForeman', disposeForeman)
   safely('disposeBrowserPanes', disposeBrowserPanes)
+  safely('disposeChatPanes', disposeChatPanes)
   safely('disposeCompanion', disposeCompanion)
   safely('disposeMobile', disposeMobile)
   // A tasklist poll every 1.5 seconds outliving the app would keep starting a

@@ -1,16 +1,19 @@
 import type { SplitDirection, TerminalTab, Workspace } from '@shared/types'
 import { MAX_PANES_PER_TAB, MAX_SESSIONS, MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import { isPermissionMode } from '@shared/agents'
+import { CHATBOTS, isChatBotId } from '@shared/chatbots'
 import {
+  chatLeafOf,
   collectLeaves,
   countLeaves,
+  isChatTab,
   isValidLayout,
   makeLeaf,
   neighbourAfterClose,
   removeLeaf,
   splitLeaf
 } from '@shared/splitTree'
-import { EMPTY_WORKSPACE, makeTab, withPrunedMosaic } from '@shared/workspace'
+import { EMPTY_WORKSPACE, makeChatTab, makeTab, withPrunedMosaic } from '@shared/workspace'
 
 /**
  * The split tree, owned by the main process.
@@ -81,6 +84,8 @@ export interface LayoutOp {
   tabId?: string
   paneId?: string
   direction?: SplitDirection
+  /** `newChatTab` only. Wire data — run through `isChatBotId` here, never cast. */
+  bot?: string
 }
 
 export type LayoutResult =
@@ -184,6 +189,18 @@ export class LayoutEngine {
         break
       }
 
+      case 'newChatTab': {
+        // A chat is a website, not a PTY, so MAX_SESSIONS is not its limit —
+        // but it is a tab, and the project's tab limit is.
+        if (!isChatBotId(op.bot)) return { ok: false, error: 'Forge does not know that chatbot.' }
+        if (ws.tabs.length >= MAX_TABS_PER_PROJECT) {
+          return { ok: false, error: `That project already holds its ${MAX_TABS_PER_PROJECT} tabs.` }
+        }
+        const tab = makeChatTab(op.bot)
+        next = { ...ws, tabs: [...ws.tabs, tab], activeTabId: tab.id }
+        break
+      }
+
       case 'close-tab': {
         if (!op.tabId) return { ok: false, error: 'No tab named.' }
         const closed = this.closeTab(ws, op.tabId)
@@ -209,6 +226,9 @@ export class LayoutEngine {
         if (!paneId) return { ok: false, error: 'There is no pane open to split.' }
         const tab = tabHolding(ws, paneId)
         if (!tab) return { ok: false, error: 'That pane is gone.' }
+        // A chat tab's root is its one chat; it never sits inside a split.
+        const chat = chatLeafOf(tab)
+        if (chat) return { ok: false, error: `A ${CHATBOTS[chat.bot].name} tab cannot be split.` }
         if (countLeaves(tab.root) >= MAX_PANES_PER_TAB) {
           return { ok: false, error: `That tab already holds its ${MAX_PANES_PER_TAB} panes.` }
         }
@@ -227,7 +247,8 @@ export class LayoutEngine {
         if (!tab) return { ok: false, error: 'That pane is gone.' }
         // Closing the last pane of a tab closes the tab — the reducer's rule,
         // and the reason a phone's × on a lone pane does not leave an empty one.
-        if (countLeaves(tab.root) === 1) {
+        // A chat tab's one chat is that lone pane.
+        if (isChatTab(tab) || countLeaves(tab.root) === 1) {
           const closed = this.closeTab(ws, tab.id)
           if (!closed) return { ok: false, error: 'That pane is gone.' }
           next = closed.workspace
@@ -293,10 +314,11 @@ export class LayoutEngine {
   }
 }
 
-/** The tab a pane lives in, wherever in the project that is. */
+/** The tab a pane lives in, wherever in the project that is. A chat tab holds its one chat. */
 function tabHolding(ws: Workspace, paneId: string): TerminalTab | null {
   for (const tab of ws.tabs) {
-    if (collectLeaves(tab.root).some((l) => l.id === paneId)) return tab
+    const chat = chatLeafOf(tab)
+    if (chat ? chat.id === paneId : collectLeaves(tab.root).some((l) => l.id === paneId)) return tab
   }
   return null
 }

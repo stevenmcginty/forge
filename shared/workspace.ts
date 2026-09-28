@@ -1,11 +1,12 @@
-import type { ClaudePermissionMode, MosaicState, MosaicTile, TerminalTab, Workspace } from './types'
+import type { ChatBotId, ClaudePermissionMode, MosaicState, MosaicTile, TerminalTab, Workspace } from './types'
 import {
   BUILTIN_AGENT_PROFILES,
   RETIRED_BUILTIN_PROFILE_IDS,
   TAB_NAME_POOL,
   TAB_TEXT_PALETTE
 } from './agents'
-import { collectLeaves, makeLeaf } from './splitTree'
+import { collectLeaves, makeChatLeaf, makeLeaf } from './splitTree'
+import { CHATBOTS } from './chatbots'
 import { makeId } from './ids'
 import { terminalName } from './terminal-names'
 
@@ -45,6 +46,8 @@ export function withPrunedMosaic(ws: Workspace): Workspace {
   if (!m) return ws
   const livePanes = new Set<string>()
   for (const t of ws.tabs) for (const l of collectLeaves(t.root)) livePanes.add(l.id)
+  // A chat tab is one Wall tile too, keyed by its chat leaf's id.
+  for (const t of ws.tabs) if (t.root.type === 'chat') livePanes.add(t.root.id)
   const liveTabs = new Set(ws.tabs.map((t) => t.id))
 
   const tiles: Record<string, MosaicTile> = {}
@@ -241,4 +244,13 @@ export function makeTab(
     },
     cursor: name.cursor
   }
+}
+
+/**
+ * A chat tab: one chatbot website, no terminal. Named after its bot rather than
+ * from the terminal name pool, and no text colour — there is no xterm to paint.
+ */
+export function makeChatTab(bot: ChatBotId): TerminalTab {
+  const leaf = makeChatLeaf(bot)
+  return { id: makeId('tab'), title: CHATBOTS[bot].name, root: leaf, activePaneId: leaf.id }
 }

@@ -38,8 +38,12 @@ import { Icon } from '@/components/Icon'
 import { Popover } from '@/components/Popover'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
 import { columnsFor } from '@/lib/mosaicLayout'
-import { collectLeaves } from '@/lib/splitTree'
+import { chatLeafOf, collectLeaves } from '@/lib/splitTree'
+import { CHATBOTS } from '@shared/chatbots'
+import type { ChatLeaf, TerminalTab } from '@shared/types'
 import { alpha, findTheme, mix } from '@/theme/themes'
+import { ChatTabChip } from '../components/ChatBadge'
+import { ChatMirror, ChatTile } from '../components/ChatMirror'
 import { PaneView } from '../components/PaneView'
 import { SessionComposer } from '../components/SessionComposer'
 import { FACES } from '../components/StatusLine'
@@ -118,6 +122,11 @@ export function DeckStage({
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
 
   const [closingTarget, setClosingTarget] = useState<{ agent: DeckAgent; anchor: HTMLElement } | null>(null)
+  const [closingChat, setClosingChat] = useState<{ tab: TerminalTab; chat: ChatLeaf; anchor: HTMLElement } | null>(null)
+
+  useEffect(() => {
+    if (closingChat && !workspace.tabs.some((t) => t.id === closingChat.tab.id)) setClosingChat(null)
+  }, [workspace.tabs, closingChat])
 
   useEffect(() => {
     if (!closingTarget) return
@@ -148,7 +157,14 @@ export function DeckStage({
   const slots = workspace.tabs
     .filter((tab) => drawn.has(tab.id))
     .flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab })))
-  const total = slots.length
+  // A chat tab has no panes: it is one slot of its own, beside the panes.
+  const chatSlots = workspace.tabs
+    .filter((tab) => drawn.has(tab.id))
+    .flatMap((tab) => {
+      const chat = chatLeafOf(tab)
+      return chat ? [{ chat, tab }] : []
+    })
+  const total = slots.length + chatSlots.length
 
   return (
     <>
@@ -210,7 +226,106 @@ export function DeckStage({
             </div>
           )
         })}
+        {chatSlots.map(({ chat, tab }) => {
+          const here = tab.id === activeTab.id
+          const shown = wall || here
+          const open = (): void => {
+            onView('focus')
+            if (!live || here) return
+            void actions.layout({ op: 'select-tab', tabId: tab.id }).then((refused) => {
+              if (refused) actions.setNotice(refused)
+            })
+          }
+          return (
+            <div
+              key={chat.id}
+              className="dk-slot"
+              data-shown={shown ? 'true' : 'false'}
+              data-focused={wall && here ? 'true' : undefined}
+              onPointerDownCapture={
+                wall && !here && live ? () => void actions.layout({ op: 'select-tab', tabId: tab.id }) : undefined
+              }
+            >
+              {wall ? (
+                <div className="dk-tile__label" title={`${chat.title}. Double-click for full screen`} onDoubleClick={open}>
+                  <span className="dk-tile__ident">
+                    <ChatTabChip bot={chat.bot} size="sm" />
+                  </span>
+                  <span className="dk-tile__tools">
+                    {here ? <span className="dk-tile__active">Active</span> : null}
+                    <button
+                      type="button"
+                      className="dk-tile__close"
+                      disabled={!live}
+                      aria-label={`Close ${chat.title} chat`}
+                      title={live ? `Close ${chat.title} chat` : 'The desktop is not answering, so it cannot close one'}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setClosingChat({ tab, chat, anchor: e.currentTarget })
+                      }}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                    >
+                      <Icon name="close" size={11} />
+                    </button>
+                  </span>
+                </div>
+              ) : null}
+              {wall ? <ChatTile leaf={chat} onOpen={open} /> : <ChatMirror leaf={chat} onScreen={shown} />}
+            </div>
+          )
+        })}
       </div>
+
+      {closingChat ? (
+        <Popover
+          anchor={closingChat.anchor}
+          open
+          onClose={() => setClosingChat(null)}
+          align="end"
+          side="bottom"
+          width={260}
+          label={`Close ${closingChat.chat.title} chat?`}
+        >
+          <div className="tab-confirm" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="tab-confirm__head">
+              <span className="eyebrow tab-confirm__eyebrow">Close Chat</span>
+            </div>
+            <p className="tab-confirm__body">
+              Close the <strong className="tab-confirm__name truncate">{CHATBOTS[closingChat.chat.bot].name}</strong> chat
+              tab?
+            </p>
+            <p className="tab-confirm__hint">The conversation stays in your {CHATBOTS[closingChat.chat.bot].name} history.</p>
+            <div className="tab-confirm__actions">
+              <button
+                type="button"
+                className="ghost-btn tab-confirm__cancel"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setClosingChat(null)
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ghost-btn tab-confirm__close"
+                data-danger="true"
+                autoFocus
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const tabId = closingChat.tab.id
+                  setClosingChat(null)
+                  void actions.layout({ op: 'close-tab', tabId }).then((refused) => {
+                    if (refused) actions.setNotice(refused)
+                  })
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </Popover>
+      ) : null}
 
       {closingTarget ? (
         <Popover

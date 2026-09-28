@@ -13,9 +13,11 @@
  * web client's, which reuses these components — do not all have to move for it.
  */
 export {
+  chatLeafOf,
   collectLeaves,
   countLeaves,
   findLeaf,
+  isChatTab,
   isValidLayout,
   makeLeaf,
   neighbourAfterClose,

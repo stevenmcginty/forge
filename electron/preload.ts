@@ -421,6 +421,20 @@ const api: ForgeApi = {
     onState: (cb) => subscribe(IPC.overlayState, cb),
     onLevel: (cb) => subscribe(IPC.overlayLevel, cb),
     call: (message) => ipcRenderer.send(IPC.overlayCall, message)
+  },
+
+  // `ensure`, `bounds`, `nav` and `close` are one-way sends, like the browser's
+  // setBounds: the pane reports its placeholder every frame it moves.
+  chat: {
+    ensure: (leafId, bot) => ipcRenderer.send(IPC.chatEnsure, String(leafId ?? ''), String(bot ?? '')),
+    bounds: (leafId, rect) => ipcRenderer.send(IPC.chatBounds, String(leafId ?? ''), rect),
+    nav: (leafId, action) => ipcRenderer.send(IPC.chatNav, String(leafId ?? ''), action),
+    close: (leafId) => ipcRenderer.send(IPC.chatClose, String(leafId ?? '')),
+    newTab: (projectId, bot) => ipcRenderer.invoke(IPC.chatNewTab, String(projectId ?? ''), String(bot ?? '')),
+    status: (bot) => ipcRenderer.invoke(IPC.chatStatus, String(bot ?? '')),
+    onStatus: (cb) => subscribe(IPC.chatStatusEvent, cb),
+    onViewState: (cb) => subscribe(IPC.chatViewState, cb),
+    signOut: (bot) => ipcRenderer.invoke(IPC.chatSignOut, String(bot ?? ''))
   }
 }
 

@@ -842,3 +842,52 @@
 .dock[data-place='top'] .comp:not([data-empty='true']) :is(.listen__word, .dock__project-name, .bpick-chip__name) {
   display: none;
 }
+
+/* ---------------------------------------------------------- chat tabs
+ *
+ * The Agents sheet's "Chatbots" group: new chat tabs, apart from the agents.
+ * A chat row's sign-in word sits on the sheet, not on the bot's plate, so it
+ * takes the sheet's colours rather than the bot's ink.
+ */
+
+.sheet__chats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: none;
+  padding: 8px 12px;
+  border-top: 1px solid var(--glass-line);
+}
+
+.sheet__chats .sheet__eyebrow {
+  margin-right: 4px;
+}
+
+.sheet__chat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.sheet__chat:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.sheet__chat:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.prow .prow__signin {
+  color: var(--text-secondary);
+  border-color: var(--line-strong);
+}

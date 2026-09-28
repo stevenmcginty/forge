@@ -850,6 +850,22 @@ export const IPC = {
   /** A callback invoked on the overlay, run against the real engine on the host. */
   overlayCall: 'overlay:call',
 
+  // chat tabs: a chatbot website in a pane (electron/chat-panes/)
+  /** Renderer → main, one-way: make (or keep) the page for a chat leaf. */
+  chatEnsure: 'chat:ensure',
+  /** Renderer → main, one-way, every frame the placeholder moves: where the page goes, or null to hide it. */
+  chatBounds: 'chat:bounds',
+  chatNav: 'chat:nav',
+  chatClose: 'chat:close',
+  /** Renderer → main, invoke: a new chat tab in a project, through the layout engine. */
+  chatNewTab: 'chat:new-tab',
+  chatStatus: 'chat:status',
+  /** Main → renderer: a bot's sign-in changed (cookies came or went). */
+  chatStatusEvent: 'chat:status-event',
+  /** Main → renderer: a chat page started or stopped loading, failed, or can now go back. */
+  chatViewState: 'chat:view-state',
+  chatSignOut: 'chat:sign-out',
+
   // diagnostics
   rendererError: 'diag:renderer-error',
   /**

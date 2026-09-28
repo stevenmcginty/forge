@@ -7,6 +7,7 @@ import { fadeIn, useFlipChildren } from '@/lib/motion'
 import { toolsHost as toolsHostStore, useHost } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
 import { uiCommands } from '@/lib/uiCommands'
+import { openChatTab } from '@/lib/chat'
 import {
   useActions,
   useActiveProject,
@@ -240,6 +241,7 @@ export const TerminalGrid = memo(function TerminalGrid({ beside = false }: { bes
       open={chooserOpen}
       onClose={() => setChooserOpen(false)}
       onPick={(profileId, permissionMode) => actions.newTab(profileId, permissionMode)}
+      onPickChat={(bot) => void openChatTab(project.id, bot, workspace.tabs.length, actions.setNotice)}
       selectedId={project.defaultProfileId}
     />
   )

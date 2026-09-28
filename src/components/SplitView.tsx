@@ -1,12 +1,13 @@
 import { memo, useCallback, useRef, useState, type ReactNode } from 'react'
 import type { LayoutNode, Project } from '@shared/types'
 import { useActions } from '@/state/AppState'
+import { ChatPane } from './ChatPane'
 import { TerminalPane } from './TerminalPane'
 import './SplitView.css'
 
 /**
  * Renders a pane layout tree. Splits are flex rows/columns with a draggable
- * hairline divider; leaves are terminals.
+ * hairline divider; leaves are terminals. A chat tab's root is its one chat.
  *
  * Memoised on its props, which are all pieces of the tree or primitives: the
  * reducer replaces only the branch that changed, so a divider drag or a rename
@@ -23,6 +24,8 @@ export const SplitView = memo(function SplitView({
   activePaneId: string
   onlyPane: boolean
 }): ReactNode {
+  // A chat tab's whole root: the chatbot website, never split.
+  if (node.type === 'chat') return <ChatPane chat={node} focused={node.id === activePaneId} />
   if (node.type === 'leaf') {
     return (
       <TerminalPane

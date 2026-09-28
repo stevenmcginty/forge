@@ -1912,3 +1912,30 @@
   font-size: var(--t-xl);
   letter-spacing: 0.01em;
 }
+
+/* ------------------------------------------------------------ chatbots */
+
+.schat__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.schat__note {
+  display: block;
+  margin-top: var(--s-2);
+}
+
+.schat__actions,
+.schat__confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
+.schat__ask {
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}

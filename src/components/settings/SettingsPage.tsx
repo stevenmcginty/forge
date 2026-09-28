@@ -7,6 +7,7 @@ import { RemoteYesSection } from './RemoteYesSection'
 import { AdvancedSection } from './AdvancedSection'
 import { AgentsSection } from './AgentsSection'
 import { AppearanceSection } from './AppearanceSection'
+import { ChatbotsSection } from './ChatbotsSection'
 import { ForemanSection } from './ForemanSection'
 import { ModelsSection } from './ModelsSection'
 import { ShortcutsSection } from './ShortcutsSection'
@@ -30,7 +31,7 @@ import './SettingsPage.css'
  */
 
 /**
- * Eight groups in the sidebar, in plain words, with Voice & Agent first. Each
+ * Nine groups in the sidebar, in plain words, with Voice & Agent first. Each
  * group is one scrolling page of one or more parts, and every old section id
  * is a part — so `openSettings('models')` (the voice agent, the hub's "add a
  * key" links, onboarding) still lands on the right card, the Keys part of
@@ -72,6 +73,13 @@ const GROUPS: Group[] = [
       { id: 'terminal', label: 'Panes', Body: TerminalSection },
       { id: 'foreman', label: 'Foreman', Body: ForemanSection }
     ]
+  },
+  {
+    id: 'chatbots',
+    label: 'Chatbots',
+    icon: 'globe',
+    blurb: 'ChatGPT, Gemini, Claude sign-in',
+    parts: [{ id: 'chatbots', label: 'Chatbots', Body: ChatbotsSection }]
   },
   {
     id: 'appearance',

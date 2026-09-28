@@ -67,6 +67,7 @@ import { plannerPaneId } from '@/lib/planner'
 import { DEFAULT_HUB, nextHubMode } from '@/lib/voicehub'
 import { basename } from '@/lib/paths'
 import {
+  chatLeafOf,
   collectLeaves,
   countLeaves,
   isValidLayout,
@@ -92,6 +93,7 @@ import { setLiveSettings } from '@/lib/livesettings'
 export type SettingsSection =
   | 'account'
   | 'agents'
+  | 'chatbots'
   | 'terminal'
   | 'models'
   | 'voice'
@@ -700,8 +702,14 @@ function sanitiseWorkspace(ws: Workspace | null, profileIds: Set<string>): Works
       }
     }
     const leaves = collectLeaves(root)
-    if (leaves.length === 0 || leaves.length > MAX_PANES_PER_TAB) continue
-    const activePaneId = leaves.some((l) => l.id === tab.activePaneId) ? tab.activePaneId : leaves[0]!.id
+    // A chat tab has no terminal leaves at all — its root is the one chat.
+    const chat = chatLeafOf({ root })
+    if (!chat && (leaves.length === 0 || leaves.length > MAX_PANES_PER_TAB)) continue
+    const activePaneId = chat
+      ? chat.id
+      : leaves.some((l) => l.id === tab.activePaneId)
+        ? tab.activePaneId
+        : leaves[0]!.id
     tabs.push({
       id: tab.id,
       title: typeof tab.title === 'string' ? tab.title : 'Tab',

@@ -11,6 +11,7 @@ import {
   type ReactNode
 } from 'react'
 import type {
+  ChatLeaf,
   MosaicGrid,
   MosaicRect,
   MosaicTile as MosaicTileRect,
@@ -72,6 +73,10 @@ import { AttachButton } from './AttachButton'
 import { EmptyState } from './EmptyState'
 import { Icon } from './Icon'
 import { StateChip } from './shell/StateChip'
+import { ChatMark } from './ChatMark'
+import { ChatNavButtons, ChatSignInWord, ChatStage, chatPaint } from './ChatPane'
+import { CHATBOTS } from '@shared/chatbots'
+import { useChatViewState } from '@/lib/chat'
 import { useBranch } from './shell/useBranch'
 import './MosaicView.css'
 
@@ -139,17 +144,51 @@ export function cellsOf(tabs: TerminalTab[]): Cell[] {
   return tabs.flatMap((tab) => collectLeaves(tab.root).map((leaf) => ({ leaf, tab })))
 }
 
+/** A chat tab's one tile on the Wall: its chatbot website, keyed by the chat leaf's id. */
+export interface ChatCell {
+  leaf: ChatLeaf
+  tab: TerminalTab
+}
+
+/** What the Wall lays out: terminals, and one tile per chat tab. */
+export type WallCell = Cell | ChatCell
+
+export function isChatCell(cell: WallCell): cell is ChatCell {
+  return cell.leaf.type === 'chat'
+}
+
+/** `cellsOf`, plus a tile for every chat tab, in tab order. */
+function wallCellsOf(tabs: TerminalTab[]): WallCell[] {
+  return tabs.flatMap((tab): WallCell[] =>
+    tab.root.type === 'chat' ? [{ leaf: tab.root, tab }] : collectLeaves(tab.root).map((leaf) => ({ leaf, tab }))
+  )
+}
+
+/** Every tile id a tab puts on the Wall: its panes, or its one chat. */
+function wallIdsOf(tab: TerminalTab): string[] {
+  return tab.root.type === 'chat' ? [tab.root.id] : collectLeaves(tab.root).map((l) => l.id)
+}
+
 /**
  * `cellsOf`, keeping each cell object from the last call whose pane and tab are
  * unchanged. The tiles are memoised on their cell, and `cellsOf` mints every
  * cell afresh — renaming one tab would otherwise re-render every tile.
  */
 export function useStableCells(tabs: TerminalTab[]): Cell[] {
-  const cache = useRef(new Map<string, Cell>())
+  return useStableOf(tabs, cellsOf)
+}
+
+/** The same, for the Wall's own tiles — chats included. */
+function useStableWallCells(tabs: TerminalTab[]): WallCell[] {
+  return useStableOf(tabs, wallCellsOf)
+}
+
+function useStableOf<C extends WallCell>(tabs: TerminalTab[], make: (tabs: TerminalTab[]) => C[]): C[] {
+  const cache = useRef(new Map<string, C>())
   return useMemo(() => {
     const prev = cache.current
-    const next = new Map<string, Cell>()
-    const cells = cellsOf(tabs).map((cell) => {
+    const next = new Map<string, C>()
+    const cells = make(tabs).map((cell) => {
       const old = prev.get(cell.leaf.id)
       const kept = old && old.leaf === cell.leaf && old.tab === cell.tab ? old : cell
       next.set(kept.leaf.id, kept)
@@ -157,7 +196,7 @@ export function useStableCells(tabs: TerminalTab[]): Cell[] {
     })
     cache.current = next
     return cells
-  }, [tabs])
+  }, [tabs, make])
 }
 
 /**
@@ -332,14 +371,14 @@ export function MosaicView({
   const mosaic = workspace.mosaic ?? emptyMosaic()
   const custom = mosaic.mode === 'custom'
 
-  /** Every pane in tab order — the order the tiles sit in the DOM. */
-  const tabCells = useStableCells(workspace.tabs)
+  /** Every pane (and chat) in tab order — the order the tiles sit in the DOM. */
+  const tabCells = useStableWallCells(workspace.tabs)
   // The same panes in the grid's reading order: the slots the user dragged
   // tiles into, then everything else in tab order. The grid places each tile
   // with CSS `order` rather than by moving it in the DOM, so a reorder never
   // detaches a live terminal from the page.
   const order = mosaic.order
-  const cells = useMemo<Cell[]>(() => {
+  const cells = useMemo<WallCell[]>(() => {
     const byId = new Map(tabCells.map((c) => [c.leaf.id, c]))
     return wallOrder(
       tabCells.map((c) => c.leaf.id),
@@ -449,7 +488,7 @@ export function MosaicView({
   // with the same panes, and re-measuring then re-rendered every tile.
   const membership = cells.map((c) => c.leaf.id).join(',')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const measured = useMemo<PaneGeometry>(() => wallReference(cells), [membership])
+  const measured = useMemo<PaneGeometry>(() => wallReference(cells.filter((c): c is Cell => !isChatCell(c))), [membership])
   // Held by value: a tile is memoised, and a re-measure that came out the same
   // must not hand every tile a new object.
   const reference = useMemo<PaneGeometry>(
@@ -830,7 +869,7 @@ export function MosaicView({
       const tab = workspace.tabs.find((t) => t.id === tabId)
       if (!tab) return
 
-      const ids = collectLeaves(tab.root).map((l) => l.id)
+      const ids = wallIdsOf(tab)
 
       // On the grid a dropped tab's tiles move to the slot under the pointer,
       // the way a header drag moves one.
@@ -881,9 +920,12 @@ export function MosaicView({
       // hand the caret back so the keyboard follows.
       if (interactiveId) terminalHost.blur(interactiveId)
       setInteractiveId(null)
+      // A chat is not a pane revealPane can find: pick its tab instead.
+      const chat = cells.find((c) => c.leaf.id === paneId)
+      if (chat && isChatCell(chat)) actions.selectTab(chat.tab.id)
       onOpenFull(paneId)
     },
-    [interactiveId, onOpenFull]
+    [actions, cells, interactiveId, onOpenFull]
   )
 
   /**
@@ -1074,7 +1116,20 @@ export function MosaicView({
           className="mosaic__canvas"
           style={custom ? { width: `${canvas.width}px`, height: `${canvas.height}px` } : undefined}
         >
-          {tabCells.map((cell) => (
+          {tabCells.map((cell) =>
+            isChatCell(cell) ? (
+              <ChatTile
+                key={cell.leaf.id}
+                cell={cell}
+                selected={cell.leaf.id === selectedId}
+                slot={slotOf.get(cell.leaf.id) ?? 0}
+                {...(custom && tiles[cell.leaf.id] ? { rect: tiles[cell.leaf.id]! } : {})}
+                onOpenFull={tileOpenFull}
+                onSelect={setPicked}
+                onBeginDrag={tileBeginDrag}
+                onFitGrid={tileFitGrid}
+              />
+            ) : (
             <MosaicTile
               key={cell.leaf.id}
               cell={cell}
@@ -1094,7 +1149,8 @@ export function MosaicView({
               onToggleFit={tileToggleFit}
               onToggleInteract={tileToggleInteract}
             />
-          ))}
+            )
+          )}
           <div className="mosaic__ghost" ref={ghostRef} />
         </div>
       </div>
@@ -1953,6 +2009,134 @@ const MosaicTile = memo(function MosaicTile({
       )}
 
       <TileScrollbar paneId={paneId} status={runtime.status} />
+
+      {HANDLES.map((handle) => (
+        <div
+          key={handle.key}
+          className="mtile__grip"
+          data-edge={handle.key}
+          title={placed ? undefined : 'Drag to resize every tile together. Double-click to fit the grid to the window.'}
+          onPointerDown={(e) => onBeginDrag(paneId, e, 'resize', handle.edges)}
+          onDoubleClick={placed ? undefined : onFitGrid}
+        />
+      ))}
+    </section>
+  )
+})
+
+/* -------------------------------------------------------------- chat tile */
+
+/**
+ * A chat tab on the Wall: the chatbot website, live, in a tile whose header
+ * wears the bot's own colours and says "· Chat" — never mistaken for a
+ * terminal. It moves and resizes like any tile (same header drag, same grips).
+ *
+ * The page is a native view laid over the tile (see ChatPane's
+ * useChatPlacement), so it is only shown while that is safe: it hides while
+ * this tile or one dragged across it is moving, while a pop-up covers it, and
+ * is trimmed to the wall's visible box when the wall scrolls. There is no
+ * "typing mode" — a click on the page is a click in the page.
+ */
+const ChatTile = memo(function ChatTile({
+  cell,
+  selected,
+  slot,
+  rect,
+  onOpenFull,
+  onSelect,
+  onBeginDrag,
+  onFitGrid
+}: {
+  cell: ChatCell
+  selected: boolean
+  slot: number
+  rect?: MosaicTileRect
+  onOpenFull: (paneId: string) => void
+  onSelect: (paneId: string) => void
+  onBeginDrag: (paneId: string, e: ReactPointerEvent<HTMLElement>, mode: 'move' | 'resize', edges: MosaicEdges) => void
+  onFitGrid: () => void
+}): ReactNode {
+  const actions = useActions()
+  const chat = cell.leaf
+  const paneId = chat.id
+  const entry = CHATBOTS[chat.bot]
+  const view = useChatViewState(paneId)
+  const tileRef = useRef<HTMLElement | null>(null)
+  const placed = rect
+
+  useLayoutEffect(() => {
+    const el = tileRef.current
+    if (el) enterOnce(paneId, el)
+  }, [paneId])
+
+  return (
+    <section
+      ref={tileRef}
+      className="mtile"
+      data-pane-id={paneId}
+      data-flip={paneId}
+      data-chat-bot={chat.bot}
+      data-selected={selected}
+      data-placed={placed ? 'true' : undefined}
+      onPointerEnter={() => onSelect(paneId)}
+      style={
+        {
+          ...chatPaint(chat.bot),
+          ...(placed ? { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` } : {}),
+          ...(placed ? {} : { '--tile-slot': slot })
+        } as React.CSSProperties
+      }
+    >
+      <header
+        className="mtile__head"
+        onPointerDown={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return
+          onBeginDrag(paneId, e, 'move', NO_EDGES)
+        }}
+        title={placed ? 'Drag to move this tile' : 'Drag to move this tile to another place in the grid'}
+      >
+        <ChatMark bot={chat.bot} size="sm" bare bubble={false} />
+        <span className="mtile__title truncate">{entry.name}</span>
+        <span className="chat-bar__kind">
+          <span aria-hidden="true">·</span> Chat
+        </span>
+        <ChatSignInWord bot={chat.bot} />
+        {view.error ? (
+          <span className="chat-bar__state" data-state="failed" title={view.error}>
+            Failed
+          </span>
+        ) : null}
+        {selected ? <span className="pane__active">Selected</span> : null}
+        <span className="chat-bar__spacer" />
+        <ChatNavButtons chat={chat} canGoBack={view.canGoBack} className="ghost-btn mtile__expand" />
+        <button
+          type="button"
+          className="ghost-btn mtile__expand"
+          aria-label={`Show ${entry.name} chat full screen`}
+          title="Full screen"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpenFull(paneId)
+          }}
+        >
+          <Icon name="expand" size={12} />
+        </button>
+        <button
+          type="button"
+          className="ghost-btn mtile__close"
+          data-danger="true"
+          aria-label={`Close ${entry.name} chat`}
+          title={`Close ${entry.name} chat`}
+          onClick={(e) => {
+            e.stopPropagation()
+            actions.closeTab(cell.tab.id)
+          }}
+        >
+          <Icon name="close" size={11} />
+        </button>
+      </header>
+
+      <ChatStage chat={chat} clip=".mosaic__wall" error={view.error} />
 
       {HANDLES.map((handle) => (
         <div

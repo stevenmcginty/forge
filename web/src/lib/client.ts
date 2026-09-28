@@ -25,6 +25,7 @@ import {
 } from '@shared/web'
 import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
+import type { ChatFrameFrame, ChatInputFrame, ChatStateFrame, ChatWatchFrame } from '@shared/chat-mirror'
 import type { ForemanState } from '@shared/foreman'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 import { publishUsage } from './usage'
@@ -536,6 +537,52 @@ export function stopWatching(): void {
  */
 export function sendMirrorInput(input: Omit<WebMirrorInputFrame, 'type'>): void {
   sendUp?.({ type: 'mirror-input', ...input })
+}
+
+/* ------------------------------------------------------------- chat tabs
+ *
+ * A chat tab's live picture (shared/chat-mirror.ts), routed the way the screen
+ * mirror is and for the same reasons: pictures arrive several times a second,
+ * belong to one surface, and have no business in the page's state. Keyed by
+ * the chat's leaf id — one surface per chat on screen — and re-sent on every
+ * `hello-ok`, because a fresh socket starts out watching nothing.
+ */
+
+/** What a chat surface on screen is told. */
+export interface ChatWatcher {
+  onFrame: (frame: ChatFrameFrame) => void
+  onState: (frame: ChatStateFrame) => void
+}
+
+const chatWatches = new Map<string, { watcher: ChatWatcher; size: Omit<ChatWatchFrame, 'type' | 'leafId'> }>()
+
+/**
+ * Watch a chat at a size, or re-send the size of one already watched. Returns
+ * the release, which unwatches — the caller runs it when its surface goes.
+ */
+export function watchChat(
+  leafId: string,
+  size: Omit<ChatWatchFrame, 'type' | 'leafId'>,
+  watcher: ChatWatcher
+): () => void {
+  const entry = { watcher, size }
+  chatWatches.set(leafId, entry)
+  sendUp?.({ type: 'chat:watch', leafId, ...size })
+  return () => {
+    if (chatWatches.get(leafId) !== entry) return
+    chatWatches.delete(leafId)
+    sendUp?.({ type: 'chat:unwatch', leafId })
+  }
+}
+
+/** One gesture on a watched chat. The body only, so the discriminant is written here. */
+export function sendChatInput(input: Omit<ChatInputFrame, 'type'>): void {
+  sendUp?.({ type: 'chat:input', ...input })
+}
+
+/** Put the caret in the chat site's own message box. */
+export function focusChatComposer(leafId: string): void {
+  sendUp?.({ type: 'chat:focusComposer', leafId })
 }
 
 /* ------------------------------------------------------ what the desk can do
@@ -1705,6 +1752,9 @@ export class ForgeClient {
         // because a pane the desktop no longer has a conversation for is
         // dropped from it by the answer.
         for (const sessionId of [...this.chats]) void this.watchTranscript(sessionId)
+        // And every chat tab on screen, for the same reason: the desktop let
+        // each copy go idle when the old socket closed.
+        for (const [leafId, { size }] of chatWatches) this.send({ type: 'chat:watch', leafId, ...size })
         this.flushHeld()
         // The new socket starts from whatever the desktop last heard about
         // this tab, which is nothing: state the flag now rather than waiting
@@ -1918,6 +1968,16 @@ export class ForgeClient {
           frame.needsPin === true,
           frame.needsPin === true && isPasskeyOptions(frame.passkey) ? frame.passkey : undefined
         )
+        return
+
+      /* ------------------------------------------------------- chat tabs */
+
+      case 'chat:frame':
+        chatWatches.get(frame.leafId)?.watcher.onFrame(frame)
+        return
+
+      case 'chat:state':
+        chatWatches.get(frame.leafId)?.watcher.onState(frame)
         return
 
       case 'pong':

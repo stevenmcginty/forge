@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentProfile, ClaudePermissionMode } from '@shared/types'
+import { CHATBOT_ORDER, CHATBOTS, type ChatBotId } from '@shared/chatbots'
 import {
   ACCENT_PALETTE,
   effectivePermissionMode,
@@ -12,6 +13,7 @@ import {
 import { useCommandPresence } from '@/hooks/useCommandPresence'
 import { useActions, useAppSelector } from '@/state/AppState'
 import { AgentBadge } from './AgentBadge'
+import { ChatMark } from './ChatMark'
 import { Icon } from './Icon'
 import { Popover, PopoverDivider, PopoverRow, PopoverSection } from './Popover'
 import './AgentChooser.css'
@@ -26,6 +28,8 @@ interface Props {
   align?: 'start' | 'end' | 'center'
   /** Marks the row that is currently in effect (e.g. project default). */
   selectedId?: string
+  /** Offer the chatbots too: a "Chatbots" group whose rows open a chat tab. */
+  onPickChat?: (bot: ChatBotId) => void
 }
 
 /**
@@ -42,7 +46,8 @@ export function AgentChooser({
   onPick,
   title = 'Open terminal with',
   align = 'start',
-  selectedId
+  selectedId,
+  onPickChat
 }: Props): ReactNode {
   const actions = useActions()
   const agentProfiles = useAppSelector((state) => state.settings.agentProfiles)
@@ -153,6 +158,29 @@ export function AgentChooser({
         <>
           {shells.length > 0 ? <PopoverDivider /> : null}
           <PopoverSection title={title === 'Open terminal with' ? 'Agents' : title}>{agents.map(row)}</PopoverSection>
+        </>
+      ) : null}
+
+      {/* Websites, not terminals: their own group, their own marks — the tab's
+          colour plate and a speech bubble — and the word "Chat" on every row. */}
+      {onPickChat ? (
+        <>
+          <PopoverDivider />
+          <PopoverSection title="Chatbots">
+            {CHATBOT_ORDER.map((bot) => (
+              <PopoverRow
+                key={bot}
+                onClick={() => {
+                  onPickChat(bot)
+                  onClose()
+                }}
+              >
+                <ChatMark bot={bot} />
+                <span className="agent-chooser__name truncate">{CHATBOTS[bot].name}</span>
+                <span className="chat-row__kind">New chat</span>
+              </PopoverRow>
+            ))}
+          </PopoverSection>
         </>
       ) : null}
 

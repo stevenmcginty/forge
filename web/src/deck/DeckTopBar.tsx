@@ -217,6 +217,13 @@ function NewAgentButton({ onView }: { onView: (view: DeckView) => void }): React
           onView('focus')
           void actions.layout({ op: 'create-tab', profileId, permissionMode })
         }}
+        onChat={(bot) => {
+          setOpen(false)
+          onView('focus')
+          void actions.layout({ op: 'newChatTab', bot }).then((refused) => {
+            if (refused) actions.setNotice(refused)
+          })
+        }}
         selectedId={project.defaultProfileId}
       />
     </>

@@ -1,13 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { AgentProfile, TerminalTab } from '@shared/types'
 import { isShellProfile, resolveProfile } from '@/lib/agents'
-import { collectLeaves } from '@/lib/splitTree'
+import { chatLeafOf, collectLeaves } from '@/lib/splitTree'
+import { CHATBOTS, type ChatBotId } from '@shared/chatbots'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { Popover } from '@/components/Popover'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection } from './BottomSheet'
+import { ChatBotMark, ChatTabChip } from './ChatBadge'
 import { CommandsButton, SkillsButton } from './Flyouts'
 import { PaneHandoffMenu } from './TopBar'
 import './WaitingPill.css'
@@ -256,6 +258,11 @@ export function TabStrip({ mobile = false }: { mobile?: boolean }): ReactNode {
         open={chooserOpen}
         onClose={() => setChooserOpen(false)}
         onPick={(profileId, permissionMode) => void actions.layout({ op: 'create-tab', profileId, permissionMode })}
+        onChat={(bot) =>
+          void actions.layout({ op: 'newChatTab', bot }).then((refused) => {
+            if (refused) actions.setNotice(refused)
+          })
+        }
         selectedId={project?.defaultProfileId}
       />
     </div>
@@ -295,6 +302,15 @@ function Tab({
   const { state, actions } = useForge()
   const profiles = useProfiles()
   const leaves = collectLeaves(tab.root)
+  /** A chat tab wears its bot: mark, name, "Chat", on the bot's own paint. */
+  const chat = chatLeafOf(tab)
+  const chatPaint: CSSProperties | undefined = chat
+    ? {
+        background: CHATBOTS[chat.bot].tab.background,
+        color: CHATBOTS[chat.bot].tab.ink,
+        borderColor: CHATBOTS[chat.bot].tab.border ?? 'transparent'
+      }
+    : undefined
   const badges = leaves.slice(0, 3).map((leaf) => resolveProfile(profiles, leaf.profileId))
   const primary = badges[0] ?? null
   // Agent tabs inherit the profile accent; an explicit tab colour still wins —
@@ -331,8 +347,10 @@ function Tab({
         aria-selected={active}
         aria-busy={pending || undefined}
         aria-haspopup="dialog"
-        aria-label={`${tab.title}${suffix ? `, ${suffix}` : ''}${asking ? ', waiting on you' : ''}. Press and hold for more`}
+        aria-label={`${tab.title}${chat ? ' chat' : ''}${suffix ? `, ${suffix}` : ''}${asking ? ', waiting on you' : ''}. Press and hold for more`}
         data-active={active}
+        data-chat={chat ? chat.bot : undefined}
+        style={chatPaint}
         data-pending={pending ? 'true' : undefined}
         data-working={asking ? 'true' : undefined}
         onPointerDown={(e) => {
@@ -379,15 +397,20 @@ function Tab({
           if (touched && !active && !pending && live) onSelect()
         }}
       >
-        <span className="tab__dots" aria-hidden="true">
-          {dots.map((profile) => (
-            <span key={profile.id} className="tab__dot" style={{ background: profile.accent }} />
-          ))}
-        </span>
+        {chat ? (
+          <ChatBotMark bot={chat.bot} size={16} />
+        ) : (
+          <span className="tab__dots" aria-hidden="true">
+            {dots.map((profile) => (
+              <span key={profile.id} className="tab__dot" style={{ background: profile.accent }} />
+            ))}
+          </span>
+        )}
         <span className="tab__title truncate">
           {tab.title}
           {suffix ? <span className="tab__suffix"> · {suffix}</span> : null}
         </span>
+        {chat ? <span className="tab__chatkind">Chat</span> : null}
         {asking ? (
           <span className="tab__ask" aria-hidden="true">
             !
@@ -404,7 +427,7 @@ function Tab({
             className="tab__menu"
             role="button"
             tabIndex={0}
-            aria-label={`Options for ${tab.title}: close, hand off, new agent`}
+            aria-label={`Options for ${tab.title}: ${chat ? 'close, new tab' : 'close, hand off, new agent'}`}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -435,7 +458,8 @@ function Tab({
       aria-busy={pending || undefined}
       data-active={active}
       data-pending={pending ? 'true' : undefined}
-      data-tint={tint ? 'true' : undefined}
+      data-tint={tint && !chat ? 'true' : undefined}
+      data-chat={chat ? chat.bot : undefined}
       data-working={asking ? 'true' : undefined}
       title={
         !live
@@ -447,10 +471,11 @@ function Tab({
               : tab.title
       }
       style={
-        {
+        chatPaint ??
+        ({
           ...(tint ? { '--tab-tint': tint } : {}),
           ...(tab.textColor ? { '--tab-text-tint': tab.textColor } : {})
-        } as CSSProperties
+        } as CSSProperties)
       }
       // A tap selects; a swipe does not. A mouse still selects on the press,
       // as it always has — but a finger's `pointerdown` arrives at the *start*
@@ -474,6 +499,7 @@ function Tab({
       }}
     >
       <div className="tab__badges">
+        {chat ? <ChatTabChip bot={chat.bot} size="sm" /> : null}
         {badges.map((profile, index) => (
           <AgentBadge key={`${profile.id}-${index}`} profile={profile} size="sm" />
         ))}
@@ -523,7 +549,7 @@ function Tab({
               Close <strong className="tab-confirm__name truncate">“{tab.title}”</strong>?
             </p>
             <p className="tab-confirm__hint">
-              Terminal processes in this tab will be terminated.
+              {chat ? chatCloseDetail(chat.bot) : 'Terminal processes in this tab will be terminated.'}
             </p>
             <div className="tab-confirm__actions">
               <button
@@ -558,6 +584,12 @@ function Tab({
 }
 
 /* ------------------------------------------------------------------ helpers */
+
+/** What closing a chat tab does, in the words of the confirm. */
+function chatCloseDetail(bot: ChatBotId): string {
+  const name = CHATBOTS[bot].name
+  return `Closes the ${name} page here. The conversation stays in your ${name} history.`
+}
 
 function activeLeafId(tab: TerminalTab): string | null {
   const leaves = collectLeaves(tab.root)
@@ -643,6 +675,7 @@ function TabSheet({
   if (!shown) return null
 
   const leaves = collectLeaves(shown.tab.root)
+  const chat = chatLeafOf(shown.tab)
   const paneId = activeLeafId(shown.tab)
   const pane = leaves.find((leaf) => leaf.id === paneId) ?? null
   const profile = pane ? resolveProfile(profiles, pane.profileId) : null
@@ -659,22 +692,28 @@ function TabSheet({
       title={
         step === 'close' ? null : (
           <span className="tabsheet__title">
-            <span className="tab__dots" aria-hidden="true">
-              {names.map((p) => (
-                <span key={p.id} className="tab__dot" style={{ background: p.accent }} />
-              ))}
-            </span>
-            <span className="truncate">{shown.title}</span>
+            {chat ? (
+              <ChatTabChip bot={chat.bot} />
+            ) : (
+              <>
+                <span className="tab__dots" aria-hidden="true">
+                  {names.map((p) => (
+                    <span key={p.id} className="tab__dot" style={{ background: p.accent }} />
+                  ))}
+                </span>
+                <span className="truncate">{shown.title}</span>
+              </>
+            )}
           </span>
         )
       }
-      subtitle={step === 'close' ? undefined : names.map((p) => p.name).join(' + ')}
+      subtitle={step === 'close' ? undefined : chat ? 'A chat tab' : names.map((p) => p.name).join(' + ')}
       testId="tab-sheet"
     >
       {step === 'close' ? (
         <SheetConfirm
           question={`Close “${shown.title}”?`}
-          detail="Terminal processes in this tab will be terminated."
+          detail={chat ? chatCloseDetail(chat.bot) : 'Terminal processes in this tab will be terminated.'}
           confirmLabel="Close tab"
           onCancel={() => onStep('list')}
           onConfirm={() => onCloseTab(shown.tab.id)}
@@ -696,7 +735,9 @@ function TabSheet({
             secondary={
               canHandoff
                 ? 'Ask this agent to write a handoff pack for another'
-                : !isAgent
+                : chat
+                  ? 'A chat tab cannot hand off'
+                  : !isAgent
                   ? 'Shells cannot hand off'
                   : !live
                     ? 'Needs a live link to the desktop'
@@ -709,7 +750,7 @@ function TabSheet({
           <SheetRow
             icon={<Icon name="close" size={20} />}
             label="Close tab"
-            secondary="Ends the terminals in it. Asks first."
+            secondary={chat ? 'Closes the chat. Asks first.' : 'Ends the terminals in it. Asks first.'}
             tone="danger"
             onClick={() => onStep('close')}
             testId="tab-sheet-close"

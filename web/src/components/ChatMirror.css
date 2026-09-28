@@ -1,0 +1,289 @@
+/*
+ * A chat tab in Forge Web: the bot's label (ChatBadge.tsx) and its live
+ * picture (ChatMirror.tsx). The bot's paint arrives as --chat-bg / --chat-ink /
+ * --chat-border from `chatTabStyle`; everything else is theme tokens. Every
+ * state carries a shape and a word; colour only agrees.
+ */
+
+/* ------------------------------------------------------------ the label */
+
+.chat-mark {
+  flex: none;
+  display: block;
+}
+
+.chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--chat-bg);
+  color: var(--chat-ink);
+  box-shadow: inset 0 0 0 1px var(--chat-border);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.chat-chip[data-size='sm'] {
+  gap: 4px;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+
+.chat-chip__kind {
+  flex: none;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+/* -------------------------------------------------------- the live chat */
+
+.chat-mirror {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-base);
+}
+
+.chat-mirror__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  background: var(--chat-bg);
+  color: var(--chat-ink);
+  box-shadow: inset 0 -1px 0 var(--chat-border);
+}
+
+.chat-mirror__name {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.chat-mirror__kind {
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.chat-mirror__state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chat-mirror__glyph {
+  flex: none;
+  display: block;
+}
+
+.chat-mirror__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  /* Every gesture here is the page's, not this one's: no browser pan or zoom. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.chat-mirror__picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* No picture has arrived yet: nothing to draw, not a broken-image box. */
+.chat-mirror__stage:not([data-pictured]) .chat-mirror__picture {
+  visibility: hidden;
+}
+
+.chat-mirror__notice {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 50%;
+  margin: 0;
+  transform: translateY(-50%);
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-strong);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.chat-mirror[data-state='error'] .chat-mirror__notice {
+  border-color: var(--danger-line);
+}
+
+.chat-mirror__hint {
+  flex: none;
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.chat-mirror__compose {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.chat-mirror__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 128px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  /* 16px keeps a phone from zooming the page when the box takes the caret. */
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.35;
+  resize: none;
+  field-sizing: content;
+}
+
+.chat-mirror__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chat-mirror__send {
+  flex: none;
+  min-width: 64px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.chat-mirror__send:disabled {
+  background: var(--bg-active);
+  color: var(--text-dim);
+  cursor: default;
+}
+
+/* ------------------------------------------------- a chat on the deck Wall */
+
+.chat-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-sunken);
+}
+
+.chat-tile__open {
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-tile__open:hover {
+  background: var(--bg-hover);
+}
+
+/* --------------------------------------------- a chat tab in the tab strip */
+
+/* The paint itself is inline (TabStrip.tsx), so no theme rule can outweigh it. */
+
+/* Which tab is open is said by weight and a ring, not by the bot's colour. */
+.app[data-shell='app'] .tab[data-chat][data-active='true'] {
+  font-weight: 700;
+  box-shadow:
+    0 0 0 2px var(--bg-base),
+    0 0 0 4px var(--text-primary);
+}
+
+.app[data-shell='app'] .tab[data-chat] .tab__title,
+.app[data-shell='app'] .tab[data-chat] .tab__menu {
+  color: inherit;
+}
+
+.tab__chatkind {
+  flex: none;
+  font-size: 0.85em;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+/* ------------------------------------------- a bot's row in the new-tab chooser */
+
+.chooser-chatmark {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--chat-bg);
+  color: var(--chat-ink);
+  box-shadow: inset 0 0 0 1px var(--chat-border);
+}
+
+.chooser-chatmark[data-size='lg'] {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+/* ---------------------------------------------------- on the deck's stage */
+
+.app[data-face='deck'] .dk-slot > :is(.chat-mirror, .chat-tile) {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+}

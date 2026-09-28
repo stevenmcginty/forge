@@ -1,5 +1,6 @@
 import { useMemo, type CSSProperties, type ReactNode } from 'react'
 import type { LayoutNode, PaneLeaf, SplitDirection } from '@shared/types'
+import { ChatMirror } from './ChatMirror'
 import { PaneView } from './PaneView'
 
 /**
@@ -80,6 +81,8 @@ interface PlacedDivider {
 const ratioOf = (ratio: number): number => Math.round(ratio * 10000) / 10000
 
 function place(node: LayoutNode, box: Box, panes: PlacedPane[], dividers: PlacedDivider[], gap = DIVIDER_PX): void {
+  // A chat tab's root holds no terminal pane to place.
+  if (node.type === 'chat') return
   if (node.type === 'leaf') {
     panes.push({ leaf: node, box })
     return
@@ -166,6 +169,9 @@ export function SplitView({
   }, [node])
 
   const onlyPane = panes.length === 1
+
+  // A chat tab's whole root: the chatbot page itself, as the desktop shows it.
+  if (node.type === 'chat') return <ChatMirror leaf={node} onScreen={onScreen} />
 
   return (
     <div className="panes">

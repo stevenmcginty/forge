@@ -187,6 +187,14 @@ function prepareSession(ses: Session, downloadsDir: string): void {
   })
 }
 
+/**
+ * The same policy for callers outside this manager — chat panes and their phone
+ * copies share the session, and may open it before any browser tab does.
+ */
+export function prepareBrowserSession(downloadsDir: string): void {
+  prepareSession(electronSession.fromPartition(BROWSER_PARTITION), downloadsDir)
+}
+
 let artifactSessionReady = false
 
 /**

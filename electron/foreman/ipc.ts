@@ -146,6 +146,7 @@ function paneSessionId(paneId: string): string {
 
 /** One pane in a split tree, by id. */
 function findLeaf(node: LayoutNode, paneId: string): Extract<LayoutNode, { type: 'leaf' }> | null {
+  if (node.type === 'chat') return null
   if (node.type === 'leaf') return node.id === paneId ? node : null
   return findLeaf(node.a, paneId) ?? findLeaf(node.b, paneId)
 }

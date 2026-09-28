@@ -1,0 +1,255 @@
+/*
+ * Chat tabs: a chatbot website in a pane. Everything a chat wears is painted
+ * from three custom properties set inline from shared/chatbots.ts —
+ * --chat-bg (any CSS background; Gemini's is a gradient), --chat-ink (text and
+ * marks on it) and --chat-border (where a white plate would vanish on Paper).
+ */
+
+/* ------------------------------------------------------------ the mark */
+
+.chat-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.chat-mark__plate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 17px;
+  min-width: 24px;
+  padding: 0 var(--s-2);
+  background: var(--chat-bg);
+  border: 1px solid var(--chat-border);
+  border-radius: var(--r-xs);
+}
+
+.chat-mark[data-size='sm'] .chat-mark__plate {
+  height: 15px;
+  min-width: 21px;
+  padding: 0 3px;
+}
+
+.chat-mark__logo {
+  display: block;
+  height: 70%;
+  width: auto;
+  aspect-ratio: 1;
+  fill: var(--chat-ink);
+}
+
+/* On a surface already in the bot's colours: the logo alone, in its ink. */
+.chat-mark[data-bare='true'] .chat-mark__plate {
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+.chat-mark[data-bare='true'] .chat-mark__logo {
+  height: 15px;
+}
+
+.chat-mark__bubble {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+
+/* --------------------------------------------------------- the pane */
+
+.chat-pane {
+  background: var(--bg-terminal);
+  border-color: var(--chat-border);
+}
+
+.chat-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+  height: var(--pane-header-h);
+  padding: 0 var(--s-2) 0 var(--s-4);
+  color: var(--chat-ink);
+  background: var(--chat-bg);
+  border-bottom: 1px solid var(--chat-border);
+}
+
+.chat-bar__name {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-bar__kind {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.chat-bar__state {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chat-bar__state[data-state='failed'] {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.chat-bar__spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  color: var(--chat-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+}
+
+.chat-bar__btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chat-ink) 14%, transparent);
+}
+
+.chat-bar__btn:focus-visible {
+  outline: 2px solid var(--chat-ink);
+  outline-offset: -2px;
+}
+
+.chat-bar__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-home {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Signed in or not: a word and a shape, on a chip that reads on any plate. */
+.chat-signin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--chat-ink);
+  border: 1px solid color-mix(in srgb, var(--chat-ink) 45%, transparent);
+  border-radius: 999px;
+}
+
+.chat-signin[data-state='signed-out'] {
+  border-style: dashed;
+}
+
+.chat-signin__shape {
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* --------------------------------------------------------- the stage */
+
+.chat-stage__view {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Seen only while the page is off its frame, or when a load failed. */
+.chat-stage__card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.chat-stage__name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chat-stage__note {
+  max-width: 44ch;
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------ Wall tile
+ *
+ * Scoped through the canvas so they outrank MosaicView.css's own tile-header
+ * states (selected, tinted, hover), which load after this file: a chat tile's
+ * header is the bot's colours in every state, with its ink on it.
+ */
+
+.mosaic__canvas > .mtile[data-chat-bot] {
+  --edge: var(--chat-border);
+}
+
+.mosaic__canvas > .mtile[data-chat-bot] .mtile__head {
+  color: var(--chat-ink);
+  background: var(--chat-bg);
+  border-bottom-color: var(--chat-border);
+}
+
+.mosaic__canvas > .mtile[data-chat-bot] .mtile__title {
+  color: var(--chat-ink);
+}
+
+.mosaic__canvas > .mtile[data-chat-bot][data-selected='true'] {
+  outline: 2px solid color-mix(in srgb, var(--text-primary) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.mosaic__canvas > .mtile[data-chat-bot] .mtile__head .ghost-btn {
+  color: var(--chat-ink);
+}
+
+.mosaic__canvas > .mtile[data-chat-bot] .mtile__head .ghost-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--chat-ink) 14%, transparent);
+}
+
+.mosaic__canvas > .mtile[data-chat-bot] .pane__active {
+  color: var(--chat-ink);
+  border-color: color-mix(in srgb, var(--chat-ink) 45%, transparent);
+  background: transparent;
+}
+
+/* ------------------------------------------------ menus and chooser rows */
+
+.chat-row__kind {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
