@@ -15,6 +15,7 @@ export type IconName =
   | 'folder'
   | 'folderPlus'
   | 'gear'
+  | 'cog'
   | 'dots'
   | 'restart'
   | 'chevronDown'
@@ -88,6 +89,12 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   gear: (
+    <>
+      <circle cx="8" cy="8" r="2.1" />
+      <path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M4 4l1.1 1.1M10.9 10.9L12 12M12 4l-1.1 1.1M5.1 10.9L4 12" />
+    </>
+  ),
+  cog: (
     <>
       <circle cx="8" cy="8" r="2.1" />
       <path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M4 4l1.1 1.1M10.9 10.9L12 12M12 4l-1.1 1.1M5.1 10.9L4 12" />

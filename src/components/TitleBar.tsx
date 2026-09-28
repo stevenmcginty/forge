@@ -397,7 +397,7 @@ function DeckMenu(): ReactNode {
         data-on={open ? 'true' : undefined}
         onClick={toggle}
       >
-        <Icon name="dots" size={16} />
+        <Icon name="cog" size={16} />
         {fresh > 0 ? <span className="deckbar__badge">{fresh > 9 ? '9+' : fresh}</span> : null}
       </button>
       <div ref={menuRef} className="deckmenu__panel" data-shell-overlay="" hidden={!open} role="menu" aria-label="Menu">

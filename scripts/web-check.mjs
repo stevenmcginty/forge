@@ -372,7 +372,9 @@ registerHooks({
           'export const clipboard = { readText: () => "", writeText: () => {} }',
           'export const dialog = { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) }',
           'export const screen = { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 0, height: 0 } }) }',
-          'export const desktopCapturer = { getSources: async () => [] }'
+          'export const desktopCapturer = { getSources: async () => [] }',
+          'export class WebContentsView { constructor() { this.webContents = { isDestroyed: () => false, close: () => {} } } setBounds() {} setVisible() {} setBackgroundColor() {} }',
+          'export const session = { fromPartition: () => ({ setPermissionRequestHandler: () => {}, setPermissionCheckHandler: () => {}, on: () => {} }) }'
         ].join('\n')
       }
     }

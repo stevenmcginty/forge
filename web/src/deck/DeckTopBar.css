@@ -24,6 +24,8 @@
   flex: none;
   height: var(--dk-bar-h);
   padding: 0 8px 0 10px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--line-hairline);
 }
 
 .app[data-face='deck'] .dk-bar__left,

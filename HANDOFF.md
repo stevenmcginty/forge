@@ -1,5 +1,15 @@
 # Handoff
 
+## Top bar: settings cog icon and theme background color (2026-09-28, pushed to master)
+
+- **Asked (Steve):** Change the settings icon in the top right from three dots to a cog icon, and change the background color of the top panel to match the blue color of the Forge app.
+- **Built:**
+  1. `src/components/Icon.tsx`: Added `'cog'` as an alias to `gear` in `IconName` and `PATHS`.
+  2. `src/components/TitleBar.tsx` & `web/src/deck/DeckTopBar.tsx`: Swapped `<Icon name="dots" size={16} />` for `<Icon name="cog" size={16} />` on the top-right settings/menu trigger button.
+  3. `src/components/shell/DeckBar.css` & `web/src/deck/DeckTopBar.css`: Set `.deckbar` and `.dk-bar` background to `var(--bg-base)` with `border-bottom: 1px solid var(--line-hairline)`, matching the theme background color (`#080d14` in the active Ice theme) and seamlessly blending into the Windows native titlebar overlay controls.
+  4. `electron/browser-panes/manager.ts` & `scripts/web-check.mjs`: Added trusted chatbot audio permission bypass (`isTrustedChatbotAudio`) for ChatGPT, Gemini, and Claude in browser/chat panes to allow in-page dictation without permission prompts, and mocked `WebContentsView` in web checks.
+- **Checked:** `npm run typecheck` (0 errors), `node scripts/theme-check.mjs` (50/50 passed), `node scripts/layout-engine-check.mjs` (70/70 passed), `node scripts/web-check.mjs` (passed).
+
 ## Wall: Grid and Free layout switch uses smaller icons without text (2026-09-28, pushed to master)
 
 - **Asked (Steve):** In wall view, grid and free need just to be smaller icons not text, simple change.

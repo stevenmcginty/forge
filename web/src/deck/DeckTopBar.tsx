@@ -141,7 +141,7 @@ export function DeckTopBar({
             title="Menu — this pane, the desktop, the theme, sign out"
             onClick={() => deckSheet.toggle('menu')}
           >
-            <Icon name="dots" size={16} />
+            <Icon name="cog" size={16} />
           </button>
           <DeckSheet id="menu" className="dk-menu__panel" label="Menu">
             <DeckMenuBody rows={rows} themeId={themeId} onTheme={onTheme} />

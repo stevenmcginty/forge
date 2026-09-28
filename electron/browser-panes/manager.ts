@@ -172,14 +172,69 @@ async function settle(wc: WebContents, limit = SETTLE_MS): Promise<void> {
 
 let sessionReady = false
 
+/**
+ * Origins of the integrated chatbots whose in-page dictation (speech-to-text)
+ * uses getUserMedia for microphone input. An agent-driven browser pane visiting
+ * arbitrary sites must never get a microphone or camera, but Steve clicking the
+ * mic inside ChatGPT, Gemini or Claude needs the mic to work without a prompt.
+ */
+function isTrustedChatbotAudio(
+  url: string | undefined,
+  mediaTypes?: Array<'video' | 'audio'> | 'video' | 'audio' | 'unknown'
+): boolean {
+  if (!url) return false
+  if (Array.isArray(mediaTypes)) {
+    if (mediaTypes.includes('video') || (mediaTypes.length > 0 && !mediaTypes.includes('audio'))) return false
+  } else if (mediaTypes === 'video') {
+    return false
+  }
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:') return false
+    const host = parsed.hostname.toLowerCase()
+    return (
+      host === 'chatgpt.com' ||
+      host.endsWith('.chatgpt.com') ||
+      host === 'gemini.google.com' ||
+      host === 'claude.ai' ||
+      host.endsWith('.claude.ai')
+    )
+  } catch {
+    return false
+  }
+}
+
 /** One-time policy for the shared session: no permission prompts, no save dialogs. */
 function prepareSession(ses: Session, downloadsDir: string): void {
   if (sessionReady) return
   sessionReady = true
   // An agent must never be the reason a camera or location prompt appears, and
-  // a prompt nobody is looking at is worse than a refusal.
-  ses.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'fullscreen' || permission === 'clipboard-sanitized-write')
+  // a prompt nobody is looking at is worse than a refusal. Integrated chatbots
+  // (ChatGPT, Gemini, Claude) share this session so Steve's sign-in is kept,
+  // and their in-page dictation needs the microphone without a prompt.
+  ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (permission === 'fullscreen' || permission === 'clipboard-sanitized-write') {
+      return callback(true)
+    }
+    if (permission === 'media') {
+      const mediaReq = details as { requestingUrl?: string; mediaTypes?: Array<'video' | 'audio'> } | undefined
+      const url = mediaReq?.requestingUrl || (wc && !wc.isDestroyed() ? wc.getURL() : '')
+      return callback(isTrustedChatbotAudio(url, mediaReq?.mediaTypes))
+    }
+    callback(false)
+  })
+  // The synchronous half of permission checking — Chromium's getUserMedia
+  // consults this first. Without it, synchronous checks fail before the
+  // async request handler is ever asked.
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+    if (permission === 'fullscreen' || permission === 'clipboard-sanitized-write') {
+      return true
+    }
+    if (permission === 'media') {
+      const url = requestingOrigin || details.requestingUrl || (wc && !wc.isDestroyed() ? wc.getURL() : '')
+      return isTrustedChatbotAudio(url, details.mediaType)
+    }
+    return false
   })
   ses.on('will-download', (_event, item) => {
     mkdirSync(downloadsDir, { recursive: true })
