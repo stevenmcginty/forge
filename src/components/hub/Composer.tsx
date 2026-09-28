@@ -4,6 +4,7 @@ import { paneNameInTab } from '@shared/workspace'
 import { useKeymap, useSavedPrompts } from '@/hooks/useHub'
 import { hotkeyLabel } from '@/hooks/useDictation'
 import { resolveProfile } from '@/lib/agents'
+import { setBarDictationSink, useBarDictationPhase } from '@/lib/barDictation'
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
@@ -40,10 +41,12 @@ import './Composer.css'
  *   agent       the chip beside Listen names the voice agent that will answer
  *               and opens a menu to switch it in place (BrainPicker).
  *   mic / send  the bar's end button (DictateButton). Empty bar: a mic, the
- *               Dictate key (Right Alt) as a button — raw words into the
- *               focused pane, or into this bar when the bar has focus; a stop
- *               square while it records. Words in the bar: Send, the same as
- *               Enter.
+ *               phone's mic — press, talk, press again; the words land in
+ *               this bar, "Sending… 1.5 s" with Undo (Esc undoes too), then
+ *               they send as Enter would. Undo keeps them here to edit. A
+ *               stop square while it records. Words in the bar: Send, the
+ *               same as Enter. The Dictate key (Right Alt) stays raw words
+ *               into the focused pane, or into this bar when it has focus.
  *   replies     what Forge says grows the bar upward, with a trail of what it
  *               did ("✓ Opened Codex pane · ✓ Typed into Everest") that opens
  *               into the whole list.
@@ -62,6 +65,9 @@ function sendToPane(paneId: string, text: string): boolean {
   window.setTimeout(() => terminalHost.submit(paneId), 70)
   return true
 }
+
+/** How long the bar mic's words sit in the bar, with Undo, before they send — the phone's (web SessionComposer). */
+const REVIEW_MS = 1500
 
 type PaletteItem =
   | { kind: 'save'; key: string; title: string }
@@ -94,7 +100,9 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
   const ls = listenState(hub)
   // The Dictate key's own session — not the agent's, which shares the sidecar.
   const dictating = (preview?.dictating ?? dictation.listening) && !state.agentListening && !ls.on
-  const intoBar = dictating && focused
+  // The bar's mic started it (src/lib/barDictation.ts): its words come here, whatever has focus.
+  const barDictating = useBarDictationPhase() !== 'off'
+  const intoBar = dictating && (focused || barDictating)
   const slash = text.startsWith('/')
   // The palette belongs to the bar: it shows while you are in the bar.
   const showPalette = (paletteOpen || slash) && focused
@@ -128,19 +136,48 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
 
   /* ---------------------------------------------------------------- send */
 
+  /** The bar mic's words, waiting to send: when the countdown ends. */
+  const [review, setReview] = useState<{ endsAt: number } | null>(null)
+  const reviewing = review !== null
+  const reviewTimer = useRef(0)
+  /** The bar mic's dictation said something this time. */
+  const heard = useRef(false)
+  /** A send or a cancel came first: the bar mic's last words, still on their way, are dropped. */
+  const dropping = useRef(false)
+  const textRef = useRef(text)
+  textRef.current = text
+  /** Where a send goes now; a review sends only if that has not moved. */
+  const aim = toForge ? 'forge' : `pane:${paneId}`
+  const aimRef = useRef(aim)
+  aimRef.current = aim
+  const noticeRef = useRef(actions.setNotice)
+  noticeRef.current = actions.setNotice
+
+  const endReview = (): void => {
+    window.clearTimeout(reviewTimer.current)
+    setReview(null)
+  }
+
+  /** Dictation into the bar ends with a send or a cancel; the bar mic's unsent tail goes with it. */
+  const endBarWords = (): void => {
+    if (barDictating) dropping.current = true
+    if (intoBar) dictation.toggle()
+  }
+
   const send = (raw: string): void => {
     const message = raw.replace(/\s+$/, '')
     if (!message.trim()) return
+    endReview()
     const route = composerRouteNow()
     if (route?.({ text: message, paneId })) {
       setText('')
-      if (intoBar) dictation.toggle()
+      endBarWords()
       return
     }
     if (toForge) {
       hubAsk(hub, message, 'typed')
       setText('')
-      if (intoBar) dictation.toggle()
+      endBarWords()
       if (shellRef.current) fireComet(shellRef.current, shellRef.current.querySelector('.listen') ?? shellRef.current, 'var(--accent)')
       return
     }
@@ -150,21 +187,98 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     }
     setText('')
     // Sent: the words in the bar are done with. Dictation into the bar ends with the send.
-    if (intoBar) dictation.toggle()
+    endBarWords()
     relayComet(paneId, shellRef.current)
   }
 
   const cancel = (): void => {
+    endReview()
     setText('')
     setPaletteOpen(false)
     setSaving(null)
-    if (intoBar) dictation.toggle()
+    endBarWords()
     focusField()
   }
 
-  // A saved prompt aimed at the composer lands here (B2's saved prompts).
+  /** Undo: no send; the words stay in the bar, and the bar takes the focus to edit them. */
+  const undoReview = (): void => {
+    endReview()
+    focusField()
+  }
+
   const sendRef = useRef(send)
   sendRef.current = send
+
+  /** The words in the bar, a 1.5 s countdown, then the same send Enter makes. */
+  const startReview = (): void => {
+    window.clearTimeout(reviewTimer.current)
+    const aimed = aimRef.current
+    setReview({ endsAt: Date.now() + REVIEW_MS })
+    reviewTimer.current = window.setTimeout(() => {
+      setReview(null)
+      if (aimRef.current !== aimed) {
+        noticeRef.current('Not sent — the words are waiting in the box.')
+        return
+      }
+      sendRef.current(textRef.current)
+    }, REVIEW_MS)
+  }
+  const startReviewRef = useRef(startReview)
+  startReviewRef.current = startReview
+
+  // The bar takes the bar mic's words while it is mounted. Its end starts the review.
+  useEffect(
+    () =>
+      setBarDictationSink({
+        phrase: (words) => {
+          if (dropping.current) return
+          heard.current = true
+          setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, '')} ${words}` : words))
+        },
+        done: (ok) => {
+          const said = heard.current
+          heard.current = false
+          if (dropping.current) {
+            dropping.current = false
+            return
+          }
+          if (!ok) return
+          if (!said) {
+            noticeRef.current('Heard nothing — nothing to send.')
+            return
+          }
+          startReviewRef.current()
+        }
+      }),
+    []
+  )
+  useEffect(() => () => window.clearTimeout(reviewTimer.current), [])
+
+  // Esc undoes the countdown wherever focus is — and never reaches a pane,
+  // where it would interrupt the agent the words are for.
+  const undoRef = useRef(undoReview)
+  undoRef.current = undoReview
+  useEffect(() => {
+    if (!reviewing) return undefined
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.isComposing) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      undoRef.current()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [reviewing])
+
+  // A dictation into the bar that starts over the countdown holds it: more
+  // words are coming, and half a sentence must not go.
+  useEffect(() => {
+    if (!intoBar) return
+    window.clearTimeout(reviewTimer.current)
+    setReview(null)
+  }, [intoBar])
+
+  // A saved prompt aimed at the composer lands here (B2's saved prompts).
   useEffect(() => {
     const on = (e: Event): void => {
       const detail = (e as CustomEvent<HubComposerDetail>).detail
@@ -259,7 +373,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
   const dictateKey = hotkeyLabel(state.settings.sttHotkey || 'AltRight')
   const placeholder = dictating
     ? intoBar
-      ? `Dictating into the bar — ${dictateKey} to stop`
+      ? `Dictating into the bar — ${barDictating ? 'press the mic again' : dictateKey} to stop`
       : `Dictating into ${paneName ?? 'the pane'} — ${dictateKey} to stop`
     : !toForge
       ? `Type straight into ${paneName}   ·   Esc for Forge`
@@ -335,13 +449,20 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           spellCheck
           placeholder={placeholder}
           aria-label={placeholder}
-          onFocus={() => setFocused(true)}
+          onFocus={() => {
+            // Coming into the words while they wait to send is Undo.
+            if (reviewing) endReview()
+            setFocused(true)
+          }}
           onBlur={() => setFocused(false)}
+          onPointerDown={reviewing ? undoReview : undefined}
           onChange={(e) => {
             setText(e.target.value)
             if (!e.target.value) setPaletteOpen(false)
           }}
           onKeyDown={(e) => {
+            // A key in the words while they wait: Undo, then the key does its own job (Enter sends now).
+            if (reviewing) endReview()
             if (e.nativeEvent.isComposing) return
             if (showPalette && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
               e.preventDefault()
@@ -397,7 +518,30 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           <span className="truncate">{toForge ? 'Forge' : paneName}</span>
         </button>
 
-        {text && !slash ? (
+        {review ? (
+          // The bar mic's words, waiting: in words, with the time left and a way out.
+          <span className="comp__review" role="status">
+            <span className="comp__review-words">
+              Sending… <Countdown to={review.endsAt} />
+            </span>
+            <button
+              type="button"
+              className="comp__act comp__act--word"
+              title="Undo — keep the words to edit (Esc)"
+              aria-label="Undo — keep the words to edit"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={undoReview}
+            >
+              Undo
+            </button>
+            <span
+              key={review.endsAt}
+              className="comp__review-drain"
+              aria-hidden="true"
+              style={{ animationDuration: `${REVIEW_MS}ms` }}
+            />
+          </span>
+        ) : text && !slash ? (
           <span className="comp__acts">
             <button
               type="button"
@@ -439,6 +583,16 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       </div>
     </div>
   )
+}
+
+/** "1.2 s": what is left of the review countdown, as the phone shows it. */
+function Countdown({ to }: { to: number }): ReactNode {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 100)
+    return () => window.clearInterval(id)
+  }, [])
+  return <span className="comp__review-clock">{(Math.max(0, to - now) / 1000).toFixed(1)} s</span>
 }
 
 /* ------------------------------------------------------------ caption rail */

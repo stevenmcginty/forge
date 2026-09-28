@@ -1,5 +1,12 @@
 # Handoff
 
+## Desktop bar mic works like the phone's mic (2026-09-28, pushed to master)
+
+- **Asked (Steve):** the bar's dictation button did not put the words in the input or send them. Wanted it like the phone: dictate, press, it holds, then sends.
+- **Built:** `src/lib/barDictation.ts` (new) marks a dictation the bar's mic started; `useDictation.ts` gives the button its own start (`dictateIntoBar`) and routes that session's phrases to the bar, ending it when the sidecar is back at idle. `Composer.tsx` puts the words in the bar, shows "Sending… 1.5 s" with Undo (Esc undoes, and never reaches the pane), then sends as Enter. Undo keeps the words to edit. Right Alt stays raw dictation into the focused pane. Listen unchanged. Same desktop speech engine.
+- **Checked:** typecheck 0, lint:hooks 0 warnings, agent-bar-check 43/0, dictation:check 31/0. Steve tested live.
+- **Left out:** the phone's spoken commands ("stop", "yes", "option two", "next tab").
+
 ## Phone Listen dead after a drop (2026-09-28)
 
 - **Asked (Steve):** the agent (Listen) button on the phone works, then drops, then a tap does nothing. Dictation still works.

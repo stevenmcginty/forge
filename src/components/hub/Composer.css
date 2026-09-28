@@ -123,6 +123,53 @@
   animation: comp-acts-in var(--dur-pop) var(--spring-pop) both;
 }
 
+/* The bar mic's words, waiting to send: "Sending… 1.2 s" and Undo, with a
+   line under them that drains to nothing as the time runs out. The words say
+   it; the line is only the shape of the same thing. */
+.comp__review {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-bottom: 4px;
+  padding-bottom: 3px;
+  animation: comp-acts-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.comp__review-words {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.comp__review-clock {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.comp__review-drain {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--pane-accent, var(--accent));
+  transform-origin: left center;
+  animation: comp-review-drain linear both;
+}
+
+@keyframes comp-review-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
 @keyframes comp-acts-in {
   from {
     opacity: 0;
@@ -727,6 +774,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .comp__acts,
+  .comp__review,
+  .comp__review-drain,
   .crail,
   .crail[data-state='closing'],
   .cpal,
@@ -737,7 +786,7 @@
   }
 }
 
-:root[data-reduced-motion='true'] :is(.comp__acts, .crail, .cpal, .csave, .crail__line, .crail__glyph) {
+:root[data-reduced-motion='true'] :is(.comp__acts, .comp__review, .comp__review-drain, .crail, .cpal, .csave, .crail__line, .crail__glyph) {
   animation: none !important;
 }
 

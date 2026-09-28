@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { hotkeyLabel } from '@/hooks/useDictation'
+import { useBarDictationPhase } from '@/lib/barDictation'
 import { useDictation } from '@/state/Dictation'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
@@ -13,13 +14,14 @@ export type DictateSend = { label: string; title: string; onSend: () => void }
  * The bar's end button: dictation while the bar is empty, Send once it has
  * words — as on Forge Web and Forge Mobile.
  *
- * As the mic it is the Dictate key (Right Alt by default) as a button —
- * `dictation.toggle` is the same intent the key sends (useDictation's
- * applyIntent('toggle')), so the words land wherever the key would put them:
- * the focused pane, or the text field that had focus. The press never takes
- * focus itself (mousedown is prevented), so "wherever had focus" is still
- * wherever you were. While a dictation runs it stays the mic, whatever the bar
- * holds, so the press that started it is the press that stops it.
+ * As the mic it is the phone's mic (src/lib/barDictation.ts): press, talk,
+ * press again. The words land in the bar's own box, wait "Sending… 1.5 s"
+ * with Undo (Esc undoes too), then send as the bar's Enter would — to Forge or
+ * to the pane the bar aims at. The speech engine is the desktop's own, the one
+ * Settings picks. The Dictate key (Right Alt by default) is not this: it stays
+ * raw words into whatever has focus. The press never takes focus itself
+ * (mousedown is prevented). While a dictation runs it stays the mic, whatever
+ * the bar holds, so the press that started it is the press that stops it.
  *
  * Every state is its own shape, never only a colour: a mic to start, a stop
  * square while it records, an arc turning while it transcribes, a mic with a
@@ -30,6 +32,7 @@ export function DictateButton({ send = null }: { send?: DictateSend | null }): R
   const dictation = useDictation()
   const hub = useHubView()
   const preview = useHubPreview()
+  const intoBar = useBarDictationPhase() !== 'off'
   const ls = listenState(hub)
   const key = hotkeyLabel(state.settings.sttHotkey || 'AltRight')
 
@@ -59,22 +62,24 @@ export function DictateButton({ send = null }: { send?: DictateSend | null }): R
   const title = sending
     ? send.title
     : recording
-      ? `Recording — press again or ${key} to stop; the words go where you were typing`
+      ? intoBar
+        ? 'Recording — press again to stop; the words go into the bar, then send'
+        : `Recording — press again or ${key} to stop; the words go where you were typing`
       : transcribing
         ? 'Transcribing the last phrase…'
         : failed
-          ? `Dictation hit a problem: ${dictation.status.error?.msg ?? 'see Settings → Voice'}. Press to try again (${key})`
+          ? `Dictation hit a problem: ${dictation.status.error?.msg ?? 'see Settings → Voice'}. Press to try again`
           : starting
-            ? `Dictate (${key}) — the speech engine is warming up`
-            : `Dictate (${key}) — raw words into whatever has focus, no agent`
+            ? 'Dictate — the speech engine is warming up'
+            : `Dictate — press, talk, press again; the words go into the bar and send after a moment. ${key} types raw words into whatever has focus`
 
   const label = sending
     ? send.label
     : recording
-      ? `Stop dictating (${key})`
+      ? 'Stop dictating'
       : transcribing
         ? 'Transcribing'
-        : `Dictate (${key})`
+        : 'Dictate'
 
   return (
     <button
@@ -85,7 +90,7 @@ export function DictateButton({ send = null }: { send?: DictateSend | null }): R
       aria-label={label}
       title={title}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={() => (sending ? send.onSend() : dictation.toggle())}
+      onClick={() => (sending ? send.onSend() : dictation.dictateIntoBar())}
     >
       <span key={shape} className="dict__glyph" aria-hidden="true">
         {look === 'send' ? (

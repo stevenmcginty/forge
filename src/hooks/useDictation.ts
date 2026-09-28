@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { agentVoiceAlways, agentVoiceNow } from '@/components/hub/barMode'
+import { barDictationPhase, barDictationSink, setBarDictationPhase } from '@/lib/barDictation'
 import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
 import { earconDictationOff, earconDictationOn } from '@/lib/earcon'
 import { formatCombo } from '@/lib/keymap'
@@ -53,6 +54,12 @@ export interface Dictation {
   needsSetup: boolean
   listening: boolean
   toggle: () => void
+  /**
+   * The bar's mic button: start a dictation whose words go into the bar (then
+   * review, then send — src/lib/barDictation.ts), or stop the one running.
+   * The Dictate key keeps `toggle`: raw words into whatever has focus.
+   */
+  dictateIntoBar: () => void
   /** Drop the sidecar so saved paths take effect; `force` respawns at once. */
   reload: (force?: boolean) => void
 }
@@ -139,6 +146,12 @@ export function useDictationEngine(): Dictation {
       }
       // The bar's Agent mode: the main agent is asked, nothing is typed.
       if (agentVoiceNow()?.phrase(text)) return
+      // The bar's mic started this dictation: its words go into the bar's box.
+      const bar = barDictationPhase() !== 'off' ? barDictationSink() : null
+      if (bar) {
+        bar.phrase(text)
+        return
+      }
       // Prefer where focus is *now*; fall back to where it was when the user
       // started talking, because clicking the pill moved it.
       let target = resolveInsertTarget(activePaneRef.current)
@@ -216,12 +229,40 @@ export function useDictationEngine(): Dictation {
     earconDictationOff()
   }, [capturing])
 
+  /* ------------------------------------------------------- the bar's mic
+   *
+   * A dictation the bar's mic started is live once the sidecar listens, and
+   * over when it is back at rest — by then every phrase is in, because the
+   * sidecar sends the last one before it says idle. That end is the bar's cue
+   * for the review countdown. Armed and never opened is not an end: a sidecar
+   * that is still loading passes through idle on its way to listening.
+   */
+  useEffect(() => {
+    const bar = barDictationPhase()
+    if (bar === 'off') return
+    const phase = status.phase
+    if (phase === 'listening' || phase === 'finishing') {
+      if (bar === 'armed') setBarDictationPhase('live')
+      return
+    }
+    if (phase === 'error' || (bar === 'live' && (phase === 'idle' || phase === 'off'))) {
+      setBarDictationPhase('off')
+      barDictationSink()?.done(phase !== 'error')
+    }
+  }, [status.phase])
+
   /* --------------------------------------------------------------- actions */
 
-  const startDictation = useCallback((): void => {
+  /** `intoBar`: the bar's mic, whose words go into the bar. The key's are raw. */
+  const startDictation = useCallback((intoBar = false): void => {
     if (phaseRef.current === 'finishing') return
+    setBarDictationPhase(intoBar ? 'armed' : 'off')
     remembered.current = resolveInsertTarget(activePaneRef.current)
-    void window.forge.stt.start().then(setStatus)
+    void window.forge.stt.start().then((s) => {
+      setStatus(s)
+      // Refused outright (a setup problem): there is no session to wait for.
+      if (s.phase === 'error' && barDictationPhase() === 'armed') setBarDictationPhase('off')
+    })
   }, [])
 
   /**
@@ -276,6 +317,23 @@ export function useDictationEngine(): Dictation {
   }, [startDictation])
 
   const toggle = useCallback(() => applyIntent('toggle'), [applyIntent])
+
+  /**
+   * The bar's mic button. Its own dictation, not the key's: the words go into
+   * the bar. While the agent holds the sidecar the press is the key's, as it
+   * always was. A press while a dictation records stops it, whoever started it.
+   */
+  const dictateIntoBar = useCallback((): void => {
+    if (toAgentRef.current) {
+      applyIntent('toggle')
+      return
+    }
+    if (phaseRef.current === 'listening') {
+      void window.forge.stt.stop()
+      return
+    }
+    startDictation(true)
+  }, [applyIntent, startDictation])
 
   const reload = useCallback((force?: boolean) => {
     void window.forge.stt.reload(force).then(setStatus)
@@ -413,9 +471,10 @@ export function useDictationEngine(): Dictation {
       needsSetup: status.phase === 'error' && !!status.error && isSttSetupError(status.error.kind),
       listening: status.phase === 'listening',
       toggle,
+      dictateIntoBar,
       reload
     }),
-    [status, toggle, reload]
+    [status, toggle, dictateIntoBar, reload]
   )
 }
 
