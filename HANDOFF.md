@@ -1,5 +1,12 @@
 # Handoff
 
+## Voice picker short list (2026-09-28)
+
+- **Asked (Steve):** the desktop voice picker shows every agent. Default to GPT Live, Gemini Live, and Claude. More in the popout shows the rest. Change who is on that list, and the order, in Settings.
+- **Built:** `voiceMenu` on Settings. Default order is GPT Realtime (`gpt-realtime`, not the mini), Gemini Live, Claude, then the other six behind More. The brain in use stays on the short list. Settings → Voice & Agent → Voice menu: tick, Up, Down, Reset. Phone, web, and watch pickers unchanged.
+- **Checked:** typecheck 0, lint:hooks 0, agent-bar:check 43/0. Not seen on screen.
+- **Needs:** a Forge restart. The menu is saved in the main process. A window reload alone shows the three, but a custom order will not stick until restart.
+
 ## Top bar: branch/project picker next to settings; prominent image notifications (2026-09-28, pushed to master)
 
 - **Asked (Steve):** Move the branch picker to the right hand side next to settings, agents wall new to the left, and when we put and paste an image make the notification a little more noticeable.

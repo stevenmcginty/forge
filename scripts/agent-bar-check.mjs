@@ -10,8 +10,9 @@
  *    next turn; the silence window rides along with every agent start.
  *  - ONE brain setting: the migration from the two old pickers, and the
  *    no-key fallback, route every turn.
- *  - The voice agent picker beside Listen: one row per brain, the pick
- *    writes agentBrain as Settings does, and both read one status.
+ *  - The voice agent picker beside Listen: the saved short list, More for
+ *    the rest, the pick writes agentBrain as Settings does, and both read
+ *    one status.
  *
  *   node scripts/agent-bar-check.mjs
  */
@@ -371,7 +372,8 @@ const mainAgentSrc = readFileSync(new URL('../src/components/settings/MainAgent.
 console.log('the voice bar: the voice agent picker')
 await check('the picker is one chip beside Listen, in the one bar', () => {
   assert.ok(/<ListenToggle \/>\s*<BrainPicker \/>/.test(composerSrc), 'rendered right after Listen')
-  assert.ok(/AGENT_BRAINS\.map\(\(spec\) =>/.test(pickerSrc), 'one row per brain')
+  assert.ok(/voiceMenuRows\(/.test(pickerSrc), 'the menu uses the saved short list')
+  assert.ok(/More/.test(pickerSrc), 'More reveals the rest')
   assert.ok(/role="menuitemradio"\s*aria-checked=\{inUse\}/.test(pickerSrc), 'the brain in use is checked')
   assert.ok(/data-tone="use">\s*in use/.test(pickerSrc), 'and says "in use" in words')
   assert.ok(/disabled=\{off\}/.test(pickerSrc), 'an unavailable brain cannot be picked')
@@ -411,6 +413,81 @@ await check('a pick made while Listen is on: next turn on Parakeet, next press w
   assert.equal(W({ liveRealtime: true, current: 'gemini-live', target: 'claude' }), true, 'a live session ends on the switch (V6)')
   assert.equal(W({ liveRealtime: true, current: 'gemini-live', target: 'gemini-live' }), false, 'the brain in use')
   assert.ok(/brainSwitchWaits\(\{ listening, liveRealtime, current, target: spec\.id \}\)[\s\S]{0,40}'Starts next time you press Listen'/.test(pickerSrc), 'the row says so')
+})
+
+const storeSrc = readFileSync(new URL('../electron/store.ts', import.meta.url), 'utf8')
+const appStateSrc = readFileSync(new URL('../src/state/AppState.tsx', import.meta.url), 'utf8')
+const voiceMenuSrc = readFileSync(new URL('../src/components/settings/VoiceMenu.tsx', import.meta.url), 'utf8')
+
+await check('the voice menu defaults to GPT Realtime, Gemini Live, Claude', () => {
+  const def = B.defaultVoiceMenu()
+  assert.deepEqual(
+    def.map((e) => e.id),
+    ['gpt-realtime', 'gemini-live', 'claude', 'codex-cli', 'gemini-cli', 'gpt-realtime-mini', 'gemini-flash', 'groq', 'openrouter']
+  )
+  assert.deepEqual(
+    def.map((e) => e.shown),
+    [true, true, true, false, false, false, false, false, false]
+  )
+  assert.deepEqual(B.normaliseVoiceMenu(undefined), def)
+  assert.deepEqual(B.normaliseVoiceMenu(null), def)
+  assert.deepEqual(B.normaliseVoiceMenu('claude'), def)
+  const empty = B.normaliseVoiceMenu([])
+  assert.deepEqual(
+    empty.map((e) => e.id),
+    B.AGENT_BRAIN_IDS
+  )
+  assert.ok(empty.every((e) => e.shown === false))
+  const custom = B.normaliseVoiceMenu([
+    { id: 'claude', shown: false },
+    { id: 'nope', shown: true },
+    { id: 'groq', shown: true },
+    { id: 'claude', shown: true },
+    { id: 'gpt-realtime', shown: true }
+  ])
+  assert.deepEqual(
+    custom.map((e) => e.id),
+    ['claude', 'groq', 'gpt-realtime', 'codex-cli', 'gemini-cli', 'gemini-live', 'gpt-realtime-mini', 'gemini-flash', 'openrouter']
+  )
+  assert.deepEqual(
+    custom.map((e) => e.shown),
+    [false, true, true, false, false, false, false, false, false]
+  )
+  const noGroq = B.normaliseVoiceMenu(def.filter((e) => e.id !== 'groq'))
+  assert.equal(noGroq.at(-1).id, 'groq')
+  assert.equal(noGroq.at(-1).shown, false)
+  assert.deepEqual(
+    noGroq.slice(0, -1).map((e) => e.id),
+    def.filter((e) => e.id !== 'groq').map((e) => e.id)
+  )
+  assert.ok(/voiceMenu: normaliseVoiceMenu\(s\.voiceMenu\)/.test(storeSrc), 'disk read keeps the saved menu')
+  assert.ok(/voiceMenu: defaultVoiceMenu\(\)/.test(storeSrc), 'a new install gets the three')
+  assert.ok(/voiceMenu: defaultVoiceMenu\(\)/.test(appStateSrc), 'the renderer fallback matches')
+  assert.ok(/Voice menu/.test(voiceMenuSrc) && /moveVoiceMenu/.test(voiceMenuSrc) && /setVoiceMenuShown/.test(voiceMenuSrc))
+})
+await check('More hides the rest, and the brain in use stays on the short list', () => {
+  const def = B.defaultVoiceMenu()
+  const codex = B.voiceMenuRows(def, 'codex-cli')
+  assert.deepEqual(
+    codex.first.map((s) => s.id),
+    ['gpt-realtime', 'gemini-live', 'claude', 'codex-cli']
+  )
+  assert.ok(!codex.rest.some((s) => s.id === 'codex-cli'))
+  assert.ok(codex.rest.some((s) => s.id === 'gpt-realtime-mini'))
+  const claude = B.voiceMenuRows(def, 'claude')
+  assert.equal(claude.first.filter((s) => s.id === 'claude').length, 1)
+  assert.ok(!claude.rest.some((s) => s.id === 'claude'))
+  const menu = B.defaultVoiceMenu()
+  const moved = B.moveVoiceMenu(menu, 0, 1)
+  assert.equal(moved[0].id, 'gemini-live')
+  assert.equal(moved[1].id, 'gpt-realtime')
+  assert.equal(B.moveVoiceMenu(menu, -1, 1), menu)
+  assert.equal(B.moveVoiceMenu(menu, 0, -1), menu)
+  assert.equal(B.moveVoiceMenu(menu, menu.length - 1, 1), menu)
+  const shown = B.setVoiceMenuShown(menu, 'codex-cli', true)
+  assert.equal(shown.find((e) => e.id === 'codex-cli').shown, true)
+  assert.equal(shown.find((e) => e.id === 'claude').shown, true)
+  assert.equal(menu.find((e) => e.id === 'codex-cli').shown, false)
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

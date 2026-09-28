@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AGENT_BRAINS, agentBrainSpec, migrateAgentBrain, type AgentBrainId, type AgentBrainKind, type AgentBrainSpec } from '@shared/agent-brain'
+import { agentBrainSpec, migrateAgentBrain, voiceMenuRows, type AgentBrainId, type AgentBrainKind, type AgentBrainSpec } from '@shared/agent-brain'
 import { useBrainProbes } from '@/hooks/useBrainStatus'
 import { barBrainLabel, brainSwitchWaits, brainUnavailable, statusOf, type BrainStatus } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
@@ -13,8 +13,8 @@ import './BrainPicker.css'
 /**
  * The voice agent, picked in place: the right half of the voice unit (Listen
  * is the left — see VoicePill.css), naming the brain that will actually answer
- * by its mark and its name, and a menu of every brain (AGENT_BRAINS) to switch
- * to without opening Settings. In a narrow window the chip keeps only the mark.
+ * by its mark and its name, and a short menu (Settings → Voice menu) to switch
+ * to without opening Settings. More shows the rest. In a narrow window the chip keeps only the mark.
  *
  * The chip reads the setting the same way Settings' Main agent card does
  * (resolveAgentBrain), so a pick that fell back for want of a key says so in
@@ -124,6 +124,8 @@ function BrainMenu({
   // Mounted only while the menu is open, so the probes run when you look.
   const { probes } = useBrainProbes(s)
   const ref = useRef<HTMLDivElement | null>(null)
+  const [more, setMore] = useState(false)
+  const { first, rest } = voiceMenuRows(s.voiceMenu, current)
 
   // From the keyboard: onto the brain in use. The popover is placed a frame
   // after it mounts, and a hidden button cannot take focus before that.
@@ -154,58 +156,75 @@ function BrainMenu({
     items[next]?.focus()
   }
 
+  const rowFor = (spec: AgentBrainSpec): ReactNode => {
+    const inUse = spec.id === current
+    const status = statusOf(spec, s, probes[spec.id])
+    const off = !inUse && brainUnavailable(status)
+    const sub =
+      spec.id === chosen && chosen !== current
+        ? 'Picked — add it in Voice settings'
+        : !off && brainSwitchWaits({ listening, liveRealtime, current, target: spec.id })
+          ? 'Starts next time you press Listen'
+          : null
+    return (
+      <button
+        key={spec.id}
+        type="button"
+        role="menuitemradio"
+        aria-checked={inUse}
+        className="popover__row bpick__row"
+        data-selected={inUse ? 'true' : undefined}
+        data-note={sub ? 'true' : undefined}
+        disabled={off}
+        title={probes[spec.id]?.result?.reason}
+        onClick={() => onPick(spec.id)}
+      >
+        <span className="bpick__tile" data-look={inUse ? 'use' : off ? 'off' : undefined} aria-hidden="true">
+          <BrainMark brain={spec.id} size={14} />
+        </span>
+        <span className="bpick__text">
+          <span className="bpick__name">{spec.label}</span>
+          <span className="bpick__sub">{sub ?? rowNote(spec, status, off)}</span>
+        </span>
+        {inUse ? (
+          <span className="bpick__state" data-tone="use">
+            in use
+            <Icon name="check" size={12} className="bpick__check" />
+          </span>
+        ) : (
+          <span className="bpick__state" data-tone={status.tone}>
+            <span className="bpick__glyph" aria-hidden="true">
+              {status.glyph}
+            </span>
+            {status.word}
+          </span>
+        )}
+      </button>
+    )
+  }
+
   return (
     <div ref={ref} className="bpick" role="menu" aria-label="Voice agent" onKeyDown={onKeyDown}>
       <div className="bpick__head">
         <span className="eyebrow">Voice agent</span>
         <span className="bpick__hint">answers Listen</span>
       </div>
-      {AGENT_BRAINS.map((spec) => {
-        const inUse = spec.id === current
-        const status = statusOf(spec, s, probes[spec.id])
-        const off = !inUse && brainUnavailable(status)
-        const sub =
-          spec.id === chosen && chosen !== current
-            ? 'Picked — add it in Voice settings'
-            : !off && brainSwitchWaits({ listening, liveRealtime, current, target: spec.id })
-              ? 'Starts next time you press Listen'
-              : null
-        return (
-          <button
-            key={spec.id}
-            type="button"
-            role="menuitemradio"
-            aria-checked={inUse}
-            className="popover__row bpick__row"
-            data-selected={inUse ? 'true' : undefined}
-            data-note={sub ? 'true' : undefined}
-            disabled={off}
-            title={probes[spec.id]?.result?.reason}
-            onClick={() => onPick(spec.id)}
-          >
-            <span className="bpick__tile" data-look={inUse ? 'use' : off ? 'off' : undefined} aria-hidden="true">
-              <BrainMark brain={spec.id} size={14} />
-            </span>
-            <span className="bpick__text">
-              <span className="bpick__name">{spec.label}</span>
-              <span className="bpick__sub">{sub ?? rowNote(spec, status, off)}</span>
-            </span>
-            {inUse ? (
-              <span className="bpick__state" data-tone="use">
-                in use
-                <Icon name="check" size={12} className="bpick__check" />
-              </span>
-            ) : (
-              <span className="bpick__state" data-tone={status.tone}>
-                <span className="bpick__glyph" aria-hidden="true">
-                  {status.glyph}
-                </span>
-                {status.word}
-              </span>
-            )}
-          </button>
-        )
-      })}
+      {first.map((spec) => rowFor(spec))}
+      {rest.length > 0 ? (
+        <button
+          type="button"
+          role="menuitem"
+          className="popover__row bpick__row"
+          aria-expanded={more}
+          onClick={() => setMore((open) => !open)}
+        >
+          <span className="bpick__tile" data-look="plain" aria-hidden="true" />
+          <span className="bpick__text">
+            <span className="bpick__name">{more ? 'Less' : 'More'}</span>
+          </span>
+        </button>
+      ) : null}
+      {more ? rest.map((spec) => rowFor(spec)) : null}
       <div className="popover__divider" />
       <button type="button" role="menuitem" className="popover__row bpick__row bpick__settings" onClick={onSettings}>
         <span className="bpick__tile" data-look="plain" aria-hidden="true">

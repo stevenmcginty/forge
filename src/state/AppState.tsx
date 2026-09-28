@@ -56,6 +56,7 @@ import {
  */
 import { EMPTY_WORKSPACE, makeTab, newTabName, nextTextColor, withPrunedMosaic } from '@shared/workspace'
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
+import { defaultVoiceMenu } from '@shared/agent-brain'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
@@ -295,6 +296,8 @@ const FALLBACK_SETTINGS: Settings = {
   // Mirrors electron/store.ts (B7): the ONE Agent brain, hands-free timing,
   // and the pane agents' browser rule.
   agentBrain: 'claude',
+  // Mirrors electron/store.ts. Three on the picker; the rest behind More.
+  voiceMenu: defaultVoiceMenu(),
   agentSilenceMs: 800,
   agentIdleTimeoutMs: 120_000,
   dictateAutoSend: false,

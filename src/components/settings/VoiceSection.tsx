@@ -9,6 +9,7 @@ import { earconListening } from '@/lib/earcon'
 import { voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { useApp } from '@/state/AppState'
 import { MainAgentCard } from './MainAgent'
+import { VoiceMenuCard } from './VoiceMenu'
 import { VoiceKeysCard } from './VoiceKeys'
 import { Card, Row, Section, TextField, Toggle } from './parts'
 import { SpeechEngineCard } from './SpeechEngineCard'
@@ -45,6 +46,7 @@ export function VoiceSection(): ReactNode {
       blurb="The bar at the bottom is Forge’s main agent. It knows every project, tab and pane, and it can open agents, type into them, browse and take you places — inside Forge, whichever engine answers."
     >
       <MainAgentCard />
+      <VoiceMenuCard />
       <VoiceKeysCard />
       <ConversationCard />
       <DictationCard />

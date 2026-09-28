@@ -25,10 +25,10 @@
  * No Electron and no DOM here: both processes import it.
  */
 
-import type { AgentBrainId } from './types'
+import type { AgentBrainId, VoiceMenuEntry } from './types'
 
 /** The union itself lives in shared/types.ts (dependency-free). */
-export type { AgentBrainId }
+export type { AgentBrainId, VoiceMenuEntry }
 
 export type AgentBrainKind = 'realtime' | 'session' | 'json'
 
@@ -86,6 +86,74 @@ export const DEFAULT_AGENT_BRAIN: AgentBrainId = 'claude'
 
 export function isAgentBrainId(value: unknown): value is AgentBrainId {
   return typeof value === 'string' && (AGENT_BRAIN_IDS as readonly string[]).includes(value)
+}
+
+/** Short list first. "GPT Live" is `gpt-realtime` (label "GPT Realtime"), not the mini model. */
+const VOICE_MENU_SHOWN_FIRST: readonly AgentBrainId[] = ['gpt-realtime', 'gemini-live', 'claude']
+
+/** The picker order when Settings has never stored one. */
+export function defaultVoiceMenu(): VoiceMenuEntry[] {
+  const shown = new Set<string>(VOICE_MENU_SHOWN_FIRST)
+  const head = VOICE_MENU_SHOWN_FIRST.filter((id) => isAgentBrainId(id))
+  const rest = AGENT_BRAIN_IDS.filter((id) => !shown.has(id))
+  return [...head, ...rest].map((id) => ({ id, shown: shown.has(id) }))
+}
+
+/**
+ * A non-array (an old settings.json has no field) becomes the default three.
+ * An array is kept: unknown ids and later duplicates drop, and any brain the
+ * list forgot is appended behind More (`shown: false`). `[]` stays all hidden.
+ */
+export function normaliseVoiceMenu(raw: unknown): VoiceMenuEntry[] {
+  if (!Array.isArray(raw)) return defaultVoiceMenu()
+  const seen = new Set<string>()
+  const out: VoiceMenuEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const id = (item as { id?: unknown }).id
+    if (!isAgentBrainId(id) || seen.has(id)) continue
+    seen.add(id)
+    out.push({ id, shown: Boolean((item as { shown?: unknown }).shown) })
+  }
+  for (const id of AGENT_BRAIN_IDS) {
+    if (!seen.has(id)) out.push({ id, shown: false })
+  }
+  return out
+}
+
+/**
+ * `first` is the short list, in saved order. The brain in use is always in
+ * `first` (at its saved position) and never also in `rest`.
+ */
+export function voiceMenuRows(
+  menu: VoiceMenuEntry[],
+  current: AgentBrainId
+): { first: AgentBrainSpec[]; rest: AgentBrainSpec[] } {
+  const first: AgentBrainSpec[] = []
+  const rest: AgentBrainSpec[] = []
+  for (const entry of normaliseVoiceMenu(menu)) {
+    const spec = AGENT_BRAINS.find((b) => b.id === entry.id)
+    if (!spec) continue
+    if (entry.shown || entry.id === current) first.push(spec)
+    else rest.push(spec)
+  }
+  return { first, rest }
+}
+
+/** Swap with the neighbour. Out of range returns `menu` unchanged. */
+export function moveVoiceMenu(menu: VoiceMenuEntry[], index: number, dir: -1 | 1): VoiceMenuEntry[] {
+  const j = index + dir
+  if (index < 0 || j < 0 || index >= menu.length || j >= menu.length) return menu
+  const next = menu.slice()
+  const tmp = next[index]!
+  next[index] = next[j]!
+  next[j] = tmp
+  return next
+}
+
+/** Flip one brain's short-list flag. Other rows stay as they are. */
+export function setVoiceMenuShown(menu: VoiceMenuEntry[], id: AgentBrainId, shown: boolean): VoiceMenuEntry[] {
+  return menu.map((entry) => (entry.id === id ? { ...entry, shown } : entry))
 }
 
 export function agentBrainSpec(id: AgentBrainId | string | undefined | null): AgentBrainSpec {

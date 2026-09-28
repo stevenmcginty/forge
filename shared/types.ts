@@ -931,6 +931,16 @@ export type AgentBrainId =
   | 'gemini-cli'
   | 'codex-cli'
 
+/**
+ * One row of the desktop voice menu, in display order.
+ * `shown` agents appear before More. Order and flags: `shared/agent-brain.ts`.
+ */
+export interface VoiceMenuEntry {
+  id: AgentBrainId
+  /** True: this brain is in the picker before More. */
+  shown: boolean
+}
+
 /** One realtime voice per vendor — the two GPT models share OpenAI's voices. */
 export interface VoiceHubVoices {
   gemini: string
@@ -1847,6 +1857,12 @@ export interface Settings {
    * routing; both are migrated into it once and kept on disk untouched.
    */
   agentBrain: AgentBrainId
+  /**
+   * Desktop voice-picker order. Agents with `shown` appear before More.
+   * Missing on disk means GPT Realtime, Gemini Live, then Claude
+   * (`defaultVoiceMenu` in shared/agent-brain.ts).
+   */
+  voiceMenu: VoiceMenuEntry[]
   /**
    * Agent mode is hands-free: this much silence ends a phrase and sends it,
    * and the mic stays open for the next turn. 500–2000 ms, default 800.

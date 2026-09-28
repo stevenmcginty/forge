@@ -10,7 +10,7 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
-import { isAgentBrainId, migrateAgentBrain, migrateCodexClaudeModel } from '@shared/agent-brain'
+import { defaultVoiceMenu, isAgentBrainId, migrateAgentBrain, migrateCodexClaudeModel, normaliseVoiceMenu } from '@shared/agent-brain'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -306,6 +306,8 @@ function defaultSettings(): Settings {
     voiceHubVoice: { gemini: '', openai: '' },
     // The ONE Agent brain (shared/agent-brain.ts). Claude: free, no key.
     agentBrain: 'claude',
+    // Picker short list: GPT Realtime, Gemini Live, Claude. The rest sit behind More.
+    voiceMenu: defaultVoiceMenu(),
     // Hands-free Agent mode: 0.8 s of silence sends the phrase.
     agentSilenceMs: 800,
     // The conversation closes after 2 min of quiet; 0 = never.
@@ -877,6 +879,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // Absent = a settings.json from before the one Agent brain: migrated once
     // from the two old pickers, which stay on disk untouched.
     agentBrain: isAgentBrainId(s.agentBrain) ? s.agentBrain : migrateAgentBrain(s.voiceHubProvider, s.voiceBrain),
+    voiceMenu: normaliseVoiceMenu(s.voiceMenu),
     agentSilenceMs:
       typeof s.agentSilenceMs === 'number' && Number.isFinite(s.agentSilenceMs)
         ? clamp(Math.round(s.agentSilenceMs / 100) * 100, 500, 2000)
