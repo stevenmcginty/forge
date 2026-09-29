@@ -9,6 +9,7 @@ import {
   useKeyDictationPressedAt
 } from '@/lib/barDictation'
 import { resolveInsertTarget, type InsertTarget } from '@/lib/dictation'
+import { setPaneSentSender } from '@/lib/paneSent'
 import { usePresence } from '@/lib/motion'
 import { useActiveTab, useAppSelector } from '@/state/AppState'
 import { useDictation } from '@/state/Dictation'
@@ -183,6 +184,13 @@ export function DictationCueHost(): ReactNode {
   }, [pressedAt])
 
   const dictating = cuePhase !== null
+
+  // The "sent" flash on a pane (lib/paneSent): the agent's colour when he has
+  // the mic, dictation's otherwise, and none while a dictation still listens —
+  // the bar's edge is the one cue until the mic shuts. Read on each send, from refs.
+  const senderRef = useRef<'agent' | 'dictation' | null>('dictation')
+  senderRef.current = agentOwnsMic ? 'agent' : cuePhase === 'listening' || cuePhase === 'starting' ? null : 'dictation'
+  useEffect(() => setPaneSentSender(() => senderRef.current), [])
   useEffect(() => {
     if (!dictating) return undefined
     const moved = (): void => onFocusMoved()

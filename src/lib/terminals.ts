@@ -11,6 +11,7 @@ import { advanceDraft, clampDraft } from './draft'
 import { joinBufferRows, tidyCapture, type BufferRow } from './paneText'
 import { earconTaskAttention, earconTaskDone } from './earcon'
 import { getLiveSettings } from './livesettings'
+import { announcePaneSent } from './paneSent'
 
 /**
  * TerminalHost — the renderer-side owner of every xterm instance.
@@ -1961,6 +1962,7 @@ class TerminalHost {
     entry.typed = '' // The Enter below sends the draft on its way.
     window.forge.pty.write(paneId, '\r', opts?.claim !== false)
     entry.term.scrollToBottom()
+    announcePaneSent(paneId) // the pane's edge flashes: "it went here" (lib/paneSent)
     return true
   }
 
