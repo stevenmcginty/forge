@@ -3,16 +3,16 @@ import { useSyncExternalStore } from 'react'
 /**
  * The bar's mic: a dictation whose words go into the bar's own text box.
  *
- * The Dictate key (Right Alt) is raw dictation — its words go straight into
- * whatever has focus. The bar's mic button is the phone's mic instead: press,
+ * The Dictate key's words go straight into whatever has focus. The bar's mic button is the phone's mic instead: press,
  * talk, press again; the words land in the bar, wait "Sending… 1.5 s" with
  * Undo (Esc undoes too), then send as the bar's Enter would. Undo keeps the
  * words in the bar to edit.
  *
- * The press that stops decides. A key dictation stopped by the key stays raw:
- * the words sit where they landed, no Enter. A key dictation stopped by the
- * bar's button is sent: the same countdown with Undo, then Enter where the
- * words landed — the pane they were typed into, or the bar when it had focus.
+ * A key dictation is sent however it ends — the key, the bar's button, the
+ * release of a held key, or silence: the same countdown with Undo, then Enter
+ * where the words landed — the pane they were typed into, or the bar when it
+ * had focus. (It used to stay raw when the key stopped it; Steve had to press
+ * Enter by hand every time.)
  *
  * Both run the one sidecar session in useDictation's engine, with whatever
  * speech engine Settings picks. This says which of them started the session
@@ -103,7 +103,7 @@ export function setKeyDictationLanding(next: KeyDictationLanding): void {
   keyLanding = next
 }
 
-/** The bar's button stopped the key dictation: send its words once every phrase is in. */
+/** The key dictation sends its words once every phrase is in. */
 export function keyDictationSendsOnEnd(): boolean {
   return keySend
 }

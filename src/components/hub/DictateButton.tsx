@@ -18,14 +18,13 @@ export type DictateSend = { label: string; title: string; onSend: () => void }
  * press again. The words land in the bar's own box, wait "Sending… 1.5 s"
  * with Undo (Esc undoes too), then send as the bar's Enter would — to Forge or
  * to the pane the bar aims at. The speech engine is the desktop's own, the one
- * Settings picks. The Dictate key (Right Alt by default) is not this: it types
- * raw words into whatever has focus. The press never takes focus itself
+ * Settings picks. The Dictate key is not this: it types the words into
+ * whatever has focus, and then sends them the same way. The press never takes focus itself
  * (mousedown is prevented). While a dictation runs it stays the mic, whatever
  * the bar holds, so it can always stop it.
  *
- * The press that stops decides. A key dictation stopped here is sent — the
- * same countdown and Undo, then Enter where its words went; stopped with the
- * key it stays raw.
+ * A key dictation is sent whichever press stops it — the same countdown and
+ * Undo, then Enter where its words went.
  *
  * Every state is its own shape, never only a colour: a mic to start, a stop
  * square while it records, an arc turning while it transcribes, a mic with a
@@ -68,14 +67,14 @@ export function DictateButton({ send = null }: { send?: DictateSend | null }): R
     : recording
       ? intoBar
         ? 'Recording — press again to stop; the words go into the bar, then send'
-        : `Recording — press to stop and send; ${key} stops without sending`
+        : `Recording — press to stop; the words send after a moment, Esc undoes`
       : transcribing
         ? 'Transcribing the last phrase…'
         : failed
           ? `Dictation hit a problem: ${dictation.status.error?.msg ?? 'see Settings → Voice'}. Press to try again`
           : starting
             ? 'Dictate — the speech engine is warming up'
-            : `Dictate — press, talk, press again; the words go into the bar and send after a moment. ${key} types raw words into whatever has focus`
+            : `Dictate — press, talk, press again; the words go into the bar and send after a moment. ${key} types the words into whatever has focus and sends them too`
 
   const label = sending
     ? send.label

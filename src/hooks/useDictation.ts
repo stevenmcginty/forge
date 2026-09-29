@@ -93,6 +93,8 @@ export function useDictationEngine(): Dictation {
   noticeRef.current = actions.setNotice
   const patchRef = useRef(actions.patchSettings)
   patchRef.current = actions.patchSettings
+  /** The key dictation now running sends its words when it ends (see startDictation). */
+  const keyWantsSend = useRef(false)
   /** Dictate mode's "press Enter after each phrase". Off means exactly the old typing. */
   const autoSendRef = useRef(state.settings.dictateAutoSend)
   autoSendRef.current = state.settings.dictateAutoSend
@@ -261,10 +263,13 @@ export function useDictationEngine(): Dictation {
     const bar = barDictationPhase()
     const phase = status.phase
     if (bar === 'off') {
+      if (phase === 'listening' && keyWantsSend.current && !toAgentRef.current) setKeyDictationSendsOnEnd(true)
+      if (phase === 'error') keyWantsSend.current = false
       if (!keyDictationSendsOnEnd()) return
       if (phase === 'error') setKeyDictationSendsOnEnd(false)
       else if (phase === 'idle' || phase === 'off') {
         setKeyDictationSendsOnEnd(false)
+        keyWantsSend.current = false
         barDictationSink()?.sendKeyWords(keyDictationLanding())
       }
       return
@@ -286,6 +291,10 @@ export function useDictationEngine(): Dictation {
     if (phaseRef.current === 'finishing') return
     setBarDictationPhase(intoBar ? 'armed' : 'off')
     setKeyDictationSendsOnEnd(false)
+    // A key dictation sends when it ends, however it ends (the key, the button,
+    // release of a held key, silence). Armed here, switched on once the mic is
+    // open: a sidecar still loading passes through idle, which is not an end.
+    keyWantsSend.current = !intoBar && !autoSendRef.current
     if (!intoBar) setKeyDictationLanding({ kind: 'none' })
     remembered.current = resolveInsertTarget(activePaneRef.current)
     void window.forge.stt.start().then((s) => {
