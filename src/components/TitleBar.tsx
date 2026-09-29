@@ -1,13 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
 import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { setVoiceBarPlace, useVoiceBarPlace } from '@/lib/voiceBarPlace'
-import { useActiveProject, useApp, useMosaic, usePaneCount, useViewMode } from '@/state/AppState'
+import { useActiveProject, useApp, usePaneCount, useViewMode } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
-import { WallLayoutSwitch } from './MosaicView'
 import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
 import { ScreenshotTray } from './ScreenshotTray'
@@ -188,50 +187,19 @@ function ProjectChip(): ReactNode {
 /* --------------------------------------------------------- agent controls */
 
 /**
- * The Agents menu, the new-agent button (Ctrl+T's chooser anchors on it; it is
- * on screen whichever size the terminals are) and the Wall switch.
+ * The Agents menu, the Wall | Full screen switch, the new-agent button (Ctrl+T's
+ * chooser anchors on it; it is on screen whichever size the terminals are) and,
+ * while the Wall is up, its layout controls — one tray, parted by hairlines.
  */
 function AgentControls(): ReactNode {
   const project = useActiveProject()
   if (!project) return null
 
   return (
-    <span className="deckbar__agents">
+    <span className="deckbar__agents" role="group" aria-label="Agents and views">
       <AgentsMenu />
       <WallSwitch />
       <NewAgentButton />
-      <WallLayoutControls />
-    </span>
-  )
-}
-
-/**
- * The Wall's Grid | Free switch, on the bar while the Wall is on screen — the
- * menu's Tools has it too, but a layout switch you have to go looking for is
- * one nobody finds. Beside it, "Fit" while the grid has been dragged to a size
- * of its own: one click back to the grid that fills the window.
- */
-function WallLayoutControls(): ReactNode {
-  const { actions } = useApp()
-  const viewMode = useViewMode()
-  const surface = useShellMode()
-  const mosaic = useMosaic()
-  if (viewMode !== 'mosaic' || surface) return null
-
-  return (
-    <span className="deckbar__wallmode">
-      <WallLayoutSwitch />
-      {mosaic.mode === 'auto' && mosaic.grid ? (
-        <button
-          type="button"
-          className="deckbar__fit"
-          title="Fit to window: back to the grid that fills the window"
-          onClick={() => actions.setMosaicGrid(null)}
-        >
-          <Icon name="restart" size={11} />
-          Fit
-        </button>
-      ) : null}
     </span>
   )
 }
@@ -266,10 +234,13 @@ function NewAgentButton(): ReactNode {
 }
 
 /**
- * Wall on or off. On: every agent at once. Off: Full screen, one terminal.
- * The state is a shape as well as a light — the masonry wall fills in beside
- * the word when on, and stays hollow when off — and aria-pressed for a screen reader.
- * Over the browser or the board it brings the agents back, as the Wall.
+ * Wall on or off, shown as the two views it flips between. On: the Wall, every
+ * agent at once. Off: Full screen, one terminal. Both words are always there
+ * and the one you are in sits in the lit capsule — a word and a shape, not a
+ * colour alone — which glides across like the mode pill's lamp. Still one
+ * button: a click (or Ctrl+G) flips it, and aria-pressed tells a screen reader
+ * whether the Wall is on. Over the browser or the board it brings the agents
+ * back, as the Wall.
  */
 function WallSwitch(): ReactNode {
   const { actions } = useApp()
@@ -279,14 +250,39 @@ function WallSwitch(): ReactNode {
   const combo = commands.find((c) => c.id === 'view.toggle')?.keys[0]
   const on = viewMode === 'mosaic' && !surface
   const keys = combo ? ` (${combo})` : ''
+  const ref = useRef<HTMLButtonElement | null>(null)
+  const thumbRef = useRef<HTMLSpanElement | null>(null)
+  const placed = useRef(false)
+
+  // The capsule is measured off the word it lands on, before paint, and only
+  // animates after its first placement so it never slides in from the edge.
+  useLayoutEffect(() => {
+    const thumb = thumbRef.current
+    const word = ref.current?.querySelector<HTMLElement>(`[data-view='${on ? 'wall' : 'full'}']`)
+    if (!thumb || !word) return
+    thumb.style.width = `${word.offsetWidth}px`
+    thumb.style.transform = `translate3d(${word.offsetLeft}px, 0, 0)`
+    if (!placed.current) {
+      placed.current = true
+      requestAnimationFrame(() => thumb.setAttribute('data-ready', 'true'))
+    }
+  }, [on])
+
+  const title = on
+    ? `Wall — every agent at once. Click for Full screen, one terminal${keys}`
+    : surface
+      ? `Wall — every agent at once${keys}`
+      : `Full screen — one terminal. Click for the Wall, every agent at once${keys}`
 
   return (
     <button
+      ref={ref}
       type="button"
       className="deckbar__wall"
       data-on={on ? 'true' : undefined}
       aria-pressed={on}
-      title={on ? `Wall is on — every agent at once. Click for Full screen${keys}` : `Wall — every agent at once${keys}`}
+      aria-label="Wall"
+      title={title}
       onClick={() => {
         if (surface) {
           actions.setViewMode('mosaic')
@@ -296,8 +292,13 @@ function WallSwitch(): ReactNode {
         actions.setViewMode(on ? 'tabs' : 'mosaic')
       }}
     >
-      <Icon name="wall" size={13} className="deckbar__wallmark" />
-      Wall
+      <span className="deckbar__thumb" ref={thumbRef} aria-hidden="true" data-hidden={surface ? 'true' : undefined} />
+      <span className="deckbar__view" data-view="wall" data-lit={on ? 'true' : undefined}>
+        Wall
+      </span>
+      <span className="deckbar__view" data-view="full" data-lit={!on && !surface ? 'true' : undefined}>
+        Full screen
+      </span>
     </button>
   )
 }

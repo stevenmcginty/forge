@@ -63,8 +63,8 @@ export interface UiCommandSpec {
 }
 
 const CORE: UiCommandSpec[] = [
-  // Ctrl+Shift+B is the built-in rail.toggle, which now toggles this sheet (App.tsx).
-  { id: 'toggle-project-sheet', title: 'Projects', group: 'Shell' },
+  // Ctrl+Shift+B is the built-in rail.toggle, which also toggles this sheet (App.tsx).
+  { id: 'toggle-project-sheet', title: 'All projects (pop-up)', group: 'Shell', defaultKey: 'Ctrl+Shift+P' },
   { id: 'open-project-sheet', title: 'Open the project sheet', group: 'Shell' },
   { id: 'close-project-sheet', title: 'Close the project sheet', group: 'Shell' },
   { id: 'toggle-panes-switcher', title: 'Every pane (switcher)', group: 'Panes', defaultKey: 'Ctrl+Shift+E' },

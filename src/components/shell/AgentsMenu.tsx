@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ChatLeaf, PaneLeaf, TerminalTab } from '@shared/types'
 import { CHATBOT_ORDER, CHATBOTS } from '@shared/chatbots'
 import { paneNameInTab } from '@shared/workspace'
+import { useKeymap } from '@/hooks/useHub'
 import { usePaneRuntime } from '@/hooks/usePaneRuntime'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { resolveProfile } from '@/lib/agents'
@@ -35,6 +36,8 @@ export function AgentsMenu(): ReactNode {
   const project = useActiveProject()
   const workspace = useActiveWorkspace()
   const open = useShellSheet() === 'panes'
+  const { commands } = useKeymap()
+  const combo = commands.find((c) => c.id === 'ui.toggle-panes-switcher')?.keys[0]
   const n = workspace.tabs.reduce((sum, t) => sum + (t.root.type === 'chat' ? 1 : collectLeaves(t.root).length), 0)
   if (!project) return null
 
@@ -47,7 +50,7 @@ export function AgentsMenu(): ReactNode {
         data-sheet-toggle="panes"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Every agent in this project — pick one to open it Full screen (Ctrl+Shift+E)"
+        title={`Every agent in this project — pick one to open it Full screen${combo ? ` (${combo})` : ''}`}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => toggleSheet('panes')}
       >

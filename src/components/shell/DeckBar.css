@@ -53,58 +53,64 @@
 }
 
 /*
- * The Agents menu, the new-agent button and the Wall switch. Set off from the
- * mark by one short hairline.
+ * The agent controls: one instrument, not three loose pills. A hairline tray —
+ * the project chip's wash and rim — holds the Agents menu, the Wall | Full
+ * screen switch and New, parted by short hairlines. Inside it the one lit thing
+ * is where you are: the mode pill's accent capsule, rim and all, so the state
+ * is a shape and a word, never a colour alone. Parts sit 24px tall in a 28px
+ * tray, the mode pill's proportions. (The Wall's Grid | Free switch and Fit
+ * live in the … menu's Tools, not here.)
  */
 .deckbar__agents {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
   flex: none;
+  height: 28px;
   margin-left: 6px;
-  padding-left: 13px;
+  padding: 2px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  -webkit-app-region: no-drag;
 }
 
-.deckbar__agents::before {
+.deckbar__agents > * + * {
+  position: relative;
+  margin-left: 11px;
+}
+
+.deckbar__agents > * + *::before {
   content: '';
   position: absolute;
-  left: 0;
+  left: -6px;
   top: 50%;
   width: 1px;
-  height: 14px;
+  height: 12px;
   transform: translateY(-50%);
   background: var(--glass-line-strong);
+  pointer-events: none;
 }
 
+/* New: full ink and an accent plus — the one action here, never lit as a state. */
 .deckbar__new {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 11px 0 9px;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px 0 8px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  /* A touch louder than its neighbours: a hairline rim, brighter text and an
-     accent plus. The Wall's "on" state is a filled accent chip, so this stays
-     hollow and never reads as switched on. */
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 18%, transparent);
-  -webkit-app-region: no-drag;
   transition:
     color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease-out);
 }
 
 .deckbar__new:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
 .deckbar__new svg {
@@ -118,85 +124,7 @@
 
 .deckbar__new:disabled {
   opacity: 0.4;
-}
-
-/*
- * The Wall's Grid | Free switch (WallLayoutSwitch in MosaicView), on the bar
- * while the Wall is up — chip-sized to match Wall and New. The chosen side is
- * filled, the other hollow: shape and weight, not colour.
- */
-/*
- * With the switch on the bar the left side can outgrow its half, and the centre
- * pill would sit on top of it: the left side takes the room it needs and the
- * pill moves over (still centred whenever there is room), and in a narrow
- * window the wordmark steps aside first.
- */
-.deckbar:has(.deckbar__wallmode) {
-  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
-}
-
-@media (max-width: 1400px) {
-  .deckbar:has(.deckbar__wallmode) .deckbar__wordmark {
-    display: none;
-  }
-}
-
-.deckbar__wallmode {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  -webkit-app-region: no-drag;
-}
-
-.deckbar__wallmode .wallmode {
-  height: 26px;
-  margin: 0;
-  border-color: var(--glass-line-strong);
-  border-radius: var(--r-full);
-}
-
-.deckbar__wallmode .wallmode__btn {
-  width: 26px;
-  height: 100%;
-  padding: 0;
-  justify-content: center;
-  color: var(--text-muted);
-}
-
-.deckbar__wallmode .wallmode__btn + .wallmode__btn {
-  border-left-color: var(--glass-line-strong);
-}
-
-.deckbar__wallmode .wallmode__btn[data-on='true'] {
-  color: var(--text-on-accent);
-}
-
-.deckbar__fit {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 10px 0 8px;
-  border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.deckbar__fit:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
-}
-
-.deckbar__fit:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
+  cursor: default;
 }
 
 .deckbar__mark {
@@ -343,13 +271,6 @@
 
 @media (max-width: 1000px) {
   .deckbar__projectname {
-    display: none;
-  }
-}
-
-/* The voice bar up here and the Wall's switch too: the bar's own pill names the project. */
-@media (max-width: 1024px) {
-  .deckbar[data-voicebar='top']:has(.deckbar__wallmode) .deckbar__project {
     display: none;
   }
 }
@@ -670,31 +591,28 @@
   -webkit-app-region: no-drag;
 }
 
+/* The tray's first part: the word, the count, and a chevron that turns when open. */
 .deckbar__agentsbtn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 26px;
-  padding: 0 9px 0 11px;
+  gap: 6px;
+  height: 24px;
+  padding: 0 7px 0 10px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line);
   transition:
     color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease-out);
 }
 
 .deckbar__agentsbtn:hover,
 .deckbar__agentsbtn[data-open='true'] {
   color: var(--text-primary);
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
 }
 
 .deckbar__agentsbtn:focus-visible {
@@ -748,37 +666,25 @@
   }
 }
 
-/* ------------------------------------------------------------ Wall switch */
+/* ---------------------------------------------- Wall | Full screen switch
+ *
+ * One button, two words: the view you are in sits in the lit capsule, which
+ * glides across (the mode pill's spring) when Ctrl+G or a click flips it.
+ * Hovering the switch washes the other word — that is where a click goes.
+ */
 
 .deckbar__wall {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 11px 0 9px;
+  height: 24px;
+  padding: 0;
   border-radius: var(--r-full);
   font-family: var(--font-display);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-muted);
-  -webkit-app-region: no-drag;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
-}
-
-.deckbar__wall:hover {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
-}
-
-/* On: lit, and the wall screens fill in (off, they are hollow). */
-.deckbar__wall[data-on='true'] {
-  color: var(--accent-ink);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .deckbar__wall:focus-visible {
@@ -786,17 +692,48 @@
   outline-offset: var(--focus-offset);
 }
 
-.deckbar__wallmark {
-  flex: none;
+.deckbar__thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  pointer-events: none;
 }
 
-.deckbar__wallmark rect {
-  fill: transparent;
-  transition: fill var(--dur-fast) var(--ease-out);
+/* Over the browser or the board neither view is the one you are in: no capsule. */
+.deckbar__thumb[data-hidden='true'] {
+  opacity: 0;
 }
 
-.deckbar__wall[data-on='true'] .deckbar__wallmark rect {
-  fill: currentColor;
+.deckbar__thumb[data-ready='true'] {
+  transition:
+    transform var(--dur-glide) var(--spring-glide),
+    width var(--dur-glide) var(--spring-glide);
+}
+
+.deckbar__view {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.deckbar__view[data-lit='true'] {
+  color: var(--accent-ink);
+}
+
+.deckbar__wall:hover .deckbar__view:not([data-lit='true']) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 /* ------------------------------------------- the … menu's Voice bar row */

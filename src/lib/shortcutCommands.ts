@@ -102,7 +102,7 @@ export const BUILTIN_COMMANDS: KeyCommandDef[] = [
   { id: 'clipboard.paste', title: 'Paste', group: 'Clipboard', defaultKeys: ['Ctrl+Shift+V'], scope: 'workspace' },
 
   /* ------------------------------------------------------------- view */
-  { id: 'rail.toggle', title: 'Show or hide the rail', group: 'View', defaultKeys: ['Ctrl+Shift+B'], scope: 'workspace' },
+  { id: 'rail.toggle', title: 'All projects (pop-up, old rail key)', group: 'View', defaultKeys: ['Ctrl+Shift+B'], scope: 'workspace' },
   { id: 'view.toggle', title: 'Full screen ⇄ Wall', group: 'View', defaultKeys: ['Ctrl+G'], scope: 'workspace' },
   { id: 'font.bigger', title: 'Bigger terminal text', group: 'View', defaultKeys: ['Ctrl+=', 'Ctrl+NumpadAdd'], scope: 'workspace' },
   { id: 'font.smaller', title: 'Smaller terminal text', group: 'View', defaultKeys: ['Ctrl+-', 'Ctrl+NumpadSubtract'], scope: 'workspace' },
