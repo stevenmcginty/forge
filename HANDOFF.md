@@ -9,7 +9,13 @@
 - **Checked:** typecheck 0, lint:hooks 0, agent-bar:check 43/0, web:usage passes; designer viewed 1600 dark and 900 light with injected frames. Not viewed: a real Mode send, a Codex frame, widths below 900.
 - **Open:** (1) usage needs one Forge restart (new preload + main); (2) the open menu is ~920px tall with usage, scrolls, clips the Bypass row: tighten; (3) Mode hides when the footer shows no mode (Claude default), so J2a could return an explicit `'default'`; (4) `getPath('downloads')` in `electron/browser-panes/ipc.ts:37`, `chat-panes/views.ts:141`, `phone-mirror.ts:179` can abort IPC registration when USERPROFILE is odd; (5) at 900px the top bar overlaps "New" with the Agents/Browser tabs (parallel session's TitleBar/DeckBar edits).
 
-## Share link: caller placed by pane id (2026-09-29, uncommitted, Forge NOT restarted)
+## Dictate key now sends (2026-09-29, pushed 4929c41)
+
+- **Asked (Steve):** dictating into a terminal did not press Enter; he pressed it by hand. Cause: a key dictation stopped by the key stayed raw by design (a002704); only the bar's mic button sent.
+- **Fix:** `startDictation` (`src/hooks/useDictation.ts`) arms `keyWantsSend`; once the mic listens, `keyDictationSendsOnEnd` goes on; the phase-idle effect calls the bar's `sendKeyWords` (countdown "Sending… 1.5 s", Undo/Esc, then `terminalHost.submit`). Skipped when `dictateAutoSend` (Enter per phrase) is on. typecheck 0, lint:hooks 0. Not tried live.
+- **Stale comments left:** `Composer.tsx:50`, `HubLayer.tsx:31`, `settings/VoiceKeys.tsx:12`, `useDictation.ts:68` still say the key is "raw".
+
+## Share link: caller placed by pane id (2026-09-29, pushed b59842d, Forge NOT restarted)
 
 - **Found while testing the chat tools:** five panes all launched as "Claude Code" in one folder made `caller()` (`electron/share-link.ts`) return null, so `pane_send`, `pane_read`, `chat_ask` and `chat_answer` all failed with `Forge does not know a pane called "Claude Code"`. `share_panes` hid it by falling back to `panes.json`. Renaming a tab does not help: `launchTitle` never changes.
 - **Fix:** the bridge sends `paneId` (`FORGE_PANE_ID`); `caller()` matches it first. Field in `shared/share.ts`. Checks: share-link-check 93/0, share-check 307/0, chat-relay-check 85/0, typecheck 0. `bridge:build` run, `bridge:install` was a no-op (config points at `bridge/`).
