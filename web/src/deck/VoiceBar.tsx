@@ -21,6 +21,7 @@ import {
   type DeckDictationPhase
 } from './dictation'
 import { dictationKeySuspended, useDictationKey } from './dictation-key'
+import { listenKeyName, useListenKey } from './listen-key'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import type { BarPlace, DeckView } from './view'
 import {
@@ -154,12 +155,9 @@ function useLive(): boolean {
   return state.stage.kind === 'connected' && state.connection.state === 'live'
 }
 
-/** Listen's key, as on the desktop (the Listen key's default there). */
-export const LISTEN_KEY = 'ShiftRight'
-export const LISTEN_KEY_NAME = 'Right Shift'
-
 /**
- * Listen's key, as the desktop's HubLayer reads it: a tap turns Listen on or
+ * Listen's key (./listen-key.ts: Right Alt unless this browser set another),
+ * as the desktop's HubLayer reads it: a tap turns Listen on or
  * off; a hold turns it on and its release leaves it listening (hands-free).
  * A hold that turns into Shift+letter takes back the start it made. Needs a
  * live link, like the button.
@@ -209,16 +207,17 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
   const blocked = !supported ? 'Not here' : !live && !on && !failed ? 'No link' : null
   const word = blocked ?? voicePhaseWord(voice.phase, voice.muted)
   const agent = voiceAgentWord(voice.agent)
+  const keyName = listenKeyName(useListenKey())
   const said = `Voice agent, ${agent}: ${word}`
   const title = !supported
     ? 'Voice agent — this browser cannot run it here (it needs a secure page and a microphone).'
     : blocked
       ? `Voice agent, ${agent} — needs a live link to the desktop.`
       : failed
-        ? `${said} — ${voice.error ?? 'no more detail'}. Click (or tap ${LISTEN_KEY_NAME}) to try again.`
+        ? `${said} — ${voice.error ?? 'no more detail'}. Click (or tap ${keyName}) to try again.`
         : on
-          ? `${said}. Talk; a pause sends it. Click, tap ${LISTEN_KEY_NAME}, or say "that's all" to stop.`
-          : `${said}${voice.ended ? ` — ${voice.ended}` : ''}. Click (or tap ${LISTEN_KEY_NAME}) to talk to ${agent}, hands-free.`
+          ? `${said}. Talk; a pause sends it. Click, tap ${keyName}, or say "that's all" to stop.`
+          : `${said}${voice.ended ? ` — ${voice.ended}` : ''}. Click (or tap ${keyName}) to talk to ${agent}, hands-free.`
   return (
     <span
       className="dk-vagent"
@@ -234,7 +233,7 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
         aria-checked={on}
         className="dk-vagent__listen"
         title={title}
-        aria-label={`Voice agent (${LISTEN_KEY_NAME}), ${agent}: ${word}`}
+        aria-label={`Voice agent (${keyName}), ${agent}: ${word}`}
         disabled={!!blocked}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => toggleWebVoice()}
@@ -684,8 +683,10 @@ export function toggleComposer(): void {
  * The deck face's keyboard, from anywhere — including a terminal that has the
  * keys, which is the point of each of them:
  *
- *   Right Alt (or the key       D, the desktop's Dictate key: tap to start
+ *   Right Shift (or the key     D, the desktop's Dictate key: tap to start
  *   set in the … menu)          or stop, hold to talk while it is down
+ *   Right Alt (or the key       Listen, the voice agent: tap on or off, a
+ *   set in the … menu)          hold leaves it listening
  *   Esc, while D listens        throw the recording away
  *   Esc, while words wait       Undo the dictation's send
  *   Ctrl+Shift+G                the composer (the desktop's voice card key)
@@ -694,7 +695,7 @@ export function toggleComposer(): void {
  * D's key runs the desktop's gestures (../lib/talk-key.ts): a modifier only
  * counts pressed on its own, so Right Alt+C is not D, and it is never
  * swallowed, so AltGr characters still type on a UK layout. None of these
- * keys fire while the … menu is recording a new D key.
+ * keys fire while the … menu is recording a new key.
  */
 export function DeckKeys({
   view,
@@ -767,18 +768,21 @@ export function DeckKeys({
   const live = useLive()
   const liveRef = useRef(live)
   liveRef.current = live
+  const listenKey = useListenKey()
+  // The two stores refuse each other's key, so they never match; if they ever
+  // did (an old tab, a hand-edited store), D keeps it and Listen stands down.
   useEffect(
     () =>
-      dKey === LISTEN_KEY
+      dKey === listenKey
         ? undefined
         : attachTalkKey(
             window,
-            LISTEN_KEY,
+            listenKey,
             () => false,
             (intent) => applyListenKey(intent, liveRef.current),
             { cancel: cancelListenHold, suspended: dictationKeySuspended }
           ),
-    [dKey]
+    [dKey, listenKey]
   )
 
   useEffect(() => {
