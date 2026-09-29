@@ -251,7 +251,9 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => deckSheet.toggle('voice')}
       >
-        <AgentMark agent={voice.agent} />
+        <span className="dk-vagent__tile">
+          <AgentMark agent={voice.agent} />
+        </span>
         <Icon name="chevronDown" size={11} className="dk-vagent__chev" />
       </button>
       <DeckSheet id="voice" className="dk-sheet--voice" label="Voice agent">

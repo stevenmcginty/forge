@@ -16,9 +16,12 @@
  *             for 4.5:1, do not reach);
  *   rims      every control's edge at 3:1 or better (`--vb-rim`), so a button
  *             is a button without its fill;
- *   targets   44px: the dock's controls are 44px tall in the row that was
- *             already 44px, so the bar is no taller; up top, where the bar is
- *             40px, each control's hit area reaches 44px past its drawing;
+ *   geometry  the desktop bar's (hub/Composer.css, Dock.css, VoicePill.css):
+ *             a 36px row — the project 36px, the voice agent's capsule 34px,
+ *             the discs 32px — in a 24px-cornered card, so the web bar and the
+ *             desk's bar are one object. Steve asked for the desktop's look;
+ *             the 44px targets this bar had before gave way to it. Up top,
+ *             where the bar is 40px, each control's hit area reaches 44px;
  *   words     every state is a word and a shape; colour only agrees;
  *   motion    the deck's springs, only on transform and opacity, all of it
  *             gone under reduced motion.
@@ -28,7 +31,7 @@
  */
 
 .app[data-face='deck'] {
-  --vb-h: 44px;
+  --vb-h: 34px;
   --vb-ink: var(--text-primary);
   --vb-ink-2: color-mix(in srgb, var(--text-primary) 80%, var(--bg-panel));
   --vb-rim: color-mix(in srgb, var(--text-primary) 44%, transparent);
@@ -38,8 +41,26 @@
   --vb-fill-hover: color-mix(in srgb, var(--text-primary) 10%, transparent);
   --vb-accent-ink: var(--accent);
   --vb-warn-ink: var(--warn);
-  --vb-d: var(--info);
-  --vb-d-ink: var(--info);
+  --vb-d: var(--dk-dict-b);
+  --vb-d-ink: var(--dk-dict-ink);
+  /*
+   * The two voices, as the desktop colours them (DictationCue.css), split on the
+   * axis a red-green colourblind eye keeps — blue against yellow — and by
+   * lightness: dictation an indigo → violet → lavender ribbon with a near-white
+   * core; the agent a lime → citrus → pale one, lighter. The edge's canvas
+   * reads --edge-a/b/c and --edge-core (./DictationEdge.tsx).
+   */
+  --dk-dict-a: #6d7bff;
+  --dk-dict-b: #a58bff;
+  --dk-dict-c: #d3c4ff;
+  --dk-dict-core: #f1edff;
+  --dk-dict-ink: #b3a2ff;
+  --dk-dict-on: #0b0c0e;
+  --dk-dict-glow: color-mix(in srgb, var(--dk-dict-a) 30%, transparent);
+  --dk-agent-a: #b6f04a;
+  --dk-agent-b: #e3f36b;
+  --dk-agent-c: #f6ffc2;
+  --dk-agent-core: #fbffe8;
 }
 
 /* A light theme comes down from the paper, and its accents are tuned to glow on
@@ -51,7 +72,16 @@
   --vb-hair: color-mix(in srgb, var(--text-primary) 20%, transparent);
   --vb-accent-ink: color-mix(in srgb, var(--accent) 45%, var(--text-primary));
   --vb-warn-ink: color-mix(in srgb, var(--warn) 50%, var(--text-primary));
-  --vb-d-ink: color-mix(in srgb, var(--info) 60%, var(--text-primary));
+  --dk-dict-a: #3f4fe6;
+  --dk-dict-b: #5a32d8;
+  --dk-dict-c: #8b5cf6;
+  --dk-dict-core: #2a168f;
+  --dk-dict-ink: #4a2bd0;
+  --dk-dict-on: #ffffff;
+  --dk-agent-a: #6f9a00;
+  --dk-agent-b: #93a800;
+  --dk-agent-c: #b5c400;
+  --dk-agent-core: #4a6b00;
 }
 
 /* Words a screen reader hears and nobody sees. */
@@ -66,81 +96,74 @@
 
 /* --------------------------------------------------------------- the rail */
 
-/* Concentric: the 22px pills sit 6px inside, so the rail's corner is 28px. */
+/* The desktop bar's card (hub/Composer.css `.dock__composer.comp`): 24px
+   corners; its rim, glass and focus are deck.css's, restated from Dock.css. */
 .app[data-face='deck'] .dk-composer .composer__card,
 .app[data-face='deck'] .dk-bar-idle {
-  border-radius: 28px;
-}
-
-.app[data-face='deck'] .dk-composer .composer__card,
-.app[data-face='deck'] .dk-composer .composer__card:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--vb-rim));
+  border-radius: 24px;
 }
 
 .app[data-face='deck'] .dk-bar-idle {
-  border-color: var(--vb-rim);
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--glass-line-strong));
 }
 
-/* The caret is in the words: the whole rim says so, 2px of accent all round. */
-.app[data-face='deck'] .dk-composer .composer__card:has(.composer__input:focus) {
-  border-color: var(--accent);
-  box-shadow:
-    var(--glass-shadow),
-    0 0 0 1px var(--accent),
-    0 0 36px -10px var(--accent-glow),
-    inset 0 1px 0 var(--glass-hi);
-}
-
+/* The words: Dock.css's `.dock__field` — one 34px line, italic hint. */
 .app[data-face='deck'] .dk-composer .composer__input {
-  padding: 12px 2px;
-  font-size: 15px;
+  padding: 7px 2px;
+  font-size: 14.5px;
   line-height: 20px;
   color: var(--vb-ink);
 }
 
 .app[data-face='deck'] .dk-composer .composer__input::placeholder {
-  color: var(--vb-ink-2);
+  color: var(--text-muted);
 }
 
 .app[data-face='deck'] .dk-bar-idle__words {
   font-size: 13px;
-  color: var(--vb-ink-2);
+  color: var(--text-muted);
 }
 
-/* Attach and send: 44px discs, rims you can see. */
+/* Attach: a quiet 32px disc, like the desktop bar's small acts. */
 .app[data-face='deck'] .dk-composer .composer__tools > .composer__icon {
-  width: var(--vb-h);
-  height: var(--vb-h);
-  color: var(--vb-ink-2);
-  background: var(--vb-fill);
-  border: 1px solid var(--vb-rim);
+  width: 32px;
+  height: 32px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid transparent;
 }
 
 .app[data-face='deck'] .dk-composer .composer__tools > .composer__icon:hover:not(:disabled) {
-  color: var(--vb-ink);
-  background: var(--vb-fill-hover);
-  border-color: var(--vb-rim-hover);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--glass-line);
 }
 
+/* Send: the end disc (DictateButton.css `.dict`), 32px in every state. */
 .app[data-face='deck'] .dk-composer .composer__send {
-  width: var(--vb-h);
-  height: var(--vb-h);
+  width: 32px;
+  height: 32px;
+  margin-bottom: 1px;
+}
+
+.app[data-face='deck'] .dk-composer .composer__send:not(:disabled):hover {
+  transform: none;
 }
 
 .app[data-face='deck'] .dk-composer .composer__send[data-draft='false']:not(:disabled) {
-  color: var(--vb-ink-2);
-  border-color: var(--vb-rim);
+  color: var(--text-secondary);
+  border-color: var(--glass-line);
 }
 
 .app[data-face='deck'] .dk-composer .composer__send[data-draft='false']:not(:disabled):hover {
-  color: var(--vb-ink);
-  border-color: var(--vb-rim-hover);
+  color: var(--text-primary);
+  border-color: var(--glass-line-strong);
 }
 
 .app[data-face='deck'] .dk-composer .composer__send[data-stop] {
   width: auto;
-  padding: 0 16px;
-  font-size: 12px;
+  padding: 0 14px;
+  font-size: 11px;
 }
 
 .app[data-face='deck'] .dk-composer :is(.composer__icon, .composer__send):focus-visible {
@@ -195,11 +218,37 @@
   color: var(--vb-ink-2);
 }
 
+/* In the dock: the desktop bar's project, as its first word (hub/Composer.css
+   `.comp__project`) — a quiet 36px pill in the glass's own tint; the folder
+   alone carries the project's colour, as the desktop's dot does. */
 .app[data-face='deck'] .dk-dock .dk-voicebar .dk-project {
-  height: var(--vb-h);
-  max-width: 200px;
-  gap: 8px;
-  padding: 0 12px 0 15px;
+  height: 36px;
+  max-width: 190px;
+  gap: 7px;
+  padding: 0 10px 0 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.app[data-face='deck'] .dk-dock .dk-voicebar .dk-project:hover,
+.app[data-face='deck'] .dk-dock .dk-voicebar .dk-project[data-open='true'],
+:root[data-appearance='light'] .app[data-face='deck'] .dk-dock .dk-voicebar .dk-project:hover,
+:root[data-appearance='light'] .app[data-face='deck'] .dk-dock .dk-voicebar .dk-project[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.app[data-face='deck'] .dk-dock .dk-voicebar .dk-project__name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+@media (max-width: 1500px) {
+  .app[data-face='deck'] .dk-dock .dk-voicebar .dk-project {
+    max-width: 130px;
+  }
 }
 
 /* ------------------------------------------------------ the voice agent
@@ -331,6 +380,143 @@
 .app[data-face='deck'] .dk-vagent[data-blocked='true'] .dk-vagent__listen {
   cursor: not-allowed;
   color: var(--vb-ink-2);
+}
+
+/* ---------------------------------------- the voice agent, in the dock
+ *
+ * The desktop bar's Listen capsule (VoicePill.css `.vunit`, BrainPicker.css
+ * `.bpick-chip`): one round 34px capsule, Listen on the left, the agent's mark
+ * on a round tile with its chevron on the right, a hairline seam between.
+ * The glyph keeps its shape per state (VoiceAgentGlyph). The capsule's edge is
+ * the state's shape too: one ring at rest, the accent ring on, a second ring
+ * standing off it while it hears you, a heavier warn ring when it failed,
+ * dashed when it cannot start.
+ */
+
+.app[data-face='deck'] .dk-dock .dk-vagent {
+  align-items: center;
+  height: 34px;
+  padding: 2px 3px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__listen,
+.app[data-face='deck'] .dk-dock .dk-vagent__pick {
+  height: 30px;
+  border-radius: var(--r-full);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__listen {
+  width: auto;
+  padding: 0 7px 0 6px;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__pick {
+  width: auto;
+  padding: 0 6px 0 5px;
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__listen:hover:not(:disabled),
+.app[data-face='deck'] .dk-dock .dk-vagent__pick:hover,
+.app[data-face='deck'] .dk-dock .dk-vagent[data-open='true'] .dk-vagent__pick {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__pick::before {
+  left: -1px;
+  top: 6px;
+  bottom: 6px;
+  background: var(--glass-line);
+}
+
+/* The agent's mark on a small round tile, as the desktop's brain chip. Up in
+   the top bar the tile is not drawn: the mark stands alone there, as before. */
+.app[data-face='deck'] .dk-vagent__tile {
+  display: contents;
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__tile .dk-amark {
+  width: 12px;
+  height: 12px;
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent__chev {
+  color: var(--text-dim);
+}
+
+/* On: the whole capsule lights. */
+.app[data-face='deck'] .dk-dock .dk-vagent[data-on='true'] {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  box-shadow:
+    inset 0 0 0 1.5px var(--accent-line),
+    0 0 18px -4px var(--accent-glow);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent[data-on='true'] .dk-vagent__listen {
+  color: var(--vb-accent-ink);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent[data-on='true'] .dk-vagent__tile {
+  color: var(--vb-accent-ink);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* Hearing you: a second ring stands off the capsule (the desktop's "recording"). */
+.app[data-face='deck'] .dk-dock .dk-vagent[data-look='listening'] {
+  outline: 0;
+  box-shadow:
+    inset 0 0 0 1.5px var(--accent-line),
+    0 0 0 2px var(--accent-softer),
+    0 0 0 3.5px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 0 24px -3px var(--accent-glow);
+}
+
+/* On, but not hearing you (D has the mic): a step back, the rim single. */
+.app[data-face='deck'] .dk-dock .dk-vagent[data-look='muted'] {
+  background: var(--accent-softer);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent[data-look='error'] {
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  box-shadow: inset 0 0 0 2px var(--vb-warn-ink);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent[data-look='error'] .dk-vagent__listen {
+  color: var(--vb-warn-ink);
+}
+
+.app[data-face='deck'] .dk-dock .dk-vagent[data-blocked='true'] {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed var(--vb-rim-hover);
+  outline-offset: -1px;
 }
 
 /* ------------------------------------------------------ the voice glyph */
@@ -484,24 +670,26 @@
 /* ----------------------------------------------------------------- the mic
  *
  * D, on screen: the bar's end button while the box is empty or a dictation
- * runs (Composer's micPrimary), Send once there are words. A disc like Send,
- * in D's own tint (the theme's info), apart from the voice agent's accent —
- * and every state its own shape: a mic to start, a stop square while it
- * listens, an arc turning while the desktop writes it down, the arrow to send.
+ * runs (Composer's micPrimary), Send once there are words — the desktop bar's
+ * end disc (DictateButton.css `.dict`): 32px in every state, in dictation's
+ * violet, apart from the voice agent's accent, and every state its own shape:
+ * a mic to start, a stop square while it listens, an arc while the desktop
+ * writes it down, the arrow to send. Still, on purpose: the bar's edge carries
+ * the one moving dictation cue (./BarCue.tsx), so the arc does not turn.
  */
 
 .app[data-face='deck'] .dk-composer .composer__mic {
   --d: var(--vb-d);
   grid-area: send;
   align-self: center;
-  width: var(--vb-h);
-  min-width: var(--vb-h);
-  height: var(--vb-h);
-  margin: 0;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  margin: 0 0 1px;
   padding: 0;
   border-radius: var(--r-full);
   color: var(--vb-d-ink);
-  background: color-mix(in srgb, var(--d) 10%, transparent);
+  background: color-mix(in srgb, var(--d) 18%, transparent);
   border: 1px solid color-mix(in srgb, var(--d) 75%, transparent);
   box-shadow: none;
   animation: none;
@@ -509,7 +697,7 @@
 
 .app[data-face='deck'] .dk-composer .composer__mic:hover:not(:disabled) {
   color: var(--vb-d-ink);
-  background: color-mix(in srgb, var(--d) 18%, transparent);
+  background: color-mix(in srgb, var(--d) 28%, transparent);
   border-color: var(--d);
   box-shadow: none;
   transform: none;
@@ -520,37 +708,39 @@
   outline-offset: 2px;
 }
 
+/* Recording: filled, a stop square, a steady ring. */
 .app[data-face='deck'] .dk-composer .composer__mic[data-phase='recording'],
 .app[data-face='deck'] .dk-composer .composer__mic[data-phase='recording']:hover:not(:disabled) {
-  width: var(--vb-h);
-  min-width: var(--vb-h);
+  width: 32px;
+  min-width: 32px;
   padding: 0;
-  color: var(--text-on-accent, #fff);
-  background: var(--d);
+  color: var(--dk-dict-on);
+  background: linear-gradient(135deg, var(--dk-dict-a), var(--d));
   border-color: var(--d);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--d) 22%, transparent);
-  animation: vb-d-ring 1.6s var(--ease-out) infinite;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--d) 28%, transparent);
+  animation: none;
 }
 
+/* Transcribing: the full rim, the arc inside it. */
 .app[data-face='deck'] .dk-composer .composer__mic[data-phase='transcribing'] {
-  width: var(--vb-h);
-  min-width: var(--vb-h);
+  width: 32px;
+  min-width: 32px;
   color: var(--vb-d-ink);
-  background: color-mix(in srgb, var(--d) 10%, transparent);
+  background: color-mix(in srgb, var(--d) 18%, transparent);
   border-color: var(--d);
   box-shadow: none;
   animation: none;
 }
 
 .app[data-face='deck'] .dk-composer .composer__mic-stop {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 3px;
   background: currentColor;
 }
 
 .app[data-face='deck'] .dk-composer .composer__mic-turn {
-  animation: vb-turn 0.9s linear infinite;
+  animation: none;
 }
 
 /* Cannot start: dashed, like the voice agent, the mic still readable. */
@@ -559,12 +749,6 @@
   color: var(--vb-ink-2);
   background: transparent;
   border: 1px dashed var(--vb-rim-hover);
-}
-
-@keyframes vb-d-ring {
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--d) 10%, transparent);
-  }
 }
 
 /* -------------------------------------------------------- in the top bar
@@ -1265,6 +1449,198 @@
   color: var(--vb-warn-ink);
 }
 
+/* -------------------------------------------------------------- dictating
+ *
+ * The desktop bar's dictation (hub/Composer.css "dictating", DictationCue.css):
+ * from the press of D or the mic the whole bar turns dictation violet — a faint
+ * tint in the card — and its outline becomes the synthesizer (./BarCue.tsx,
+ * ./DictationEdge.tsx), the one moving cue, alive with the voice. The Listen
+ * agent's turn is the same idea, lesser: a fainter tint in its lime. The state
+ * itself is the word ("Listening") and the disc's shape, never the colour alone.
+ */
+
+/* What the canvas reads: lead, companion, highlight and the core line. */
+.app[data-face='deck'] .dk-edge {
+  --edge-a: var(--dk-dict-a);
+  --edge-b: var(--dk-dict-b);
+  --edge-c: var(--dk-dict-c);
+  --edge-core: var(--dk-dict-core);
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  animation: vb-edge-in var(--dur-med) var(--ease-out) both;
+}
+
+.app[data-face='deck'] .dk-edge[data-variant='agent'] {
+  --edge-a: var(--dk-agent-a);
+  --edge-b: var(--dk-agent-b);
+  --edge-c: var(--dk-agent-c);
+  --edge-core: var(--dk-agent-core);
+}
+
+.app[data-face='deck'] .dk-edge[data-closing='true'] {
+  animation: vb-edge-out 260ms var(--ease-out) both;
+}
+
+@keyframes vb-edge-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes vb-edge-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* The card, dictating: the rim gives way to the ribbon; a violet tint within. */
+.app[data-face='deck'] .dk-composer .composer__card:has(> .dk-edge[data-variant='dictation']) {
+  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dk-dict-b) 11%, var(--bg-panel)),
+    color-mix(in srgb, var(--dk-dict-a) 6%, var(--bg-panel))
+  );
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 var(--glass-hi),
+    inset 0 0 22px -10px var(--dk-dict-glow);
+}
+
+/* The agent's turn: the same clean tint in his own colour, fainter. */
+.app[data-face='deck'] .dk-composer .composer__card:has(> .dk-edge[data-variant='agent']) {
+  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dk-agent-a) 6%, var(--bg-panel)),
+    color-mix(in srgb, var(--dk-agent-a) 3%, var(--bg-panel))
+  );
+}
+
+/* The hairline of light along the top edge, in the dictation colour too. */
+.app[data-face='deck'] .dk-composer .composer__card:has(> .dk-edge[data-variant='dictation'])::before {
+  background: linear-gradient(90deg, transparent, var(--dk-dict-core), transparent);
+}
+
+/* The word, where the placeholder was: bold, in dictation's ink, and quieter
+   after it how to stop. Gone the moment the box holds words. */
+.app[data-face='deck'] .dk-micword {
+  grid-area: field;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  align-self: end;
+  gap: 8px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+  color: var(--dk-dict-ink);
+  animation: vb-micword-in var(--dur-glide) var(--spring-glide) both;
+}
+
+.app[data-face='deck'] .dk-composer .composer__input:not(:placeholder-shown) ~ .dk-micword {
+  display: none;
+}
+
+.app[data-face='deck'] .dk-composer .composer__card:has(> .dk-micword) .composer__input::placeholder {
+  color: transparent;
+}
+
+/* The word is in the bar, so the line above shows only Cancel and the clock
+   (its status still reaches a screen reader); with words already in the box,
+   the line says it instead. */
+.app[data-face='deck'] .dk-composer .composer__card:has(> .composer__input:placeholder-shown ~ .dk-micword) .composer__voice-label {
+  color: transparent;
+}
+
+.app[data-face='deck'] .dk-micword__word {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.app[data-face='deck'] .dk-micword__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-micword__key {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--dk-dict-on);
+  background: linear-gradient(135deg, var(--dk-dict-a), var(--dk-dict-b));
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--dk-dict-on) 22%, transparent);
+}
+
+@keyframes vb-micword-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, 0, 0);
+  }
+}
+
+/* The dictation's own line above the bar (Cancel, the clock, Undo) in the
+   desktop bar's small type; its meter goes — the edge is the meter now. */
+.app[data-face='deck'] .dk-composer .composer__voice {
+  min-height: 30px;
+  gap: 10px;
+  padding: 0 4px;
+  font-size: 12.5px;
+}
+
+.app[data-face='deck'] .dk-composer .composer__voice .voicemeter {
+  display: none;
+}
+
+.app[data-face='deck'] .dk-composer .composer__voice-label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--dk-dict-ink);
+}
+
+.app[data-face='deck'] .dk-composer .composer__voice-clock {
+  font-size: 12px;
+}
+
+.app[data-face='deck'] .dk-composer .composer__voice-btn {
+  min-height: 26px;
+  min-width: 0;
+  padding: 0 11px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-color: var(--glass-line);
+}
+
+/* One moving cue at a time: while the edge runs, the voice agent's glyph
+   keeps its shape and holds still. */
+.app[data-face='deck'] .dk-composer .composer__card:has(> .dk-edge) .dk-vglyph * {
+  animation: none;
+}
+
 /* ------------------------------------------------------------ still */
 
 @media (prefers-reduced-motion: reduce) {
@@ -1272,13 +1648,23 @@
   .app[data-face='deck'] .dk-vline,
   .app[data-face='deck'] .dk-vline__amark,
   .app[data-face='deck'] .dk-composer .composer__mic,
-  .app[data-face='deck'] .dk-composer .composer__mic-turn {
+  .app[data-face='deck'] .dk-composer .composer__mic-turn,
+  .app[data-face='deck'] .dk-edge,
+  .app[data-face='deck'] .dk-micword {
     animation: none !important;
   }
 }
 
 :root[data-reduced-motion='true']
   .app[data-face='deck']
-  :is(.dk-vglyph *, .dk-vline, .dk-vline__amark, .dk-composer .composer__mic, .dk-composer .composer__mic-turn) {
+  :is(
+    .dk-vglyph *,
+    .dk-vline,
+    .dk-vline__amark,
+    .dk-composer .composer__mic,
+    .dk-composer .composer__mic-turn,
+    .dk-edge,
+    .dk-micword
+  ) {
   animation: none !important;
 }

@@ -174,6 +174,20 @@ export function usePaneUsage(paneId: string | null, status: PaneStatus | undefin
   return footer === null ? NONE : { context: { usedPct: footer, from: 'footer' }, limits: null }
 }
 
+/**
+ * The pane's latest `usage` frame as the desktop sent it, or nothing. The
+ * deck's agent picker reads the parts the ring has no use for — every
+ * plan-limit window by its true length, the model and effort the CLI reports,
+ * the session's cost, and when it was true.
+ */
+export function usePaneUsageFrame(paneId: string | null): WebUsageFrame | undefined {
+  return useSyncExternalStore(
+    subscribe,
+    () => (paneId ? frames.get(paneId) : undefined),
+    () => undefined
+  )
+}
+
 /** How loud a percentage is: neutral, then amber from 80, then red from 92. */
 export function usageLevel(usedPct: number): 'calm' | 'warn' | 'full' {
   return usedPct >= 92 ? 'full' : usedPct >= 80 ? 'warn' : 'calm'

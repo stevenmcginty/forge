@@ -52,6 +52,8 @@ const IDLE_VOICE: VoiceState = { phase: 'idle' }
 const MAX_GROW_PX = 196
 /** The phone's one-line box: 24px of line and 15px above and below it. */
 const PHONE_ONE_LINE_PX = 58
+/** The deck bar's one line: the desktop bar's field (Dock.css `.dock__field`). */
+const DECK_LINE_PX = 34
 
 /** A press on the mic shorter than this is a tap (toggle); longer is hold-to-talk. */
 export const HOLD_MS = 300
@@ -131,7 +133,9 @@ export function Composer({
   bar = false,
   voiceKey,
   listen,
-  listenLine
+  listenLine,
+  edge,
+  picker
 }: {
   draft: string
   disabled: boolean
@@ -232,6 +236,17 @@ export function Composer({
    * no dictation runs; the first letter typed, or a dictation, takes it back.
    */
   listenLine?: ReactNode
+  /**
+   * The deck bar only: its moving cue — the synth edge round the card and the
+   * "Listening" word (web/src/deck/BarCue.tsx) — drawn inside the card.
+   */
+  edge?: ReactNode
+  /**
+   * The deck bar only: the agent's model / effort / mode chip and the usage
+   * line under the row (web/src/deck/AgentPicker.tsx), in place of the picks
+   * row, which then has nothing to show.
+   */
+  picker?: ReactNode
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -399,14 +414,15 @@ export function Composer({
     const el = field.current
     if (!el) return
     el.style.height = '0px'
-    const next = Math.min(Math.max(el.scrollHeight, 44), MAX_GROW_PX)
+    // The deck's bar is the desktop bar's height: a 34px line, not the 44px box.
+    const next = Math.min(Math.max(el.scrollHeight, bar && !mobile ? DECK_LINE_PX : 44), MAX_GROW_PX)
     el.style.height = `${next}px`
     el.style.overflowY = el.scrollHeight > MAX_GROW_PX ? 'auto' : 'hidden'
     // The phone's box is a pill on one line and a rounded sheet past it: a
     // pill's ends on a box eight lines tall are two half-moons.
     const box = el.parentElement
     if (box?.classList.contains('composer__field')) box.dataset.tall = next > PHONE_ONE_LINE_PX ? 'true' : 'false'
-  }, [draft, mobile])
+  }, [draft, mobile, bar])
 
   const addFiles = useCallback((incoming: File[]) => {
     if (incoming.length) setFiles((current) => [...current, ...incoming])
@@ -1065,6 +1081,8 @@ export function Composer({
               dictation passes through, so a hold keeps its pointer. */}
           {micPrimary ? mic : null}
         </div>
+        {bar ? picker : null}
+        {bar ? edge : null}
       </div>
     </form>
   )

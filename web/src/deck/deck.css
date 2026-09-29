@@ -22,7 +22,7 @@
   --dk-dock-clear: calc(
     var(--dk-dock-h, calc(var(--dock-h) + 8px + var(--dk-strip-h))) + var(--dock-bottom) + var(--dk-gut)
   );
-  --dk-bar-w: clamp(560px, 60vw, 1040px);
+  --dk-bar-w: clamp(600px, 72vw, 1240px);
   position: relative;
   isolation: isolate;
   background: var(--bg-base);
@@ -518,9 +518,10 @@
 /* --------------------------------------------------------------- the bar
  *
  * Dock.css's `.dock__composer` glass and rim, laid out as hub/Composer.css
- * lays the deck's bar: one row — project, voice agent, the words, attach,
- * and the mic (or Send, once there are words). The picks (model, effort, mode) and the terminal keys fold into a row above
- * it that opens while you are in the bar, so at rest the dock is one line.
+ * lays the deck's bar: one row — project, voice agent, the words, the agent
+ * picker's chip, attach, and the mic (or Send, once there are words) — and the
+ * usage line under it once the desktop has numbers. The terminal keys fold into
+ * a row above it, so at rest the dock is one line.
  */
 .app[data-face='deck'] .dk-composer .composer__card {
   position: relative;
@@ -547,6 +548,17 @@
   cursor: text;
 }
 
+/* With the agent picker (./AgentPicker.tsx): its chip sits beside the words, as
+   on the desktop, and the usage line runs under the whole row. */
+.app[data-face='deck'] .dk-composer .composer__card:has(> .dk-apick-slot) {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas:
+    'files files files files files'
+    'sub sub sub sub sub'
+    'lead field pick attach send'
+    'strip strip strip strip strip';
+}
+
 /* A hairline of light along the top edge: the one lit object in the foreground. */
 .app[data-face='deck'] .dk-composer .composer__card::before {
   content: '';
@@ -569,16 +581,6 @@
     inset 0 1px 0 var(--glass-hi);
 }
 
-/* Listening: the rim lights. */
-.app[data-face='deck'] .dk-composer .composer[data-voice='recording'] .composer__card {
-  border-color: var(--accent-line);
-  box-shadow:
-    var(--glass-shadow),
-    0 0 0 3px var(--accent-softer),
-    0 0 28px -4px var(--accent-glow),
-    inset 0 1px 0 var(--glass-hi);
-}
-
 /* Nothing can be sent: the rim goes dashed, the reason is in the box. */
 .app[data-face='deck'] .dk-composer .composer[data-disabled='true'] .composer__card {
   border-style: dashed;
@@ -592,7 +594,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  height: 44px;
+  height: 36px;
 }
 
 .app[data-face='deck'] .dk-composer .composer__input {
@@ -615,7 +617,7 @@
 }
 
 .app[data-face='deck'] .dk-composer .composer[data-voice='recording'] .composer__input::placeholder {
-  color: var(--accent);
+  color: var(--dk-dict-ink);
 }
 
 .app[data-face='deck'] .dk-composer .composer__attach {

@@ -1,5 +1,14 @@
 # Handoff
 
+## Forge Web desktop-browser bar now looks like the desktop agent bar (2026-09-29, NOT committed, web NOT rebuilt)
+
+- **Asked (Steve):** copy the desktop agent bar onto the browser (deck face, not the phone); "copy it where we can", not like-for-like.
+- **Built (designer agent, refuter re-ran the checks):** `web/src/deck/deck.css` + `voicebar.css` (desktop bar size: `clamp(600px, 72vw, 1240px)`, 24px corners, 34-36px controls, violet dictation tint and "Listening" word), `DictationEdge.tsx` (canvas ribbon copy, `dk-edge`; violet dictating, lime agent, loop runs only while shown), `BarCue.tsx` (picks the one cue), `AgentPicker.tsx` + `agentpicker.css` (`dk-apick` chip, usage strip, model/effort/mode menu, same section colours), plus `Composer.tsx` (`edge`, `picker` props, bar only), `SessionComposer.tsx` (deck only), `lib/usage.ts` (`usePaneUsageFrame`), `VoiceBar.tsx` (round agent tile). Phone face untouched (refuter checked scoping).
+- **Checked:** typecheck 0, lint:hooks 0, agent-bar:check 43/0, web:usage passes. Seen only in a static harness at 1600px (dark, light, idle, dictating, agent, menu open); not in the live app, with a real mic, below 1600px, or in reduced motion.
+- **Fixed after the refuter:** the Mode rows were hidden on Codex when the screen showed no mode; now shown whenever the agent has its own mode pop-up (`AgentPicker.tsx` `showMode`).
+- **Known, left:** controls are 34-36px (the web's phone size is 44px); a 60 s tick keeps "resets in" true (`useNow`); a Codex frame with only a monthly window shows no strip (`publishUsage` drops it); the desktop's prompt palette and caption rail are not copied. The impeccable hook flags `var(--spring-glide)`: false positive (the curve never passes 1), same as below.
+- **To see it:** needs `npm run web:build` when Steve is not remote (it drops the phone to the PIN screen).
+
 ## Agent bar: model + effort + mode picker and usage strip (2026-09-29, NOT committed, NOT restarted)
 
 - **Asked (Steve):** a small button in the desktop agent bar to pick the pane's model (Sonnet 5.5 came out today) and effort; then a wider bar whose picker shows the current model, usage, and progress to plan limits; then "copy the voice agent picker, pop up, no sideways scroll".
@@ -15,7 +24,7 @@
 - **Asked (Steve):** he could not see that he was dictating (only the mic button changed). Wanted the whole agent bar to change colour, a "Listening" word, and the outer edge to synthesize with his voice; then turned down, smoother (no "hair-like" bristles), and a lesser version for agent voice mode.
 - **Built (designer agent, verified by typecheck 0, lint:hooks 0, headless screenshots; NOT seen with a real mic):** `src/components/DictationEdge.tsx` (canvas ribbon round the bar, levels smoothed at 120 Hz), `DictationCue.tsx` (decides where the one cue shows: bar first; pane frame/strip and top band only with no bar), `DictationCueView.tsx`, `DictationCue.css` (tokens), `Composer.tsx/.css` (`data-mic`, `data-edge`, chip, review store), `DictateButton.css`, `SynthesizerIndicator.tsx` (bar size props), `barDictation.ts` (cue stores). Dictation = indigo to violet (dark `#6d7bff`/`#a58bff`/`#d3c4ff`); agent voice = lime, half height, slower. Blue vs yellow is the axis Steve's colour vision keeps (checked under deuteranopia and protanopia).
 - **Rules to keep:** one animated cue at a time; reach ~8 px and glow low so controls near the bar stay usable; every state has a word and a shape. The impeccable hook flags `var(--spring-glide)` as bounce: false positive (the curve never passes 1), left as is; Steve was asked whether to add the ignore and has not answered.
-- **"Sent" flash (same day):** when Enter goes into a pane (`terminalHost.submit` calls `announcePaneSent`, `src/lib/paneSent.ts`), a comet spins once round that pane's edge (and its Wall tile) in ~0.76 s, lime if the agent sent it, else violet. Pure CSS on one pseudo-element via a `data-sent` attribute; nothing runs between sends (Steve asked for it cheap). Not measured for CPU/memory, not seen live.
+- **"Sent" flash (same day):** when Enter goes into a pane (`terminalHost.submit` calls `announcePaneSent`, `src/lib/paneSent.ts`), a comet spins twice round that pane's edge (and its Wall tile) in ~1.3 s (was once, 0.76 s; Steve: "not as good as the agent bar", tried two laps first), lime if the agent sent it, else violet. Pure CSS on one pseudo-element via a `data-sent` attribute; nothing runs between sends (Steve asked for it cheap). Not measured for CPU/memory, not seen live.
 - **Open:** the agent-mode stop button is still violet (offered "fix the button"); reduced-motion ring, frame rate and the no-bar pane fallback are unchecked.
 
 ## Dictate key now sends (2026-09-29, pushed 4929c41)

@@ -18,6 +18,8 @@ import {
 } from '@shared/agents'
 import { paneNameInTab } from '@shared/workspace'
 import { badgeColor, isShellProfile, resolveProfile } from '@/lib/agents'
+import { DeckAgentPicker } from '../deck/AgentPicker'
+import { DeckBarCue } from '../deck/BarCue'
 import { toggleDeckDictation } from '../deck/dictation'
 import { dictationKeyName, useDictationKey } from '../deck/dictation-key'
 import { noKeys, optionKeys, readPaneAsk, sendAnswerKeys } from '../lib/answer-send'
@@ -446,6 +448,9 @@ export function SessionComposer({
     setVoice(IDLE)
     setFocusSignal((n) => n + 1)
   }, [setVoice])
+
+  /** The open microphone's loudness, read live by the deck bar's edge each frame. */
+  const readMic = useCallback(() => levelRef.current?.level() ?? 0, [])
 
   /** Let go of the microphone and its meter, without deciding what happens to the audio. */
   const dropLevel = useCallback(() => {
@@ -911,6 +916,32 @@ export function SessionComposer({
       />
     ) : undefined
 
+  /*
+   * The deck's bar carries the desktop bar's picker instead of the picks row:
+   * one chip in the row, the usage line under it, one menu for all three. The
+   * picks go out through the same sendModel / sendEffort / sendMode.
+   */
+  const deck = face === 'deck'
+  const deckPicker =
+    deck && isAgent && profile && paneId && leaf && (roster.length || levels.length || ladder.length) ? (
+      <DeckAgentPicker
+        paneId={paneId}
+        paneName={paneName ?? paneNameInTab(tab, leaf.id)}
+        agentName={profile.name}
+        command={profile.command}
+        models={roster}
+        levels={levels}
+        modes={ladder}
+        status={status}
+        currentModelId={currentModelId}
+        rung={rung}
+        disabled={!canType}
+        onModel={(id) => void sendModel(id)}
+        onEffort={(level) => void sendEffort(level)}
+        onMode={(mode) => void sendMode(mode)}
+      />
+    ) : undefined
+
   return (
     // `data-view` is the face on screen, defaulted the way the pane defaults
     // it, so the phone's key row and status strip trade places on the same face
@@ -967,14 +998,14 @@ export function SessionComposer({
         onRaw={sendRaw}
         onStop={canStop ? sendStop : undefined}
         stopping={stopping}
-        models={roster}
+        models={deck ? undefined : roster}
         currentModelId={currentModelId}
-        onModel={roster.length ? (id) => void sendModel(id) : undefined}
-        effortLevels={levels}
-        onEffort={levels.length ? (level) => void sendEffort(level) : undefined}
-        modes={ladder}
+        onModel={!deck && roster.length ? (id) => void sendModel(id) : undefined}
+        effortLevels={deck ? undefined : levels}
+        onEffort={!deck && levels.length ? (level) => void sendEffort(level) : undefined}
+        modes={deck ? undefined : ladder}
         currentModeId={currentModeId}
-        onMode={ladder.length ? (mode) => void sendMode(mode) : undefined}
+        onMode={!deck && ladder.length ? (mode) => void sendMode(mode) : undefined}
         onFocus={takePane}
         autoFocus={false}
         focusSignal={focusSignal}
@@ -1002,6 +1033,12 @@ export function SessionComposer({
         voiceKey={face === 'deck' ? dictationKeyName(dKey) : undefined}
         listen={face === 'deck' ? undefined : <PhoneListen />}
         listenLine={face === 'deck' ? undefined : <PhoneListenLine />}
+        picker={deckPicker}
+        edge={
+          deck ? (
+            <DeckBarCue voice={voice} readMic={readMic} docked={Boolean(lead)} keyName={dictationKeyName(dKey)} />
+          ) : undefined
+        }
       />
     </div>
   )

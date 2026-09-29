@@ -1,0 +1,755 @@
+/*
+ * The deck bar's agent picker (./AgentPicker.tsx): the desktop bar's `apick`
+ * chip, usage line and menu (src/components/hub/ModelPicker.css, with the rows
+ * of BrainPicker.css), redrawn under `dk-` names. The menu is portalled to
+ * <body>, outside `.app[data-face='deck']`, so its rules hang off its own
+ * `.dk-apick` root rather than the deck's; the phone never renders one.
+ *
+ * Each section has its own colour, cool at the top to warm lower down: plan
+ * limits blue, this session cyan, model violet, effort gold, mode pink — the
+ * blue-to-yellow run a red-green colourblind eye still sees, no two neighbours
+ * in one family. The colour is the section's identity only; a usage level is
+ * its word and its striped amber / hatched red fill; the pick in force is a
+ * bar, a haloed tile, a bold name, a tick and the word "current".
+ */
+
+.dk-apick,
+.dk-ustrip,
+.dk-apick-chip {
+  --apick-plan: #6ea8ff;
+  --apick-session: #4dd2e6;
+  --apick-model: #b69cff;
+  --apick-effort: #f2c14e;
+  --apick-mode: #ff8fc6;
+  --apick-on: #111215;
+  /* Usage levels, not sections: never on a label or a tile. */
+  --apick-warn: var(--warn);
+  --apick-full: #e5392a;
+}
+
+:root[data-appearance='light'] :is(.dk-apick, .dk-ustrip, .dk-apick-chip) {
+  --apick-plan: #1f5fd6;
+  --apick-session: #07748a;
+  --apick-model: #6a3fd6;
+  --apick-effort: #8a6300;
+  --apick-mode: #b8337a;
+  --apick-on: #ffffff;
+  --apick-warn: #c98200;
+  --apick-full: #ee5646;
+}
+
+:is(.dk-apick__section, .dk-apick__group, .dk-ustrip__item)[data-sec='plan'] {
+  --sec: var(--apick-plan);
+}
+:is(.dk-apick__section, .dk-apick__group, .dk-ustrip__item)[data-sec='session'] {
+  --sec: var(--apick-session);
+}
+.dk-apick__group[data-sec='model'] {
+  --sec: var(--apick-model);
+}
+.dk-apick__group[data-sec='effort'] {
+  --sec: var(--apick-effort);
+}
+.dk-apick__group[data-sec='mode'] {
+  --sec: var(--apick-mode);
+}
+
+/* ------------------------------------------------------------------ chip */
+
+/* The chip and its usage toggle share one cell of the bar's grid, beside the words. */
+.dk-apick-slot {
+  grid-area: pick;
+  display: inline-flex;
+  align-items: center;
+  align-self: end;
+  min-width: 0;
+  height: 34px;
+}
+
+.dk-apick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 190px;
+  height: 26px;
+  padding: 0 7px 0 4px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--line-hairline);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.dk-apick-chip:hover:not(:disabled),
+.dk-apick-chip[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.dk-apick-chip:disabled {
+  cursor: default;
+  border-style: dashed;
+}
+
+.dk-apick-chip:focus-visible,
+.dk-apick-toggle:focus-visible,
+.dk-ustrip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The model's letter, in the Model section's violet. */
+.dk-apick-chip__tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--apick-model);
+  background: color-mix(in srgb, var(--apick-model) 16%, transparent);
+}
+
+.dk-apick-chip__face {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dk-apick-chip__chev {
+  flex: none;
+  color: var(--text-dim);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.dk-apick-chip:hover .dk-apick-chip__chev {
+  color: var(--text-secondary);
+}
+
+.dk-apick-chip[data-open='true'] .dk-apick-chip__chev {
+  transform: rotate(180deg);
+  color: var(--text-primary);
+}
+
+/* Beside the chip: down tucks the usage line away, up brings it back. */
+.dk-apick-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 26px;
+  margin-left: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.dk-apick-toggle:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.dk-apick-toggle[data-shown='false'] .dk-apick-toggle__chev {
+  transform: rotate(180deg);
+}
+
+/* ------------------------------------------------------------ the strip */
+
+/*
+ * Under the row, the bar's instrument line: a hairline, then each reading as a
+ * word, a small bar and its number. Quiet by default, in the ink near a limit.
+ * Its own container, so as the bar narrows the least pressing readings go first.
+ */
+.dk-ustrip {
+  grid-area: strip;
+  container: dk-ustrip / inline-size;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  height: 24px;
+  margin: 5px 2px 0 6px;
+  padding: 3px 6px 0 8px;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid var(--glass-line);
+  border-radius: 0 0 16px 16px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.dk-ustrip:hover,
+.dk-ustrip[data-open='true'] {
+  color: var(--text-secondary);
+}
+
+.dk-ustrip__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+}
+
+.dk-ustrip__label {
+  color: var(--text-dim);
+}
+
+.dk-ustrip:hover .dk-ustrip__label,
+.dk-ustrip[data-open='true'] .dk-ustrip__label {
+  color: var(--text-muted);
+}
+
+.dk-ustrip__bar {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 34px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--sec, var(--text-primary)) 16%, transparent);
+}
+
+.dk-ustrip__bar > span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: var(--sec, currentColor);
+}
+
+.dk-ustrip__pct {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dk-ustrip__item[data-level='warn'],
+.dk-ustrip__item[data-level='full'] {
+  color: var(--text-primary);
+}
+
+.dk-ustrip__word {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dk-ustrip__reset {
+  color: var(--text-dim);
+}
+
+.dk-ustrip__reset::before {
+  content: '· ';
+}
+
+.dk-ustrip__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+  color: var(--text-dim);
+}
+
+.dk-ustrip:hover .dk-ustrip__more,
+.dk-ustrip[data-open='true'] .dk-ustrip__more {
+  color: var(--text-secondary);
+}
+
+.dk-ustrip__chev {
+  transform: rotate(180deg);
+}
+
+.dk-ustrip[data-open='true'] .dk-ustrip__chev {
+  transform: none;
+}
+
+/* Narrowing: reset times, then cost and the word "Details", then the other
+   windows, then context. The most-used window always stays. */
+@container dk-ustrip (max-width: 700px) {
+  .dk-ustrip__reset {
+    display: none;
+  }
+}
+
+@container dk-ustrip (max-width: 540px) {
+  .dk-ustrip__item[data-rank='3'],
+  .dk-ustrip__more-word {
+    display: none;
+  }
+}
+
+@container dk-ustrip (max-width: 420px) {
+  .dk-ustrip__item[data-rank='2'] {
+    display: none;
+  }
+}
+
+/* Near the end the fill leaves its section colour: amber stripes from 80%
+   ("near limit"), a denser dark-red hatch with a bright end cap from 92%
+   ("almost full", "full") — the same thresholds as the words, and a shape as
+   well as a colour. */
+:is(.dk-apick__meter, .dk-ustrip__item)[data-level='warn'] :is(.dk-apick__meter-bar, .dk-ustrip__bar) > span {
+  background-color: var(--apick-warn);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--bg-panel-raised) 45%, transparent) 3px 5px
+  );
+}
+
+:is(.dk-apick__meter, .dk-ustrip__item)[data-level='full'] :is(.dk-apick__meter-bar, .dk-ustrip__bar) > span {
+  background-color: var(--apick-full);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 2px,
+    color-mix(in srgb, var(--bg-panel-raised) 55%, transparent) 2px 4px
+  );
+  box-shadow: inset -2px 0 0 var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ menu */
+
+/* The popover scrolls up and down only; nothing in it may push it sideways. */
+.popover:has(> .dk-apick) {
+  overflow: hidden;
+  padding: 0;
+  animation-name: dk-apick-rise;
+}
+
+/* It rises out of the bar (Popover's own entrance drops). A move only, never a
+   scale: Popover measures the panel as it mounts. */
+@keyframes dk-apick-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dk-apick {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--s-3);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.dk-apick__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  min-width: 0;
+  padding: var(--s-2) var(--s-4) var(--s-4) 6px;
+}
+
+.dk-apick__eyebrow {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dk-apick__hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.dk-apick__section,
+.dk-apick__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* A section's head: a short upright bar and the name in its colour, and a
+   hairline rule in the same colour that fades out to the right. */
+.dk-apick__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  min-width: 0;
+  margin-bottom: 3px;
+  padding: var(--s-2) var(--s-4) var(--s-2) 6px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: linear-gradient(to right, color-mix(in srgb, var(--sec, var(--text-dim)) 50%, transparent), transparent 85%)
+    6px 100% / calc(100% - 6px) 1px no-repeat;
+}
+
+.dk-apick__label-name {
+  flex: none;
+  color: var(--sec, var(--text-dim));
+}
+
+.dk-apick__label-name::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 9px;
+  margin-right: 7px;
+  vertical-align: -1px;
+  border-radius: 2px;
+  background: var(--sec, currentColor);
+}
+
+.dk-apick__label-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-dim);
+}
+
+/* The coloured rules divide the sections; a grey line too would double them. Its room stays. */
+.dk-apick__divider {
+  flex: none;
+  height: 0;
+  margin: var(--s-2) 0;
+}
+
+/* A reading: name and "% used" on one line, a bar, then when it resets. */
+.dk-apick__meter {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px var(--s-4) 8px 6px;
+}
+
+.dk-apick__meter-head,
+.dk-apick__stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+.dk-apick__stat {
+  padding: 6px var(--s-4) 8px 6px;
+}
+
+.dk-apick__meter-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.dk-apick__meter-pct,
+.dk-apick__stat-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.dk-apick__stat-value {
+  font-size: var(--t-md);
+  color: var(--text-primary);
+}
+
+/* "near limit" / "almost full" / "full": the word is the signal. */
+.dk-apick__meter-word {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.dk-apick__meter-bar {
+  position: relative;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--sec, var(--text-primary)) 16%, transparent);
+}
+
+.dk-apick__meter-bar > span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: var(--sec, var(--text-secondary));
+}
+
+.dk-apick__meter-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.dk-apick__refusal {
+  margin: 0;
+  padding: var(--s-2) var(--s-4) var(--s-3) 6px;
+  font-size: var(--t-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------- the rows */
+
+.dk-apick__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 5px var(--s-4) 5px 10px;
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  text-align: left;
+  transition: background var(--dur-instant) var(--ease-out);
+}
+
+.dk-apick__row:hover:not([disabled]) {
+  background: var(--bg-hover);
+}
+
+.dk-apick__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The pick in force, by shape before colour: an upright bar at the row's left edge… */
+.dk-apick__row::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--sec, var(--text-primary));
+  transform: scaleY(0);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.dk-apick__row[data-selected='true']::before {
+  transform: none;
+}
+
+/* …and a wash of its section's colour behind it all. */
+.dk-apick__group > .dk-apick__row[data-selected='true'] {
+  background: color-mix(in srgb, var(--sec) 15%, transparent);
+}
+
+.dk-apick__group > .dk-apick__row[data-selected='true']:hover {
+  background: color-mix(in srgb, var(--sec) 21%, transparent);
+}
+
+.dk-apick__tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--sec);
+  background: color-mix(in srgb, var(--sec) 13%, transparent);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.dk-apick__row:hover:not([disabled]) .dk-apick__tile:not([data-look]) {
+  background: color-mix(in srgb, var(--sec) 22%, transparent);
+}
+
+/* The one in force: a solid tile with a halo ring. */
+.dk-apick__tile[data-look='use'] {
+  color: var(--apick-on);
+  background: var(--sec);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sec) 24%, transparent);
+}
+
+/* Cannot be picked from here: an empty, dashed ring. */
+.dk-apick__tile[data-look='off'] {
+  color: var(--text-dim);
+  background: none;
+  outline: 1px dashed color-mix(in srgb, var(--text-dim) 70%, transparent);
+  outline-offset: -1px;
+}
+
+.dk-apick__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.dk-apick__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-md);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.dk-apick__row:hover:not([disabled]) .dk-apick__name,
+.dk-apick__row[data-selected='true'] .dk-apick__name {
+  color: var(--text-primary);
+}
+
+/* The pick in force: its name bold, one size up. */
+.dk-apick__row[data-selected='true'] .dk-apick__name {
+  font-size: var(--t-lg);
+  font-weight: 600;
+}
+
+.dk-apick__row[disabled] .dk-apick__name {
+  color: var(--text-muted);
+}
+
+.dk-apick__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+.dk-apick__row:hover:not([disabled]) .dk-apick__sub,
+.dk-apick__row[data-selected='true'] .dk-apick__sub {
+  color: var(--text-secondary);
+}
+
+.dk-apick__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.dk-apick__check {
+  color: var(--sec, var(--accent));
+}
+
+.dk-apick__warn {
+  flex: none;
+  color: var(--warn);
+}
+
+/* Mode is a setting, not the headline: its pick keeps the bar, the solid tile
+   and the tick, with a lighter wash and the name at its usual size. */
+.dk-apick__group[data-sec='mode'] > .dk-apick__row[data-selected='true'] {
+  background: color-mix(in srgb, var(--sec) 8%, transparent);
+}
+
+.dk-apick__group[data-sec='mode'] > .dk-apick__row[data-selected='true']:hover {
+  background: color-mix(in srgb, var(--sec) 13%, transparent);
+}
+
+.dk-apick__group[data-sec='mode'] > .dk-apick__row[data-selected='true'] .dk-apick__name {
+  font-size: var(--t-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover:has(> .dk-apick) {
+    animation: none;
+  }
+
+  .dk-apick__row::before {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .popover:has(> .dk-apick),
+:root[data-reduced-motion='true'] .dk-apick__row::before {
+  animation: none;
+  transition: none;
+}
