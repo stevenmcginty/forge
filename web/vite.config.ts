@@ -115,6 +115,20 @@ export default defineConfig(({ command }) => ({
     target: 'es2022',
     // A public URL with no devtools attached and one user: the sourcemap is
     // worth far more than the bytes, exactly as it is for mobile.
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        // React and xterm in a chunk of their own. Every push to master deploys
+        // this site, and /assets/** is cached immutable (firebase.json): split
+        // like this, a phone re-downloads only Forge's own code after a deploy,
+        // not the libraries, which change only with package.json. Scripts only:
+        // xterm.css stays in the one stylesheet, where main.tsx puts it first.
+        manualChunks(id) {
+          if (/\.css($|\?)/.test(id)) return undefined
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|@xterm)[\\/]/.test(id)) return 'vendor'
+          return undefined
+        }
+      }
+    }
   }
 }))

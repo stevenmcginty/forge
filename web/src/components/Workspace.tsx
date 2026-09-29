@@ -3,10 +3,11 @@ import { EmptyState } from '@/components/EmptyState'
 import { Icon } from '@/components/Icon'
 import { useMobile } from '../lib/mobile'
 import { useNarrow } from '../lib/narrow'
+import { publishThemeChoice } from '../lib/theme-choice'
+import { isPhoneFace, phoneFaceFromWindow } from '../lib/viewport'
 import { useActiveProject, useForge, useWorkspace } from '../state'
 import { useWebUpdate } from '../lib/update'
 import { AgentChooser } from './AgentChooser'
-import { GitHubMode } from './GitHubMode'
 import { MobilePanes } from './MobilePanes'
 import { useTextScale } from './MoreSheet'
 import { OfflineBanner } from './OfflineBanner'
@@ -17,7 +18,13 @@ import { SplitView } from './Panes'
 import { TabStrip } from './TabStrip'
 import { TopBar } from './TopBar'
 import { UpdateBanner } from './UpdateBanner'
-import { DeckBackdrop, DeckDock, DeckSheetHost, DeckStage } from '../deck/Deck'
+// The deck's sheets stay in the entry, in the order Deck.tsx imports them, so
+// the cascade is the same one both faces always had; only its code is split off.
+import '@/components/shell/deck-tokens.css'
+import '@/components/shell/deck.css'
+import '../deck/deck.css'
+import '../deck/voicebar.css'
+import '../deck/paneface.css'
 import { useDeckTheme } from '../deck/theme'
 import { useBarPlace, useDeckView } from '../deck/view'
 import { DeckKeys } from '../deck/VoiceBar'
@@ -25,6 +32,22 @@ import { DeckKeys } from '../deck/VoiceBar'
 // Rarely opened, so it is not worth its own share of every phone's initial
 // download: see the xterm WebGL addon in lib/terminals.ts for the same pattern.
 const Mirror = lazy(() => import('./Mirror').then((m) => ({ default: m.Mirror })))
+// Only with the desktop asleep and GitHub mode picked: same reasoning.
+const GitHubMode = lazy(() => import('./GitHubMode').then((m) => ({ default: m.GitHubMode })))
+
+/**
+ * The deck face (desktop browser only), split off so a phone never downloads
+ * it. Fetched as this module loads on anything that is not a phone, so it is
+ * normally in hand long before the connection lets the Workspace mount.
+ */
+const loadDeck = (): Promise<typeof import('../deck/Deck')> => import('../deck/Deck')
+// A prefetch hint only: `useMobile` still picks the face. (No `?phone` dev
+// override here — that just prefetches a chunk the dev preview never draws.)
+if (!isPhoneFace(phoneFaceFromWindow(false))) void loadDeck()
+const DeckBackdrop = lazy(() => loadDeck().then((m) => ({ default: m.DeckBackdrop })))
+const DeckStage = lazy(() => loadDeck().then((m) => ({ default: m.DeckStage })))
+const DeckDock = lazy(() => loadDeck().then((m) => ({ default: m.DeckDock })))
+const DeckSheetHost = lazy(() => loadDeck().then((m) => ({ default: m.DeckSheetHost })))
 
 /**
  * Forge Web: three regions, two faces, not a copy of the desktop IDE.
@@ -64,11 +87,15 @@ export function Workspace(): ReactNode {
   const mobile = useMobile()
   /**
    * Not a phone: the deck face (web/src/deck), the redesigned desktop app's
-   * look — top bar, the Wall, the dock, sheets. Its theme is applied here, in
-   * render, so it is on the root before any terminal reads its palette.
+   * look — top bar, the Wall, the dock, sheets. The theme is applied here, in
+   * render, so it is on the root before any terminal reads its palette — on
+   * both faces now: the phone picks it in its More sheet (lib/theme-choice.ts),
+   * and Volt, the default, is exactly tokens.css, so a phone that never picks
+   * one looks as it always has.
    */
   const deck = !mobile
-  const { themeId, setTheme } = useDeckTheme(deck)
+  const { themeId, setTheme } = useDeckTheme(true)
+  useEffect(() => publishThemeChoice({ themeId, setTheme }), [themeId, setTheme])
   const [deckView, setDeckView] = useDeckView()
   const [barPlace, setBarPlace] = useBarPlace()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -166,7 +193,16 @@ export function Workspace(): ReactNode {
       data-mobile={mobile ? 'true' : undefined}
       style={mobile ? ({ '--phone-text-scale': textScale } as CSSProperties) : undefined}
     >
-      {deck ? <DeckBackdrop themeId={themeId} /> : null}
+      {/*
+        The lazy deck pieces wait with nothing drawn: the deck theme's tokens are
+        already on the root (useDeckTheme, above), so the page behind them is the
+        theme's own base colour while the chunk lands — normally already in hand.
+      */}
+      {deck ? (
+        <Suspense fallback={null}>
+          <DeckBackdrop themeId={themeId} />
+        </Suspense>
+      ) : null}
       <TopBar
         collapsed={mobile ? !drawerOpen : collapsed}
         onToggleRail={() => (mobile ? setDrawerOpen((v) => !v) : setRailCollapsed((v) => !v))}
@@ -204,8 +240,11 @@ export function Workspace(): ReactNode {
         <main className="dk-stage">
           {/* GitHub mode swaps in for the stage and nothing else, as it does below. */}
           {offline && state.offlineMode === 'github' ? (
-            <GitHubMode />
+            <Suspense fallback={null}>
+              <GitHubMode />
+            </Suspense>
           ) : (
+            <Suspense fallback={null}>
             <DeckStage
               view={deckView}
               onView={setDeckView}
@@ -249,6 +288,7 @@ export function Workspace(): ReactNode {
                 ) : null
               }
             />
+            </Suspense>
           )}
         </main>
       ) : (
@@ -272,7 +312,9 @@ export function Workspace(): ReactNode {
             applications. See OfflineBanner, which holds the switch.
           */}
           {offline && state.offlineMode === 'github' ? (
-            <GitHubMode />
+            <Suspense fallback={null}>
+              <GitHubMode />
+            </Suspense>
           ) : (
           <div className="grid">
             <TabStrip mobile={mobile} />
@@ -334,7 +376,11 @@ export function Workspace(): ReactNode {
       </div>
       )}
 
-      {deck ? <DeckDock place={barPlace} /> : null}
+      {deck ? (
+        <Suspense fallback={null}>
+          <DeckDock place={barPlace} />
+        </Suspense>
+      ) : null}
       {deck ? <DeckKeys view={deckView} onView={setDeckView} place={barPlace} /> : null}
 
       {mobile && gridShown ? null : notice}
@@ -359,7 +405,11 @@ export function Workspace(): ReactNode {
         }}
         selectedId={project?.defaultProfileId}
       />
-      {deck ? <DeckSheetHost /> : null}
+      {deck ? (
+        <Suspense fallback={null}>
+          <DeckSheetHost />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

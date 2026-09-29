@@ -770,6 +770,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // line that merely changed — and the pill says the rest.
         if (isAsking && !was && !document.hidden) buzz()
         setAsking((current) => {
+          // Same set back when nothing changed: a fresh Set is a fresh `state`,
+          // and that is every consumer re-rendering for a prompt line.
+          if (current.has(sessionId) === isAsking) return current
           const next = new Set(current)
           if (isAsking) next.add(sessionId)
           else next.delete(sessionId)
@@ -802,6 +805,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       },
       onBusy: (sessionId, isBusy) => {
         setBusy((current) => {
+          // Busy frames repeat the same value many times a second; only an
+          // actual flip is worth a new set (and a re-render of every pane).
+          if (current.has(sessionId) === isBusy) return current
           const next = new Set(current)
           if (isBusy) next.add(sessionId)
           else next.delete(sessionId)
@@ -1466,5 +1472,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
     ]
   )
 
-  return <ForgeContext.Provider value={{ state, actions }}>{children}</ForgeContext.Provider>
+  // One object per real change: a fresh literal here would re-render every
+  // `useForge()` consumer on any provider render, even one that changed nothing
+  // they read.
+  const value = useMemo<ForgeContextValue>(() => ({ state, actions }), [state, actions])
+
+  return <ForgeContext.Provider value={value}>{children}</ForgeContext.Provider>
 }

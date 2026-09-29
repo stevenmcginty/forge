@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { WEB_FEATURE_PASSKEY, type WebPasskeyInfo } from '@shared/web'
 import { Icon } from '@/components/Icon'
+import { DECK_THEMES } from '../deck/theme'
 import { useDeskFacts } from '../lib/features'
 import {
   biometricName,
@@ -15,9 +16,11 @@ import {
 } from '../lib/passkey'
 import { speakSample, speechSupported, useVoices } from '../lib/speak'
 import { getReadAloudVoice, getVoiceAutoStop, setReadAloudVoice, setVoiceAutoStop } from '../lib/voice-prefs'
+import { useThemeChoice } from '../lib/theme-choice'
 import { useForge, type NotifySupport } from '../state'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection, SheetSwitch } from './BottomSheet'
 import { FingerprintGlyph } from './Connection'
+import { ThemePicker, ThemeSwatch } from './PhoneTheme'
 import { rustDeskLink } from './Workspace'
 import './MoreSheet.css'
 
@@ -65,12 +68,14 @@ export function MoreSheet({
   screen: MoreSheetAction
 }): ReactNode {
   const { state, actions } = useForge()
-  const [step, setStep] = useState<'list' | 'sign-out' | 'passkey-forget' | 'voice'>('list')
+  const [step, setStep] = useState<'list' | 'sign-out' | 'passkey-forget' | 'voice' | 'theme'>('list')
   const [autoStop, setAutoStop] = useState(getVoiceAutoStop)
   const [voiceURI, setVoiceURI] = useState(getReadAloudVoice)
   const voices = useVoices()
   const [scale, setScale] = useTextScale()
   const unlock = usePasskeyRow(open)
+  const theme = useThemeChoice()
+  const themeCore = theme ? (DECK_THEMES.find((core) => core.id === theme.themeId) ?? null) : null
 
   // Every opening starts on the list, reading the stored preference afresh —
   // the composer may have changed nothing, but another tab may have.
@@ -98,13 +103,19 @@ export function MoreSheet({
             ? biometricUnlockLabel()
             : step === 'voice'
               ? 'Read-aloud voice'
-              : 'More'
+              : step === 'theme'
+                ? 'Theme'
+                : 'More'
       }
       title={step === 'sign-out' || step === 'passkey-forget' ? null : undefined}
-      subtitle={step === 'voice' ? 'Tap a voice to hear it' : undefined}
+      subtitle={
+        step === 'voice' ? 'Tap a voice to hear it' : step === 'theme' ? 'How this phone looks. Tap one to wear it.' : undefined
+      }
       testId="more-sheet"
     >
-      {step === 'voice' ? (
+      {step === 'theme' && theme ? (
+        <ThemePicker themeId={theme.themeId} onPick={theme.setTheme} />
+      ) : step === 'voice' ? (
         <VoicePicker
           voices={voices}
           chosen={voiceURI}
@@ -224,6 +235,15 @@ export function MoreSheet({
               }
               testId="more-text-size"
             />
+            {theme && themeCore ? (
+              <SheetRow
+                icon={<ThemeSwatch core={themeCore} size={24} />}
+                label="Theme"
+                secondary={`${themeCore.name} — ${themeCore.appearance === 'light' ? 'light' : 'dark'}`}
+                onClick={() => setStep('theme')}
+                testId="more-theme"
+              />
+            ) : null}
             <SheetRow
               icon={<SheetGlyph name="autoStop" />}
               label="Stop listening after a pause"

@@ -35,6 +35,7 @@ import { useLendDictation, type DictationSeat } from '../lib/dictation-seat'
 import { isImageFile, uploadFileChunks } from '../lib/file'
 import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
+import { announcePaneSent } from '../lib/pane-sent'
 import { requestPaneView, usePaneStatus, usePaneView, type PaneFace } from '../lib/pane-status'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import { matchVoiceCommand, type VoiceCommandMatch } from '../lib/voice-commands'
@@ -317,6 +318,7 @@ export function SessionComposer({
           await actions.request({ kind: 'claim', sessionId: paneId })
           await pause(SETTLE_BEFORE_ENTER_MS)
           actions.write(paneId, '\r')
+          announcePaneSent(paneId)
         }
         takePane()
       } finally {

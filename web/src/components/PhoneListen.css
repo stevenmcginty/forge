@@ -44,15 +44,15 @@
 
 /* On: a conversation is open. The mic half's ink fill says it; the rim echoes it. */
 .app[data-mobile] .plisten-unit[data-on='true'] {
-  background: color-mix(in srgb, var(--p-act) 14%, var(--p-raised));
-  box-shadow: inset 0 0 0 1.5px var(--p-act);
+  background: color-mix(in srgb, var(--p-agent) 14%, var(--p-raised));
+  box-shadow: inset 0 0 0 1.5px var(--p-agent);
 }
 
 /* Actively hearing speech */
 .app[data-mobile] .plisten-unit[data-recording='true'] {
   box-shadow:
-    inset 0 0 0 1.5px var(--p-act),
-    0 0 0 2px var(--p-act-soft);
+    inset 0 0 0 1.5px var(--p-agent),
+    0 0 0 2px color-mix(in srgb, var(--p-agent) 22%, transparent);
 }
 
 /* Failed, or it cannot start here: a dashed rim. */
@@ -225,9 +225,9 @@
 }
 
 .app[data-mobile] .plisten-unit[data-on='true'] .plisten__agent-tile {
-  box-shadow: inset 0 0 0 1px var(--p-act);
-  background: color-mix(in srgb, var(--p-act) 20%, transparent);
-  color: var(--p-act);
+  box-shadow: inset 0 0 0 1px var(--p-agent);
+  background: color-mix(in srgb, var(--p-agent) 20%, transparent);
+  color: var(--p-agent);
 }
 
 .app[data-mobile] .plisten__chev {
@@ -270,6 +270,52 @@
   }
 }
 
+/*
+ * The agent's cue on the box: the lesser sibling of dictation's (phone-cues.css)
+ * — a thin lime ring, breathing slowly while the agent hears you, still while
+ * it thinks or speaks — and the word "Agent" at the head of the line.
+ */
+.app[data-mobile] .plisten-line[data-tone='live']::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px var(--p-agent);
+  opacity: 0.8;
+}
+
+.app[data-mobile] .plisten-line[data-tone='live'][data-lead='live']::before {
+  animation: plisten-breathe 2.8s var(--p-glide) infinite alternate;
+}
+
+@keyframes plisten-breathe {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+
+.app[data-mobile] .plisten-line__tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: var(--p-r-pill);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-agent) 70%, var(--p-line-strong));
+  font: 650 11px / 1 var(--p-font);
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .plisten-line[data-tone='failed'] .plisten-line__tag,
+.app[data-mobile] .plisten-line[data-tone='ended'] .plisten-line__tag {
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+}
+
 .app[data-mobile] .plisten-line__body {
   flex: 1;
   min-width: 0;
@@ -309,7 +355,7 @@
 }
 
 .app[data-mobile] .plisten-line__lead[data-lead='live'] {
-  color: var(--p-act);
+  color: var(--p-agent);
 }
 
 .app[data-mobile] .plisten-line__lead[data-lead='failed'] {
@@ -400,6 +446,13 @@
   outline-offset: -2px;
 }
 
+/* Room for "Agent" and the state before the agent's name: its mark is on Listen's own half. */
+@container (max-width: 240px) {
+  .app[data-mobile] .plisten-line__agent {
+    display: none;
+  }
+}
+
 /* A narrow box (Stop beside it on a small phone): the chip goes — Listen's agent half still picks. */
 @container (max-width: 200px) {
   .app[data-mobile] .plisten-line__pick {
@@ -450,11 +503,13 @@
 /* --------------------------------------------------------------- motion */
 
 @media (prefers-reduced-motion: reduce) {
-  .app[data-mobile] .plisten-line {
+  .app[data-mobile] .plisten-line,
+  .app[data-mobile] .plisten-line[data-tone='live'][data-lead='live']::before {
     animation: none;
   }
 }
 
-:root[data-reduced-motion='true'] .app[data-mobile] .plisten-line {
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten-line,
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten-line[data-tone='live'][data-lead='live']::before {
   animation: none;
 }

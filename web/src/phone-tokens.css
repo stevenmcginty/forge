@@ -2,7 +2,8 @@
  * Phone tokens — the one vocabulary for Forge Web on a phone (`.app[data-mobile]`).
  *
  *  1. Lime (--p-act) means "act here": Send, the mic, Start, the live dot —
- *     plus "you are here" on the open project in the project sheet. Nothing else is lime.
+ *     plus "you are here" on the open project in the project sheet. Nothing else is lime
+ *     except the voice agent's own cue (--p-agent, the desk's agent lime).
  *  2. Amber (--p-attn) means "something is waiting on you"; red (--p-danger) means "this destroys".
  *  3. Never colour alone: every state also carries a shape ("!", a ring, a dash) or words.
  *  4. Three radii: --p-r-pill (999), --p-r-sheet (20, sheets and cards), --p-r-row (12, rows and inputs).
@@ -83,6 +84,41 @@
   --p-dur-fast: 120ms;
   --p-dur: 180ms;
   --p-dur-sheet: 280ms;
+  /*
+   * The desktop's glide, for the feedback cues that should feel like the
+   * desk's: a critically damped spring sampled into linear() (k 520 / c 44,
+   * src/components/shell/deck-tokens.css `--spring-glide`). It never passes 1,
+   * so rule 9 holds. Copied, not referenced, so the phone keeps it however
+   * the deck's sheets are loaded.
+   */
+  --p-glide: linear(0, 0.056, 0.1775, 0.3183, 0.4545, 0.5748, 0.6753, 0.7564, 0.8198, 0.8685, 0.9051, 0.9323, 0.9522, 0.9666, 0.9769, 0.9841, 0.9892, 0.9928, 0.9952, 0.9969, 1);
+  --p-dur-glide: 330ms;
+
+  /*
+   * The two voices, as on the desk (src/components/DictationCue.css): your
+   * dictation is violet, the voice agent is lime. Split on the blue–yellow
+   * axis Steve keeps, and by lightness; each also has its own shape and word
+   * (phone-cues.css, PhoneListen.css). The one exception to rule 10: no theme
+   * carries these, so they are the desktop's values, dark and light.
+   */
+  --p-dict: #a58bff;
+  --p-dict-2: #6d7bff;
+  --p-dict-core: #f1edff;
+  --p-dict-ink: #b3a2ff;
+  --p-agent: #b6f04a;
+  --p-agent-2: #e3f36b;
+  --p-agent-core: #fbffe8;
+}
+
+:root[data-appearance='light'] .app[data-mobile],
+:root[data-appearance='light'] .bsheet-layer {
+  --p-dict: #5a32d8;
+  --p-dict-2: #3f4fe6;
+  --p-dict-core: #2a168f;
+  --p-dict-ink: #4a2bd0;
+  --p-agent: #6f9a00;
+  --p-agent-2: #93a800;
+  --p-agent-core: #4a6b00;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -91,6 +127,7 @@
     --p-dur-fast: 0ms;
     --p-dur: 0ms;
     --p-dur-sheet: 0ms;
+    --p-dur-glide: 0ms;
   }
 }
 
@@ -99,4 +136,5 @@
   --p-dur-fast: 0ms;
   --p-dur: 0ms;
   --p-dur-sheet: 0ms;
+  --p-dur-glide: 0ms;
 }

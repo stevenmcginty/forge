@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -11,10 +12,13 @@ import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import type { PaneStatus } from '@/lib/rich'
+import { AgentStateGlyph, type DeckAgentState } from '../deck/agents'
 import { useScreenPane, type ScreenPane } from '../lib/pane-screen'
+import { usePhonePaneState, type PhonePaneState } from '../lib/pane-state'
 import { usePaneReply, type PaneFace } from '../lib/pane-status'
 import { speakReply, speechSupported, stopSpeaking, useSpeakingPane } from '../lib/speak'
 import { fmtReset, fmtTokens, usageLevel, usePaneUsage, type PaneUsage, type UsageLimit } from '../lib/usage'
+import { useForge } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
 import './StatusLine.css'
 
@@ -22,13 +26,15 @@ import './StatusLine.css'
  * The phone's status line: the one row under the conversation that says what
  * this pane is and changes how it is shown.
  *
- *   [ Chat | Cards | Terminal ]              ◔ 42%   Opus · Plan ▾
- *   [ Chat | Cards | Terminal ]                         (!) Waiting
+ *   [ Chat | Cards | Terminal ]            ◉ Working   Opus · Plan ▾
+ *                                            12m · 42%
+ *   [ Chat | Cards | Terminal ]                       (!) Needs you
  *
  * Left, the view switch — three labelled segments, the face on screen raised,
- * any face one tap away. Right, what the pane is: how full its context window
- * is and the model chip — or, while something is wrong with the pane, just the
- * word for it (Waiting / Reconnecting / Frozen). The ring (the agent's badge
+ * any face one tap away. Right, what the pane is: its state in the desktop's
+ * words (Working 12m / Done / Ready) over how full its context window is, and
+ * the model chip — or, while something is wrong with the pane, just the word
+ * for it (Needs you / Reconnecting / Frozen). The ring (the agent's badge
  * before there is a reading; the word while there is one) opens the pane's
  * sheet: tokens, plan limits, "Copy screen" and the raw footer the reading
  * came from — so the row itself is no longer a hidden button, and nothing on
@@ -66,8 +72,10 @@ export const FACES: { face: PaneFace; label: string; icon: ReactNode }[] = [
 /** The pane's condition in one word, when it has one worth a word. */
 type Condition = 'waiting' | 'reconnecting' | 'frozen'
 
+/* "Needs you", not "Waiting": the desktop's StateChip word for the same state,
+   so the phone and the desk say one thing for it. */
 const CONDITION: Record<Condition, { word: string; mark: string; title: string }> = {
-  waiting: { word: 'Waiting', mark: '!', title: 'This pane has settled on a question and is waiting on an answer' },
+  waiting: { word: 'Needs you', mark: '!', title: 'This pane has settled on a question and is waiting on an answer' },
   reconnecting: {
     word: 'Reconnecting',
     mark: '',
@@ -107,9 +115,13 @@ export function StatusLine({
   const condition = screen?.condition ?? null
   const context = usage.context
   const place = placeOf(status)
-  const canRead = !shell && paneId !== null && speechSupported()
-  const reply = usePaneReply(canRead ? paneId : null)
+  const pane = usePhonePaneState(shell ? null : paneId)
   const reading = useSpeakingPane() === paneId && paneId !== null
+  // While the agent works its reply is still being written, so "Read aloud"
+  // steps aside and gives its room to the clock — unless it is reading, when
+  // it stays so it can be stopped.
+  const canRead = !shell && paneId !== null && speechSupported() && (pane.state !== 'working' || reading)
+  const reply = usePaneReply(canRead ? paneId : null)
 
   /* ------------------------------------------------------------ the swipe */
   const swipe = useRef<{ id: number; x: number; y: number; moving: boolean } | null>(null)
@@ -156,20 +168,44 @@ export function StatusLine({
       type="button"
       className="pstat__ctx"
       data-level={usageLevel(context.usedPct)}
+      data-state={pane.state}
       onClick={() => setSheet(true)}
-      aria-label={`Context ${context.usedPct}% used — details`}
+      title={pane.detail}
+      aria-label={`${stateSaid(pane)}. Context ${context.usedPct}% used — details`}
     >
-      <Ring pct={context.usedPct} size={20} />
-      <span className="pstat__pct">{context.usedPct}%</span>
+      {/* The ring is the context gauge and the state's frame at once: its
+          hole holds the state's shape — a dot working, a tick done, empty
+          (the desktop's ring) ready. */}
+      <span className="pstat__ring">
+        <Ring pct={context.usedPct} size={20} />
+        <StateMark state={pane.state} paneId={paneId} />
+      </span>
+      {/* The word over the numbers: while it works, its clock leads the
+          context figure on the second line, so the word itself is never cut. */}
+      <span className="pstat__lines">
+        <StateWords pane={pane} clock={false} />
+        <span className="pstat__pct">
+          {pane.clock ? <span className="pstat__clock">{pane.clock} · </span> : null}
+          {context.usedPct}%
+        </span>
+      </span>
     </button>
   ) : (
     <button
       type="button"
       className="pstat__badge"
+      data-state={pane.state}
       onClick={() => setSheet(true)}
-      aria-label={`${profile.name} — details and Copy screen`}
+      title={pane.detail}
+      aria-label={`${profile.name}: ${stateSaid(pane)} — details and Copy screen`}
     >
       <AgentBadge profile={profile} size="sm" />
+      <span className="pstat__lines">
+        <span className="pstat__glyphline">
+          <AgentStateGlyph state={pane.state} />
+          <StateWords pane={pane} />
+        </span>
+      </span>
     </button>
   )
 
@@ -246,7 +282,9 @@ export function StatusLine({
           </button>
         ) : null}
         {!shell && !condition ? lead : null}
-        {chip && !condition ? chip : null}
+        {/* No process behind the pane: nothing for the chip to change, so
+            "Not running" has its room. */}
+        {chip && !condition && (shell || pane.state !== 'dormant') ? chip : null}
       </div>
 
       <PaneSheet
@@ -340,6 +378,82 @@ function Segments({ view, onPick }: { view: PaneFace; onPick: (face: PaneFace) =
         </button>
       ))}
     </div>
+  )
+}
+
+/* ----------------------------------------------------------------- state */
+
+/** "Working, 12m" for a screen reader; the row shows the same in a word and a shape. */
+function stateSaid(pane: PhonePaneState): string {
+  return pane.clock ? `${pane.word}, ${pane.clock}` : pane.word
+}
+
+/**
+ * The state's word, and its clock while it works. Keyed on the state, so a
+ * change rises in (one short glide) and nothing moves between changes.
+ */
+function StateWords({ pane, clock = true }: { pane: PhonePaneState; clock?: boolean }): ReactNode {
+  return (
+    <span key={pane.state} className="pstat__state" data-state={pane.state}>
+      <span className="pstat__sword">{pane.word}</span>
+      {clock && pane.clock ? <span className="pstat__clock">{pane.clock}</span> : null}
+    </span>
+  )
+}
+
+/** How long the dot holds its beat after a burst of output (the desktop ActivityDot's). */
+const PULSE_HOLD_MS = 620
+
+/**
+ * The state's shape, drawn in the ring's hole: the desktop StateGlyph's dot,
+ * tick and diamond; Ready is the ring itself, so its hole stays empty. While
+ * working, the dot beats when the pane prints (the desktop's output pulse):
+ * a class put straight on the node, no render per burst, and no listener at
+ * all unless the pane is working.
+ */
+function StateMark({ state, paneId }: { state: DeckAgentState; paneId: string | null }): ReactNode {
+  const { actions } = useForge()
+  const ref = useRef<SVGSVGElement | null>(null)
+  const working = state === 'working'
+
+  useEffect(() => {
+    if (!working || !paneId) return undefined
+    let timer: number | undefined
+    const stop = actions.onData(paneId, (_data, replay) => {
+      const dot = ref.current
+      if (replay || !dot) return
+      dot.classList.add('is-active')
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => dot.classList.remove('is-active'), PULSE_HOLD_MS)
+    })
+    return () => {
+      stop()
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [actions, paneId, working])
+
+  return (
+    <svg ref={ref} className="pstat__mark-in" data-state={state} width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+      {state === 'working' ? <circle className="pstat__beat" cx="5" cy="5" r="3" fill="currentColor" /> : null}
+      {state === 'attention' ? <path d="M5 1.2 L8.8 5 L5 8.8 L1.2 5 Z" fill="currentColor" /> : null}
+      {state === 'done' ? (
+        <path d="M1.8 5.3 L4.1 7.5 L8.3 2.8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      ) : null}
+      {state === 'dormant' ? <rect x="2" y="4.2" width="6" height="1.6" rx="0.8" fill="currentColor" /> : null}
+      {state === 'reconnecting' || state === 'frozen' ? (
+        <rect
+          x="2.4"
+          y="2.4"
+          width="5.2"
+          height="5.2"
+          rx="1"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeDasharray={state === 'reconnecting' ? '1.6 1.2' : undefined}
+        />
+      ) : null}
+    </svg>
   )
 }
 

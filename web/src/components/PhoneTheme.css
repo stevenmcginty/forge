@@ -1,0 +1,44 @@
+/*
+ * The theme rows in the phone's More sheet (PhoneTheme.tsx). Tokens from
+ * phone-tokens.css; the swatch's colours are the theme's own, inline.
+ */
+
+.ptheme__swatch {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+}
+
+/* The panel as the lower third, the accent a dot on the background. */
+.ptheme__panel {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 34%;
+}
+
+.ptheme__accent {
+  position: absolute;
+  top: 22%;
+  left: 22%;
+  width: 30%;
+  height: 30%;
+  border-radius: var(--p-r-pill);
+}
+
+.ptheme[data-current='true'] .bsrow__label {
+  font-weight: 650;
+}
+
+.ptheme__tick {
+  width: 24px;
+  justify-content: center;
+  color: var(--p-ink);
+}
+
+/* The row in the list that leads here: the swatch sits where an icon would. */
+.bsrow__icon .ptheme__swatch {
+  flex: none;
+}

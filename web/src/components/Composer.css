@@ -421,29 +421,36 @@
 }
 
 /* Working out the words: the same track, dotted, with a light passing along it. */
+/* The track holds still; the light is a pseudo-element sliding on transform,
+   so the dots are never repainted. The mask cuts both into dots. */
 .app[data-mobile] .composer__shimmer {
+  position: relative;
   display: block;
   height: 20px;
-  background: linear-gradient(
-      90deg,
-      var(--p-ink-3) 0%,
-      var(--p-ink-3) 35%,
-      var(--p-ink) 50%,
-      var(--p-ink-3) 65%,
-      var(--p-ink-3) 100%
-    )
-    0 50% / 300% 3px no-repeat;
+  overflow: hidden;
+  background: linear-gradient(var(--p-ink-3), var(--p-ink-3)) 0 50% / 100% 3px no-repeat;
   -webkit-mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 6px);
   mask: repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 6px);
+}
+
+.app[data-mobile] .composer__shimmer::after {
+  content: '';
+  position: absolute;
+  top: calc(50% - 1.5px);
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 5%, var(--p-ink) 50%, transparent 95%);
+  transform: translateX(-100%);
   animation: composer-shimmer 1.6s linear infinite;
 }
 
 @keyframes composer-shimmer {
   from {
-    background-position: 100% 50%;
+    transform: translateX(-100%);
   }
   to {
-    background-position: 0% 50%;
+    transform: translateX(100%);
   }
 }
 
@@ -759,7 +766,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .app[data-mobile] .composer .composer__disc[data-phase='recording']::after,
-  .app[data-mobile] .composer__shimmer {
+  .app[data-mobile] .composer__shimmer::after {
     animation: none;
   }
 
@@ -769,6 +776,6 @@
 }
 
 :root[data-reduced-motion='true'] .app[data-mobile] .composer .composer__disc[data-phase='recording']::after,
-:root[data-reduced-motion='true'] .app[data-mobile] .composer__shimmer {
+:root[data-reduced-motion='true'] .app[data-mobile] .composer__shimmer::after {
   animation: none;
 }

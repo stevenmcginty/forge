@@ -1,0 +1,273 @@
+/*
+ * The phone's feedback cues: the desk's vocabulary (src/components/DictationCue.css)
+ * at phone size, and cheaper. Tokens from phone-tokens.css.
+ *
+ *  1. "It went there": when words are sent into a pane (lib/pane-sent.ts puts
+ *     data-sent on it), a comet runs once round the pane's card, starting at
+ *     the bottom edge the words came up from. Violet for yours, lime for the
+ *     voice agent's — and the agent's is thinner, slower and dotted, so the
+ *     two differ in shape as well as colour.
+ *  2. Dictating: the box your words are going into is ringed in violet and
+ *     breathes while it listens, beside the word "Listening" and the live
+ *     waveform. The voice agent's cue (PhoneListen.css) is the lesser one: a
+ *     thin, slow lime ring and the word "Agent".
+ *
+ * Only transform and opacity move. The comet rides the card's edge on
+ * `offset-distance` — it is moved, never repainted — and exists only while
+ * the attribute is on; nothing here runs between sends or while idle. Reduced
+ * motion: one soft fade of a still ring, and a steady ring while listening.
+ */
+
+/* ------------------------------------------------------------- the comet */
+
+.app[data-mobile] .pane[data-sent] {
+  --sent: var(--p-dict);
+  --sent-2: var(--p-dict-2);
+  --sent-core: var(--p-dict-core);
+}
+
+.app[data-mobile] .pane[data-sent='agent'] {
+  --sent: var(--p-agent);
+  --sent-2: var(--p-agent-2);
+  --sent-core: var(--p-agent-core);
+}
+
+.app[data-mobile] .pane[data-sent] > .pane__stage::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  width: 144px;
+  height: 3px;
+  border-radius: 3px;
+  pointer-events: none;
+  /* A little light spilling into the card; drawn once into the comet's own
+     layer, which then only moves. */
+  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--sent) 45%, transparent);
+  /* Tail to head: the sender's lead colour thinning out behind a bright core. */
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--sent-2) 55%, transparent) 38%,
+    var(--sent) 82%,
+    var(--sent-core)
+  );
+  /* Round the card, 1.5px in, so the whole 3px stays inside its clip. */
+  offset-path: inset(1.5px round calc(var(--r-lg) - 1.5px));
+  offset-anchor: 100% 50%;
+  offset-rotate: auto;
+  offset-distance: 60%;
+  opacity: 0;
+  will-change: transform, opacity;
+  /* The desk's lap curve: quick away, easing in to land. */
+  animation: pcue-sent-0 900ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
+}
+
+/* The agent's: thinner, slower, dotted. */
+.app[data-mobile] .pane[data-sent='agent'] > .pane__stage::after {
+  height: 2px;
+  width: 160px;
+  box-shadow: none;
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 10px);
+  mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 10px);
+  animation-duration: 1250ms;
+}
+
+.app[data-mobile] .pane[data-sent][data-sent-beat='1'] > .pane__stage::after {
+  animation-name: pcue-sent-1;
+}
+
+/*
+ * 60% is about the middle of the bottom edge of a tall card (the path starts
+ * at the top-left and runs clockwise); a closed path wraps, so 160% is one lap.
+ * Two names, one per beat, so a send mid-lap restarts it.
+ */
+@keyframes pcue-sent-0 {
+  0% {
+    offset-distance: 60%;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 160%;
+    opacity: 0;
+  }
+}
+
+@keyframes pcue-sent-1 {
+  0% {
+    offset-distance: 60%;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 160%;
+    opacity: 0;
+  }
+}
+
+/* No motion, or no motion path in this browser: one soft fade of a still ring. */
+@keyframes pcue-sent-still-0 {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+@keyframes pcue-sent-still-1 {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+@supports not (offset-path: inset(0 round 1px)) {
+  .app[data-mobile] .pane[data-sent] > .pane__stage::after {
+    inset: 0;
+    width: auto;
+    height: auto;
+    border-radius: inherit;
+    background: none;
+    box-shadow: inset 0 0 0 2px var(--sent);
+    -webkit-mask: none;
+    mask: none;
+    animation: pcue-sent-still-0 560ms ease-out both;
+  }
+
+  .app[data-mobile] .pane[data-sent][data-sent-beat='1'] > .pane__stage::after {
+    animation-name: pcue-sent-still-1;
+  }
+
+  .app[data-mobile] .pane[data-sent='agent'] > .pane__stage::after {
+    box-shadow: inset 0 0 0 1px var(--sent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .pane[data-sent] > .pane__stage::after {
+    inset: 0;
+    width: auto;
+    height: auto;
+    border-radius: inherit;
+    offset-path: none;
+    background: none;
+    box-shadow: inset 0 0 0 2px var(--sent);
+    -webkit-mask: none;
+    mask: none;
+    animation: pcue-sent-still-0 560ms ease-out both;
+  }
+
+  .app[data-mobile] .pane[data-sent][data-sent-beat='1'] > .pane__stage::after {
+    animation-name: pcue-sent-still-1;
+  }
+
+  .app[data-mobile] .pane[data-sent='agent'] > .pane__stage::after {
+    box-shadow: inset 0 0 0 1px var(--sent);
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .pane[data-sent] > .pane__stage::after {
+  inset: 0;
+  width: auto;
+  height: auto;
+  border-radius: inherit;
+  offset-path: none;
+  background: none;
+  box-shadow: inset 0 0 0 2px var(--sent);
+  -webkit-mask: none;
+  mask: none;
+  animation: pcue-sent-still-0 560ms ease-out both;
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .pane[data-sent][data-sent-beat='1'] > .pane__stage::after {
+  animation-name: pcue-sent-still-1;
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .pane[data-sent='agent'] > .pane__stage::after {
+  box-shadow: inset 0 0 0 1px var(--sent);
+}
+
+/* ----------------------------------------------------- dictation's box
+ *
+ * The box the words are going into, while you dictate: a violet ring with a
+ * soft inner light that breathes (a pseudo-element's opacity, nothing else),
+ * the live dot violet beside "Listening", and the disc's outgoing ring violet.
+ * The disc itself stays lime: it is still the thing to press to send.
+ * Working out the words: the ring holds still and dims.
+ */
+
+.app[data-mobile] .composer .composer__field:is([data-phase='recording'], [data-phase='transcribing']) {
+  border-color: var(--p-dict);
+  background: color-mix(in srgb, var(--p-dict) 7%, var(--p-raised));
+}
+
+.app[data-mobile] .composer .composer__field:is([data-phase='recording'], [data-phase='transcribing'])::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px var(--p-dict),
+    inset 0 0 18px color-mix(in srgb, var(--p-dict-2) 34%, transparent);
+  opacity: 0.55;
+  animation: pcue-breathe 1.4s var(--p-glide) infinite alternate;
+}
+
+.app[data-mobile] .composer .composer__field[data-phase='transcribing']::before {
+  opacity: 0.4;
+  animation: none;
+}
+
+@keyframes pcue-breathe {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.app[data-mobile] .composer__field[data-phase='recording'] .composer__strip-dot {
+  background: var(--p-dict);
+}
+
+/* "Listening" is the cue's word, so it gets the room to be read whole: the
+   Cancel button before it already spaces it from the rim. */
+.app[data-mobile] .composer__field[data-phase='recording'] .composer__strip {
+  padding-left: var(--p-1);
+}
+
+.app[data-mobile] .composer .composer__disc[data-phase='recording']::after {
+  border-color: var(--p-dict);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .composer .composer__field[data-phase='recording']::before {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .composer .composer__field[data-phase='recording']::before {
+  opacity: 1;
+  animation: none;
+}

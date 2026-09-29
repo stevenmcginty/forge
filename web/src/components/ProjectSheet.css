@@ -287,36 +287,89 @@
     0 0 0 4.5px var(--pj-color, var(--p-ink-3));
 }
 
+/*
+ * Working: a halo breathes round the dot and never goes out, so the ring is
+ * the shape that says "working" even when it holds still. It is a
+ * pseudo-element on transform and opacity — one per row, so a paint-free
+ * pulse matters here. Drawn over the dot in the dot's own colour, it only
+ * shows where it spills past the edge.
+ */
 .pjrow[data-working='true'] .pjrow__dot {
+  position: relative;
+}
+
+.pjrow[data-working='true'] .pjrow__dot::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: var(--pj-color, var(--p-ink-3));
+  opacity: 0.2;
+  transform: scale(0.7);
+  pointer-events: none;
   animation: pjrow-pulse 1400ms ease-in-out infinite;
 }
 
+/* 10px dot: 0.7 of the 20px halo is a 2px spill, 1 is 5px. */
 @keyframes pjrow-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pj-color, var(--p-ink-3)) 20%, transparent);
+    opacity: 0.2;
+    transform: scale(0.7);
   }
   50% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--pj-color, var(--p-ink-3)) 50%, transparent);
+    opacity: 0.5;
+    transform: none;
   }
 }
 
-.pjrow[data-current='true'][data-working='true'] .pjrow__dot {
-  animation: pjrow-pulse-current 1400ms ease-in-out infinite;
+/* The open project's dot already wears a ring; working, its outer band thickens. */
+.pjrow[data-current='true'][data-working='true'] .pjrow__dot::after {
+  inset: -7px;
+  background: none;
+  border: 2.5px solid var(--pj-color, var(--p-act));
+  opacity: 0;
+  transform: scale(0.9);
+  animation-name: pjrow-pulse-current;
 }
 
 @keyframes pjrow-pulse-current {
   0%,
   100% {
-    box-shadow:
-      0 0 0 3px color-mix(in srgb, var(--p-act) 14%, var(--p-bg)),
-      0 0 0 4.5px var(--pj-color, var(--p-ink-3));
+    opacity: 0;
+    transform: scale(0.9);
   }
   50% {
-    box-shadow:
-      0 0 0 3px color-mix(in srgb, var(--p-act) 14%, var(--p-bg)),
-      0 0 0 7px var(--pj-color, var(--p-act));
+    opacity: 1;
+    transform: none;
   }
+}
+
+/* Motion off: the halo holds still, so "working" keeps its ring. */
+@media (prefers-reduced-motion: reduce) {
+  .pjrow[data-working='true'] .pjrow__dot::after {
+    animation: none;
+    opacity: 0.35;
+    transform: none;
+  }
+
+  .pjrow[data-current='true'][data-working='true'] .pjrow__dot::after {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .pjrow[data-working='true'] .pjrow__dot::after {
+  animation: none;
+  opacity: 0.35;
+  transform: none;
+}
+
+:root[data-reduced-motion='true'] .pjrow[data-current='true'][data-working='true'] .pjrow__dot::after {
+  animation: none;
+  opacity: 1;
+  transform: none;
 }
 
 .pjrow[data-attention='true'] {

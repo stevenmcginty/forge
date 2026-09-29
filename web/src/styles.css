@@ -50,6 +50,17 @@ body {
   overflow: hidden;
 }
 
+/*
+ * A tap is a tap: no double-tap zoom wait and no grey flash on anything a
+ * thumb presses. `:where()` keeps this at zero specificity, so any control
+ * that needs more (the mic's hold is `touch-action: none`) still wins. Pinch
+ * zoom stays: `manipulation` keeps panning and pinching.
+ */
+:where(button, [role='button'], [role='tab'], a, .tab, .ptop__btn, .ptop__projects, .mpanes__chip) {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* -------------------------------------------------------------- the gate
  *
  * One centred card, used by sign-in and by every connection screen. They share a
@@ -2636,11 +2647,35 @@ body {
   border: 1px solid color-mix(in srgb, var(--info) 60%, transparent);
 }
 
+/* The word says RECONNECTING; a ring goes out from the chip and fades. The ring
+   is a pseudo-element on transform and opacity, so it never repaints the header. */
 .app[data-mobile] .pane .pane__perm[data-reconnecting='true'] {
+  position: relative;
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 18%, #141518);
   border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
-  animation: astatus-pulse 1.6s infinite;
+}
+
+.app[data-mobile] .pane .pane__perm[data-reconnecting='true']::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 2px solid color-mix(in srgb, var(--feed-accent) 50%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: perm-pulse 1.6s ease infinite;
+}
+
+@keyframes perm-pulse {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.1, 1.5);
+  }
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__action,
@@ -2654,7 +2689,19 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--dur-fast);
+  transition:
+    background var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast),
+    box-shadow var(--dur-fast);
+}
+
+/* 34px buttons, 44px of finger top to bottom; sideways only half the 4px gap,
+   so two buttons' hits never overlap. */
+.app[data-mobile] .pane[data-kind='agent'] .pane__action::before {
+  content: '';
+  position: absolute;
+  inset: -5px -2px;
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__action:active {
@@ -2684,21 +2731,29 @@ body {
   background: color-mix(in srgb, var(--danger, #ef4444) 14%, rgba(255, 255, 255, 0.03));
   border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 38%, var(--line-hairline));
   box-shadow: 0 0 8px color-mix(in srgb, var(--danger, #ef4444) 20%, transparent);
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
-.pane__action--close:hover,
-.pane__action[data-danger='true']:hover,
-.pane[data-kind='agent'] .pane__action--close:hover,
-.pane[data-kind='agent'] .pane__action[data-danger='true']:hover,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action--close:hover,
-.app[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:hover,
-[data-mobile] .pane[data-kind='agent'] .pane__action--close:hover,
-[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:hover {
-  color: #ff9999;
-  background: color-mix(in srgb, var(--danger, #ef4444) 24%, rgba(255, 255, 255, 0.06));
-  border-color: color-mix(in srgb, var(--danger, #ef4444) 65%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--danger, #ef4444) 32%, transparent);
+/* Hover only where there is a pointer that hovers: on a phone a tap would
+   leave the red glow stuck on after the finger lifts. */
+@media (hover: hover) {
+  .pane__action--close:hover,
+  .pane__action[data-danger='true']:hover,
+  .pane[data-kind='agent'] .pane__action--close:hover,
+  .pane[data-kind='agent'] .pane__action[data-danger='true']:hover,
+  .app[data-mobile] .pane[data-kind='agent'] .pane__action--close:hover,
+  .app[data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:hover,
+  [data-mobile] .pane[data-kind='agent'] .pane__action--close:hover,
+  [data-mobile] .pane[data-kind='agent'] .pane__action[data-danger='true']:hover {
+    color: #ff9999;
+    background: color-mix(in srgb, var(--danger, #ef4444) 24%, rgba(255, 255, 255, 0.06));
+    border-color: color-mix(in srgb, var(--danger, #ef4444) 65%, transparent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--danger, #ef4444) 32%, transparent);
+  }
 }
 
 .pane__action--close:active,
@@ -2782,14 +2837,20 @@ body {
   background: color-mix(in srgb, var(--danger, #ef4444) 14%, rgba(255, 255, 255, 0.03));
   border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 38%, var(--line-hairline));
   box-shadow: 0 0 8px color-mix(in srgb, var(--danger, #ef4444) 16%, transparent);
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 
-.tab-confirm__close:hover {
-  color: #ffffff;
-  background: color-mix(in srgb, var(--danger, #ef4444) 28%, rgba(255, 255, 255, 0.06));
-  border-color: var(--danger, #ef4444);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
+@media (hover: hover) {
+  .tab-confirm__close:hover {
+    color: #ffffff;
+    background: color-mix(in srgb, var(--danger, #ef4444) 28%, rgba(255, 255, 255, 0.06));
+    border-color: var(--danger, #ef4444);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--danger, #ef4444) 30%, transparent);
+  }
 }
 
 .tab-confirm__close:active {
@@ -2946,7 +3007,23 @@ body {
   background: var(--bg-panel);
   color: var(--text-secondary);
   font: 500 13px / 1 var(--font-ui);
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+/* A 34px pill with 44px of finger: the hit reaches into the row's 6px padding
+   and half of the 4px gap, so neighbours never share a hit. */
+.app[data-mobile] .mpanes__chip {
+  position: relative;
+}
+
+.app[data-mobile] .mpanes__chip::before {
+  content: '';
+  position: absolute;
+  inset: -5px -2px;
 }
 
 .mpanes__chip .agent-badge {
@@ -3318,8 +3395,21 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 .astatus[data-busy='true'] .astatus__state-dot[data-live='true'] {
+  position: relative;
   background: var(--feed-accent);
   box-shadow: 0 0 0 0 color-mix(in srgb, var(--feed-accent) 50%, transparent);
+}
+
+/* Busy: a halo swells out of the dot and fades — drawn by a pseudo-element on
+   transform and opacity, so the pulse never repaints the row. */
+.astatus[data-busy='true'] .astatus__state-dot[data-live='true']::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--feed-accent) 50%, transparent);
+  opacity: 0;
+  pointer-events: none;
   animation: astatus-pulse 1.6s var(--ease-out) infinite;
 }
 
@@ -3340,7 +3430,11 @@ button.astatus__mode:not(:disabled):hover {
   background: color-mix(in srgb, #ffffff 12%, rgba(255, 255, 255, 0.04));
   border: 1px solid color-mix(in srgb, #ffffff 28%, var(--line-hairline));
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
   cursor: pointer;
   flex: none;
 }
@@ -3377,12 +3471,15 @@ button.astatus__mode:not(:disabled):hover {
   border-bottom: 1px solid var(--line-soft);
 }
 
+/* 7px dot inside a 23px halo: 0.3 is the dot's own edge. */
 @keyframes astatus-pulse {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--feed-accent) 50%, transparent);
+    opacity: 1;
+    transform: scale(0.3);
   }
   100% {
-    box-shadow: 0 0 0 8px transparent;
+    opacity: 0;
+    transform: none;
   }
 }
 
@@ -3834,7 +3931,24 @@ button.astatus__mode:not(:disabled):hover {
   border-color: color-mix(in srgb, #ef4444 60%, transparent);
   color: #ef4444;
   box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 14%, transparent);
+}
+
+/* The halo breathes outward: a pseudo-element ring on opacity and transform,
+   so the pill is not repainted every frame. The phone's disc has its own ring
+   (Composer.css) and the deck's mic its own (voicebar.css). */
+.composer__mic:not(.composer__disc)[data-phase='recording']::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  border: 3px solid color-mix(in srgb, #ef4444 8%, transparent);
+  opacity: 0;
+  pointer-events: none;
   animation: composer-mic-halo 1.8s ease-in-out infinite;
+}
+
+.app[data-face='deck'] .dk-composer .composer__mic::after {
+  content: none;
 }
 
 .composer__mic[data-phase='recording']:hover:not(:disabled) {
@@ -3896,10 +4010,12 @@ button.astatus__mode:not(:disabled):hover {
 @keyframes composer-mic-halo {
   0%,
   100% {
-    box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 14%, transparent);
+    opacity: 0;
+    transform: scale(0.94);
   }
   50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, #ef4444 6%, transparent);
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -3934,6 +4050,7 @@ button.astatus__mode:not(:disabled):hover {
 /* Motion off: the bars still move (they are the information), the dressing does not. */
 @media (prefers-reduced-motion: reduce) {
   .composer__mic[data-phase='recording'],
+  .composer__mic:not(.composer__disc)[data-phase='recording']::after,
   .composer__mic-dot,
   .composer__mic-ring {
     animation: none;
@@ -3941,6 +4058,7 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 :root[data-reduced-motion='true'] .composer__mic[data-phase='recording'],
+:root[data-reduced-motion='true'] .composer__mic:not(.composer__disc)[data-phase='recording']::after,
 :root[data-reduced-motion='true'] .composer__mic-dot,
 :root[data-reduced-motion='true'] .composer__mic-ring {
   animation: none;
@@ -4455,7 +4573,11 @@ button.astatus__mode:not(:disabled):hover {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  transition: all var(--dur-fast);
+  transition:
+    background var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast),
+    box-shadow var(--dur-fast);
 }
 
 [data-mobile] .astatus__mode .astatus__mode-dot {
@@ -4862,10 +4984,30 @@ button.astatus__mode:not(:disabled):hover {
     animation: none;
   }
 
+  /* The busy dot keeps its word beside it and simply stops; RECONNECTING's
+     ring holds still, faint, so the chip keeps its shape. */
+  .astatus[data-busy='true'] .astatus__state-dot[data-live='true']::after {
+    animation: none;
+  }
+
+  .app[data-mobile] .pane .pane__perm[data-reconnecting='true']::after {
+    animation: none;
+    opacity: 0.5;
+  }
+
   .feed__jump,
   .feed__copy {
     transition: none;
   }
+}
+
+:root[data-reduced-motion='true'] .astatus[data-busy='true'] .astatus__state-dot[data-live='true']::after {
+  animation: none;
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .pane .pane__perm[data-reconnecting='true']::after {
+  animation: none;
+  opacity: 0.5;
 }
 
 /* ------------------------------------------------------------------- foreman

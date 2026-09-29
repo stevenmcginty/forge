@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PaneLeaf } from '@shared/types'
 import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import { isShellProfile, paneDisplayTitle, resolveProfile } from '@/lib/agents'
@@ -39,6 +39,9 @@ const PARSE_INTERVAL_MS = 80
 
 /** How long the phone's text size must hold still before the terminal refits to it. */
 const TEXT_SIZE_SETTLE_MS = 300
+
+/** How far a finger may wander and still be a tap on a pane, not the start of a scroll. */
+const TAP_SLOP_PX = 10
 
 /**
  * Put text on the clipboard. The async API where the page may use it; the old
@@ -143,7 +146,7 @@ function fmtTokens(n: number): string {
  * detach, a re-attach and up to MAX_REPLAY_BYTES per pane, and it happened
  * whenever a socket so much as flinched.
  */
-export function PaneView({
+function PaneViewInner({
   leaf,
   focused,
   onlyPane,
@@ -200,6 +203,8 @@ export function PaneView({
   const fontPx = mobile ? Math.round(fontSize * textScale) : fontSize
   const fontPxRef = useRef(fontPx)
   fontPxRef.current = fontPx
+  /** A finger or pen on this pane: where it went down, and whether it has moved off that spot. */
+  const touchStart = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   /** No desktop at all: decision 10's read-only twin, drawn from the cache. */
   const cached = state.stage.kind === 'offline'
   /** Is the socket answering this second? Only input and the badge read this. */
@@ -1068,7 +1073,32 @@ export function PaneView({
       data-only={onlyPane ? 'true' : undefined}
       data-status={!live ? 'frozen' : alive ? 'live' : 'dead'}
       style={{ '--pane-accent': profile.accent } as CSSProperties}
-      onPointerDownCapture={() => {
+      // A mouse focuses on the press, as it always has. A finger or pen focuses
+      // on the lift, and only when it stayed put: its `pointerdown` is also the
+      // start of every scroll, and a focus-pane there was a socket round trip
+      // per swipe. A pan the browser takes over ends in `pointercancel`, and a
+      // scroll the terminal runs itself moves the pointer — neither focuses.
+      // Same split as TabStrip's tap-vs-swipe.
+      onPointerDownCapture={(event) => {
+        if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+          touchStart.current = { x: event.clientX, y: event.clientY, moved: false }
+          return
+        }
+        if (!focused && live) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
+      }}
+      onPointerMoveCapture={(event) => {
+        const start = touchStart.current
+        if (!start || start.moved) return
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) >= TAP_SLOP_PX) start.moved = true
+      }}
+      onPointerCancelCapture={() => {
+        touchStart.current = null
+      }}
+      onPointerUpCapture={(event) => {
+        const start = touchStart.current
+        touchStart.current = null
+        if (!start || start.moved) return
+        if (Math.hypot(event.clientX - start.x, event.clientY - start.y) >= TAP_SLOP_PX) return
         if (!focused && live) void actions.layout({ op: 'focus-pane', paneId: leaf.id })
       }}
     >
@@ -1345,3 +1375,10 @@ export function PaneView({
     </section>
   )
 }
+
+/**
+ * Memoised: a tab mounts one of these per leaf, each with its own xterm, and a
+ * parent re-rendering for a chip or a sheet must not re-render every one of
+ * them. The context still reaches each pane through `useForge()`.
+ */
+export const PaneView = memo(PaneViewInner)

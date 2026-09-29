@@ -43,6 +43,8 @@ import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
 import { watchAppViewport } from './lib/viewport'
 import './components/Cards.phone.css'
+// Last, so the phone's feedback cues land over the composer's and pane's own rules.
+import './phone-cues.css'
 
 const host = document.getElementById('root')
 if (!host) throw new Error('index.html has no #root')

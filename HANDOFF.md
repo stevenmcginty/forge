@@ -1,5 +1,15 @@
 # Handoff
 
+## Phone face: faster, cheaper motion, desktop cues (2026-09-29, pushed; web only, no Forge restart)
+
+- **Asked (Steve):** make the phone (Forge Web) feel like the desktop, fast and touch-first; animations similar, not identical. Also: commit and push every terminal's work when done.
+- **Audits (read-only, scratch files gone with the session):** the phone runs the older face (TopBar, TabStrip, PaneView, StatusLine) on `phone-tokens.css`; the deck face mounts only when not mobile (`Workspace.tsx`, `deck = !mobile`).
+- **A, speed (`state.tsx`, `PaneView.tsx`, `Workspace.tsx`, `vite.config.ts`):** context value memoised, `onBusy`/`asking` keep the same reference when unchanged, `PaneView` is `memo`, touch focus-pane fires on pointerup (mouse unchanged), Deck and GitHubMode are lazy, vendor split. Entry JS 1,589,764 B to 816,895 B + vendor 721,394 B (vendor only saves re-downloads). `firebase.json` was already `immutable` on `/assets/**`.
+- **B, motion and touch (`styles.css`, `ProjectSheet.css`, `Composer.css`):** infinite pulses now move transform/opacity on a pseudo-element, no `transition: all`, reduced-motion guards, coarse-pointer hit areas grown to 44 px without changing looks, `touch-action: manipulation`. Left: typing-mode fold (`max-height`/`padding`) and `StatusLine.css` height need a wrapper element (.tsx). `.sfly .srow` and `.rsec__toggle` are still 40 px.
+- **C, cues (new `phone-cues.css`, `lib/pane-sent.ts`, `lib/pane-state.ts`, `lib/theme-choice.ts`, `PhoneTheme.tsx/.css`; edits to `StatusLine`, `PhoneListen`, `MoreSheet`, `SessionComposer`, `phone-tokens.css`):** pane state words with shapes (Ready, Working + clock, Done, Needs you, Reconnecting, Frozen), a one-lap "sent" comet on the pane edge (violet you, lime agent), dictation (violet, "Listening") vs agent (lime, "Agent" pill) cues, and a Theme row in More so Paper works. Phone-own copies of desktop logic; nothing imports `src/`.
+- **Checked:** typecheck 0 (all four configs), lint:hooks 0, scratch vite build 0 by the foreman. Designer viewed mocked states at 390x844 (Ice and Paper). NOT seen on a real phone, not with a desktop connected, not on iOS (`offset-path`), not in Orbit/Carbon/Ember.
+- **Open:** (1) `web/src/deck/theme.ts` doc comment is stale; (2) shell panes get no state word (no busy data on the phone); (3) comet does not fire for the Claude web voice's desktop-side tools; (4) the "Working" clock counts from when the phone first saw the pane busy; (5) `PaneView` memo is defeated on the Deck by inline props at `Deck.tsx:223-224`, and splitting the context is deferred; (6) next lazy win: `DeckTopBar` in `TopBar.tsx:13`; (7) the All-agents overview (Wall/Full screen tray) was skipped, it is the big remaining gap; (8) the impeccable hook flags `var(--spring-glide)` in deck CSS: false positive, Steve is "not too worried", no ignore added.
+
 ## Forge Web desktop-browser bar now looks like the desktop agent bar (2026-09-29, NOT committed, web NOT rebuilt)
 
 - **Asked (Steve):** copy the desktop agent bar onto the browser (deck face, not the phone); "copy it where we can", not like-for-like.

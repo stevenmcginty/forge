@@ -16,7 +16,8 @@ import {
   type WebVoiceState
 } from '../deck/voiceAgent'
 import { voiceAgentWord, voiceHint, voicePhaseWord, WEB_VOICE_AGENTS } from '../deck/voice-words'
-import { useForge } from '../state'
+import { withAgentSends } from '../lib/pane-sent'
+import { useForge, useWorkspace } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
 import './PhoneListen.css'
 
@@ -57,8 +58,13 @@ const CAPTION_TAIL = 140
 export function usePhoneVoice(enabled: boolean, dictating: boolean): void {
   const { state, actions } = useForge()
   const request = actions.request
+  // The workspace the agent's sends are resolved against: read at answer time.
+  const workspace = useWorkspace()
+  const workspaceRef = useRef(workspace)
+  workspaceRef.current = workspace
   useEffect(() => {
-    if (enabled) setVoiceLink({ request })
+    // The agent's sends into a pane get the agent's comet (lib/pane-sent.ts).
+    if (enabled) setVoiceLink({ request: withAgentSends(request, () => workspaceRef.current) })
   }, [enabled, request])
 
   // A move lands on this phone: a project, a tab, a pane, through the same
@@ -402,6 +408,9 @@ export function ListenLine({
       </span>
       <span className="plisten-line__body" aria-hidden="true">
         <span className="plisten-line__head">
+          {/* Whose voice this is, in a word: dictation's strip says "Listening"
+              too, and the two must never be told apart by colour alone. */}
+          <span className="plisten-line__tag">Agent</span>
           <LeadMark lead={content.lead} />
           <span className="plisten-line__word">{content.word}</span>
           <span className="plisten-line__agent">· {content.agent}</span>
