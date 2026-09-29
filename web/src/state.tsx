@@ -291,6 +291,11 @@ export function useForge(): ForgeContextValue {
   return value
 }
 
+/** Like `useForge`, but null outside a provider: the preview harness (`?preview=`) mounts panes with none. */
+export function useForgeOptional(): ForgeContextValue | null {
+  return useContext(ForgeContext)
+}
+
 /** The active project's workspace, or an empty one so callers need no null branch. */
 export function useWorkspace(): Workspace {
   const { state } = useForge()

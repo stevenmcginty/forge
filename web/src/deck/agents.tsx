@@ -5,7 +5,7 @@ import { collectLeaves } from '@/lib/splitTree'
 import type { AgentProfile, PaneLeaf, TerminalTab } from '@shared/types'
 import { paneNameInTab } from '@shared/workspace'
 import { usePaneDone, usePaneStatus } from '../lib/pane-status'
-import { useForge, useProfiles, useWorkspace } from '../state'
+import { useForge, useForgeOptional, useProfiles, useWorkspace } from '../state'
 
 /*
  * What the deck face knows about each agent in the project, shared by the top
@@ -88,7 +88,7 @@ const STATE_TITLE: Record<DeckAgentState, string> = {
 }
 
 export function useAgentState(paneId: string | null): { state: DeckAgentState; word: string; detail: string } {
-  const { state } = useForge()
+  const state = useForgeOptional()?.state ?? null
   const status = usePaneStatus(paneId)
   const done = usePaneDone(paneId)
   const say = (s: DeckAgentState, detail?: string): { state: DeckAgentState; word: string; detail: string } => ({
@@ -97,6 +97,8 @@ export function useAgentState(paneId: string | null): { state: DeckAgentState; w
     detail: detail ?? STATE_TITLE[s]
   })
   if (!paneId) return say('dormant')
+  // No provider (the preview harness): nothing to know, so the quiet state.
+  if (!state) return say('idle')
   if (state.stage.kind === 'offline') return say('frozen')
   if (state.connection.state !== 'live') return say('reconnecting')
   if (state.asking.has(paneId)) return say('attention')

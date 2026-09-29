@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAgentState, type DeckAgentState } from '../deck/agents'
-import { useForge } from '../state'
+import { useForgeOptional } from '../state'
 
 /**
  * A pane's state for the phone's status line: the deck's word and shape for
@@ -16,6 +16,7 @@ import { useForge } from '../state'
  */
 
 const busySince = new Map<string, number>()
+const NO_BUSY: Set<string> = new Set()
 
 /**
  * Every pane the desktop says is working, stamped the first time it is seen
@@ -51,15 +52,15 @@ export interface PhonePaneState {
 }
 
 export function usePhonePaneState(paneId: string | null): PhonePaneState {
-  const { state: forge } = useForge()
+  const forge = useForgeOptional()?.state ?? null
   const { state, word, detail } = useAgentState(paneId)
   const working = state === 'working'
   const [now, setNow] = useState(() => Date.now())
 
   const keep = working ? paneId : null
   useEffect(() => {
-    syncBusy(forge.busy, keep, Date.now())
-  }, [forge.busy, keep])
+    syncBusy(forge?.busy ?? NO_BUSY, keep, Date.now())
+  }, [forge?.busy, keep])
 
   // The clock ticks only while the pane on screen is working; idle, nothing runs.
   useEffect(() => {

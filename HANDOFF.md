@@ -1,5 +1,13 @@
 # Handoff
 
+## Browser: pane-edge comet and voice keys; phone comet timing (2026-09-29, pushed 8233699, 19dbc46 + fix)
+
+- **Phone comet timing:** Forge Web reaches the phone/browser only through a push (CI "Forge Web", ~40 s); edits in this checkout do NOT show. Settled at 2.0 s (agent 2.8 s) on the desk's lap curve (`web/src/phone-cues.css`; `SAFETY_MS` 3600 in `web/src/lib/pane-sent.ts`). Steve tried 0.9 s ("a little fast"), 3 s + a front-loaded curve ("way too fast"), 6 s ("way too slow"). Desktop app comet is 2.2 s, two laps (`src/components/DictationCue.css`).
+- **Deck (desktop-browser) comet:** `web/src/deck/sent.css` (new): the desktop's two-lap comet and glow on `.app[data-face='deck'] .pane[data-sent]`, `dk-sent-*` keyframes, `--dk-dict-*` violet / `--dk-agent-*` lime; Wall tiles glow on the `.dk-slot`. `pane-sent.ts` clears on `dk-sent*` too. `DeckKeys` (`VoiceBar.tsx`) wraps the voice link in `withAgentSends`, so the agent's sends show lime on the deck. Agent lime comet on a live deck not tested end to end.
+- **Browser voice keys (browser only; localStorage; desktop app and phone unchanged):** dictation default Right Shift (`web/src/deck/dictation-key.ts`), agent voice ("Listen") default Right Alt (new `web/src/deck/listen-key.ts`, was a fixed Right Shift). Both editable in the "..." menu (`DictationKey.tsx`: Change key / Reset, `VoiceKeyRecorder`). One key, one job: the other's key is refused in words. A browser that stored its own dictation key keeps it. Desktop app defaults are unchanged (`scripts/voice-hotkey-check.mjs` still asserts Dictate = Right Alt there; Steve's swap on the desktop is his own setting).
+- **CI:** `viewtoggle:check` failed because the phone status line (`usePhonePaneState`, `useAgentState`) needed `<ForgeProvider>` and the `?preview=` harness has none. Fixed with `useForgeOptional()` in `web/src/state.tsx` (null outside a provider; quiet "Ready" state). 24/0 locally. `input:check` ("The input helper did not answer in time") also failed on the same runs and on 9a4c790, before this work: looks like a CI flake, not chased.
+- **Checked:** typecheck 0, lint:hooks 0 for each push; keys builder ran `voice-hotkey-check` 73/0 and a throwaway store check 29/0; deck comet builder viewed paused headless shots (violet, lime). Not seen: real browser key presses on Steve's UK keyboard (Right Alt is AltGr; `talk-key.ts` handles the fake Left Ctrl).
+
 ## Phone face: faster, cheaper motion, desktop cues (2026-09-29, pushed; web only, no Forge restart)
 
 - **Asked (Steve):** make the phone (Forge Web) feel like the desktop, fast and touch-first; animations similar, not identical. Also: commit and push every terminal's work when done.
