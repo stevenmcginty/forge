@@ -2,6 +2,7 @@ import { closeSync, openSync, readdirSync, readSync, statSync, watch, type FSWat
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { WebUsageFrame } from '@shared/web'
+import { sortWindows, windowLabel } from '@shared/usage-windows'
 
 /**
  * Each Codex pane's context window, read off Codex's own session files for
@@ -18,6 +19,15 @@ import type { WebUsageFrame } from '@shared/web'
  * `token_count` after every turn:
  *
  *   { info: { last_token_usage: { total_tokens, … }, model_context_window } }
+ *
+ * The same line carries the account's plan limits beside `info`:
+ *
+ *   rate_limits: { primary: { used_percent, window_minutes, resets_at }, secondary | null, plan_type }
+ *
+ * The slots are not fixed lengths — on a `go` plan `primary` is a 30-day
+ * window and `secondary` is null — so each is labelled by `window_minutes`
+ * (shared/usage-windows.ts) and never put in the phone's 5-hour or weekly slot.
+ * The model and reasoning effort come from the newest `turn_context` line.
  *
  * The ring is Codex's own sum (codex-rs/tui/src/token_usage.rs,
  * `percent_of_context_window_remaining`): `last_token_usage.total_tokens` is
@@ -111,8 +121,14 @@ export interface CodexUsage {
 }
 
 type Meta = { folder: string; start: number }
-type Turn = { context: NonNullable<WebUsageFrame['context']>; at: number }
-type Rollout = { file: string; folder: string; start: number; written: number; turn?: Turn }
+type Turn = {
+  context: NonNullable<WebUsageFrame['context']>
+  windows: NonNullable<WebUsageFrame['windows']>
+  at: number
+}
+/** What the newest `turn_context` says the session is running. */
+type Settings = { model?: string; effort?: string }
+type Rollout = { file: string; folder: string; start: number; written: number; turn?: Turn; settings?: Settings }
 type Known = CodexPane & { folder: string; goneAt?: number }
 
 export function startCodexUsage(options: CodexUsageOptions): CodexUsage {
@@ -126,8 +142,11 @@ export function startCodexUsage(options: CodexUsageOptions): CodexUsage {
   const known = new Map<string, Known>()
   /** `session_meta` never changes, so a file's is read once. null = not a rollout. */
   const metas = new Map<string, Meta | null>()
-  /** The latest turn, reused while the file's size holds. */
-  const turns = new Map<string, { size: number; turn?: Turn }>()
+  /**
+   * The latest turn, reused while the file's size holds, and the newest
+   * `turn_context`, found by reading only what was appended since `scanned`.
+   */
+  const turns = new Map<string, { size: number; turn?: Turn; settings?: Settings; scanned: number }>()
   /** What each pane was last told, as a comparable string. */
   const lastKey = new Map<string, string>()
 
@@ -209,10 +228,19 @@ export function startCodexUsage(options: CodexUsageOptions): CodexUsage {
       if (!meta || !folders.has(meta.folder)) continue
       let held = turns.get(file)
       if (!held || held.size !== size) {
-        held = { size, turn: readLastTurn(file, size, written) }
+        // A file that grew is read on from where the last look stopped; one
+        // that shrank, or is new, from its tail.
+        const grew = held && size > held.size ? held : undefined
+        const found = readSettings(file, grew?.scanned, size)
+        held = {
+          size,
+          turn: readLastTurn(file, size, written),
+          settings: found.settings ?? grew?.settings,
+          scanned: found.scanned
+        }
         turns.set(file, held)
       }
-      rollouts.push({ file, folder: meta.folder, start: meta.start, written, turn: held.turn })
+      rollouts.push({ file, folder: meta.folder, start: meta.start, written, turn: held.turn, settings: held.settings })
     }
     for (const file of [...turns.keys()]) if (!seen.has(file)) turns.delete(file)
     for (const file of [...metas.keys()]) if (!seen.has(file)) metas.delete(file)
@@ -258,9 +286,12 @@ export function startCodexUsage(options: CodexUsageOptions): CodexUsage {
         sessionId: pane.id,
         context: mine.turn.context,
         source: 'codex-session',
-        at: mine.turn.at
+        at: mine.turn.at,
+        windows: mine.turn.windows,
+        ...(mine.settings?.model ? { model: mine.settings.model } : {}),
+        ...(mine.settings?.effort ? { effort: mine.settings.effort } : {})
       }
-      const key = JSON.stringify(frame.context)
+      const key = JSON.stringify([frame.context, frame.windows, frame.model ?? null, frame.effort ?? null])
       if (lastKey.get(pane.id) === key) continue
       lastKey.set(pane.id, key)
       try {
@@ -328,12 +359,17 @@ function rolloutFiles(dir: string): string[] {
 
 /** Bytes `[start, end)` of a file as text, or null when it cannot be read. */
 function readRange(file: string, start: number, end: number): string | null {
+  return readBytes(file, start, end)?.toString('utf8') ?? null
+}
+
+/** Bytes `[start, end)` of a file, or null when it cannot be read. */
+function readBytes(file: string, start: number, end: number): Buffer | null {
   let fd: number | null = null
   try {
     fd = openSync(file, 'r')
     const buf = Buffer.alloc(end - start)
     const got = readSync(fd, buf, 0, buf.length, start)
-    return buf.subarray(0, got).toString('utf8')
+    return buf.subarray(0, got)
   } catch {
     return null
   } finally {
@@ -393,8 +429,49 @@ function readLastTurn(file: string, size: number, written: number): Turn | undef
   }
 }
 
+/**
+ * The newest `turn_context`'s model and effort in bytes `[from, size)`, and how
+ * far the complete lines went. Without `from`, the file's tail is read and its
+ * first, partial line dropped. A turn_context carries the turn's whole
+ * instructions, so it is found by reading on from where the last look stopped
+ * rather than backwards from the end every time.
+ */
+function readSettings(file: string, from: number | undefined, size: number): { settings?: Settings; scanned: number } {
+  const start = from ?? Math.max(0, size - MAX_TAIL_BYTES)
+  if (start >= size) return { scanned: start }
+  const buf = readBytes(file, start, size)
+  if (!buf) return { scanned: start }
+  const end = buf.lastIndexOf(0x0a)
+  if (end < 0) return { scanned: start }
+  const lines = buf.subarray(0, end).toString('utf8').split('\n')
+  if (from === undefined && start > 0) lines.shift()
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"turn_context"')) continue
+    const settings = settingsOf(lines[i])
+    if (settings) return { settings, scanned: start + end + 1 }
+  }
+  return { scanned: start + end + 1 }
+}
+
+function settingsOf(text: string): Settings | undefined {
+  let line: {
+    type?: unknown
+    payload?: { model?: unknown; effort?: unknown; collaboration_mode?: { settings?: { reasoning_effort?: unknown } } }
+  }
+  try {
+    line = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (line?.type !== 'turn_context' || !line.payload) return undefined
+  const model = str(line.payload.model)
+  const effort = str(line.payload.effort) ?? str(line.payload.collaboration_mode?.settings?.reasoning_effort)
+  if (!model && !effort) return undefined
+  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+}
+
 function turnOf(text: string, written: number): Turn | undefined {
-  let line: { timestamp?: unknown; payload?: { type?: unknown; info?: unknown } }
+  let line: { timestamp?: unknown; payload?: { type?: unknown; info?: unknown; rate_limits?: unknown } }
   try {
     line = JSON.parse(text)
   } catch {
@@ -412,8 +489,31 @@ function turnOf(text: string, written: number): Turn | undefined {
       : (Math.max(0, usedTokens - BASELINE_TOKENS) / (windowTokens - BASELINE_TOKENS)) * 100
   return {
     context: { usedPct: Math.min(100, Math.max(0, usedPct)), usedTokens, windowTokens },
+    windows: windowsOf(line.payload.rate_limits),
     at: time(line.timestamp) ?? written
   }
+}
+
+/** `rate_limits.{primary, secondary}`, each labelled by its own length. [] for an API-key login. */
+function windowsOf(value: unknown): Turn['windows'] {
+  if (!value || typeof value !== 'object') return []
+  const rl = value as { primary?: unknown; secondary?: unknown }
+  const out: Turn['windows'] = []
+  for (const slot of [rl.primary, rl.secondary]) {
+    if (!slot || typeof slot !== 'object') continue
+    const w = slot as { used_percent?: unknown; window_minutes?: unknown; resets_at?: unknown }
+    const minutes = num(w.window_minutes)
+    const used = num(w.used_percent)
+    if (!minutes || minutes <= 0 || used === undefined) continue
+    const resetsAt = num(w.resets_at)
+    out.push({
+      minutes,
+      label: windowLabel(minutes),
+      usedPct: Math.min(100, Math.max(0, used)),
+      ...(resetsAt && resetsAt > 0 ? { resetsAt } : {})
+    })
+  }
+  return sortWindows(out)
 }
 
 function time(value: unknown): number | undefined {
@@ -424,4 +524,8 @@ function time(value: unknown): number | undefined {
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }

@@ -76,6 +76,11 @@ export const IPC = {
   shotsDrag: 'shots:drag',
   shotsOpenFolder: 'shots:open-folder',
 
+  // agent usage — each agent pane's model, context and plan limits, for the
+  // desktop agent bar. See electron/usage-hub.ts.
+  usageSnapshot: 'usage:snapshot',
+  usageFrame: 'usage:frame',
+
   // dictation (stt sidecar)
   sttStart: 'stt:start',
   sttStop: 'stt:stop',

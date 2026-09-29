@@ -24,6 +24,7 @@ import { ACTION_GLYPH, hubAsk, listenState, useHubPreview, useHubView } from './
 import { BrainPicker } from './BrainPicker'
 import { DictateButton } from './DictateButton'
 import { KeyRecorder, Keys } from './KeyRecorder'
+import { ModelPicker, UsageStrip } from './ModelPicker'
 import { ListenToggle } from './VoicePill'
 import './Composer.css'
 
@@ -69,18 +70,24 @@ const ECHO_POLL_MS = 30
  * Fire the keys a hand at the prompt would: the text, then Enter once the pane
  * has drawn it.
  *
- * A fixed beat (it was 70 ms) lost the Enter now and then: Claude Code takes a
- * long line as a paste, and an Enter that lands while it is still taking the
- * paste in becomes part of it — the words sat on the prompt line until Steve
- * pressed Enter himself. So the Enter waits for the echo: output after the
- * text went in, then a short quiet, by which time the words are in the
- * agent's box. A shell echoes at once, so it loses nothing.
+ * The words go in as a paste, never as typing. Typed raw, a long line reached
+ * Claude Code as one fast burst it guesses is a paste — and when the Enter
+ * arrived in the same read as the words, it was taken in as part of that
+ * paste, a new line rather than a send, so the words sat on the prompt until
+ * Steve pressed Enter himself. xterm's paste wraps the words in bracketed-
+ * paste markers whenever the agent asked for them (Claude Code, Codex and
+ * Gemini CLI all do), so the agent knows exactly where the words end: an
+ * Enter after the end marker is an Enter, and one that lands while it is still
+ * taking the paste in is held and pressed after it. A shell that never asked
+ * for the markers gets the plain words, as before.
+ *
+ * The Enter still waits for the echo — output after the words went in, then a
+ * short quiet — so it follows the words rather than racing them.
  */
 function sendToPane(paneId: string, text: string): boolean {
-  if (!terminalHost.has(paneId)) return false
+  if (!terminalHost.has(paneId) || terminalHost.runtime(paneId).status === 'exited') return false
   const before = terminalHost.readiness(paneId).outputBytes
-  const ok = text.includes('\n') ? (terminalHost.paste(paneId, text), true) : terminalHost.type(paneId, text)
-  if (!ok) return false
+  terminalHost.paste(paneId, text)
   const started = performance.now()
   const tick = (): void => {
     const r = terminalHost.readiness(paneId)
@@ -577,6 +584,8 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           <span className="truncate">{toForge ? 'Forge' : paneName}</span>
         </button>
 
+        <ModelPicker />
+
         {review ? (
           // Dictated words, waiting: in words, with the time left and a way out.
           <span className="comp__review" role="status">
@@ -640,6 +649,9 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           }
         />
       </div>
+
+      {/* The aimed-at pane's context and plan limits, once it has reported them. */}
+      <UsageStrip />
     </div>
   )
 }

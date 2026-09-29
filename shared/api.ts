@@ -106,6 +106,7 @@ import type {
   WebMirrorConfig,
   WebProjectRemoveEvent,
   WebRememberedPhone,
+  WebUsageFrame,
   WebVoiceAskEvent,
   WebVoiceAskReply
 } from './web'
@@ -258,6 +259,21 @@ export interface ForgeApi {
     openFolder(): Promise<string>
     /** Returns an unsubscribe function. */
     onUpdated(cb: (shots: Shot[]) => void): () => void
+  }
+
+  /**
+   * Each agent pane's live usage — model, effort, context, session cost and
+   * the account's plan-limit windows — read off disk by electron/usage-hub.ts
+   * whether or not Forge Web is on. `WebUsageFrame.sessionId` is the pane id.
+   *
+   * Optional: a preload older than the renderer lacks it, and calling a
+   * missing function unmounts the renderer. src/lib/paneUsage.ts checks.
+   */
+  usage?: {
+    /** The latest frame for every pane that has one. */
+    snapshot(): Promise<WebUsageFrame[]>
+    /** Returns an unsubscribe function. */
+    onFrame(cb: (frame: WebUsageFrame) => void): () => void
   }
 
   /**

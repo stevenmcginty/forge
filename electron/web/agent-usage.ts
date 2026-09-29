@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { isSessionId } from '@shared/session'
 import type { WebUsageFrame } from '@shared/web'
+import { sortWindows, windowLabel } from '@shared/usage-windows'
 
 /**
  * Each Claude pane's context window, and the account's 5-hour and weekly
@@ -17,12 +18,14 @@ import type { WebUsageFrame } from '@shared/web'
  * `~/.claude/forge-status/<claude-session-id>.json`, written to a temp name and
  * renamed so a read never sees half a file:
  *
- *   { session_id, context_window, rate_limits, model, at }
+ *   { session_id, context_window, rate_limits, model, model_name, effort, cost_usd, at }
  *
  * This module watches that folder, turns each file into a `WebUsageFrame` for
  * the pane that owns the session, and hands it over when the numbers changed.
- * Pacing and replay are electron/web/server.ts's; which pane owns which session
- * is web-host's (`paneSessionId`, the same mapping the chat view uses).
+ * It runs once for the whole desktop (electron/usage-hub.ts), which fans the
+ * frames out to the desktop window and to Forge Web; pacing and replay for the
+ * phone are electron/web/server.ts's. Which pane owns which session is
+ * web-host's (`paneSessionId`, the same mapping the chat view uses).
  *
  * **Limits are the account's, not the pane's.** Every session reports the same
  * two windows, so the newest file that carries them speaks for every Claude
@@ -86,6 +89,9 @@ type Status = {
   at: number
   context?: WebUsageFrame['context']
   limits?: WebUsageFrame['limits']
+  model?: string
+  effort?: string
+  costUsd?: number
 }
 
 export function startAgentUsage(options: AgentUsageOptions): AgentUsage {
@@ -190,7 +196,7 @@ export function startAgentUsage(options: AgentUsageOptions): AgentUsage {
     for (const status of fresh) {
       const paneId = owners.get(status.sessionId)
       if (!paneId) continue
-      if (!status.context && !limits) continue
+      if (!status.context && !limits && !status.model) continue
       told.add(paneId)
       const frame: WebUsageFrame = {
         type: 'usage',
@@ -198,9 +204,19 @@ export function startAgentUsage(options: AgentUsageOptions): AgentUsage {
         ...(status.context ? { context: status.context } : {}),
         ...(limits ? { limits } : {}),
         source: 'claude-statusline',
-        at: Math.max(status.at, limitsAt)
+        at: Math.max(status.at, limitsAt),
+        windows: windowsOf(limits),
+        ...(status.model ? { model: status.model } : {}),
+        ...(status.effort ? { effort: status.effort } : {}),
+        ...(status.costUsd !== undefined ? { costUsd: status.costUsd } : {})
       }
-      const key = JSON.stringify([frame.context ?? null, frame.limits ?? null])
+      const key = JSON.stringify([
+        frame.context ?? null,
+        frame.limits ?? null,
+        frame.model ?? null,
+        frame.effort ?? null,
+        frame.costUsd ?? null
+      ])
       if (lastKey.get(paneId) === key) continue
       lastKey.set(paneId, key)
       try {
@@ -244,17 +260,51 @@ function readStatus(file: string, sessionId: string, mtimeMs: number): Status | 
     return null
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const json = raw as { session_id?: unknown; context_window?: unknown; rate_limits?: unknown; at?: unknown }
+  const json = raw as {
+    session_id?: unknown
+    context_window?: unknown
+    rate_limits?: unknown
+    model?: unknown
+    model_name?: unknown
+    effort?: unknown
+    cost_usd?: unknown
+    at?: unknown
+  }
   // The name is the key; a body that names another session is not trusted.
   if (json.session_id !== undefined && json.session_id !== sessionId) return null
   const context = contextOf(json.context_window)
   const limits = limitsOf(json.rate_limits)
+  // The name Claude Code shows ("Opus 5.5 (1M context)"), else its id. Older
+  // statusline.js copies wrote only the id.
+  const model = str(json.model_name) ?? str(json.model)
+  const effort = str(json.effort)
+  const costUsd = num(json.cost_usd)
   return {
     sessionId,
     at: num(json.at) ?? mtimeMs,
     ...(context ? { context } : {}),
-    ...(limits ? { limits } : {})
+    ...(limits ? { limits } : {}),
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(costUsd !== undefined && costUsd >= 0 ? { costUsd } : {})
   }
+}
+
+/** The account's two windows as a list labelled by length, shortest first. */
+function windowsOf(limits: WebUsageFrame['limits'] | undefined): NonNullable<WebUsageFrame['windows']> {
+  const out: NonNullable<WebUsageFrame['windows']> = []
+  const add = (minutes: number, w: { usedPct: number; resetsAt?: number } | undefined): void => {
+    if (!w) return
+    out.push({
+      minutes,
+      label: windowLabel(minutes),
+      usedPct: w.usedPct,
+      ...(w.resetsAt !== undefined ? { resetsAt: w.resetsAt } : {})
+    })
+  }
+  add(300, limits?.fiveHour)
+  add(10080, limits?.week)
+  return sortWindows(out)
 }
 
 /**
@@ -312,6 +362,10 @@ function windowOf(value: unknown): { usedPct: number; resetsAt?: number } | unde
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
 function pct(value: number): number {

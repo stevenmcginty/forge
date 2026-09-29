@@ -14,7 +14,8 @@
   flex-direction: column;
   align-items: stretch;
   gap: 0;
-  width: clamp(560px, 60vw, 1040px);
+  /* Roomy: the row carries the model chip beside the target now. */
+  width: clamp(600px, 72vw, 1240px);
   padding: 6px 8px 6px 6px;
   border-radius: 24px;
 }
@@ -797,8 +798,10 @@
   }
 }
 
+/* Narrow: the window less its edges and the grip beside the bar (16 px + the
+   8 px gap), so the bar's right end stays on screen. */
 @media (max-width: 1180px) {
   .dock__composer.comp {
-    width: calc(100vw - 32px);
+    width: calc(100vw - 56px);
   }
 }

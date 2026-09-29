@@ -725,9 +725,13 @@ function modelFamily(command: string): string | null {
  * chip then stays off rather than offering Claude's aliases to a tool that
  * does not speak them. Adding a family is one more key in MODEL_FAMILIES.
  *
- * Snapshot 2026-08-23: Claude aliases from code.claude.com/docs/en/model-config;
+ * Snapshot 2026-09-29 (Claude, Codex; the rest 2026-08-23): Claude full ids
+ * from the Claude Code 2.1.284 model table — Opus 5.5 keeps its `[1m]` suffix
+ * (the table marks it supports_1m_suffix, Steve runs it that way); Fable 5.1
+ * and Sonnet 5.5 are native 1M, so their plain ids already get 1M context;
+ * Haiku 4.5 is 200k and has no effort dial;
  * Grok versions from `grok models` plus the older ids the TUI still takes;
- * Codex from `codex debug models --bundled` + learn.chatgpt.com/codex/models;
+ * Codex from the visible rows of `codex debug models` (0.157.1);
  * Antigravity from `agy models`; Kimi from kimi.com/code/docs models;
  * Qwen from qwen-code `/model <id>` + QwenCloud text-generation models;
  * Gemini CLI from geminicli.com/docs/cli/model; GLM from docs.z.ai Coding Plan;
@@ -743,10 +747,10 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'grok-2', label: 'Grok 2', note: 'the oldest this picker still names' }
   ],
   claude: [
-    { id: 'fable', label: 'Fable', note: 'the hardest, longest-running tasks' },
-    { id: 'opus', label: 'Opus', note: 'complex reasoning — the usual default' },
-    { id: 'sonnet', label: 'Sonnet', note: 'daily coding, faster and cheaper' },
-    { id: 'haiku', label: 'Haiku', note: 'simple tasks, the lightest' }
+    { id: 'claude-fable-5-1', label: 'Fable 5.1', note: 'the hardest, longest-running tasks' },
+    { id: 'claude-opus-5-5[1m]', label: 'Opus 5.5', note: 'complex reasoning — the usual default' },
+    { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'the newest Sonnet — daily coding, faster' },
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', note: 'simple tasks, the lightest' }
   ],
   glm: [
     { id: 'glm-5.3[1m]', label: 'GLM 5.3', note: 'the Coding Plan flagship, 1M context' },
@@ -755,14 +759,10 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'glm-4.7', label: 'GLM 4.7', note: 'the older Coding Plan model' }
   ],
   codex: [
-    { id: 'gpt-6-sol', label: 'GPT-6 Sol', note: 'newest — interactive and agentic coding' },
-    { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: 'newest — the fastest, cheapest GPT-6' },
-    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', note: 'flagship — complex coding and research' },
-    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'everyday workhorse' },
-    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'fast and cheap, clear repeatable work' },
-    { id: 'gpt-5.5', label: 'GPT-5.5', note: 'the previous frontier' },
-    { id: 'gpt-5.2', label: 'GPT-5.2', note: 'still on the bundled list' },
-    { id: 'gpt-5.3-codex-spark', label: 'Codex Spark', note: 'near-instant iteration — Pro' }
+    { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: 'newest — fast and affordable' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'older balanced model, straightforward work' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'older fast and efficient model' },
+    { id: 'gpt-5.5', label: 'GPT-5.5', note: 'legacy coding model' }
   ],
   kimi: [
     { id: 'k3', label: 'Kimi K3', note: 'flagship, up to 1M context' },
@@ -858,8 +858,8 @@ export function modelRefusal(command: string): string {
  * Which of `models` the status strip is talking about, or null when the
  * printed name does not match anything on the list.
  *
- * Longest id wins, so "grok-4.6" does not land on "grok-4" and "Opus 4.1"
- * still matches the `opus` alias.
+ * Longest id wins, so "grok-4.6" does not land on "grok-4", and a printed
+ * "Opus 5.5 (1M context)" still lands on the `Opus 5.5` row by its label.
  */
 export function matchAgentModel(models: AgentModelSpec[], printed: string | undefined): AgentModelSpec | null {
   if (!printed || !models.length) return null

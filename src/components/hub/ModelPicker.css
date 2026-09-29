@@ -1,0 +1,519 @@
+/*
+ * The model / effort chip in the bar's row, beside the target chip, and its
+ * menu. The menu wears the voice agent picker's rows (BrainPicker.css,
+ * .bpick__*); this file only adds the chip, the menu's frame and its section
+ * labels. The pick in force is a tick and the word "current", never a tint
+ * alone.
+ *
+ * Class names are `apick`: `.modelpick` already belongs to the voice
+ * surface's segmented pill (VoiceSurface.css), a global rule that squashed
+ * the old menu into one 18 px, sideways, clipped row.
+ */
+
+.apick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 170px;
+  height: 26px;
+  margin-bottom: 4px;
+  padding: 0 7px 0 4px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--line-hairline);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.apick-chip:hover,
+.apick-chip[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.apick-chip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Beside the chip, in the bar's own row: one small chevron that hides the usage
+   line under the bar or brings it back. Down = tuck it away, up = bring it back. */
+.apick-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 26px;
+  margin: 0 0 4px -4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.apick-toggle:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.apick-toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.apick-toggle[data-shown='false'] .apick-toggle__chev {
+  transform: rotate(180deg);
+}
+
+.dock[data-place='top'] .apick-toggle {
+  height: 24px;
+  margin-top: 2px;
+}
+
+/* The voice agent chip's tile, one size down: the model's letter. */
+.apick-chip__tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.apick-chip__face {
+  min-width: 0;
+}
+
+.apick-chip__chev {
+  flex: none;
+  color: var(--text-dim);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.apick-chip:hover .apick-chip__chev {
+  color: var(--text-secondary);
+}
+
+.apick-chip[data-open='true'] .apick-chip__chev {
+  transform: rotate(180deg);
+  color: var(--text-primary);
+}
+
+/* In the top bar: the target chip's shorter height. */
+.dock[data-place='top'] .apick-chip {
+  height: 24px;
+  margin-top: 2px;
+}
+
+/* Typing up there, the words need the width: the chip keeps its letter and
+   chevron and gives its words back when the bar is empty (as Dock.css does
+   for the voice agent chip). */
+.dock[data-place='top'] .comp:not([data-empty='true']) .apick-chip__face {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ menu */
+
+/* The popover scrolls up and down only; nothing in it may push it sideways. */
+.popover:has(> .apick) {
+  overflow: hidden;
+  padding: 0;
+}
+
+.apick {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--s-3);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* It rises out of the bar at the bottom edge (Popover's own entrance drops).
+   A move only, never a scale: Popover measures the panel as it mounts, and a
+   scaled panel measures short and lands on the bar. */
+.popover:has(> .apick[data-side='top']) {
+  animation-name: apick-rise;
+}
+
+@keyframes apick-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover:has(> .apick) {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .popover:has(> .apick) {
+  animation: none;
+}
+
+.apick__hint {
+  min-width: 0;
+}
+
+.apick__section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.apick__label {
+  padding: var(--s-2) var(--s-4) var(--s-2) 6px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.apick__row {
+  flex: none;
+}
+
+.apick__tile {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.apick__bars {
+  display: block;
+}
+
+.apick__refusal {
+  margin: 0;
+  padding: var(--s-2) var(--s-4) var(--s-3) 6px;
+  font-size: var(--t-xs);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------- the readings */
+
+.apick__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+.apick__label-hint {
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: var(--t-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-dim);
+}
+
+.apick__group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* A reading: name and "% used" on one line, a bar, then when it resets. */
+.apick__meter {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px var(--s-4) 8px 6px;
+}
+
+.apick__meter-head,
+.apick__stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+.apick__stat {
+  padding: 6px var(--s-4) 8px 6px;
+}
+
+.apick__meter-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.apick__meter-pct,
+.apick__stat-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.apick__stat-value {
+  font-size: var(--t-md);
+  color: var(--text-primary);
+}
+
+/* "near limit" / "almost full" / "full": the word is the signal. */
+.apick__meter-word {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.apick__meter-bar {
+  position: relative;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.apick__meter-bar > span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: var(--text-secondary);
+  transition: width var(--dur-med) var(--ease-out);
+}
+
+/* Near the end the fill also changes texture — stripes — so the state has a
+   shape as well as a colour. */
+:is(.apick__meter, .ustrip__item)[data-level='warn'] :is(.apick__meter-bar, .ustrip__bar) > span {
+  background-color: var(--warn);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--bg-panel-raised) 45%, transparent) 3px 5px
+  );
+}
+
+:is(.apick__meter, .ustrip__item)[data-level='full'] :is(.apick__meter-bar, .ustrip__bar) > span {
+  background-color: var(--danger);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 2px,
+    color-mix(in srgb, var(--bg-panel-raised) 55%, transparent) 2px 4px
+  );
+}
+
+.apick__meter-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------ the strip */
+
+/*
+ * Under the row, the bar's instrument line: a hairline, then each reading
+ * as a word, a small bar and its number. Quiet by default (muted ink, no
+ * fill), in the ink when pressed or near a limit. The strip is its own
+ * container, so as the bar narrows the least pressing readings go first.
+ */
+.ustrip {
+  container: ustrip / inline-size;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: auto;
+  min-width: 0;
+  height: 24px;
+  margin: 5px 2px 0 6px;
+  padding: 3px 6px 0 8px;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid var(--glass-line);
+  border-radius: 0 0 16px 16px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.ustrip:hover,
+.ustrip[data-open='true'] {
+  color: var(--text-secondary);
+}
+
+.ustrip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.ustrip__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+}
+
+.ustrip__label {
+  color: var(--text-dim);
+}
+
+.ustrip:hover .ustrip__label,
+.ustrip[data-open='true'] .ustrip__label {
+  color: var(--text-muted);
+}
+
+.ustrip__bar {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 34px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+.ustrip__bar > span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: currentColor;
+  transition: width var(--dur-med) var(--ease-out);
+}
+
+.ustrip__pct {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ustrip__item[data-level='warn'],
+.ustrip__item[data-level='full'] {
+  color: var(--text-primary);
+}
+
+.ustrip__word {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ustrip__reset {
+  color: var(--text-dim);
+}
+
+.ustrip__reset::before {
+  content: '· ';
+}
+
+.ustrip__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+  color: var(--text-dim);
+}
+
+.ustrip:hover .ustrip__more,
+.ustrip[data-open='true'] .ustrip__more {
+  color: var(--text-secondary);
+}
+
+.ustrip__chev {
+  transform: rotate(180deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.ustrip[data-open='true'] .ustrip__chev {
+  transform: none;
+}
+
+/* Narrowing: reset times, then cost and the word "Details", then the other
+   windows, then context. The most-used window always stays. */
+@container ustrip (max-width: 700px) {
+  .ustrip__reset {
+    display: none;
+  }
+}
+
+@container ustrip (max-width: 540px) {
+  .ustrip__item[data-rank='3'],
+  .ustrip__more-word {
+    display: none;
+  }
+}
+
+@container ustrip (max-width: 420px) {
+  .ustrip__item[data-rank='2'] {
+    display: none;
+  }
+}
+
+@container ustrip (max-width: 300px) {
+  .ustrip__item[data-rank='1'] {
+    display: none;
+  }
+}
+
+/* The top bar is one line: the strip stays out; the chip opens the same menu. */
+.dock[data-place='top'] .ustrip {
+  display: none;
+}

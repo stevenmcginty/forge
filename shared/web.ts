@@ -1960,6 +1960,19 @@ export interface WebUsageFrame {
   source: 'claude-statusline' | 'codex-session'
   /** When these numbers were true, epoch ms. */
   at: number
+  /**
+   * Every plan-limit window the CLI reports, labelled by its true length
+   * (shared/usage-windows.ts), shortest first. Unlike `limits`, which has
+   * only a 5-hour and a weekly slot, this carries whatever the CLI has — a
+   * Codex plan's 30-day window included. Absent from an older desktop.
+   */
+  windows?: { minutes: number; label: string; usedPct: number; resetsAt?: number }[]
+  /** The model as the CLI reports it — "Opus 5.5 (1M context)", "gpt-6-luna". */
+  model?: string
+  /** Reasoning effort, when the CLI reports it — "high". */
+  effort?: string
+  /** This session's spend so far in USD (Claude). */
+  costUsd?: number
 }
 
 /**

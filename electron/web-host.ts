@@ -58,8 +58,8 @@ import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsub
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeChatMirrors, findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
-import { defaultStatusDir, startAgentUsage, type AgentUsage } from './web/agent-usage'
-import { defaultCodexSessionsDir, startCodexUsage, type CodexPane, type CodexUsage } from './web/codex-usage'
+import type { CodexPane } from './web/codex-usage'
+import { disposeUsageHub, ensureUsageHub, onUsageFrame, registerUsageHandlers, usageFrames } from './usage-hub'
 import { foremanList, foremanStart, foremanSay, foremanStop, onForemanState } from './foreman/ipc'
 import { listHandoffsFor, onHandoffChanged } from './handoff-watcher'
 import type { HandoffStartRemoteEvent } from '@shared/handoffview'
@@ -271,17 +271,12 @@ let unsubscribeForeman: (() => void) | null = null
  */
 let unsubscribeHandoff: (() => void) | null = null
 /**
- * Each Claude pane's context and the account's limits, read from the files
- * `~/.claude/statusline.js` leaves in `~/.claude/forge-status` — see
- * electron/web/agent-usage.ts. Started with the link, stopped with it.
+ * Each agent pane's usage — Claude's from the files `~/.claude/statusline.js`
+ * leaves in `~/.claude/forge-status`, Codex's from its rollouts — relayed to
+ * the phone. The readers themselves run in electron/usage-hub.ts, for the
+ * desktop too; the link only listens, from its start to its stop.
  */
-let usageWatch: AgentUsage | null = null
-/**
- * Each Codex pane's context, read from Codex's own rollout files in
- * `~/.codex/sessions` — see electron/web/codex-usage.ts. Beside `usageWatch`,
- * and started and stopped with it.
- */
-let codexUsageWatch: CodexUsage | null = null
+let unsubscribeUsage: (() => void) | null = null
 /**
  * How long a PTY resize waits before the session list is pushed again.
  *
@@ -1520,7 +1515,7 @@ async function start(): Promise<void> {
 
   const host: WebServerHost = {
     auth: getAuth(),
-    // `usageWatch` below feeds `pushUsage`, so the feature is announced.
+    // `unsubscribeUsage` below feeds `pushUsage`, so the feature is announced.
     usage: true,
     appVersion: app.getVersion(),
     desktopName: () => hostname(),
@@ -1762,20 +1757,13 @@ async function start(): Promise<void> {
   // what lights a take-over button up.
   unsubscribeHandoff = onHandoffChanged((projectId, records) => instance.pushHandoff(projectId, records))
 
-  // And each Claude pane's context ring and the account's limits. The pane a
-  // session belongs to is looked up on every pass rather than remembered,
-  // because panes open, close and change session under it.
-  usageWatch = startAgentUsage({
-    dir: defaultStatusDir(),
-    panes: paneSessions,
-    onUsage: (frame) => instance.pushUsage(frame)
-  })
-  // Codex's, from its session files rather than a status line.
-  codexUsageWatch = startCodexUsage({
-    dir: defaultCodexSessionsDir(),
-    panes: codexPanes,
-    onUsage: (frame) => instance.pushUsage(frame)
-  })
+  // And each agent pane's context ring and the account's limits, Claude's and
+  // Codex's. The readers are the desktop's (electron/usage-hub.ts) and may
+  // have been running for an hour, so what they already know is said first —
+  // they only report changes. The server paces both.
+  ensureUsageHub()
+  for (const frame of usageFrames()) instance.pushUsage(frame)
+  unsubscribeUsage = onUsageFrame((frame) => instance.pushUsage(frame))
 
   // The browser sees what the window sees, from the same coalesced flush.
   unsubscribePty = addPtySink({
@@ -1796,10 +1784,8 @@ async function start(): Promise<void> {
         .find((s) => s.id === id)
       if (session) instance.pushSessionStarted(session)
       instance.pushSessions()
-      // A resumed session's status file is already on disk; its ring need not
-      // wait for the next redraw or the poll.
-      usageWatch?.rescan(id)
-      codexUsageWatch?.rescan(id)
+      // A resumed session's ring is electron/usage-hub.ts's own spawn sink's
+      // to rescan; its frame reaches the phone through `unsubscribeUsage`.
       // Re-adoption after a renderer reload arrives here too, and a renderer
       // that has just reloaded has forgotten which of its panes a browser is
       // reading — the labels on them, and nothing else now, but a label that
@@ -2050,10 +2036,9 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribeForeman = null
   unsubscribeHandoff?.()
   unsubscribeHandoff = null
-  usageWatch?.stop()
-  usageWatch = null
-  codexUsageWatch?.stop()
-  codexUsageWatch = null
+  // The readers keep running for the desktop; only the phone stops listening.
+  unsubscribeUsage?.()
+  unsubscribeUsage = null
   // A pending push would fire into a server that has stopped, which is the
   // ordinary shape of switching the link off a beat after moving a pane.
   if (geometryPush) clearTimeout(geometryPush)
@@ -2099,6 +2084,11 @@ function releaseBlocker(): void {
 
 export function registerWebHandlers(): void {
   ipcMain.handle(IPC.webStatus, (): WebStatus => webStatus())
+
+  // The desktop's usage readers, with this file's pane ↔ session lookups —
+  // they read the layout and the PTY manager, not the link. Nothing is
+  // watched until the renderer or the link asks. See electron/usage-hub.ts.
+  registerUsageHandlers({ claudePanes: paneSessions, codexPanes })
 
   ipcMain.handle(IPC.webStart, async (): Promise<WebStatus> => {
     setSettings({ webEnabled: true })
@@ -2414,4 +2404,5 @@ export async function disposeWeb(): Promise<void> {
   }
   pendingVoice.clear()
   await stop('quit')
+  disposeUsageHub()
 }

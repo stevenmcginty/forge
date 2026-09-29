@@ -1,6 +1,15 @@
 # Handoff
 
-## Top-left buttons redesigned; pane and project shortcuts; chat relay built (2026-09-29, NOT committed, NOT restarted)
+## Agent bar: model + effort + mode picker and usage strip (2026-09-29, NOT committed, NOT restarted)
+
+- **Asked (Steve):** a small button in the desktop agent bar to pick the pane's model (Sonnet 5.5 came out today) and effort; then a wider bar whose picker shows the current model, usage, and progress to plan limits; then "copy the voice agent picker, pop up, no sideways scroll".
+- **Built:** `src/components/hub/ModelPicker.tsx/.css` (picker on BrainPicker's `.bpick` shell, root class `apick`; `UsageStrip` under the input row), `Composer.css` (bar `clamp(600px, 72vw, 1240px)`), one import + mounts in `Composer.tsx` (the `sendToPane` hunk there is another session's). Claude roster in `shared/agents.ts` is now Fable 5.1 / Opus 5.5 `[1m]` / Sonnet 5.5 / Haiku 4.5 by full id; Codex roster matches `codex debug models`. Usage plumbing: `electron/usage-hub.ts` (one copy of the two watchers, feeds the desktop window and Forge Web), `shared/usage-windows.ts`, `usage:snapshot`/`usage:frame` IPC in `preload.ts`, `src/lib/paneUsage.ts` (`usePaneUsage`, guarded, null until restart). `~/.claude/statusline.js` forge-status copy gained `model_name`, `effort`, `cost_usd`.
+- **Why the old picker broke:** the global `.modelpick` class in `src/components/VoiceSurface.css:445` (inline-flex, 18px, overflow hidden) squashed it.
+- **Windows shown are the real ones:** Claude 5-hour + Weekly; Codex on Steve's plan = Monthly (43200 min); API-key panes none. No invented daily/monthly.
+- **Checked:** typecheck 0, lint:hooks 0, agent-bar:check 43/0, web:usage passes; designer viewed 1600 dark and 900 light with injected frames. Not viewed: a real Mode send, a Codex frame, widths below 900.
+- **Open:** (1) usage needs one Forge restart (new preload + main); (2) the open menu is ~920px tall with usage, scrolls, clips the Bypass row: tighten; (3) Mode hides when the footer shows no mode (Claude default), so J2a could return an explicit `'default'`; (4) `getPath('downloads')` in `electron/browser-panes/ipc.ts:37`, `chat-panes/views.ts:141`, `phone-mirror.ts:179` can abort IPC registration when USERPROFILE is odd; (5) at 900px the top bar overlaps "New" with the Agents/Browser tabs (parallel session's TitleBar/DeckBar edits).
+
+## Top-left buttons redesigned; pane and project shortcuts; chat relay built (2026-09-29, pushed to master 0a8eb3b, Forge NOT restarted)
 
 - **Asked (Steve):** (1) Forge talks to its three built-in chatbots (ChatGPT, Gemini, Claude tabs); (2) redesign Wall / New / Freeform / Full screen; (3) a shortcut that lists every pane in the project.
 - **Shortcut:** already exists. `Ctrl+Shift+E` opens the "every pane" sheet (`toggle-panes-switcher`, `src/lib/uiCommands.ts:70`; 1-9 jump, Enter opens). Nothing built. Free combos if he wants another: Ctrl+Shift+A/L/P, Ctrl+P, Ctrl+Space.
@@ -11,7 +20,6 @@
 - **Chat relay (Steve chose option 1, the clipboard relay, over automation):** agent calls MCP `chat_ask({bot,message})` then polls `chat_answer` (waits ~45 s per call; states waiting/answered/dismissed/expired/none). Steve sees a banner under the top bar (`src/components/shell/ChatRelayBar.tsx`): [Copy and open <bot>] then [Send answer to <agent>]; nothing is copied or switched before he presses. Main reads the clipboard only on that button. Answer comes back wrapped as untrusted text. Logic in `electron/chat-relay.ts` (Electron-free, injected deps), wired in `electron/pty-host.ts`, ops in `shared/share.ts`, tools in `bridge/share-bridge.mjs`. Nothing reads, types into or scripts a chat page (grep-checked). Checks: chat-relay-check 85/0, share-link-check 90/0, share-check 307/0, typecheck 0, lint:hooks 0; a refuter re-ran all (HOLDS).
 - **Chat relay, to do:** (a) it is NOT live until Forge restarts (main + preload changed; restart strands the phone ~10 min, so pick a moment); (b) agents pick up the new tools only after `npm run bridge:build` and `npm run bridge:install` (not run) and a fresh agent session; (c) no shortcut for the banner buttons: chat views forward no keys (`before-input-event` not wired); (d) not on Forge Web / phone; (e) real end-to-end with ChatGPT/Gemini/Claude untested.
 - **Tree:** other files in `git status` (usage hub, model picker, Composer) belong to a parallel session; do not commit them with this.
-
 
 ## Dictate key + mic button, and the bar aims at the pane by default (2026-09-28, pushed to master)
 

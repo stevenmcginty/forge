@@ -74,6 +74,11 @@ const api: ForgeApi = {
     onUpdated: (cb) => subscribe(IPC.shotsUpdated, cb)
   },
 
+  usage: {
+    snapshot: () => ipcRenderer.invoke(IPC.usageSnapshot),
+    onFrame: (cb) => subscribe(IPC.usageFrame, cb)
+  },
+
   stt: {
     // `?? {}` rather than passing undefined through: the handler treats an
     // empty request as the plain push-to-talk start, which is what an old
