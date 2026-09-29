@@ -329,7 +329,10 @@ function linkAsk(request) {
 
     socket.setEncoding('utf8')
     socket.on('connect', () => {
-      socket.write(`${JSON.stringify({ ...request, from: defaultAuthor(), cwd: process.cwd() })}\n`)
+      const paneId = String(process.env['FORGE_PANE_ID'] ?? '').trim()
+      socket.write(
+        `${JSON.stringify({ ...request, from: defaultAuthor(), cwd: process.cwd(), ...(paneId ? { paneId } : {}) })}\n`
+      )
     })
     socket.on('data', (chunk) => {
       buffer += chunk

@@ -128,6 +128,17 @@ console.log('\nwho is calling')
   ok(placed.ok && !placed.panes.some((p) => p.id === 'a'), 'and the other project’s panes are not in the answer')
   const lost = twins.handle({ op: 'panes', from: 'Rex', cwd: 'D:\\somewhere\\else' }, T0)
   ok(!lost.ok, 'a caller whose cwd settles nothing is refused rather than guessed at', JSON.stringify(lost))
+
+  // Five panes launched with one name in one folder: the name and cwd settle
+  // nothing, but the pane id does.
+  const fives = linkOf()
+  for (let i = 0; i < 5; i++) fives.register({ id: `q${i}`, title: 'Claude Code', agent: 'claude', cwd: FORGE, projectName: 'Forge' })
+  const noId = fives.handle({ op: 'chat-answer', from: 'Claude Code', cwd: FORGE }, T0)
+  ok(!noId.ok, 'five panes with one name and one folder cannot place a caller by name', JSON.stringify(noId))
+  const withId = fives.handle({ op: 'chat-answer', from: 'Claude Code', cwd: FORGE, paneId: 'q3' }, T0)
+  ok(withId.ok, 'but the pane id places it', JSON.stringify(withId))
+  const badId = fives.handle({ op: 'panes', from: 'Mallory', cwd: FORGE, paneId: 'nope' }, T0)
+  ok(!badId.ok, 'an id Forge does not know does not place anyone', JSON.stringify(badId))
 }
 
 /* -------------------------------------------------------------------- scoping */

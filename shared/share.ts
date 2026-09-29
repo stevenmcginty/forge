@@ -453,6 +453,8 @@ export interface ShareLinkRequest {
   from?: string
   /** The calling process's cwd, used only to break a tie between same-named panes. */
   cwd?: string
+  /** The calling pane's id — `FORGE_PANE_ID`. Exact, so it wins over the name when panes share one. */
+  paneId?: string
   /** Which pane to act on: its name, its id, or its agent if only one pane runs that agent. */
   pane?: string
   text?: string

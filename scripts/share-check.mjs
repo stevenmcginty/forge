@@ -792,8 +792,8 @@ console.log('\nno key, no network')
   const envReads = [...src.matchAll(/process\.env\['([^']+)'\]/g)].map((m) => m[1]).sort()
   ok(
     JSON.stringify([...new Set(envReads)]) ===
-      JSON.stringify(['FORGE_BROWSER_TOOLS', 'FORGE_SHARE_AGENT', 'FORGE_SHARE_DIR', 'FORGE_SHARE_LINK', 'FORGE_SHARE_ROOT']),
-    'and reads exactly five environment variables (four share, one browser-tools switch), none of them a credential',
+      JSON.stringify(['FORGE_BROWSER_TOOLS', 'FORGE_PANE_ID', 'FORGE_SHARE_AGENT', 'FORGE_SHARE_DIR', 'FORGE_SHARE_LINK', 'FORGE_SHARE_ROOT']),
+    'and reads exactly six environment variables (four share, the pane id, one browser-tools switch), none of them a credential',
     JSON.stringify(envReads)
   )
 }

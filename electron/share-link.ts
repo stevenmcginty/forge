@@ -300,7 +300,11 @@ export class ShareLink {
    * to its own request. A name shared by two panes in two projects is broken
    * by the caller's cwd — the process asking is running *in* one of them.
    */
-  private caller(from: string, cwd: string): ShareLinkPane | null {
+  private caller(from: string, cwd: string, paneId = ''): ShareLinkPane | null {
+    // The id is exact. Names are not: five panes launched as "Claude Code" in one
+    // folder used to make every one of them unknown to the link.
+    const byId = paneId.trim() ? this.panes.get(paneId.trim()) : undefined
+    if (byId) return byId
     const needle = from.trim().toLowerCase()
     if (!needle) return null
     const all = [...this.panes.values()]
@@ -397,7 +401,7 @@ export class ShareLink {
     }
 
     const from = String(request?.from ?? '')
-    const me = this.caller(from, String(request?.cwd ?? ''))
+    const me = this.caller(from, String(request?.cwd ?? ''), String(request?.paneId ?? ''))
     if (!me) {
       return {
         ok: false,
