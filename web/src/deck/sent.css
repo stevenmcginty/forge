@@ -1,0 +1,267 @@
+/* ------------------------------------------------------------- sent flash
+ *
+ * The desk's "it went there" (src/components/DictationCue.css, "sent flash")
+ * on the deck face. lib/pane-sent.ts sets data-sent on the pane and takes it
+ * off when this ends: a comet of the sender's colour runs twice round the
+ * inside of the edge, the ring flares at the end of each lap, and the pane's
+ * edge glows with it, then it is gone. One pseudo-element per pane, only while
+ * the attribute is on; nothing runs between sends. The agent sends in his lime,
+ * dictation and the bar in the violet: the desk's split, blue against yellow and
+ * light against dark, with the same shape for both, as on the desk.
+ *
+ * On the Wall the tile clips the pane, so the tile wears the glow (the desk's
+ * `.mtile`); the comet stays inside the pane.
+ */
+
+@property --dk-sent-a {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@property --dk-sent-flare {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+.app[data-face='deck'] .pane[data-sent],
+.app[data-face='deck'] .dk-slot:has(> .pane[data-sent]) {
+  --dk-sent-lead: var(--dk-dict-a);
+  --dk-sent-mid: var(--dk-dict-b);
+  --dk-sent-core: var(--dk-dict-core);
+}
+
+.app[data-face='deck'] .pane[data-sent='agent'],
+.app[data-face='deck'] .dk-slot:has(> .pane[data-sent='agent']) {
+  --dk-sent-lead: var(--dk-agent-a);
+  --dk-sent-mid: var(--dk-agent-b);
+  --dk-sent-core: var(--dk-agent-core);
+}
+
+.app[data-face='deck'] .pane[data-sent]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 21;
+  padding: 3px;
+  border-radius: inherit;
+  pointer-events: none;
+  contain: strict;
+  background:
+    /* the flare: the whole ring, lit for a beat at the end */
+    linear-gradient(
+      color-mix(in srgb, var(--dk-sent-mid) calc(var(--dk-sent-flare) * 100%), transparent),
+      color-mix(in srgb, var(--dk-sent-mid) calc(var(--dk-sent-flare) * 100%), transparent)
+    ),
+    /* the comet: a bright head with a tail in the sender's colours */
+    conic-gradient(
+      from var(--dk-sent-a),
+      transparent 0turn,
+      transparent 0.5turn,
+      color-mix(in srgb, var(--dk-sent-lead) 55%, transparent) 0.78turn,
+      var(--dk-sent-mid) 0.93turn,
+      var(--dk-sent-core) 0.975turn,
+      var(--dk-sent-core) 0.995turn,
+      transparent 1turn
+    );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: dk-sent-0 2200ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
+}
+
+.app[data-face='deck'] .pane[data-sent][data-sent-beat='1']::before {
+  animation-name: dk-sent-1;
+}
+
+/* The edge glows with it: the outer halo, in the sender's colour, on the pane
+   itself so its own overflow cannot clip it; on the Wall, on the tile. */
+.app[data-face='deck'] .pane[data-sent],
+.app[data-face='deck'] .dk-panes[data-view='wall'] > .dk-slot:has(> .pane[data-sent]) {
+  animation: dk-sent-glow-0 2200ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
+}
+
+.app[data-face='deck'] .pane[data-sent][data-sent-beat='1'],
+.app[data-face='deck'] .dk-panes[data-view='wall'] > .dk-slot:has(> .pane[data-sent][data-sent-beat='1']) {
+  animation-name: dk-sent-glow-1;
+}
+
+.app[data-face='deck'] .dk-panes[data-view='wall'] > .dk-slot > .pane[data-sent] {
+  animation: none;
+}
+
+@keyframes dk-sent-0 {
+  0% {
+    --dk-sent-a: 0deg;
+    --dk-sent-flare: 0;
+    opacity: 1;
+  }
+  32% {
+    --dk-sent-flare: 0;
+  }
+  /* first lap done: a half-strength flare */
+  40% {
+    --dk-sent-a: 360deg;
+    --dk-sent-flare: 0.5;
+    opacity: 1;
+  }
+  48% {
+    --dk-sent-flare: 0;
+  }
+  /* second lap, then the full flare and out */
+  80% {
+    --dk-sent-flare: 0;
+  }
+  88% {
+    --dk-sent-a: 720deg;
+    --dk-sent-flare: 1;
+    opacity: 1;
+  }
+  100% {
+    --dk-sent-a: 720deg;
+    --dk-sent-flare: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes dk-sent-1 {
+  0% {
+    --dk-sent-a: 0deg;
+    --dk-sent-flare: 0;
+    opacity: 1;
+  }
+  32% {
+    --dk-sent-flare: 0;
+  }
+  /* first lap done: a half-strength flare */
+  40% {
+    --dk-sent-a: 360deg;
+    --dk-sent-flare: 0.5;
+    opacity: 1;
+  }
+  48% {
+    --dk-sent-flare: 0;
+  }
+  /* second lap, then the full flare and out */
+  80% {
+    --dk-sent-flare: 0;
+  }
+  88% {
+    --dk-sent-a: 720deg;
+    --dk-sent-flare: 1;
+    opacity: 1;
+  }
+  100% {
+    --dk-sent-a: 720deg;
+    --dk-sent-flare: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes dk-sent-glow-0 {
+  0%,
+  48% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--dk-sent-mid) 55%, transparent),
+      0 0 18px 1px color-mix(in srgb, var(--dk-sent-lead) 32%, transparent);
+  }
+  40% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--dk-sent-mid) 70%, transparent),
+      0 0 24px 2px color-mix(in srgb, var(--dk-sent-lead) 38%, transparent);
+  }
+  88% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--dk-sent-mid) 80%, transparent),
+      0 0 26px 3px color-mix(in srgb, var(--dk-sent-lead) 42%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+@keyframes dk-sent-glow-1 {
+  0%,
+  48% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--dk-sent-mid) 55%, transparent),
+      0 0 18px 1px color-mix(in srgb, var(--dk-sent-lead) 32%, transparent);
+  }
+  40% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--dk-sent-mid) 70%, transparent),
+      0 0 24px 2px color-mix(in srgb, var(--dk-sent-lead) 38%, transparent);
+  }
+  88% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--dk-sent-mid) 80%, transparent),
+      0 0 26px 3px color-mix(in srgb, var(--dk-sent-lead) 42%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 0 transparent,
+      0 0 0 0 transparent;
+  }
+}
+
+/* Reduced motion: no travelling colour, one soft fade of a still ring. */
+@keyframes dk-sent-still-0 {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+@keyframes dk-sent-still-1 {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+/* The beat-1 selectors are listed too: they out-rank the plain ones above. */
+@media (prefers-reduced-motion: reduce) {
+  .app[data-face='deck'] .pane[data-sent],
+  .app[data-face='deck'] .pane[data-sent][data-sent-beat='1'],
+  .app[data-face='deck'] .dk-panes[data-view='wall'] > .dk-slot:has(> .pane[data-sent]),
+  .app[data-face='deck'] .dk-panes[data-view='wall'] > .dk-slot:has(> .pane[data-sent][data-sent-beat='1']) {
+    animation: none;
+  }
+
+  .app[data-face='deck'] .pane[data-sent]::before {
+    background: linear-gradient(var(--dk-sent-mid), var(--dk-sent-mid));
+    animation: dk-sent-still-0 520ms ease-out both;
+  }
+
+  .app[data-face='deck'] .pane[data-sent][data-sent-beat='1']::before {
+    animation-name: dk-sent-still-1;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-face='deck'] .pane[data-sent],
+:root[data-reduced-motion='true'] .app[data-face='deck'] .pane[data-sent][data-sent-beat='1'],
+:root[data-reduced-motion='true'] .app[data-face='deck'] .dk-panes[data-view='wall'] > .dk-slot:has(> .pane[data-sent]),
+:root[data-reduced-motion='true']
+  .app[data-face='deck']
+  .dk-panes[data-view='wall']
+  > .dk-slot:has(> .pane[data-sent][data-sent-beat='1']) {
+  animation: none;
+}
+
+:root[data-reduced-motion='true'] .app[data-face='deck'] .pane[data-sent]::before {
+  background: linear-gradient(var(--dk-sent-mid), var(--dk-sent-mid));
+  animation: dk-sent-still-0 520ms ease-out both;
+}
+
+:root[data-reduced-motion='true'] .app[data-face='deck'] .pane[data-sent][data-sent-beat='1']::before {
+  animation-name: dk-sent-still-1;
+}

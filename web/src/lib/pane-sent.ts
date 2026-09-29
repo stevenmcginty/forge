@@ -10,7 +10,8 @@ import { paneNameInTab } from '@shared/workspace'
  * never imports the desktop's modules.
  *
  * This only puts a data attribute on the pane's element and takes it off when
- * the CSS animation ends; phone-cues.css draws it. No React, no state, no
+ * the CSS animation ends; phone-cues.css draws it on the phone, deck/sent.css
+ * (the desk's two-lap comet) on the deck. No React, no state, no
  * loop: between sends nothing runs, and PaneView's memo is never disturbed.
  *
  *   data-sent       'you' (the dictation violet) or 'agent' (the agent's lime)
@@ -40,9 +41,15 @@ function flash(el: HTMLElement, by: SentBy): void {
   clear(el)
   el.dataset['sentBeat'] = beat
   el.dataset['sent'] = by
-  // The comet is the stage's ::after; its end bubbles up to the pane.
+  // The phone's comet is the stage's ::after, its end bubbling up to the pane;
+  // the deck's is the pane's own ::before.
   const onEnd = (e: AnimationEvent): void => {
-    if (e.pseudoElement === '::after' && e.animationName.startsWith('pcue-sent')) clear(el)
+    if (
+      (e.pseudoElement === '::after' && e.animationName.startsWith('pcue-sent')) ||
+      ((e.pseudoElement === '::before' || e.pseudoElement === '::after') && e.animationName.startsWith('dk-sent'))
+    ) {
+      clear(el)
+    }
   }
   el.addEventListener('animationend', onEnd)
   running.set(el, { timer: window.setTimeout(() => clear(el), SAFETY_MS), onEnd })
@@ -90,7 +97,7 @@ export function withAgentSends(
         // A frame later, so a focus the desktop pushed with its answer has landed.
         window.requestAnimationFrame(() => {
           if (paneId) announcePaneSent(paneId, 'agent')
-          else flashWhere('.app[data-mobile] .pane[data-focused="true"]', 'agent')
+          else flashWhere('.app:is([data-mobile], [data-face="deck"]) .pane[data-focused="true"]', 'agent')
         })
       }
     } catch {

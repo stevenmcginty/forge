@@ -59,6 +59,8 @@ import './deck.css'
 // After deck.css (and so after DeckTopBar.css and VoicePill.css): the bar's own look has the last word.
 import './voicebar.css'
 import './paneface.css'
+// The desk's sent comet (lib/pane-sent.ts); here only, so a phone never downloads it.
+import './sent.css'
 
 /* ---------------------------------------------------------------- backdrop */
 

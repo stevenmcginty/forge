@@ -5,7 +5,8 @@ import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import { usePresence } from '@/lib/motion'
 import { Rail } from '../components/Rail'
-import { useActiveProject, useForge } from '../state'
+import { withAgentSends } from '../lib/pane-sent'
+import { useActiveProject, useForge, useWorkspace } from '../state'
 import { AgentStateChip, useDeckAgents, type DeckAgent } from './agents'
 import { composerField, composerOpen, focusedField, openComposer } from './composer'
 import { useDictationSeat } from '../lib/dictation-seat'
@@ -714,7 +715,12 @@ export function DeckKeys({
   // writes it down (V5).
   const { state, actions } = useForge()
   const request = actions.request
-  useEffect(() => setVoiceLink({ request }), [request])
+  // The workspace the agent's sends are resolved against: read at answer time.
+  const workspace = useWorkspace()
+  const workspaceRef = useRef(workspace)
+  workspaceRef.current = workspace
+  // The agent's sends into a pane get the agent's comet (../lib/pane-sent.ts).
+  useEffect(() => setVoiceLink({ request: withAgentSends(request, () => workspaceRef.current) }), [request])
 
   // Listen's moving around lands here, on this browser's own deck: the view is
   // this page's choice (./view.ts), and a project, tab or pane goes through the
