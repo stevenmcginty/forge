@@ -619,8 +619,8 @@
  *
  * Words just went into this pane (src/lib/paneSent.ts sets data-sent on the
  * pane and on its Wall tile, and takes it off when this ends): a comet of the
- * sender's colour runs once round the inside of the edge, ease-out-quart, and
- * the whole ring flares briefly as it closes, then it is gone. One pseudo-
+ * sender's colour runs twice round the inside of the edge (~1.3 s), and
+ * the ring flares at the end of each lap, then it is gone. One pseudo-
  * element per pane, only while the attribute is on; nothing runs between sends.
  * The agent sends in his lime, dictation and the bar in the violet.
  */
@@ -678,13 +678,13 @@
   mask:
     linear-gradient(#000 0 0) content-box exclude,
     linear-gradient(#000 0 0);
-  animation: pane-sent-0 760ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
+  animation: pane-sent-0 1300ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
 }
 
 /* The pane's own edge glows with it for the moment it lasts: the outer halo,
    in the sender's colour, which the pane's overflow cannot clip. */
 :is(.pane, .mtile)[data-sent] {
-  animation: pane-sent-glow-0 760ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
+  animation: pane-sent-glow-0 1300ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
 }
 
 :is(.pane, .mtile)[data-sent][data-sent-beat='1'] {
@@ -701,16 +701,29 @@
     --sent-flare: 0;
     opacity: 1;
   }
-  72% {
+  32% {
     --sent-flare: 0;
   }
-  80% {
+  /* first lap done: a half-strength flare */
+  40% {
     --sent-a: 360deg;
+    --sent-flare: 0.5;
+    opacity: 1;
+  }
+  48% {
+    --sent-flare: 0;
+  }
+  /* second lap, then the full flare and out */
+  80% {
+    --sent-flare: 0;
+  }
+  88% {
+    --sent-a: 720deg;
     --sent-flare: 1;
     opacity: 1;
   }
   100% {
-    --sent-a: 360deg;
+    --sent-a: 720deg;
     --sent-flare: 0;
     opacity: 0;
   }
@@ -722,28 +735,47 @@
     --sent-flare: 0;
     opacity: 1;
   }
-  72% {
+  32% {
     --sent-flare: 0;
   }
-  80% {
+  /* first lap done: a half-strength flare */
+  40% {
     --sent-a: 360deg;
+    --sent-flare: 0.5;
+    opacity: 1;
+  }
+  48% {
+    --sent-flare: 0;
+  }
+  /* second lap, then the full flare and out */
+  80% {
+    --sent-flare: 0;
+  }
+  88% {
+    --sent-a: 720deg;
     --sent-flare: 1;
     opacity: 1;
   }
   100% {
-    --sent-a: 360deg;
+    --sent-a: 720deg;
     --sent-flare: 0;
     opacity: 0;
   }
 }
 
 @keyframes pane-sent-glow-0 {
-  0% {
+  0%,
+  48% {
     box-shadow:
       0 0 0 1px color-mix(in srgb, var(--sent-mid) 55%, transparent),
       0 0 18px 1px color-mix(in srgb, var(--sent-lead) 32%, transparent);
   }
-  80% {
+  40% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--sent-mid) 70%, transparent),
+      0 0 24px 2px color-mix(in srgb, var(--sent-lead) 38%, transparent);
+  }
+  88% {
     box-shadow:
       0 0 0 2px color-mix(in srgb, var(--sent-mid) 80%, transparent),
       0 0 26px 3px color-mix(in srgb, var(--sent-lead) 42%, transparent);
@@ -756,12 +788,18 @@
 }
 
 @keyframes pane-sent-glow-1 {
-  0% {
+  0%,
+  48% {
     box-shadow:
       0 0 0 1px color-mix(in srgb, var(--sent-mid) 55%, transparent),
       0 0 18px 1px color-mix(in srgb, var(--sent-lead) 32%, transparent);
   }
-  80% {
+  40% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--sent-mid) 70%, transparent),
+      0 0 24px 2px color-mix(in srgb, var(--sent-lead) 38%, transparent);
+  }
+  88% {
     box-shadow:
       0 0 0 2px color-mix(in srgb, var(--sent-mid) 80%, transparent),
       0 0 26px 3px color-mix(in srgb, var(--sent-lead) 42%, transparent);
