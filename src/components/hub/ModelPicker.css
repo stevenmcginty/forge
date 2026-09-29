@@ -5,6 +5,12 @@
  * labels. The pick in force is a tick and the word "current", never a tint
  * alone.
  *
+ * Each section has its own colour, cool at the top to warm lower down: plan
+ * limits blue, this session cyan, model violet, effort gold, mode pink. That
+ * runs along the blue-to-yellow axis a red-green colourblind eye still sees,
+ * and no two neighbours share a family. The colour is the section's identity
+ * only; a usage level is still its word and its striped amber / red fill.
+ *
  * Class names are `apick`: `.modelpick` already belongs to the voice
  * surface's segmented pill (VoiceSurface.css), a global rule that squashed
  * the old menu into one 18 px, sideways, clipped row.
@@ -99,8 +105,9 @@
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  /* The model's letter, in the Model section's violet. */
+  color: var(--apick-model);
+  background: color-mix(in srgb, var(--apick-model) 16%, transparent);
 }
 
 .apick-chip__face {
@@ -317,7 +324,7 @@
   height: 6px;
   overflow: hidden;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: color-mix(in srgb, var(--sec, var(--text-primary)) 16%, transparent);
 }
 
 .apick__meter-bar > span {
@@ -325,14 +332,17 @@
   height: 100%;
   max-width: 100%;
   border-radius: inherit;
-  background: var(--text-secondary);
+  background: var(--sec, var(--text-secondary));
   transition: width var(--dur-med) var(--ease-out);
 }
 
-/* Near the end the fill also changes texture — stripes — so the state has a
-   shape as well as a colour. */
+/* Near the end the fill leaves its section colour: amber from 80% ("near
+   limit"), red from 92% ("almost full", "full"), the same thresholds as the
+   words. Each also has a shape — stripes, and at red a denser hatch with a
+   bright end cap — and the red sits well darker than the blue and cyan
+   fills, so the change reads without telling red from anything. */
 :is(.apick__meter, .ustrip__item)[data-level='warn'] :is(.apick__meter-bar, .ustrip__bar) > span {
-  background-color: var(--warn);
+  background-color: var(--apick-warn);
   background-image: repeating-linear-gradient(
     -45deg,
     transparent 0 3px,
@@ -341,12 +351,13 @@
 }
 
 :is(.apick__meter, .ustrip__item)[data-level='full'] :is(.apick__meter-bar, .ustrip__bar) > span {
-  background-color: var(--danger);
+  background-color: var(--apick-full);
   background-image: repeating-linear-gradient(
     -45deg,
     transparent 0 2px,
     color-mix(in srgb, var(--bg-panel-raised) 55%, transparent) 2px 4px
   );
+  box-shadow: inset -2px 0 0 var(--text-primary);
 }
 
 .apick__meter-sub {
@@ -355,6 +366,185 @@
   white-space: nowrap;
   font-size: var(--t-xs);
   color: var(--text-dim);
+}
+
+/* ------------------------------------------------------ section colours */
+
+/* Dark: bright enough for 10 px words on the raised panel (7:1 and up).
+   Light: darkened to hold 4.5:1 on the near-white panel. `--apick-on` is the
+   ink on a solid section-colour fill. */
+.apick,
+.ustrip,
+.apick-chip {
+  --apick-plan: #6ea8ff;
+  --apick-session: #4dd2e6;
+  --apick-model: #b69cff;
+  --apick-effort: #f2c14e;
+  --apick-mode: #ff8fc6;
+  --apick-on: #111215;
+  /* Usage levels, not sections: never on a label or a tile. */
+  --apick-warn: var(--warn);
+  --apick-full: #e5392a;
+}
+
+:root[data-appearance='light'] :is(.apick, .ustrip, .apick-chip) {
+  --apick-plan: #1f5fd6;
+  --apick-session: #07748a;
+  --apick-model: #6a3fd6;
+  --apick-effort: #8a6300;
+  --apick-mode: #b8337a;
+  --apick-on: #ffffff;
+  --apick-warn: #c98200;
+  --apick-full: #ee5646;
+}
+
+:is(.apick__section, .apick__group, .ustrip__item)[data-sec='plan'] {
+  --sec: var(--apick-plan);
+}
+:is(.apick__section, .apick__group, .ustrip__item)[data-sec='session'] {
+  --sec: var(--apick-session);
+}
+:is(.apick__section, .apick__group)[data-sec='model'] {
+  --sec: var(--apick-model);
+}
+:is(.apick__section, .apick__group)[data-sec='effort'] {
+  --sec: var(--apick-effort);
+}
+:is(.apick__section, .apick__group)[data-sec='mode'] {
+  --sec: var(--apick-mode);
+}
+
+/* A section's head: a short upright bar and the name in its colour, and a
+   hairline rule in the same colour that fades out to the right. */
+.apick__label-name {
+  color: var(--sec, var(--text-dim));
+}
+
+.apick__label-name::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 9px;
+  margin-right: 7px;
+  vertical-align: -1px;
+  border-radius: 2px;
+  background: var(--sec, currentColor);
+}
+
+[data-sec] > .apick__label {
+  margin-bottom: 3px;
+  background: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--sec) 50%, transparent),
+      transparent 85%
+    )
+    6px 100% / calc(100% - 6px) 1px no-repeat;
+}
+
+/* The coloured rules divide the sections now; the grey line would double
+   them. Its room stays. */
+.popover .apick .popover__divider {
+  height: 0;
+  margin: var(--s-2) 0;
+  background: none;
+}
+
+/* The choices. At rest a row's tile wears its section's colour and its name
+   steps back a little, so the pick in force leads. */
+.apick__row {
+  position: relative;
+}
+
+.apick__group[data-sec] .apick__row .apick__tile:not([data-look]) {
+  color: var(--sec);
+  background: color-mix(in srgb, var(--sec) 13%, transparent);
+}
+
+.apick__group[data-sec] .apick__row:hover:not([disabled]) .apick__tile:not([data-look]) {
+  background: color-mix(in srgb, var(--sec) 22%, transparent);
+}
+
+.apick__row:not([data-selected='true']):not([disabled]) .bpick__name {
+  color: var(--text-secondary);
+}
+
+.apick__row:hover:not([disabled]) .bpick__name {
+  color: var(--text-primary);
+}
+
+/*
+ * The pick in force, most prominent in the menu, by shape before colour:
+ * an upright bar at the row's left edge, a solid tile with a halo ring,
+ * the name one size up in bold, the tick and "current" — and then a wash
+ * of the section's colour behind it all.
+ */
+.apick__row::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--sec, var(--text-primary));
+  transform: scaleY(0);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.apick__row[data-selected='true']::before {
+  transform: none;
+}
+
+.apick__group[data-sec] > .apick__row[data-selected='true'] {
+  background: color-mix(in srgb, var(--sec) 15%, transparent);
+}
+
+.apick__group[data-sec] > .apick__row[data-selected='true']:hover {
+  background: color-mix(in srgb, var(--sec) 21%, transparent);
+}
+
+.apick__group[data-sec] .apick__row .apick__tile[data-look='use'] {
+  color: var(--apick-on);
+  background: var(--sec);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sec) 24%, transparent);
+}
+
+.apick__row[data-selected='true'] .bpick__name {
+  font-size: var(--t-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.apick__row[data-selected='true'] .bpick__sub {
+  color: var(--text-secondary);
+}
+
+.apick__row .bpick__check {
+  color: var(--sec, var(--accent));
+}
+
+/* Mode is a setting, not the headline: its pick keeps the bar, the solid
+   tile and the tick, with a lighter wash and the name at its usual size. */
+.apick__group[data-sec='mode'] > .apick__row[data-selected='true'] {
+  background: color-mix(in srgb, var(--sec) 8%, transparent);
+}
+
+.apick__group[data-sec='mode'] > .apick__row[data-selected='true']:hover {
+  background: color-mix(in srgb, var(--sec) 13%, transparent);
+}
+
+.apick__group[data-sec='mode'] > .apick__row[data-selected='true'] .bpick__name {
+  font-size: var(--t-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apick__row::before {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .apick__row::before {
+  transition: none;
 }
 
 /* ------------------------------------------------------------ the strip */
@@ -425,15 +615,16 @@
   height: 4px;
   overflow: hidden;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  background: color-mix(in srgb, var(--sec, var(--text-primary)) 16%, transparent);
 }
 
+/* The same colour as the menu's section for the same reading. */
 .ustrip__bar > span {
   display: block;
   height: 100%;
   max-width: 100%;
   border-radius: inherit;
-  background: currentColor;
+  background: var(--sec, currentColor);
   transition: width var(--dur-med) var(--ease-out);
 }
 

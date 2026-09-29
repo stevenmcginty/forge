@@ -635,7 +635,14 @@ export function UsageStrip(): ReactNode {
         onClick={menu.toggle}
       >
         {items.map((it) => (
-          <span key={it.key} className="ustrip__item" data-rank={it.rank} data-level={levelOf(it.pct)} aria-hidden="true">
+          <span
+            key={it.key}
+            className="ustrip__item"
+            data-rank={it.rank}
+            data-level={levelOf(it.pct)}
+            data-sec={it.key === 'context' ? 'session' : 'plan'}
+            aria-hidden="true"
+          >
             <span className="ustrip__label">{it.label}</span>
             <span className="ustrip__bar">
               <span style={{ width: `${it.pct}%` }} />
@@ -646,7 +653,7 @@ export function UsageStrip(): ReactNode {
           </span>
         ))}
         {typeof costUsd === 'number' ? (
-          <span className="ustrip__item" data-rank={3} aria-hidden="true">
+          <span className="ustrip__item" data-rank={3} data-sec="session" aria-hidden="true">
             <span className="ustrip__label">Session</span>
             <span className="ustrip__pct">{fmtCost(costUsd)}</span>
           </span>
@@ -743,9 +750,9 @@ function AgentMenu({
       </div>
 
       {usage && usage.windows.length > 0 ? (
-        <section className="apick__section" aria-label="Plan limits">
+        <section className="apick__section" data-sec="plan" aria-label="Plan limits">
           <div className="apick__label">
-            <span>Plan limits</span>
+            <span className="apick__label-name">Plan limits</span>
             {stale ? <span className="apick__label-hint">{stale}</span> : null}
           </div>
           {usage.windows.map((w) => (
@@ -760,9 +767,9 @@ function AgentMenu({
       ) : null}
 
       {usage && hasSession ? (
-        <section className="apick__section" aria-label="This session">
+        <section className="apick__section" data-sec="session" aria-label="This session">
           <div className="apick__label">
-            <span>This session</span>
+            <span className="apick__label-name">This session</span>
             {stale && usage.windows.length === 0 ? <span className="apick__label-hint">{stale}</span> : null}
           </div>
           {usage.context ? (
@@ -788,9 +795,9 @@ function AgentMenu({
       {usage && (usage.windows.length > 0 || hasSession) ? <div className="popover__divider" /> : null}
 
       <div className="apick__menu" role="menu" aria-label={`Model, effort and mode for ${paneName}`}>
-        <div className="apick__group" role="group" aria-label="Model">
+        <div className="apick__group" data-sec="model" role="group" aria-label="Model">
           <div className="apick__label" aria-hidden="true">
-            <span>Model</span>
+            <span className="apick__label-name">Model</span>
             {agent.modelName ? <span className="apick__label-hint truncate">now {agent.modelName}</span> : null}
           </div>
           {canModel ? (
@@ -811,9 +818,9 @@ function AgentMenu({
 
         <div className="popover__divider" />
 
-        <div className="apick__group" role="group" aria-label="Effort">
+        <div className="apick__group" data-sec="effort" role="group" aria-label="Effort">
           <div className="apick__label" aria-hidden="true">
-            <span>Effort</span>
+            <span className="apick__label-name">Effort</span>
           </div>
           {canEffort ? (
             levels.map((l, i) => (
@@ -834,9 +841,9 @@ function AgentMenu({
         {showMode ? (
           <>
             <div className="popover__divider" />
-            <div className="apick__group" role="group" aria-label="Mode">
+            <div className="apick__group" data-sec="mode" role="group" aria-label="Mode">
               <div className="apick__label" aria-hidden="true">
-                <span>Mode</span>
+                <span className="apick__label-name">Mode</span>
                 {modeWord && !modes.some((m) => m.id === agent.rung) ? (
                   <span className="apick__label-hint">now {modeWord}</span>
                 ) : null}
