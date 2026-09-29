@@ -1,13 +1,14 @@
 /*
  * The bar's end button — a disc, the same size in every state, so one button
- * changes its job in place. As the mic it wears dictation's own hue (the
- * theme's --info), apart from Listen's accent; as Send it fills with the
+ * changes its job in place. As the mic it wears dictation's own hue
+ * (--dictation-accent, the violet in DictationCue.css), apart from Listen's
+ * accent; as Send it fills with the
  * accent. Every state is also its own shape: a mic, a stop square, a turning
  * arc, a mic with "!", an arrow — never the tint alone.
  */
 
 .dict {
-  --d: var(--info);
+  --d: var(--dictation-accent, var(--info));
   position: relative;
   display: inline-grid;
   place-items: center;
@@ -62,14 +63,14 @@
   border-style: dashed;
 }
 
-/* Recording: filled, a stop square, and a ring that breathes. */
+/* Recording: filled, a stop square, a steady ring. Still, on purpose: the bar
+   around it carries the one moving dictation cue. */
 .dict[data-look='rec'],
 .dict[data-look='rec']:hover {
-  color: var(--bg-base);
-  background: var(--d);
+  color: var(--dictation-on, var(--bg-base));
+  background: linear-gradient(135deg, var(--dictation-accent-2, var(--d)), var(--d));
   border-color: var(--d);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--d) 24%, transparent);
-  animation: dict-ring 1.6s var(--ease-out) infinite;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--d) 28%, transparent);
 }
 
 .dict__stop {
@@ -77,12 +78,6 @@
   height: 11px;
   border-radius: 3px;
   background: currentColor;
-}
-
-@keyframes dict-ring {
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--d) 10%, transparent);
-  }
 }
 
 /* Transcribing: the full rim, an arc turning inside it. */

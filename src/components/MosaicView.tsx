@@ -78,6 +78,7 @@ import { ChatNavButtons, ChatSignInWord, ChatStage, chatPaint } from './ChatPane
 import { CHATBOTS } from '@shared/chatbots'
 import { useChatViewState } from '@/lib/chat'
 import { useBranch } from './shell/useBranch'
+import { DictationCue } from './DictationCue'
 import './MosaicView.css'
 
 /**
@@ -1985,6 +1986,9 @@ const MosaicTile = memo(function MosaicTile({
       </header>
 
       <PeekStage cell={cell} project={project} refit={refit} reference={reference} interactive={interactive} />
+
+      {/* The Dictate key's words are coming here: the tile says so, over the terminal. */}
+      <DictationCue paneId={paneId} />
 
       {/*
         On the wall the terminal is scenery: this sheet sits over it, and a

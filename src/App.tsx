@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
+import { DictationCueHost } from '@/components/DictationCue'
 import { AccountPrompt } from '@/components/AccountPrompt'
 import { Onboarding } from '@/components/Onboarding'
 import { WhatsNew } from '@/components/WhatsNew'
@@ -198,6 +199,8 @@ export function App(): ReactNode {
       {/* The voice bar: in the top bar (TitleBar) unless clipped down here. */}
       {voiceBar === 'bottom' ? <Dock place="bottom" /> : null}
       <DeckToast />
+      {/* The Dictate key's dictation, lit where its words land (the pane, the bar, or a band). */}
+      <DictationCueHost />
       <SettingsPopup />
       {/*
         The voice hub's UI: the dock's voice pill, the Board surface,

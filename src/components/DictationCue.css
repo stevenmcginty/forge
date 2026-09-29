@@ -1,0 +1,616 @@
+/*
+ * The dictation cue: the pane the Dictate key's words are going into, on air.
+ *
+ * The voice pill's volt family, turned up to pane size — a ring round the whole
+ * pane, a volt wash over the terminal, and a strip under the header that says
+ * the state in words big enough to read from the back of the chair. Each state
+ * also has its own shape (an arc turning, live bars, settling dots, a ring
+ * running down), so none of it rests on telling one colour from another.
+ *
+ * Everything here floats over the terminal (pointer-events: none): the xterm
+ * underneath is never resized or refitted by the cue coming and going.
+ */
+
+/*
+ * The two voices, as two colour families. Steve is red-green colourblind, so
+ * they are split on the axis he keeps — blue against yellow — and by lightness:
+ *
+ *   dictation  an indigo → violet → lavender aurora with a near-white core
+ *              (light themes: deep indigo → violet, a dark indigo core)
+ *   agent      a lime → citrus → pale aurora, lighter than dictation
+ *              (light themes: olive → citron, a deep olive core)
+ *
+ * Under a deuteranopia or protanopia simulation dictation's violet reads blue
+ * and the agent's citrus reads yellow, 2.1–2.7× apart in luminance, in both
+ * themes. Text: the dictation ink on the dictating bar is 7.6:1 dark, 6.2:1
+ * light; the filled key chip's label over 7:1. Words and shapes still carry
+ * every state; the colour is the extra signal.
+ */
+:root {
+  /* dictation: lead (indigo), companion (violet), highlight (lavender), core */
+  --dictation-accent-2: #6d7bff;
+  --dictation-accent: #a58bff;
+  --dictation-accent-3: #d3c4ff;
+  --dictation-core: #f1edff;
+  /* Words on the dictating bar: the violet, lifted for small text. */
+  --dictation-ink: #b3a2ff;
+  --dictation-on: #0b0c0e;
+  --dictation-soft: color-mix(in srgb, var(--dictation-accent) 14%, transparent);
+  --dictation-line: color-mix(in srgb, var(--dictation-accent) 55%, transparent);
+  --dictation-glow: color-mix(in srgb, var(--dictation-accent-2) 30%, transparent);
+  /* agent (Jarvis): lead (lime), companion (citrus), highlight (pale), core */
+  --agent-edge-a: #b6f04a;
+  --agent-edge-b: #e3f36b;
+  --agent-edge-c: #f6ffc2;
+  --agent-edge-core: #fbffe8;
+}
+
+:root[data-appearance='light'] {
+  --dictation-accent-2: #3f4fe6;
+  --dictation-accent: #5a32d8;
+  --dictation-accent-3: #8b5cf6;
+  --dictation-core: #2a168f;
+  --dictation-ink: #4a2bd0;
+  --dictation-on: #ffffff;
+  --agent-edge-a: #6f9a00;
+  --agent-edge-b: #93a800;
+  --agent-edge-c: #b5c400;
+  --agent-edge-core: #4a6b00;
+}
+
+/* The voice bar's edge synthesizer (DictationEdge.tsx): laid over the bar and
+   past it; placed and sized from the script, faded in and out here. */
+.dedge {
+  /* What the canvas reads: lead, companion, highlight and the core line. */
+  --edge-a: var(--dictation-accent-2);
+  --edge-b: var(--dictation-accent);
+  --edge-c: var(--dictation-accent-3);
+  --edge-core: var(--dictation-core);
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  animation: dcue-fade-in var(--dur-med) var(--ease-out) both;
+}
+
+.dedge[data-variant='agent'] {
+  --edge-a: var(--agent-edge-a);
+  --edge-b: var(--agent-edge-b);
+  --edge-c: var(--agent-edge-c);
+  --edge-core: var(--agent-edge-core);
+}
+
+.dedge[data-closing='true'] {
+  animation: dcue-fade-out 260ms var(--ease-out) both;
+}
+
+@property --dcue-spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* --------------------------------------------------------------- the pane */
+
+.dcue {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  border-radius: inherit;
+  container: dcue / inline-size;
+}
+
+/* The ring and the wash. The wash is strongest under the strip and fades
+   down the terminal: the whole pane reads as changed, the output stays legible. */
+.dcue__frame {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dictation-accent) 16%, transparent) 0,
+    color-mix(in srgb, var(--dictation-accent) 9%, transparent) 30%,
+    color-mix(in srgb, var(--dictation-accent) 7%, transparent) 100%
+  );
+  box-shadow: inset 0 0 0 3px var(--dictation-accent);
+  animation: dcue-fade-in var(--dur-glide) var(--ease-out) both;
+  transition:
+    box-shadow var(--dur-med) var(--ease-out),
+    background var(--dur-med) var(--ease-out);
+}
+
+/* Listening: an inner glow that swells with the voice (--dcue-lvl, 0..1). */
+.dcue__frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 34px 2px var(--dictation-glow);
+  opacity: calc(0.35 + 0.65 * var(--dcue-lvl, 0.4));
+}
+
+/* Starting: a thin resting ring, and an arc chasing round it. */
+.dcue[data-phase='starting'] .dcue__frame {
+  box-shadow: inset 0 0 0 1.5px var(--dictation-line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dictation-accent) 10%, transparent) 0,
+    color-mix(in srgb, var(--dictation-accent) 3%, transparent) 40%,
+    transparent 100%
+  );
+}
+
+.dcue[data-phase='starting'] .dcue__frame::after {
+  display: none;
+}
+
+.dcue[data-phase='starting'] .dcue__frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--dcue-spin),
+    transparent 0turn,
+    transparent 0.62turn,
+    var(--dictation-accent) 0.9turn,
+    transparent 0.9turn
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: dcue-spin 1.6s linear infinite;
+}
+
+/* Finishing: the mic is shut; the ring breaks into dashes while the last words land. */
+.dcue[data-phase='finishing'] .dcue__frame {
+  box-shadow: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dictation-accent) 10%, transparent) 0,
+    color-mix(in srgb, var(--dictation-accent) 3%, transparent) 40%,
+    transparent 100%
+  );
+}
+
+.dcue[data-phase='finishing'] .dcue__frame::after {
+  display: none;
+}
+
+.dcue[data-phase='finishing'] .dcue__frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 3px dashed var(--dictation-accent);
+  border-radius: inherit;
+}
+
+/* Sending: the ring holds; the countdown is in the strip. */
+.dcue[data-phase='sending'] .dcue__frame::after {
+  opacity: 0.4;
+}
+
+.dcue[data-closing='true'] .dcue__frame,
+.dcue[data-closing='true'] .dcue__strip {
+  animation: dcue-fade-out var(--dur-exit) var(--ease-out) both;
+}
+
+/* The pane's own edge answers too — a wider ring than focus, so a dictating
+   pane never looks like a merely focused one. */
+.deck .pane:has(> .dcue:not([data-closing])) {
+  border-color: var(--dictation-accent);
+  box-shadow:
+    0 0 0 2px var(--dictation-accent),
+    0 0 0 9px var(--dictation-soft),
+    0 0 60px 6px var(--dictation-glow),
+    0 20px 50px -20px rgba(0, 0, 0, 0.9);
+}
+
+.mtile:has(> .dcue:not([data-closing])) {
+  border-color: var(--dictation-accent);
+  box-shadow:
+    0 0 0 2px var(--dictation-accent),
+    0 0 26px 2px var(--dictation-glow);
+}
+
+/* ------------------------------------------------------------------ strip */
+
+.dcue__strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  height: 46px;
+  padding: 0 16px 0 12px;
+  overflow: hidden;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--dictation-accent) 13%, var(--bg-panel));
+  font-family: var(--font-ui);
+}
+
+/* Docked under the pane's header, inside the ring. */
+.dcue > .dcue__strip {
+  position: absolute;
+  top: var(--pane-header-h);
+  left: 3px;
+  right: 3px;
+  border-bottom: 1px solid var(--dictation-line);
+  box-shadow: 0 10px 22px -14px rgba(0, 0, 0, 0.55);
+  animation: dcue-strip-in var(--dur-glide) var(--spring-glide) both;
+}
+
+.deck .pane > .dcue > .dcue__strip {
+  top: var(--pane-head-h);
+}
+
+.mtile > .dcue > .dcue__strip {
+  top: var(--tile-head-h);
+}
+
+.dcue[data-phase='starting'] > .dcue__strip,
+.dcue[data-phase='finishing'] > .dcue__strip {
+  left: 1.5px;
+  right: 1.5px;
+}
+
+.dcue__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 46px;
+  height: 28px;
+  color: var(--dictation-accent);
+  animation: dcue-glyph-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.dcue__synth {
+  color: var(--dictation-accent);
+}
+
+.dcue__words {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  animation: dcue-fade-in var(--dur-med) var(--ease-out) both;
+}
+
+.dcue__word {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.dcue__hint {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+.dcue__hint--short {
+  display: none;
+}
+
+.dcue__dash {
+  color: var(--text-dim);
+}
+
+.dcue__key {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--dictation-on);
+  background: linear-gradient(135deg, var(--dictation-accent-2), var(--dictation-accent));
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--dictation-on) 22%, transparent);
+}
+
+.dcue__clock {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  font-size: 15px;
+}
+
+/* Where the words go — only on the strips away from the pane. */
+.dcue__into {
+  flex: none;
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dictation-accent);
+}
+
+.dcue__drain {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--dictation-accent);
+  transform-origin: left center;
+  animation-name: dcue-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+
+/* Narrow panes (a Wall of nine): the short way out, then the word alone. */
+@container dcue (max-width: 520px) {
+  .dcue__hint--long {
+    display: none;
+  }
+
+  .dcue__hint--short {
+    display: inline-flex;
+  }
+
+  .dcue__word {
+    font-size: 15px;
+  }
+}
+
+@container dcue (max-width: 300px) {
+  .dcue__strip {
+    gap: 8px;
+    padding: 0 10px 0 4px;
+  }
+
+  .dcue__glyph {
+    width: 34px;
+  }
+
+  .dcue__in {
+    display: none;
+  }
+
+  .dcue__word {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  /* The clock is the point of the countdown: it never ellipsizes. */
+  .dcue__strip[data-phase='sending'] .dcue__word {
+    flex: none;
+  }
+}
+
+@container dcue (max-width: 240px) {
+  .dcue__hint--short {
+    display: none;
+  }
+}
+
+/* ----------------------------------------------------------------- glyphs */
+
+/* Starting and sending: a ring. Starting turns a short arc; sending runs a
+   full one down with the clock and carries an Enter mark. */
+.dcue__ring {
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.dcue__ring circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+
+.dcue__ring-track {
+  opacity: 0.22;
+}
+
+.dcue__ring-arc {
+  transform-origin: 14px 14px;
+  animation: dcue-turn 0.9s linear infinite;
+}
+
+.dcue__ring-drain {
+  stroke-dashoffset: 0;
+  animation-name: dcue-ring-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+
+.dcue__ring-enter {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(90deg);
+  transform-origin: 14px 14px;
+}
+
+/* Finishing: three dots settling, in turn. */
+.dcue__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dcue__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: currentColor;
+  animation: dcue-settle 1.05s var(--ease-in-out) infinite;
+}
+
+.dcue__dots[data-small='true'] {
+  gap: 4px;
+}
+
+.dcue__dots[data-small='true'] .dcue__dot {
+  width: 5px;
+  height: 5px;
+}
+
+.dcue__dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.dcue__dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+/* ------------------------------------------------------------- the window */
+
+/* No pane to light (another field, the clipboard, a pane not on screen): a
+   slim band across the top of the stage. Never a dictation with no sign. */
+.dcue-window {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: calc(var(--z-dock) - 1);
+  pointer-events: none;
+  border-bottom: 2px solid var(--dictation-accent);
+  box-shadow: 0 12px 30px -16px var(--dictation-glow);
+  container: dcue / inline-size;
+  animation: dcue-strip-in var(--dur-glide) var(--spring-glide) both;
+}
+
+.dcue-window .dcue__strip {
+  height: 40px;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.dcue-window[data-closing='true'] {
+  animation: dcue-fade-out var(--dur-exit) var(--ease-out) both;
+}
+
+/* ------------------------------------------------------------- keyframes */
+
+@keyframes dcue-spin {
+  to {
+    --dcue-spin: 360deg;
+  }
+}
+
+@keyframes dcue-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dcue-ring-drain {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: var(--dcue-ring-c);
+  }
+}
+
+@keyframes dcue-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes dcue-settle {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.75);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes dcue-strip-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dcue-glyph-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes dcue-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dcue-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------- reduced motion
+ *
+ * Still frames that keep their shapes: a fixed arc, still bars (the
+ * synthesizer draws its own static equalizer), three still dots, a full
+ * countdown ring with the clock still counting in words.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  .dcue *,
+  .dcue *::before,
+  .dcue *::after,
+  .dcue-window,
+  .dcue-window * {
+    animation: none !important;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.dcue, .dcue-window) :is(*, *::before, *::after),
+:root[data-reduced-motion='true'] .dcue-window {
+  animation: none !important;
+}

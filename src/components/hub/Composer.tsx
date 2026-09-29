@@ -4,7 +4,7 @@ import { paneNameInTab } from '@shared/workspace'
 import { useKeymap, useSavedPrompts } from '@/hooks/useHub'
 import { hotkeyLabel } from '@/hooks/useDictation'
 import { resolveProfile } from '@/lib/agents'
-import { setBarDictationSink, useBarDictationPhase } from '@/lib/barDictation'
+import { publishDictationReview, setBarDictationSink, useBarDictationPhase } from '@/lib/barDictation'
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
@@ -18,6 +18,9 @@ import { useUiCommand } from '@/lib/uiCommands'
 import { useDictation } from '@/state/Dictation'
 import { useActiveTab, useApp } from '@/state/AppState'
 import type { HubAction, HubCaption } from '@/state/VoiceHubController'
+import { readCueLevels, useBarCue } from '../DictationCue'
+import { CueGlyph, type CuePhase } from '../DictationCueView'
+import { DictationEdge } from '../DictationEdge'
 import { Icon } from '../Icon'
 import { setBarTarget, useBarTarget } from './barMode'
 import { ACTION_GLYPH, hubAsk, listenState, useHubPreview, useHubView } from './hubView'
@@ -105,6 +108,14 @@ function sendToPane(paneId: string, text: string): boolean {
 /** How long dictated words wait, with Undo, before they send — the phone's (web SessionComposer). */
 const REVIEW_MS = 1500
 
+/** The bar, dictating: the word where the placeholder was, and the chip's shorter one beside words already in. */
+const MIC_WORD: Record<CuePhase, { full: string; chip: string }> = {
+  starting: { full: 'Getting the mic ready…', chip: 'Mic…' },
+  listening: { full: 'Listening…', chip: 'Listening' },
+  finishing: { full: 'Finishing…', chip: 'Finishing' },
+  sending: { full: 'Sending…', chip: 'Sending' }
+}
+
 type PaletteItem =
   | { kind: 'save'; key: string; title: string }
   | { kind: 'prompt'; key: string; prompt: SavedPrompt }
@@ -139,6 +150,20 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
   // The bar's mic started it (src/lib/barDictation.ts): its words come here, whatever has focus.
   const barDictating = useBarDictationPhase() !== 'off'
   const intoBar = dictating && (focused || barDictating)
+  // Dictation into the bar — its mic button, or the key with the bar focused — from the press on.
+  const mic = useBarCue()
+  const micCue = mic?.phase ?? null
+  // The agent's voice on the bar's edge: listening moves with the mic, speaking with his voice.
+  const agentEdge: { phase: CuePhase; feed: 'mic' | 'out' } | null =
+    ls.on || state.agentListening
+      ? ls.look === 'listening'
+        ? { phase: 'listening', feed: 'mic' }
+        : ls.look === 'speaking'
+          ? { phase: 'listening', feed: 'out' }
+          : ls.look === 'connecting'
+            ? { phase: 'starting', feed: 'mic' }
+            : { phase: 'finishing', feed: 'mic' }
+      : null
   const slash = text.startsWith('/')
   // The palette belongs to the bar: it shows while you are in the bar.
   const showPalette = (paletteOpen || slash) && focused
@@ -315,6 +340,8 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     []
   )
   useEffect(() => () => window.clearTimeout(reviewTimer.current), [])
+  // The pane the words wait in shows the countdown too (DictationCue); this only tells it.
+  useEffect(() => (review ? publishDictationReview({ paneId: review.pane, endsAt: review.endsAt }) : undefined), [review])
 
   // Esc undoes the countdown wherever focus is — and never reaches a pane,
   // where it would interrupt the agent the words are for.
@@ -458,6 +485,8 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       data-empty={text ? undefined : 'true'}
       data-palette={showPalette ? 'true' : undefined}
       data-tall={tall ? 'true' : undefined}
+      data-mic={agentEdge ? undefined : (micCue ?? undefined)}
+      data-edge={agentEdge ? 'agent' : micCue || review ? 'dictation' : undefined}
       style={{ '--pane-accent': profile?.accent ?? 'var(--accent)' } as React.CSSProperties}
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) {
@@ -466,6 +495,29 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
         }
       }}
     >
+      {/* The bar's outline is the synthesizer: one voice at a time. The agent's
+          (Jarvis listening or speaking) wins while he has the mic: his volt, a
+          lesser edge. Otherwise dictation's violet, from the press, through the
+          words, to the send countdown draining it away. */}
+      {agentEdge ? (
+        <DictationEdge
+          key="agent"
+          variant="agent"
+          phase={agentEdge.phase}
+          feed={agentEdge.feed}
+          readLevels={hub.readLevels}
+          compact={compact}
+        />
+      ) : (
+        <DictationEdge
+          key="dictation"
+          phase={micCue ?? (review ? 'sending' : null)}
+          endsAt={review?.endsAt ?? null}
+          readLevels={readCueLevels}
+          compact={compact}
+        />
+      )}
+
       {showPalette && !saving ? (
         <Palette
           items={items}
@@ -507,13 +559,34 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           <BrainPicker />
         </span>
 
+        {micCue ? (
+          // The bar says it is listening, in a word and a shape: in the placeholder's
+          // place while the box is empty, as a slim chip beside words already in.
+          <span className="comp__mic" data-phase={micCue} data-chip={text ? 'true' : undefined} role="status" aria-live="polite">
+            <CueGlyph phase={micCue} readLevels={readCueLevels} small />
+            <span className="comp__mic-word">{text ? MIC_WORD[micCue].chip : MIC_WORD[micCue].full}</span>
+            {!text && mic && micCue === 'listening' ? (
+              <span className="comp__mic-hint truncate">
+                {mic.into ? <span className="comp__mic-into">{mic.into}</span> : null}
+                <span aria-hidden="true">—</span>
+                <kbd className="dcue__key">{mic.keyLabel || 'the Dictate key'}</kbd>
+                {mic.sends ? 'to stop and send' : 'to stop'}
+              </span>
+            ) : !text && mic?.into ? (
+              <span className="comp__mic-hint truncate">
+                <span className="comp__mic-into">{mic.into}</span>
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+
         <textarea
           ref={fieldRef}
           className="dock__field"
           rows={1}
           value={text}
           spellCheck
-          placeholder={placeholder}
+          placeholder={micCue ? '' : placeholder}
           aria-label={placeholder}
           onFocus={() => {
             // Coming into the words while they wait to send is Undo.

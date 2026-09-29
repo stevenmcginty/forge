@@ -12,12 +12,17 @@ export function SynthesizerIndicator({
   readLevels,
   width = 24,
   height = 14,
+  barWidth = 2.4,
+  barGap = 2,
   className
 }: {
   look: HubLook
   readLevels: () => { mic: number; out: number }
   width?: number
   height?: number
+  /** Thicker bars for a bigger indicator (the dictation cue); the defaults are the voice pill's. */
+  barWidth?: number
+  barGap?: number
   className?: string
 }): ReactNode {
   const ref = useRef<HTMLCanvasElement | null>(null)
@@ -46,8 +51,7 @@ export function SynthesizerIndicator({
     const still = reducedMotion()
 
     const barCount = 5
-    const barW = 2.4
-    const barGap = 2
+    const barW = barWidth
     const totalBarsW = barCount * barW + (barCount - 1) * barGap
     const startX = Math.round((w - totalBarsW) / 2)
     const midY = h / 2
@@ -68,7 +72,7 @@ export function SynthesizerIndicator({
         // the resting looks fall through to their dots, so on still reads apart from off.
         const staticHeights = [4, 8, 12, 7, 4]
         for (let i = 0; i < barCount; i++) {
-          const bh = Math.min(h - 2, staticHeights[i])
+          const bh = Math.min(h - 2, (staticHeights[i] * h) / 14)
           const x = startX + i * (barW + barGap)
           drawBar(ctx, x, midY - bh / 2, barW, bh)
         }
@@ -163,7 +167,7 @@ export function SynthesizerIndicator({
       document.removeEventListener('visibilitychange', onVisibility)
       canvas.removeEventListener('transitionend', onTransitionEnd)
     }
-  }, [look, width, height])
+  }, [look, width, height, barWidth, barGap])
 
   return (
     <canvas

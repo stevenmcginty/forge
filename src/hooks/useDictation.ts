@@ -6,6 +6,7 @@ import {
   barDictationSink,
   keyDictationLanding,
   keyDictationSendsOnEnd,
+  markKeyDictationPressed,
   setBarDictationPhase,
   setKeyDictationLanding,
   setKeyDictationSendsOnEnd
@@ -296,6 +297,8 @@ export function useDictationEngine(): Dictation {
     // open: a sidecar still loading passes through idle, which is not an end.
     keyWantsSend.current = !intoBar && !autoSendRef.current
     if (!intoBar) setKeyDictationLanding({ kind: 'none' })
+    // The pane says "Getting the mic ready…" from this press, not from the sidecar's answer.
+    if (!intoBar) markKeyDictationPressed()
     remembered.current = resolveInsertTarget(activePaneRef.current)
     void window.forge.stt.start().then((s) => {
       setStatus(s)

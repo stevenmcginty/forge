@@ -111,3 +111,65 @@ export function keyDictationSendsOnEnd(): boolean {
 export function setKeyDictationSendsOnEnd(next: boolean): void {
   keySend = next
 }
+
+/* ------------------------------------------------------------ the cue's view
+ *
+ * Two facts the dictation cue (src/components/DictationCue.tsx) shows and does
+ * not own: that the Dictate key was just pressed — the sidecar can take a
+ * second to open the mic, and the pane says "Getting the mic ready…" from the
+ * press, not from the sidecar's answer — and the bar's review countdown, which
+ * Composer runs and only publishes here. Read-only to everyone else.
+ */
+
+/** A review countdown the bar is running: `paneId` null is the bar's own words. */
+export interface DictationReview {
+  paneId: string | null
+  endsAt: number
+}
+
+let review: DictationReview | null = null
+let keyPressedAt: number | null = null
+const cueListeners = new Set<() => void>()
+
+function subscribeCue(fn: () => void): () => void {
+  cueListeners.add(fn)
+  return () => {
+    cueListeners.delete(fn)
+  }
+}
+
+function emitCue(): void {
+  cueListeners.forEach((fn) => fn())
+}
+
+/** Composer: this review is running. Returns the release, which clears it only if it is still the one shown. */
+export function publishDictationReview(next: DictationReview): () => void {
+  review = next
+  emitCue()
+  return () => {
+    if (review !== next) return
+    review = null
+    emitCue()
+  }
+}
+
+export function useDictationReview(): DictationReview | null {
+  return useSyncExternalStore(subscribeCue, () => review, () => review)
+}
+
+/** The Dictate key just started a dictation (not the bar's mic). */
+export function markKeyDictationPressed(): void {
+  keyPressedAt = Date.now()
+  emitCue()
+}
+
+/** The mic answered (or never will): the press is no longer waiting. */
+export function clearKeyDictationPressed(): void {
+  if (keyPressedAt === null) return
+  keyPressedAt = null
+  emitCue()
+}
+
+export function useKeyDictationPressedAt(): number | null {
+  return useSyncExternalStore(subscribeCue, () => keyPressedAt, () => keyPressedAt)
+}

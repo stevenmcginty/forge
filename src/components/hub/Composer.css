@@ -773,6 +773,155 @@
   padding-top: 4px;
 }
 
+/* ------------------------------------------------------------ dictating
+ *
+ * From the press of the mic or the Dictate key, the whole bar turns dictation
+ * violet (--dictation-accent, DictationCue.css): a faint tint here, and its
+ * whole outline becomes the synthesizer (DictationEdge.tsx), the one moving
+ * cue, alive with his voice. The state itself is the word and the shape
+ * in .comp__mic, never the colour alone. Five classes, so it also wins over the
+ * top bar's tall and captioned looks in Dock.css.
+ */
+.dock .dock__composer.comp.comp[data-mic] {
+  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dictation-accent) 11%, var(--bg-panel)),
+    color-mix(in srgb, var(--dictation-accent-2) 6%, var(--bg-panel))
+  );
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 var(--glass-hi),
+    inset 0 0 22px -10px var(--dictation-glow);
+}
+
+/* The agent's turn: the same clean tint in his own colour, fainter. */
+.dock .dock__composer.comp.comp[data-edge='agent'] {
+  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--agent-edge-a) 6%, var(--bg-panel)),
+    color-mix(in srgb, var(--agent-edge-a) 3%, var(--bg-panel))
+  );
+}
+
+/* The dock's hairline of light along the top edge, in the dictation colour too. */
+.dock .dock__composer.comp.comp[data-mic]::before {
+  background: linear-gradient(90deg, transparent, var(--dictation-core), transparent);
+}
+
+/* The word, where the placeholder was. */
+.comp__mic {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  height: 34px;
+  padding: 0 4px 0 6px;
+  color: var(--dictation-ink);
+  white-space: nowrap;
+  animation: comp-mic-in var(--dur-glide) var(--spring-glide) both;
+}
+
+.comp__mic-word {
+  font-family: var(--font-display);
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--dictation-ink);
+}
+
+/* The way out, and where the words go: quieter than the word. */
+.comp__mic-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.comp__mic-into {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dictation-ink);
+}
+
+.comp__mic .dcue__key {
+  height: 20px;
+  font-size: 11.5px;
+}
+
+.dock[data-place='top'] .comp__mic .dcue__key {
+  height: 18px;
+  font-size: 11px;
+}
+
+/* Words already in the box: a slim chip beside them instead. */
+.comp__mic[data-chip='true'] {
+  gap: 6px;
+  height: 26px;
+  margin-bottom: 4px;
+  padding: 0 10px 0 7px;
+  border-radius: var(--r-full);
+  background: linear-gradient(90deg, var(--dictation-soft), color-mix(in srgb, var(--dictation-accent-2) 10%, transparent));
+  box-shadow: inset 0 0 0 1px var(--dictation-line);
+}
+
+.comp__mic[data-chip='true'] .comp__mic-word {
+  font-size: 12px;
+}
+
+.dock[data-place='top'] .comp__mic {
+  height: 26px;
+}
+
+.dock[data-place='top'] .comp__mic-word {
+  font-size: 13.5px;
+}
+
+.dock[data-place='top'] .comp__mic[data-chip='true'] {
+  height: 22px;
+  margin-top: 3px;
+}
+
+.dock[data-place='top'] .comp__mic[data-chip='true'] .comp__mic-word {
+  font-size: 11.5px;
+}
+
+/* One moving cue at a time: while the bar shows dictation, the end button's
+   own arc holds still (its shape still says "transcribing"). */
+.comp[data-mic] .dict__turn {
+  animation: none;
+}
+
+@keyframes comp-mic-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comp__mic,
+  .comp__mic * {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.comp__mic, .comp__mic *) {
+  animation: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .comp__acts,
   .comp__review,

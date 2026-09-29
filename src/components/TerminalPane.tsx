@@ -22,6 +22,7 @@ import { enterOnce } from '@/lib/motion'
 import { usePaneActivity } from '@/lib/paneActivity'
 import { selectActiveWorkspace, useActions, useAppSelector, useAppStateGetter, type AppState } from '@/state/AppState'
 import { ActivityDot } from './ActivityDot'
+import { DictationCue } from './DictationCue'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
 import { AttachButton } from './AttachButton'
@@ -680,6 +681,9 @@ export const TerminalPane = memo(function TerminalPane({
           })
         }}
       />
+
+      {/* The Dictate key's words are coming here: the pane says so, over the terminal. */}
+      <DictationCue paneId={leaf.id} />
 
       {foremanAble ? (
         <ForemanFooter paneId={leaf.id} logOpen={logOpen} onToggleLog={() => setLogOpen((v) => !v)} />
