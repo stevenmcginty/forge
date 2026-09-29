@@ -678,13 +678,13 @@
   mask:
     linear-gradient(#000 0 0) content-box exclude,
     linear-gradient(#000 0 0);
-  animation: pane-sent-0 1300ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
+  animation: pane-sent-0 2200ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
 }
 
 /* The pane's own edge glows with it for the moment it lasts: the outer halo,
    in the sender's colour, which the pane's overflow cannot clip. */
 :is(.pane, .mtile)[data-sent] {
-  animation: pane-sent-glow-0 1300ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
+  animation: pane-sent-glow-0 2200ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
 }
 
 :is(.pane, .mtile)[data-sent][data-sent-beat='1'] {

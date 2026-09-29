@@ -30,7 +30,7 @@ export function setPaneSentSender(fn: () => SentBy | null): () => void {
 }
 
 /** Long enough for the animation; the attribute never outlives a missed animationend. */
-const SAFETY_MS = 1700
+const SAFETY_MS = 2700
 const running = new WeakMap<HTMLElement, { timer: number; onEnd: (e: AnimationEvent) => void }>()
 
 function clear(el: HTMLElement): void {
