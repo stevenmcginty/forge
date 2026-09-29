@@ -31,7 +31,9 @@ import { chatUrl, forgetChat, setChatUrl } from './registry'
  *
  * Not a browser surface. A chat page is not in the surface list, not on the
  * board and not reachable by the browser tools: Steve drives it himself, and
- * nothing here reads, types into or scripts a page.
+ * nothing here reads, types into or scripts a page. The chat relay
+ * (electron/chat-relay.ts) is no exception: its only bridge is the clipboard
+ * plus window focus, done from outside the page when Steve presses a button.
  *
  * A view is made the first time its pane is on screen and kept while its leaf
  * is in some project's layout — switching tabs only hides it, so a half-typed

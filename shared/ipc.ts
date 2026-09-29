@@ -866,6 +866,17 @@ export const IPC = {
   chatViewState: 'chat:view-state',
   chatSignOut: 'chat:sign-out',
 
+  // the chat relay: an agent's question carried to a chat tab by Steve (electron/chat-relay.ts)
+  /** Main → renderer: the questions waiting on Steve changed. Payload: ChatRelayView[], oldest first. */
+  chatRelayState: 'chat-relay:state',
+  /** Renderer → main, invoke: the questions waiting now. */
+  chatRelayList: 'chat-relay:list',
+  /** Renderer → main, invoke: Steve pressed Copy and open — main copies the question and brings the bot's tab forward. */
+  chatRelayCopy: 'chat-relay:copy',
+  /** Renderer → main, invoke: Steve pressed Send answer — main reads the clipboard. */
+  chatRelayAnswer: 'chat-relay:answer',
+  chatRelayDismiss: 'chat-relay:dismiss',
+
   // diagnostics
   rendererError: 'diag:renderer-error',
   /**

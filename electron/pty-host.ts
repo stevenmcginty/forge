@@ -1,9 +1,11 @@
-import { ipcMain, type BrowserWindow } from 'electron'
+import { clipboard, ipcMain, type BrowserWindow } from 'electron'
 import { resolve as resolvePath, sep } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { CreateSessionRequest, CreateSessionResult, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
 import { commandExe, isGlmClaudeCommand, ZAI_ANTHROPIC_BASE_URL } from '@shared/agents'
-import { SHARE_DIR_ENV, SHARE_LINK_ENV } from '@shared/share'
+import { SHARE_DIR_ENV, SHARE_LINK_ENV, type ChatRelayActionResult } from '@shared/share'
+import { CHATBOTS } from '@shared/chatbots'
+import { chatLeafOf } from '@shared/splitTree'
 import { installCommandFor, toolSpecForCommand } from '@shared/tools'
 import { DESK_VIEWER, GridOwners } from './pty/grid-owner'
 import { PtySessionManager } from './pty/session-manager'
@@ -21,6 +23,8 @@ import { presenceFile } from './presence'
 import { gitRemoteOrigin, stripRemoteCredentials } from './git-remote'
 import { canvasEnvFor } from './hub-ipc'
 import { browserPaneEnv } from './browser-panes/env'
+import { layoutEngine } from './layout-engine'
+import type { ChatRelayTarget } from './chat-relay'
 
 /**
  * The PTY host: owns one PtySessionManager and bridges it to the renderer.
@@ -392,10 +396,61 @@ function getLink(): ShareLink {
       write: (id, data) => getManager().write(id, data),
       replay: getReplay,
       // The renderer flies the relay comet from the sender's pane to this one.
-      onSend: (from, to) => send(IPC.ptyRelay, { from, to })
+      onSend: (from, to) => send(IPC.ptyRelay, { from, to }),
+      // The chat relay: Steve's two buttons are the only things that touch the
+      // clipboard, and the chat page itself is never touched at all.
+      chat: {
+        writeClipboard: (text) => clipboard.writeText(text),
+        readClipboard: () => clipboard.readText(),
+        focusChat: focusChatTab,
+        onChange: (open) => send(IPC.chatRelayState, open)
+      }
     })
+    // An unanswered question expires after thirty minutes even if nothing else
+    // happens, so the banner does not hold it forever.
+    relaySweep = setInterval(() => link?.chatRelay.sweep(), 60_000)
+    relaySweep.unref?.()
   }
   return link
+}
+
+let relaySweep: ReturnType<typeof setInterval> | null = null
+
+/**
+ * "Copy and open": bring the bot's chat tab forward in the asking pane's
+ * project — the one already open, else a new one — through the layout engine,
+ * which saves it and tells the renderer (and so switches project too). Then
+ * the window is raised. Window focus is the whole of it: nothing here goes near
+ * the page.
+ */
+function focusChatTab({ projectName, cwd, bot }: ChatRelayTarget): { ok: true } | { ok: false; error: string } {
+  const engine = layoutEngine()
+  if (!engine) return { ok: false, error: 'Forge is still starting.' }
+  const projects = getProjects()
+  const root = projectRootFor(cwd)
+  const project =
+    projects.find((p) => p.name === projectName) ??
+    (root ? projects.find((p) => resolvePath(p.path).toLowerCase() === root.toLowerCase()) : undefined)
+  if (!project) return { ok: false, error: `the project "${projectName}" is no longer open.` }
+  const tab = engine.workspace(project.id).tabs.find((t) => chatLeafOf(t)?.bot === bot)
+  const result = tab
+    ? engine.apply(project.id, { op: 'select-tab', projectId: project.id, tabId: tab.id })
+    : engine.apply(project.id, { op: 'newChatTab', projectId: project.id, bot })
+  if (!result.ok) return { ok: false, error: tab ? result.error : `no ${CHATBOTS[bot].name} tab is open and a new one cannot be: ${result.error}` }
+  if (target && !target.isDestroyed()) {
+    if (target.isMinimized()) target.restore()
+    target.focus()
+  }
+  return { ok: true }
+}
+
+/** The relay banner's buttons. Ids are wire data; the relay refuses one it does not hold. */
+function registerChatRelayHandlers(): void {
+  const refused = (): ChatRelayActionResult => ({ ok: false, error: 'No question was named.' })
+  ipcMain.handle(IPC.chatRelayList, () => getLink().chatRelay.open())
+  ipcMain.handle(IPC.chatRelayCopy, (_e, id: unknown) => (typeof id === 'string' ? getLink().chatRelay.copyAndOpen(id) : refused()))
+  ipcMain.handle(IPC.chatRelayAnswer, (_e, id: unknown) => (typeof id === 'string' ? getLink().chatRelay.sendAnswer(id) : refused()))
+  ipcMain.handle(IPC.chatRelayDismiss, (_e, id: unknown) => (typeof id === 'string' ? getLink().chatRelay.dismiss(id) : refused()))
 }
 
 /**
@@ -1079,6 +1134,8 @@ export function registerPtyHandlers(): void {
   ipcMain.handle(IPC.ptyKill, (_e, id: string) => killPane(String(id)))
 
   ipcMain.handle(IPC.ptyList, () => getManager().list())
+
+  registerChatRelayHandlers()
 }
 
 export function disposePtyHost(): void {
@@ -1092,6 +1149,10 @@ export function disposePtyHost(): void {
   }
   geometryDirty.clear()
   for (const id of [...jiggles.keys()]) clearJiggle(id)
+  if (relaySweep) {
+    clearInterval(relaySweep)
+    relaySweep = null
+  }
   link?.close()
   link = null
   owners.clear()

@@ -16,6 +16,7 @@ import {
 } from '@shared/share'
 import type { ShareLinkPaneView, ShareLinkRequest, ShareLinkResponse } from '@shared/share'
 import { listTerminals, nameKey, resolveTerminal, type TerminalResolution } from '@shared/terminal-names'
+import { ChatRelay, type ChatRelayDeps } from './chat-relay'
 
 /**
  * One agent types into another agent's terminal.
@@ -104,6 +105,12 @@ export interface ShareLinkDeps {
   replay: (id: string) => string
   /** A send went in, `from` → `to` (session ids). Tells the renderer, for the relay comet. */
   onSend?: (from: string, to: string) => void
+  /**
+   * The chat relay's clipboard, tab focus and banner push (electron/chat-relay.ts).
+   * Absent, `chat_ask` still queues and `chat_answer` still answers, but the
+   * banner's buttons refuse — which is what a check that only drives panes wants.
+   */
+  chat?: ChatRelayDeps
 }
 
 /**
@@ -137,9 +144,12 @@ export class ShareLink {
   private server: Server | null = null
   private path: string | null = null
   private readonly sockets = new Set<Socket>()
+  /** `chat_ask` / `chat_answer`. Caller and project are settled here first, as for every op. */
+  readonly chatRelay: ChatRelay
 
   constructor(deps: ShareLinkDeps) {
     this.deps = deps
+    this.chatRelay = new ChatRelay(deps.chat)
   }
 
   /* ---------------------------------------------------------- the registry */
@@ -192,6 +202,7 @@ export class ShareLink {
     const key = String(id ?? '')
     this.panes.delete(key)
     this.activity.delete(key)
+    this.chatRelay.dropPane(key)
   }
 
   /** The PTY said something. Called from the host's replay buffer, once per flush. */
@@ -381,8 +392,8 @@ export class ShareLink {
    */
   handle(request: ShareLinkRequest, now: number = Date.now()): ShareLinkResponse {
     const op = String(request?.op ?? '')
-    if (op !== 'send' && op !== 'read' && op !== 'panes') {
-      return { ok: false, error: `Unknown op: ${op || '(none)'}. This link speaks send, read and panes.` }
+    if (op !== 'send' && op !== 'read' && op !== 'panes' && op !== 'chat-ask' && op !== 'chat-answer') {
+      return { ok: false, error: `Unknown op: ${op || '(none)'}. This link speaks send, read, panes, chat-ask and chat-answer.` }
     }
 
     const from = String(request?.from ?? '')
@@ -397,6 +408,15 @@ export class ShareLink {
       }
     }
     const scope = this.scopeOf(me)
+
+    if (op === 'chat-ask' || op === 'chat-answer') {
+      // No pane is addressed: the caller asks a chatbot through Steve, and sees
+      // only its own question — so the project wall is the caller's own scope.
+      const caller = { id: me.id, title: me.title, scope, projectName: me.projectName, cwd: me.cwd }
+      return op === 'chat-ask'
+        ? this.chatRelay.ask(caller, request?.bot, request?.message, now)
+        : this.chatRelay.answer(caller, request?.bot, now)
+    }
 
     if (op === 'panes') {
       return {
@@ -624,5 +644,6 @@ export class ShareLink {
     this.path = null
     this.panes.clear()
     this.activity.clear()
+    this.chatRelay.clear()
   }
 }

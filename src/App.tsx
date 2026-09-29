@@ -11,6 +11,7 @@ import { WebProjectRemoveBridge } from '@/components/WebProjectRemoveBridge'
 import { WebVoiceBridge } from '@/components/WebVoiceBridge'
 import { HubLayer } from '@/components/hub/HubLayer'
 import { Backdrop } from '@/components/shell/Backdrop'
+import { ChatRelayBar } from '@/components/shell/ChatRelayBar'
 import { DeckToast } from '@/components/shell/DeckToast'
 import { Dock } from '@/components/shell/Dock'
 import { SettingsPopup } from '@/components/shell/SettingsPopup'
@@ -168,6 +169,11 @@ export function App(): ReactNode {
       */}
       <UpdateBanner />
       <StaleBanner />
+      {/*
+        An agent's question for a chat tab, waiting on Steve. In flow, like the
+        two above, so a chat page (a native view over the stage) sits below it.
+      */}
+      <ChatRelayBar />
       <main className="deck__stage" ref={stageRef}>
         {Surface && surface?.placement === 'full' ? (
           <div className="deck__full">

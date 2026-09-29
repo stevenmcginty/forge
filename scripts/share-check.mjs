@@ -623,6 +623,8 @@ console.log('\nthe MCP server')
           'browser_screenshot',
           'browser_type',
           'browser_upload',
+          'chat_answer',
+          'chat_ask',
           'pane_read',
           'pane_send',
           'share_clear',
@@ -631,7 +633,7 @@ console.log('\nthe MCP server')
           'share_read',
           'share_write'
         ]),
-      'exactly the five share tools, the two pane tools and the eight browser tools, and nothing else',
+      'exactly the five share tools, the two pane tools, the two chat relay tools and the eight browser tools, and nothing else',
       JSON.stringify(names)
     )
     ok(
@@ -646,7 +648,9 @@ console.log('\nthe MCP server')
         JSON.stringify(required.share_list) === '[]' &&
         JSON.stringify(required.share_panes) === '[]' &&
         JSON.stringify(required.pane_send) === '["pane","text"]' &&
-        JSON.stringify(required.pane_read) === '["pane"]',
+        JSON.stringify(required.pane_read) === '["pane"]' &&
+        JSON.stringify(required.chat_ask) === '["bot","message"]' &&
+        JSON.stringify(required.chat_answer) === '[]',
       'and asks for exactly the arguments it needs',
       JSON.stringify(required)
     )

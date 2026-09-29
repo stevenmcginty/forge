@@ -1282,6 +1282,22 @@ export interface ForgeApi {
   }
 
   /**
+   * The chat relay banner's half of electron/chat-relay.ts: an agent's question
+   * waiting for Steve to carry it to a chat tab and the answer back. Only main
+   * touches the clipboard. Optional for the same reason `chat` is: a running
+   * Forge's preload may predate it, and the banner then draws nothing.
+   */
+  chatRelay?: {
+    list(): Promise<import('./share').ChatRelayView[]>
+    onState(cb: (open: import('./share').ChatRelayView[]) => void): () => void
+    /** Copy the question to the clipboard and bring the bot's chat tab forward. */
+    copyAndOpen(id: string): Promise<import('./share').ChatRelayActionResult>
+    /** Read the clipboard as the answer and hand it to the agent. */
+    sendAnswer(id: string): Promise<import('./share').ChatRelayActionResult>
+    dismiss(id: string): Promise<import('./share').ChatRelayActionResult>
+  }
+
+  /**
    * Chat tabs: a chatbot website (shared/chatbots.ts) laid over a pane, the
    * way the built-in browser lays a page over its surface. Optional because the
    * desktop hot-reloads the renderer but not the preload: every call is

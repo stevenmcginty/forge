@@ -1,4 +1,5 @@
 import type { ShareSlot, ShareSlotBody, ShareVia } from './types'
+import type { ChatBotId } from './chatbots'
 
 /**
  * The *format* of a project's shared scratchpad: five markdown files, and the
@@ -391,9 +392,63 @@ export const SHARE_BUSY_WINDOW_MS = 3000
 /** A request line longer than this is a client that has lost its mind, not a message. */
 export const SHARE_LINK_MAX_REQUEST_BYTES = 64 * 1024
 
+/* --------------------------------------------------------- the chat relay
+ *
+ * An agent asks one of the chatbot websites in Forge's chat tabs a question,
+ * and Steve carries it there and back. Forge never reads, types into or scripts
+ * a chat page (electron/chat-panes/views.ts): the only bridge is the clipboard
+ * and window focus, and both move only when Steve presses a button on the relay
+ * banner. electron/chat-relay.ts holds the requests; the agent pulls the answer
+ * with `chat_answer`, and nothing is ever typed into its terminal.
+ */
+
+/** The longest question an agent may hand Steve to paste. Refused over it, never cut. */
+export const CHAT_ASK_MAX_CHARS = 8000
+
+/** The longest answer handed back to the agent. Cut over it, and the reply says so. */
+export const CHAT_ANSWER_MAX_CHARS = 30_000
+
+/** Open questions (waiting on Steve) one project may hold at once. */
+export const CHAT_RELAY_MAX_OPEN = 5
+
+/** A question nobody has answered in this long is expired. */
+export const CHAT_RELAY_EXPIRE_MS = 30 * 60_000
+
+/**
+ * How long one `chat_answer` call waits for news before saying `waiting`.
+ * Under the 60 s tool timeout the agent CLIs use, with room for the round trip.
+ * Mirrored in bridge/share-bridge.mjs, which cannot import this file.
+ */
+export const CHAT_ANSWER_WAIT_MS = 45_000
+
+/** Where one relay question is. Only the first two are waiting on Steve. */
+export type ChatRelayStatus = 'needs-paste' | 'needs-answer' | 'answered' | 'dismissed' | 'expired'
+
+/** What `chat_answer` tells the agent. */
+export type ChatAnswerStatus = 'waiting' | 'answered' | 'dismissed' | 'expired' | 'none'
+
+/** One open question, as the relay banner shows it. */
+export interface ChatRelayView {
+  id: string
+  /** The asking pane's name, as Steve sees it. */
+  agent: string
+  projectName: string
+  bot: ChatBotId
+  botName: string
+  state: 'needs-paste' | 'needs-answer'
+  /** The first ~80 characters of the question, on one line. */
+  preview: string
+  createdAt: number
+}
+
+/** What a banner button did. `copied` says the question is on the clipboard even though the rest failed. */
+export type ChatRelayActionResult =
+  | { ok: true; agent: string; botName: string }
+  | { ok: false; error: string; copied?: boolean }
+
 /** What a caller says. One JSON object, one line, one reply. */
 export interface ShareLinkRequest {
-  op: 'send' | 'read' | 'panes'
+  op: 'send' | 'read' | 'panes' | 'chat-ask' | 'chat-answer'
   /** The calling pane's name — `FORGE_SHARE_AGENT`. Unknown names are refused. */
   from?: string
   /** The calling process's cwd, used only to break a tie between same-named panes. */
@@ -404,6 +459,10 @@ export interface ShareLinkRequest {
   force?: boolean
   multiline?: boolean
   lines?: number
+  /** `chat-ask` / `chat-answer`: which chatbot — chatgpt, gemini or claude. Wire data, checked in main. */
+  bot?: string
+  /** `chat-ask`: the question Steve will paste. */
+  message?: string
 }
 
 /** One pane, as the link describes it to a caller. */
@@ -419,6 +478,21 @@ export type ShareLinkResponse =
   | { ok: true; op: 'send'; pane: string; id: string; bytes: number; quietForMs: number; forced: boolean }
   | { ok: true; op: 'read'; pane: string; id: string; text: string; idle: boolean; quietForMs: number; lines: number }
   | { ok: true; op: 'panes'; panes: ShareLinkPaneView[] }
+  | { ok: true; op: 'chat-ask'; id: string; bot: ChatBotId; botName: string; chars: number; open: number }
+  | {
+      ok: true
+      op: 'chat-answer'
+      status: ChatAnswerStatus
+      bot?: ChatBotId
+      botName?: string
+      /** `waiting` only: whether Steve has copied the question over yet. */
+      stage?: 'needs-paste' | 'needs-answer'
+      /** `answered` only: the answer, already wrapped in its untrusted-text label. */
+      text?: string
+      truncated?: boolean
+      /** `answered` only: the answer's length before any cut. */
+      chars?: number
+    }
   | { ok: false; error: string; candidates?: string[]; panes?: ShareLinkPaneView[]; quietForMs?: number }
 
 /** The empty pigeonhole, for a slot with no file. */

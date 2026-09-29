@@ -423,6 +423,15 @@ const api: ForgeApi = {
     call: (message) => ipcRenderer.send(IPC.overlayCall, message)
   },
 
+  // The chat relay banner. Invokes only: every button waits for main's answer,
+  // because main is the one that touches the clipboard and says whether it worked.
+  chatRelay: {
+    list: () => ipcRenderer.invoke(IPC.chatRelayList),
+    onState: (cb) => subscribe(IPC.chatRelayState, cb),
+    copyAndOpen: (id) => ipcRenderer.invoke(IPC.chatRelayCopy, String(id ?? '')),
+    sendAnswer: (id) => ipcRenderer.invoke(IPC.chatRelayAnswer, String(id ?? '')),
+    dismiss: (id) => ipcRenderer.invoke(IPC.chatRelayDismiss, String(id ?? ''))
+  },
   // `ensure`, `bounds`, `nav` and `close` are one-way sends, like the browser's
   // setBounds: the pane reports its placeholder every frame it moves.
   chat: {

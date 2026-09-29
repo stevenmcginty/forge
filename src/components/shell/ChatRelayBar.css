@@ -1,0 +1,117 @@
+/*
+ * The chat relay strip. It sits in the shell's flow under the title bar, beside
+ * the update strips, and pushes the stage down rather than covering it: a chat
+ * page is a native view laid over its placeholder, so anything drawn *over* the
+ * stage would be under the page. In flow, the page is simply measured below it.
+ *
+ * Same geometry and tokens as the update strip (UpdateBanner.css); the accent is
+ * used once, on the button that does the next step. Every state is a word.
+ */
+
+.relaybar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  padding: 3px var(--s-3) 3px var(--s-5);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--accent-line);
+  -webkit-app-region: no-drag;
+}
+
+.relaybar__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  min-height: 24px;
+}
+
+.relaybar__eyebrow {
+  flex: none;
+  font-size: var(--t-eyebrow);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.relaybar__text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.relaybar__text strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.relaybar__more {
+  flex: none;
+  padding: 0 var(--s-2);
+  font-size: var(--t-xs);
+  color: var(--text-secondary);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.relaybar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: none;
+}
+
+.relaybar__btn {
+  height: 22px;
+  padding: 0 var(--s-4);
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.relaybar__btn:hover:not(:disabled) {
+  border-color: var(--text-dim);
+}
+
+.relaybar__btn--go {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.relaybar__btn--go:hover:not(:disabled) {
+  background: var(--accent-bright);
+  border-color: var(--accent-bright);
+}
+
+.relaybar__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A refusal, in words, on a line of its own so it is never cut short. */
+.relaybar__note {
+  padding: 2px 0 3px;
+  font-size: var(--t-xs);
+  color: var(--text-primary);
+}
+
+.relaybar__note strong {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.relaybar[data-state='sent'] .relaybar__text strong {
+  color: var(--text-primary);
+}
