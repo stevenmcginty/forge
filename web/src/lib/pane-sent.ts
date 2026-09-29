@@ -21,7 +21,7 @@ import { paneNameInTab } from '@shared/workspace'
 export type SentBy = 'you' | 'agent'
 
 /** A little over the longest lap (the agent's); the attribute never outlives a missed animationend. */
-const SAFETY_MS = 8600
+const SAFETY_MS = 3600
 const running = new WeakMap<HTMLElement, { timer: number; onEnd: (e: AnimationEvent) => void }>()
 
 function clear(el: HTMLElement): void {
