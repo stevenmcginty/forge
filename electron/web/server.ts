@@ -796,6 +796,19 @@ interface Client {
    * RESUME_IDLE_MS. See `WebHelloOkFrame.resume`.
    */
   resume: string | null
+  /**
+   * Whether this socket has been heard from since its `hello-ok`, which
+   * proves the page has `resume` — see `auth.resumeDelivered`.
+   */
+  resumeDelivered: boolean
+  /** When the socket was accepted, its `hello` arrived (0 until then), and it last sent a frame or pong. For the close line. */
+  openedAt: number
+  helloAt: number
+  lastFrameAt: number
+  /** What its `hello` called the browser, bounded, for the close line of a socket not yet admitted. */
+  helloName: string
+  /** What `drop` closed it with, when the desktop hung up rather than the browser or the network. */
+  droppedWith: { code: number; reason: string } | null
   /** This socket's identity for the grid-ownership rule. See `viewerSeq`. */
   viewer: string
   /** Sessions this browser is reading. */
@@ -1488,6 +1501,12 @@ export class WebServer {
       origin,
       device: null,
       resume: null,
+      resumeDelivered: false,
+      openedAt: this.now(),
+      helloAt: 0,
+      lastFrameAt: this.now(),
+      helloName: '',
+      droppedWith: null,
       viewer: `web-${++viewerSeq}`,
       subs: new Set(),
       chats: new Map(),
@@ -1518,6 +1537,7 @@ export class WebServer {
     }, HEARTBEAT_GRACE_MS)
 
     socket.on('message', (raw) => {
+      client.lastFrameAt = this.now()
       const frame = parseFrame(String(raw))
       if (!frame) {
         this.send(client, { type: 'error', code: 'bad-frame', message: 'Unreadable frame' })
@@ -1543,8 +1563,15 @@ export class WebServer {
         if (!client.device) this.drop(client, CLOSE_UNAUTHENTICATED, 'Failed before hello completed')
       })
     })
-    socket.on('pong', () => this.schedulePing(client))
-    socket.on('close', () => {
+    socket.on('pong', () => {
+      client.lastFrameAt = this.now()
+      this.schedulePing(client)
+    })
+    socket.on('close', (code: number, reason: Buffer) => {
+      // Why it went, once per socket and before anything below forgets who it
+      // was. See `closeLine`.
+      const line = this.closeLine(client, code, reason)
+      if (line) this.log(line)
       this.clients.delete(client)
       this.clearTimers(client)
       // Redundant with the delete above and written anyway: a socket that has
@@ -1575,7 +1602,6 @@ export class WebServer {
         client.resume = null
       }
       if (client.device) {
-        this.log(`${client.device.name} disconnected`)
         this.host.onPresence?.(this.connectedCount)
         // A browser that hangs up is no longer reading anything, so the desktop
         // takes its panes back — including after a tunnel drops mid-pane.
@@ -1610,6 +1636,13 @@ export class WebServer {
       })
       this.drop(client, CLOSE_UNAUTHENTICATED, 'Not authenticated')
       return
+    }
+
+    // The page sends nothing but `hello` until its `hello-ok` has landed, so
+    // any other frame from it proves it holds the ticket that carried.
+    if (client.resume && !client.resumeDelivered) {
+      client.resumeDelivered = true
+      this.host.auth.resumeDelivered(client.resume)
     }
 
     // Ahead of the general budget, and with a counter of its own. A pointer
@@ -2025,6 +2058,10 @@ export class WebServer {
 
   private async onHello(client: Client, frame: Extract<WebClientFrame, { type: 'hello' }>): Promise<void> {
     if (client.device) return // one hello per socket
+    if (!client.helloAt) {
+      client.helloAt = this.now()
+      client.helloName = logText(wireString(frame.deviceName, 64), 64) || 'Browser'
+    }
 
     if (Number(frame.proto) !== WEB_PROTO) {
       // `proto` is the one refusal auth never returns: it is decided here,
@@ -3593,7 +3630,31 @@ export class WebServer {
     }
   }
 
+  /**
+   * The desk-log line for a socket that has closed, or '' when it gets none:
+   * who hung up, with what code, how long the socket lived and how long since
+   * it last said anything — so a dropped phone can be told apart from a page
+   * that gave up, a tunnel that died, and a desktop that closed it. One line
+   * per close and only for a socket that said hello: an admitted one, or one
+   * that went while its hello was still being answered (the window in which
+   * a `hello-ok` and its ticket are lost). A browser's own reason is printed
+   * bounded and quoted, as data. Nothing secret reaches it.
+   */
+  private closeLine(client: Client, code: number, reason: Buffer): string {
+    const now = this.now()
+    const by = client.droppedWith
+      ? `closed by the desktop: ${logText(client.droppedWith.reason, 80)} (code ${client.droppedWith.code})`
+      : `code ${code} (${closeWords(code)})${reason.length ? ` ${JSON.stringify(logText(reason.toString('utf8'), 80))}` : ''}, closed by the browser or the network`
+    if (client.device) {
+      return `${client.device.name} disconnected — ${by}, after ${secondsText(now - client.openedAt)}, last frame from it ${secondsText(now - client.lastFrameAt)} ago`
+    }
+    if (!client.helloAt || client.droppedWith) return ''
+    return `"${client.helloName}" at ${client.source} closed before its hello was answered — ${by}, ${secondsText(now - client.helloAt)} after the hello`
+  }
+
   private drop(client: Client, code: number, reason: string): void {
+    // The first drop is the reason; a second (an error on the way out) is not.
+    client.droppedWith ??= { code, reason }
     this.clients.delete(client)
     this.clearTimers(client)
     // Here as well as in the close handler, and not instead of it. `close`
@@ -3855,6 +3916,42 @@ function closeReason(text: string): string {
   const bytes = Buffer.from(text, 'utf8')
   if (bytes.length <= 123) return text
   return bytes.subarray(0, 123).toString('utf8').replace(/�+$/, '')
+}
+
+/**
+ * A close code in plain words, for the desk log. The 40xx codes the page
+ * itself hangs up with are named by the reason it sends beside them (see
+ * `retire` in web/src/lib/client.ts), so they are only placed here.
+ */
+function closeWords(code: number): string {
+  switch (code) {
+    case 1000:
+      return 'normal close'
+    case 1001:
+      return 'going away: the page was closed or navigated'
+    case 1005:
+      return 'no code given'
+    case 1006:
+      return 'no close frame: the link died'
+    case CLOSE_UNAUTHENTICATED:
+      return 'Forge: not let in'
+    case CLOSE_PROTO:
+      return 'Forge: protocol mismatch'
+    case CLOSE_HEARTBEAT:
+      return 'Forge: heartbeat lost'
+    default:
+      return code >= 4000 && code <= 4099 ? 'the page hung up' : 'unusual code'
+  }
+}
+
+/** Untrusted text made safe for one log line: control characters out, bounded. */
+function logText(text: string, max: number): string {
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '?').slice(0, max)
+}
+
+/** A duration as the log prints it: "2.1 s". */
+function secondsText(ms: number): string {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)} s`
 }
 
 /** Does this upgrade request ask for the one subprotocol this server speaks? */

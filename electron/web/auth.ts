@@ -536,7 +536,28 @@ interface ResumeTicket {
   lastUsedAt: number
   /** When the socket holding it closed, or 0 while that socket is open. */
   closedAt: number
+  /**
+   * Set once this ticket has been presented and admitted: the digest of the
+   * ticket it was rotated to. Kept rather than spent, because that successor
+   * travels in a `hello-ok` a dying socket may never deliver, and the phone
+   * then still holds this one. While the successor is unused this ticket is
+   * its stand-in, living and lapsing exactly as the successor does; the
+   * successor's first use, or its socket being heard from, spends it. See
+   * `takeResume` and `resumeDelivered`.
+   */
+  next?: string
+  /** Set on a rotated-to ticket: the digest of the one it replaced, until this one is used. */
+  prev?: string
 }
+
+/** A ticket `takeResume` admitted, and its digest: what `issueResume` links the next one to. */
+interface SpentResume {
+  key: string
+  entry: ResumeTicket
+}
+
+/** A SHA-256 in base64url is 43 characters; anything else is not a key this class wrote. */
+const RESUME_KEY = /^[A-Za-z0-9_-]{43}$/
 
 /** `web-remembered.json`. See `WebAuthHost.resumes`. */
 interface RememberedFile {
@@ -545,13 +566,18 @@ interface RememberedFile {
   tickets: Record<string, ResumeTicket>
 }
 
-/** Ceiling on the ticket map — see `pruneResumes`. One person's phones, many times over. */
+/**
+ * Ceiling on the ticket map — see `pruneResumes`. One person's phones, many
+ * times over. A rotated ticket kept as its successor's stand-in (`next`)
+ * counts, and goes when that successor does.
+ */
 const MAX_RESUME_TICKETS = 256
 
 /**
  * Ceiling per browser. A phone holds one live ticket at a time, but a PIN
  * replay or a second tab leaves the one before unspent until it lapses, so a
- * few more than one pile up; past this the oldest go first.
+ * few more than one pile up; past this the oldest go first. Live tickets
+ * only: a stand-in is not a second ticket for the phone.
  */
 const MAX_RESUME_PER_DEVICE = 8
 
@@ -578,7 +604,25 @@ function readResumeTicket(value: unknown): ResumeTicket | null {
   const closedAt = time('closedAt')
   if (!uid || !deviceId || !origin || !digest || issuedAt === null || lastUsedAt === null || closedAt === null) return null
   const deviceName = printable((text('deviceName') ?? '').slice(0, 64)) || 'Browser'
-  return { uid, deviceId, deviceName, origin, pinDigest: digest, issuedAt, lastUsedAt, closedAt }
+  // Optional: a file written before tickets were linked has neither.
+  const link = (key: string): string | null => {
+    const s = text(key)
+    return s && RESUME_KEY.test(s) ? s : null
+  }
+  const next = link('next')
+  const prev = link('prev')
+  return {
+    uid,
+    deviceId,
+    deviceName,
+    origin,
+    pinDigest: digest,
+    issuedAt,
+    lastUsedAt,
+    closedAt,
+    ...(next ? { next } : {}),
+    ...(prev ? { prev } : {})
+  }
 }
 
 /** The map key for a ticket: its SHA-256, so the map never holds one it could hand out. */
@@ -746,7 +790,7 @@ export class WebAuth {
     // next ticket, so the phone is remembered until it goes RESUME_IDLE_MS
     // unused. `unlock` is only set when a PIN is.
     const resume = unlock && origin
-      ? this.issueResume(uid, deviceId, deviceName, origin, unlock.pinDigest, ticket?.issuedAt)
+      ? this.issueResume(uid, deviceId, deviceName, origin, unlock.pinDigest, ticket ?? undefined)
       : undefined
     return {
       ok: true,
@@ -773,6 +817,20 @@ export class WebAuth {
   }
 
   /**
+   * The socket holding this ticket has heard from its page since `hello-ok`,
+   * so the page has it: the ticket it replaced is spent now, rather than
+   * waiting for this one to be presented. See `ResumeTicket.next`.
+   */
+  resumeDelivered(ticket: string): void {
+    this.loadResumes()
+    const entry = this.resumes.get(resumeKey(ticket))
+    if (!entry?.prev) return
+    this.resumes.delete(entry.prev)
+    delete entry.prev
+    this.saveResumes()
+  }
+
+  /**
    * The phones this desktop remembers, one row per browser, most recently
    * used first — for the desktop's own settings, never the wire. A ticket
    * voided by a PIN change or lapsed is gone before this is read.
@@ -783,6 +841,8 @@ export class WebAuth {
     const now = this.now()
     const rows = new Map<string, WebRememberedPhone>()
     for (const entry of this.resumes.values()) {
+      // A rotated ticket's successor is the same browser, and the newer row.
+      if (entry.next) continue
       const lastUsedAt = entry.closedAt ? Math.max(entry.closedAt, entry.lastUsedAt) : now
       const key = `${entry.uid}\n${entry.deviceId}`
       const row = rows.get(key)
@@ -820,9 +880,10 @@ export class WebAuth {
   }
 
   /**
-   * A fresh ticket for an admitted socket. Only its digest is kept. `since`
-   * is the spent ticket's `issuedAt`, so a phone keeps its "remembered since"
-   * across rotations.
+   * A fresh ticket for an admitted socket. Only its digest is kept. `spent`
+   * is the ticket this hello presented, when it did: the new one is linked
+   * as its successor (see `ResumeTicket.next`) and inherits its `issuedAt`,
+   * so a phone keeps its "remembered since" across rotations.
    */
   private issueResume(
     uid: string,
@@ -830,25 +891,31 @@ export class WebAuth {
     deviceName: string,
     origin: string,
     digest: string,
-    since?: number
+    spent?: SpentResume
   ): string {
     this.loadResumes()
     this.pruneResumes()
-    // Room for the new one: this browser's oldest first, then anybody's.
-    this.evictResumes((entry) => entry.uid === uid && entry.deviceId === deviceId, MAX_RESUME_PER_DEVICE - 1)
-    this.evictResumes(() => true, MAX_RESUME_TICKETS - 1)
+    // Room for the new one: this browser's oldest first, then anybody's. Never
+    // the ticket just spent, which is about to become the new one's stand-in.
+    const keep = spent?.key
+    this.evictResumes((entry, key) => key !== keep && entry.uid === uid && entry.deviceId === deviceId, MAX_RESUME_PER_DEVICE - 1)
+    this.evictResumes((_, key) => key !== keep, MAX_RESUME_TICKETS - 1 - (spent ? 1 : 0), true)
     const now = this.now()
     const ticket = randomBytes(32).toString('base64url')
-    this.resumes.set(resumeKey(ticket), {
+    const key = resumeKey(ticket)
+    const linked = spent && this.resumes.get(spent.key) === spent.entry
+    this.resumes.set(key, {
       uid,
       deviceId,
       deviceName,
       origin,
       pinDigest: digest,
-      issuedAt: since ?? now,
+      issuedAt: spent?.entry.issuedAt ?? now,
       lastUsedAt: now,
-      closedAt: 0
+      closedAt: 0,
+      ...(linked ? { prev: spent.key } : {})
     })
+    if (linked) spent.entry.next = key
     this.saveResumes()
     return ticket
   }
@@ -856,37 +923,79 @@ export class WebAuth {
   /**
    * Spend a ticket: the entry only when it is known, still live, and was
    * issued to this account, browser and page under the PIN set now, else
-   * null. Spent whatever the answer, so a ticket is presented once.
+   * null. A refused ticket is gone whatever the answer.
+   *
+   * An admitted one is not deleted but kept as the stand-in for the ticket
+   * `issueResume` rotates it to, because that successor travels in a
+   * `hello-ok` the socket may die before delivering — and the phone, which
+   * keeps its ticket until the desktop answers, then presents this one again.
+   * So a stand-in whose successor was never used is admitted once more, on
+   * every check it passed the first time and on its successor's idle clock,
+   * and the undelivered successor is replaced. The successor's first use, or
+   * its socket being heard from (`resumeDelivered`), spends the stand-in.
    *
    * A no here is never struck — 256 random bits are not something anybody
    * guesses, so repeated wrong tickets are noise, as bad tokens are — and the
    * caller answers it as a hello with no credential. Why is for the log only.
    */
-  private takeResume(ticket: string, uid: string, deviceId: string, origin: string, stored: string): ResumeTicket | null {
+  private takeResume(ticket: string, uid: string, deviceId: string, origin: string, stored: string): SpentResume | null {
     this.loadResumes()
     const key = resumeKey(ticket)
     const entry = this.resumes.get(key)
-    if (entry) {
-      this.resumes.delete(key)
-      this.saveResumes()
-    }
     const no = (why: string): null => {
+      if (entry) {
+        this.removeResume(key)
+        this.saveResumes()
+      }
       this.host.log?.(`web auth: remembered-phone ticket refused — ${why}`)
       return null
     }
     if (!entry) return no('unknown or already spent')
-    if (entry.closedAt && this.now() - entry.closedAt > RESUME_IDLE_MS) return no('expired')
+    // A stand-in lives exactly as long as its successor, whose clock it runs on.
+    const successor = entry.next ? this.resumes.get(entry.next) : undefined
+    if (entry.next && successor?.prev !== key) return no('unknown or already spent')
+    const closedAt = (successor ?? entry).closedAt
+    if (closedAt && this.now() - closedAt > RESUME_IDLE_MS) return no('expired')
     if (!sameString(entry.uid, uid)) return no('another account')
     if (!sameString(entry.deviceId, deviceId)) return no('another browser')
     if (!origin || !sameString(entry.origin, origin)) return no('another page')
     if (!sameString(entry.pinDigest, pinDigest(stored))) return no('the PIN has changed')
-    return entry
+    if (successor && entry.next) {
+      // The phone never got the successor: it goes, and `issueResume` links a new one here.
+      this.resumes.delete(entry.next)
+      delete entry.next
+      this.host.log?.('web auth: re-accepted a remembered-phone ticket — the last one never reached the phone')
+    } else if (entry.prev) {
+      // This ticket reached the phone, so the one it replaced is spent.
+      this.resumes.delete(entry.prev)
+      delete entry.prev
+    }
+    // In use by the socket this hello opens until `issueResume` links its
+    // successor; from then its life is the successor's.
+    entry.closedAt = 0
+    this.saveResumes()
+    return { key, entry }
+  }
+
+  /**
+   * Delete one ticket and keep the links whole: a successor takes its
+   * stand-in with it, and a stand-in is unhooked from its successor, which
+   * stays good.
+   */
+  private removeResume(key: string): void {
+    const entry = this.resumes.get(key)
+    if (!entry) return
+    this.resumes.delete(key)
+    if (entry.prev) this.resumes.delete(entry.prev)
+    const successor = entry.next ? this.resumes.get(entry.next) : undefined
+    if (successor?.prev === key) delete successor.prev
   }
 
   /**
    * Drop tickets that can never be spent: lapsed past RESUME_IDLE_MS, or
-   * issued under a PIN other than the one set now (or with none set at all).
-   * True when anything went, so the caller knows to save.
+   * issued under a PIN other than the one set now (or with none set at all),
+   * and every stand-in whose successor is gone. True when anything went, so
+   * the caller knows to save.
    */
   private pruneResumes(): boolean {
     const now = this.now()
@@ -894,30 +1003,44 @@ export class WebAuth {
     const digest = stored ? pinDigest(stored) : ''
     let changed = false
     for (const [key, entry] of this.resumes) {
+      if (entry.next) continue // judged by its successor, below
       const lapsed = entry.closedAt && now - entry.closedAt > RESUME_IDLE_MS
       if (lapsed || !digest || entry.pinDigest !== digest) {
         this.resumes.delete(key)
         changed = true
       }
     }
+    for (const [key, entry] of this.resumes) {
+      if (!entry.next) continue
+      if (digest && entry.pinDigest === digest && this.resumes.get(entry.next)?.prev === key) continue
+      this.resumes.delete(key)
+      changed = true
+    }
     return changed
   }
 
   /**
-   * Keep at most `keep` of the tickets `match` picks, dropping the least
-   * recently used first — an open socket's is in use now, so it goes last.
-   * Dropping a ticket only ever costs one more PIN, never a way in. True when
-   * anything went.
+   * Keep at most `keep` of the live tickets `match` picks, dropping the least
+   * recently used first — an open socket's is in use now, so it goes last. A
+   * stand-in goes with its successor, and with `entries` it counts too, for
+   * the ceiling on the map itself. Dropping a ticket only ever costs one more
+   * PIN, never a way in. True when anything went.
    */
-  private evictResumes(match: (entry: ResumeTicket) => boolean, keep: number): boolean {
-    const matching = [...this.resumes].filter(([, entry]) => match(entry))
-    if (matching.length <= keep) return false
+  private evictResumes(match: (entry: ResumeTicket, key: string) => boolean, keep: number, entries = false): boolean {
+    const matching = [...this.resumes].filter(([key, entry]) => !entry.next && match(entry, key))
+    const weight = (entry: ResumeTicket): number => (entries && entry.prev && this.resumes.has(entry.prev) ? 2 : 1)
+    let total = matching.reduce((sum, [, entry]) => sum + weight(entry), 0)
+    if (total <= keep) return false
     matching.sort(([, a], [, b]) => {
       const ra = resumeRecency(a)
       const rb = resumeRecency(b)
       return ra === rb ? a.lastUsedAt - b.lastUsedAt : ra < rb ? -1 : 1
     })
-    for (const [key] of matching.slice(0, matching.length - keep)) this.resumes.delete(key)
+    for (const [key, entry] of matching) {
+      if (total <= keep) break
+      total -= weight(entry)
+      this.removeResume(key)
+    }
     return true
   }
 
@@ -945,8 +1068,7 @@ export class WebAuth {
     let changed = false
     for (const [key, value] of Object.entries(file.tickets)) {
       const entry = readResumeTicket(value)
-      // A SHA-256 in base64url is 43 characters; anything else is not a key this class wrote.
-      if (!entry || !/^[A-Za-z0-9_-]{43}$/.test(key)) {
+      if (!entry || !RESUME_KEY.test(key)) {
         changed = true
         continue
       }
@@ -957,7 +1079,7 @@ export class WebAuth {
       this.resumes.set(key, entry)
     }
     if (this.pruneResumes()) changed = true
-    if (this.evictResumes(() => true, MAX_RESUME_TICKETS)) changed = true
+    if (this.evictResumes(() => true, MAX_RESUME_TICKETS, true)) changed = true
     if (changed) this.saveResumes()
   }
 

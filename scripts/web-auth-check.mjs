@@ -707,13 +707,16 @@ async function main() {
       "6 days after its socket closed the ticket admits with a passkey's rights (never a PIN's), and a fresh ticket"
     )
     log(lines.some((l) => l.includes('admitted') && l.includes('with a remembered-phone ticket')), 'and the log says so')
-    const twice = await door(a, 'phone-1', { resume: byPin.resume })
-    log(!twice.ok && twice.reason === 'pin-required' && refusedWhy(lines).includes('already spent'), 'a ticket is single-use')
 
     a.resumeClosed(sixDays.resume)
     clock += 7 * DAY
     const sevenDays = await door(a, 'phone-1', { resume: sixDays.resume })
     log(sevenDays.ok && isTicket(sevenDays.resume), 'exactly 7 days after its socket closed it still admits')
+    const twice = await door(a, 'phone-1', { resume: byPin.resume })
+    log(
+      !twice.ok && twice.reason === 'pin-required' && refusedWhy(lines).includes('already spent'),
+      'once the ticket it was rotated to has been used, a ticket is spent'
+    )
     a.resumeClosed(sevenDays.resume)
     clock += 7 * DAY + 1
     const late = await door(a, 'phone-1', { resume: sevenDays.resume })
@@ -859,6 +862,203 @@ async function main() {
     log(asked === AUTH_MAX_FAILURES + 2, `${AUTH_MAX_FAILURES + 2} bad tickets are each asked for the PIN, none struck`)
     const pinAfter = await door(a, 'phone-11', { pin: PIN })
     log(pinAfter.ok, 'and the correct PIN still gets in afterwards')
+  }
+
+  /* 22g. A rotated ticket stays good until its successor is used.
+   *
+   * The successor travels in a `hello-ok` that a dying socket may never
+   * deliver, and the phone keeps the ticket it holds until the desktop
+   * answers, so it presents the old one again. That must not cost a PIN.
+   */
+  const pair = async (a, deviceId) => {
+    const first = await door(a, deviceId, { pin: PIN })
+    a.resumeClosed(first.resume)
+    const second = await door(a, deviceId, { resume: first.resume })
+    a.resumeClosed(second.resume)
+    return { first, second }
+  }
+
+  // (a) and (b): a lost successor, then its replacement used.
+  {
+    const lines = []
+    const a = desk(memoryFile(), lines)
+    const { first, second: lost } = await pair(a, 'phone-12')
+    clock += DAY
+    const again = await door(a, 'phone-12', { resume: first.resume })
+    log(
+      lost.ok &&
+        again.ok &&
+        again.device.unlock?.by === 'passkey' &&
+        isTicket(again.resume) &&
+        ![first.resume, lost.resume].includes(again.resume),
+      "a ticket whose successor never reached the phone is admitted again, no PIN, with a passkey's rights, and a third ticket"
+    )
+    log(
+      lines.includes('web auth: re-accepted a remembered-phone ticket — the last one never reached the phone'),
+      'and the log says the last one never reached the phone'
+    )
+    log(a.rememberedList().length === 1, 'the rotated pair is one row in the list')
+    const undelivered = await door(a, 'phone-12', { resume: lost.resume })
+    log(
+      !undelivered.ok && undelivered.reason === 'pin-required' && refusedWhy(lines).includes('already spent'),
+      'the undelivered successor it replaced is gone'
+    )
+    a.resumeClosed(again.resume)
+    const third = await door(a, 'phone-12', { resume: again.resume })
+    const firstAgain = await door(a, 'phone-12', { resume: first.resume })
+    log(
+      third.ok && !firstAgain.ok && firstAgain.reason === 'pin-required' && refusedWhy(lines).includes('unknown or already spent'),
+      'once the third ticket is used, the first is refused'
+    )
+  }
+
+  // (c): the successor used normally, or its socket heard from.
+  {
+    const lines = []
+    const a = desk(memoryFile(), lines)
+    const { first, second } = await pair(a, 'phone-13')
+    const next = await door(a, 'phone-13', { resume: second.resume })
+    const back = await door(a, 'phone-13', { resume: first.resume })
+    log(
+      next.ok && !back.ok && back.reason === 'pin-required' && refusedWhy(lines).includes('unknown or already spent'),
+      'a successor used normally spends the ticket it replaced'
+    )
+    const heard = await door(a, 'phone-14', { pin: PIN })
+    const rotated = await door(a, 'phone-14', { resume: heard.resume })
+    a.resumeDelivered(rotated.resume)
+    const stale = await door(a, 'phone-14', { resume: heard.resume })
+    log(
+      rotated.ok && !stale.ok && refusedWhy(lines).includes('unknown or already spent'),
+      'a successor whose socket has been heard from spends the one it replaced before it is ever presented'
+    )
+  }
+
+  // (d): a PIN change voids the stand-in and its successor alike.
+  {
+    const file = memoryFile()
+    const a = desk(file)
+    const { first, second } = await pair(a, 'phone-15')
+    const savedPin = pinHash
+    pinHash = hashPin('24681357')
+    const listed = a.rememberedList()
+    const left = Object.keys(ticketsIn(file)).length
+    pinHash = savedPin
+    const one = await door(a, 'phone-15', { resume: first.resume })
+    const two = await door(a, 'phone-15', { resume: second.resume })
+    log(
+      listed.length === 0 && left === 0 && !one.ok && !two.ok && one.reason === 'pin-required' && two.reason === 'pin-required',
+      `a PIN change voids a rotated ticket and its successor alike (${left} left in the file)`
+    )
+  }
+
+  // (e): forgetting the phone removes both.
+  {
+    const file = memoryFile()
+    const a = desk(file)
+    const { first, second } = await pair(a, 'phone-16')
+    const gone = a.rememberedForget('phone-16')
+    const one = await door(a, 'phone-16', { resume: first.resume })
+    const two = await door(a, 'phone-16', { resume: second.resume })
+    log(
+      gone === 2 && Object.keys(ticketsIn(file)).length === 0 && !one.ok && !two.ok,
+      `forgetting a phone removes a rotated ticket with its successor (${gone} went)`
+    )
+  }
+
+  // (f): a file written before tickets were linked loads, and its tickets rotate.
+  {
+    const file = memoryFile()
+    const a = desk(file)
+    const earned = await door(a, 'phone-17', { pin: PIN })
+    a.resumeClosed(earned.resume)
+    const oldFormat = {}
+    for (const [key, t] of Object.entries(ticketsIn(file))) {
+      const { uid: u, deviceId, deviceName, origin, pinDigest, issuedAt, lastUsedAt, closedAt } = t
+      oldFormat[key] = { uid: u, deviceId, deviceName, origin, pinDigest, issuedAt, lastUsedAt, closedAt }
+    }
+    file.text = JSON.stringify({ version: 1, tickets: oldFormat })
+    const b = desk(file)
+    const loaded = await door(b, 'phone-17', { resume: earned.resume })
+    const linked = Object.values(ticketsIn(file))
+    const again = await door(b, 'phone-17', { resume: earned.resume })
+    log(
+      Object.keys(oldFormat).length === 1 && loaded.ok && again.ok && isTicket(again.resume),
+      'a remembered-phone file with no link fields loads, its ticket admits, and it rotates like any other'
+    )
+    log(
+      linked.some((t) => typeof t.next === 'string') &&
+        linked.some((t) => typeof t.prev === 'string') &&
+        ![earned.resume, loaded.resume, again.resume].some((t) => file.text.includes(t)),
+      'the links are written as digests, never ticket text'
+    )
+  }
+
+  // (g): a stand-in is held to every check the ticket was.
+  {
+    const lines = []
+    const a = desk(memoryFile(), lines)
+    const acct = await pair(a, 'phone-18')
+    uid = OTHER_UID
+    const otherAccount = await a.authenticate(
+      hello('10.9.0.1', mint({ sub: OTHER_UID }), 'phone-18', 'Phone phone-18', { origin: ORIGIN, resume: acct.first.resume })
+    )
+    uid = UID
+    const acctWhy = refusedWhy(lines)
+    const acctKept = await door(a, 'phone-18', { resume: acct.second.resume })
+    log(
+      !otherAccount.ok && otherAccount.reason === 'pin-required' && acctWhy.endsWith('another account') && acctKept.ok,
+      `a rotated ticket from another account is refused (${acctWhy}), and its successor is still good`
+    )
+    const dev = await pair(a, 'phone-19')
+    const otherDevice = await door(a, 'phone-19-other', { resume: dev.first.resume })
+    log(
+      !otherDevice.ok && otherDevice.reason === 'pin-required' && refusedWhy(lines).endsWith('another browser'),
+      `a rotated ticket from another browser is refused (${refusedWhy(lines)})`
+    )
+    const page = await pair(a, 'phone-20')
+    const otherPage = await door(a, 'phone-20', { resume: page.first.resume, origin: 'https://elsewhere.example' })
+    log(
+      !otherPage.ok && otherPage.reason === 'pin-required' && refusedWhy(lines).endsWith('another page'),
+      `a rotated ticket from another page is refused (${refusedWhy(lines)})`
+    )
+  }
+
+  // (h): a stand-in lives and lapses on its successor's clock, not its own.
+  {
+    const lines = []
+    const a = desk(memoryFile(), lines)
+    const earned = await door(a, 'phone-21', { pin: PIN })
+    a.resumeClosed(earned.resume)
+    clock += 6 * DAY
+    const lost = await door(a, 'phone-21', { resume: earned.resume })
+    a.resumeClosed(lost.resume)
+    clock += 7 * DAY
+    const late = await door(a, 'phone-21', { resume: earned.resume })
+    log(lost.ok && late.ok, "13 days after its own socket closed, but 7 after its successor's, a rotated ticket still admits")
+
+    const { first } = await pair(a, 'phone-22')
+    clock += 7 * DAY + 1
+    const lapsed = await door(a, 'phone-22', { resume: first.resume })
+    log(
+      !lapsed.ok && lapsed.reason === 'pin-required' && refusedWhy(lines).endsWith('expired'),
+      `7 days + 1 ms after its successor's socket closed it lapses with it (${refusedWhy(lines)})`
+    )
+  }
+
+  // (i): the per-phone cap never evicts the pair being linked.
+  {
+    const a = desk(memoryFile())
+    const issued = []
+    for (let i = 0; i < 8; i++) {
+      const o = await door(a, 'phone-23', { pin: PIN })
+      a.resumeClosed(o.resume)
+      issued.push(o.resume)
+      clock += 1000
+    }
+    const oldest = await door(a, 'phone-23', { resume: issued[0] })
+    const again = await door(a, 'phone-23', { resume: issued[0] })
+    const second = await door(a, 'phone-23', { resume: issued[1] })
+    log(oldest.ok && again.ok && second.ok, "at the phone's cap its oldest ticket rotates and is re-accepted, and nothing else is lost")
   }
 }
 

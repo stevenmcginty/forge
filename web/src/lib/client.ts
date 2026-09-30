@@ -176,6 +176,25 @@ const STUCK_DIAL_MS = 4_000
 const CONNECT_TIMEOUT_MS = 8_000
 
 /**
+ * Why this page hung up a socket, sent as its close code and reason so the
+ * desktop's log can tell a page that gave up from a link that died (which
+ * arrives as 1006, no close frame at all). 4010-4099 is this page's range;
+ * the desktop's own codes sit below it. Reasons are short ASCII, well inside
+ * the 123 bytes a close frame carries.
+ */
+const HANG_UP = {
+  noPong: { code: 4010, reason: 'no answer to ping' },
+  superseded: { code: 4011, reason: 'superseded by a newer socket' },
+  disconnect: { code: 4012, reason: 'page disconnected' },
+  stuckDial: { code: 4013, reason: 'dial stuck, redialling' },
+  redial: { code: 4014, reason: 'redialling' },
+  connectTimeout: { code: 4015, reason: 'connect timed out' },
+  sendFailed: { code: 4016, reason: 'socket would not take a ping' },
+  noReplay: { code: 4017, reason: 'pane replay never came' }
+} as const
+type HangUp = (typeof HANG_UP)[keyof typeof HANG_UP]
+
+/**
  * How long an `attach` may sit without the `replay` that answers it.
  *
  * The desktop answers every `attach` it receives with exactly one `replay` —
@@ -926,7 +945,7 @@ export class ForgeClient {
   disconnect(): void {
     this.closedByUs = true
     this.clearRetry()
-    this.dropSocket()
+    this.dropSocket(HANG_UP.disconnect)
     this.subs.clear()
     this.chats.clear()
     this.forgetPin()
@@ -1096,7 +1115,7 @@ export class ForgeClient {
     // that never finished. See STUCK_DIAL_MS.
     if (this.socket?.readyState === WebSocket.CONNECTING) {
       if (Date.now() - this.dialStartedAt > STUCK_DIAL_MS) {
-        this.dropSocket()
+        this.dropSocket(HANG_UP.stuckDial)
         this.clearRetry()
         void this.open()
       }
@@ -1174,7 +1193,7 @@ export class ForgeClient {
     this.pingedAt = 0
     if (!this.send({ type: 'ping' })) {
       // The socket would not take a frame, which settles it without waiting.
-      this.declareDead()
+      this.declareDead(HANG_UP.sendFailed)
       return
     }
     this.pingedAt = Date.now()
@@ -1185,7 +1204,7 @@ export class ForgeClient {
       // A slow answer is not a dead link. Ask once more before giving up on it;
       // a socket that is really gone fails this one just the same.
       if (this.strikes < PROBE_STRIKES) this.challenge()
-      else this.declareDead()
+      else this.declareDead(HANG_UP.noPong)
     }, PROBE_MS)
   }
 
@@ -1204,8 +1223,8 @@ export class ForgeClient {
    * hostname that stopped existing hours ago before it thought to ask where the
    * desktop actually is.
    */
-  private declareDead(): void {
-    this.dropSocket()
+  private declareDead(why: HangUp): void {
+    this.dropSocket(why)
     this.attempt = Math.max(this.attempt, 1)
     this.clearRetry()
     void this.open()
@@ -1486,7 +1505,7 @@ export class ForgeClient {
     const dial = ++this.dialCount
     this.opening = true
     try {
-      this.dropSocket()
+      this.dropSocket(HANG_UP.redial)
       this.handlers.onConnection({ state: 'connecting', attempt: this.attempt })
 
       let idToken: string
@@ -1560,7 +1579,7 @@ export class ForgeClient {
         if (socket.readyState !== WebSocket.CONNECTING) return
         // `dropSocket` detaches the handlers, so the `onclose` that would
         // normally arm the next attempt never comes: this arms it instead.
-        this.dropSocket()
+        this.dropSocket(HANG_UP.connectTimeout)
         this.scheduleRetry()
       }, CONNECT_TIMEOUT_MS)
 
@@ -1573,7 +1592,7 @@ export class ForgeClient {
        */
       const superseded = (): boolean => {
         if (generation === this.generation) return false
-        this.retire(socket)
+        this.retire(socket, HANG_UP.superseded)
         return true
       }
 
@@ -2195,7 +2214,7 @@ export class ForgeClient {
         continue
       }
       // Second breach for the same pane: the link itself is the suspect.
-      this.declareDead()
+      this.declareDead(HANG_UP.noReplay)
       return
     }
   }
@@ -2279,7 +2298,7 @@ export class ForgeClient {
    * `onclose` into a link that has already moved on and arm a second retry
    * behind it — the same care, for the same reason, as mobile's `dropSocket`.
    */
-  private dropSocket(): void {
+  private dropSocket(why: HangUp): void {
     const socket = this.socket
     this.socket = null
     this.stopBeating()
@@ -2290,7 +2309,7 @@ export class ForgeClient {
     this.told.clear()
     this.pendingReplay.clear()
     if (!socket) return
-    this.retire(socket)
+    this.retire(socket, why)
   }
 
   /**
@@ -2301,13 +2320,14 @@ export class ForgeClient {
    * `this.socket`, so it cannot go through `dropSocket` to get it. One hang-up
    * in the file rather than two that have to be kept saying the same thing.
    */
-  private retire(socket: WebSocket): void {
+  private retire(socket: WebSocket, why: HangUp): void {
     socket.onopen = null
     socket.onmessage = null
     socket.onclose = null
     socket.onerror = null
     try {
-      socket.close()
+      // With a code and reason, so the desktop's log can say which of these it was.
+      socket.close(why.code, why.reason)
     } catch {
       /* already gone */
     }
