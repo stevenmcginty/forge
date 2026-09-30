@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
 import { AgentChooser } from '../components/AgentChooser'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
+import { phoneOnlyPair } from '../lib/phone-themes'
 import { useActiveProject, useForge } from '../state'
 import { AgentsMenu } from './AgentsMenu'
 import { ShortcutKeys } from './DictationKey'
@@ -282,8 +283,13 @@ function DeckMenuBody({
         <span className="dk-menu__eyebrow">Theme · this browser</span>
         <div className="dk-themes" role="radiogroup" aria-label="Theme">
           {DECK_THEMES.map((core) => {
-            const sw = swatchOf(core)
             const here = core.id === themeId
+            const pair = phoneOnlyPair(core.id)
+            const sw = swatchOf(pair ? pair.dark : core)
+            // A theme that follows the system shows both halves, dark over light,
+            // split on the diagonal — the same drawing as the phone's row.
+            const split = pair ? swatchOf(pair.light) : null
+            const look = pair ? ' — follows this computer’s light / dark' : core.appearance === 'light' ? ' — light' : ''
             return (
               <button
                 key={core.id}
@@ -293,11 +299,17 @@ function DeckMenuBody({
                 className="dk-theme"
                 data-theme-id={core.id}
                 data-here={here ? 'true' : undefined}
-                title={`${core.name}${core.appearance === 'light' ? ' — light' : ''}${here ? ' (in use)' : ''}`}
+                title={`${core.name}${look}${here ? ' (in use)' : ''}`}
                 onClick={() => onTheme(core.id)}
               >
-                <span className="dk-theme__swatch" style={{ background: sw.bg }} aria-hidden="true">
-                  <span className="dk-theme__panel" style={{ background: sw.panel }} />
+                <span
+                  className="dk-theme__swatch"
+                  style={{
+                    background: split ? `linear-gradient(135deg, ${sw.bg} 50%, ${split.bg} 50%)` : sw.bg
+                  }}
+                  aria-hidden="true"
+                >
+                  {split ? null : <span className="dk-theme__panel" style={{ background: sw.panel }} />}
                   <span className="dk-theme__accent" style={{ background: sw.accent }} />
                   {here ? (
                     <span className="dk-theme__check">

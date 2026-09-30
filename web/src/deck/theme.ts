@@ -15,8 +15,9 @@ import {
  * The theme this browser wears. Read straight from src/theme/themes.ts — the
  * same six cores and the same resolver the desktop uses — so a theme added or
  * retuned on the deck is here on the next build without anyone copying a
- * colour. The phone's Theme list adds its own (lib/phone-themes.ts: WhatsApp),
- * which the deck's picker never lists.
+ * colour. Forge Web adds its own on top (lib/phone-themes.ts: WhatsApp), in
+ * the phone's Theme list and the deck's picker alike; Forge desktop never
+ * sees it, because src/theme/themes.ts does not know it.
  *
  * Remembered per browser (localStorage), never sent to the desktop: this is
  * how *this* window looks, not a setting of that machine.
@@ -29,11 +30,11 @@ import {
 
 const KEY = 'forge-web-theme'
 
-/** The deck's picker: the desktop's six, nothing phone-only. */
-export const DECK_THEMES: ThemeCore[] = BUILTIN_THEMES
-
 /** The phone's Theme list: the six, then WhatsApp. */
 export const PHONE_THEMES: ThemeCore[] = [...BUILTIN_THEMES, ...PHONE_ONLY_THEMES]
+
+/** The deck's picker: the same list — WhatsApp last, following this computer's dark / light. */
+export const DECK_THEMES: ThemeCore[] = PHONE_THEMES
 
 function known(id: string): boolean {
   return BUILTIN_THEMES.some((t) => t.id === id) || isPhoneOnlyTheme(id)
@@ -126,7 +127,7 @@ export function paintStoredTheme(): void {
  */
 export function useDeckTheme(on: boolean): { themeId: string; setTheme: (id: string) => void } {
   const [themeId, setThemeId] = useState(stored)
-  // A theme that follows the phone re-wears itself when the phone flips.
+  // A theme that follows the system re-wears itself when the phone (or computer) flips.
   const [, setScheme] = useState(systemDark)
   const follows = on && followsSystem(themeId)
   useEffect(() => {

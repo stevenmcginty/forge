@@ -3,9 +3,9 @@ import type { ThemeCore } from '@shared/types'
 import { resolveTheme, type ResolvedTheme } from '@/theme/themes'
 
 /**
- * Themes only the phone wears. Forge desktop never sees this file (it lives in
- * web/, and src/theme/themes.ts stays the desktop's six); the Forge browser's
- * deck picker keeps listing `DECK_THEMES`, which does not include these.
+ * Themes only Forge Web wears, on the phone and in the Forge browser's deck
+ * picker (`DECK_THEMES = PHONE_THEMES`). Forge desktop never sees this file (it
+ * lives in web/, and src/theme/themes.ts stays the desktop's six).
  *
  * WhatsApp: the colours people already read a chat in, taken whole — ground,
  * bars, both bubbles, ink, icons, the green and the blue ticks — so the phone's

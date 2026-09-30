@@ -7,14 +7,15 @@
  *   the bubbles, named once per change of speaker by an 8px dot and its name.
  * - Tool calls and thinking: quiet 44px rows between hairlines that open in
  *   place. The only boxes left are the ones that hold code and tables.
- * - Copy, folds and the jump pill are all at least 44px tall for a thumb.
+ * - Folds and the jump pill are all at least 44px tall for a thumb.
  * - Colours come from tokens, so Volt and Paper both hold.
  *
- * On the phone (`data-bubbles`, the last part of this sheet) it reads like
- * WhatsApp instead: both sides in bubbles, the time and ticks in the corner,
- * a long-press menu in place of Copy. The bubble colours are tokens here, with
- * a theme's own `--theme-bubble-*` (lib/phone-themes.ts: WhatsApp) taking
- * over when it sets them.
+ * Over that base it reads like WhatsApp (`data-bubbles`, the last parts of
+ * this sheet), on the phone and the deck alike: both sides in bubbles, the
+ * time and ticks in the corner, a long-press / right-click menu for Copy. The
+ * bubble colours are tokens here, with a theme's own `--theme-bubble-*`
+ * (lib/phone-themes.ts: WhatsApp) taking over when it sets them. The deck's
+ * window-sized tuning is the sheet's very end (`data-desk`).
  */
 
 .chatview {
@@ -184,14 +185,6 @@
   padding-left: 12%;
 }
 
-.chatview__mine {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  max-width: 100%;
-  min-width: 0;
-}
-
 .chatview__bubble {
   max-width: 100%;
   min-width: 0;
@@ -228,24 +221,6 @@
 
 .chatview__prompt + .chatview__prompt {
   margin-top: var(--s-3);
-}
-
-/* Under the bubble: the CLI's clock, when there is one, then Copy. */
-.chatview__under {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--s-2);
-  margin: -4px -12px -12px 0;
-}
-
-.chatview__clock {
-  font-family: var(--font-mono);
-  font-size: var(--t-xs);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-  user-select: none;
 }
 
 /* ------------------------------------------------------ the agent: the page */
@@ -288,66 +263,6 @@
   font-weight: 600;
   letter-spacing: 0.005em;
   color: var(--text-secondary);
-}
-
-.chatview__speaker-clock {
-  font-family: var(--font-mono);
-  font-size: var(--t-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
-}
-
-/* -------------------------------------------------------------------- copy
- *
- * A real button: 44px tall, an icon and a word. It sits under the reply with
- * its label on the text's edge — the padding that makes it a thumb target
- * hangs out into the gutter and the gap below, not into the words.
- */
-
-.chatview__copy {
-  flex: none;
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-3);
-  min-height: 44px;
-  margin: -8px 0 -12px -12px;
-  padding: 0 12px;
-  font-family: var(--font-ui);
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--text-dim);
-  background: none;
-  border: 0;
-  border-radius: var(--r-lg);
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.chatview__under .chatview__copy {
-  align-self: auto;
-  margin: 0;
-}
-
-.chatview__copy:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-}
-
-.chatview__copy:active {
-  background: var(--bg-active);
-}
-
-.chatview__copy[data-done='true'] {
-  color: var(--ok);
-}
-
-.chatview__copy svg {
-  flex: none;
 }
 
 /* ------------------------------------------------------------------ prose */
@@ -997,7 +912,6 @@
 
 .chatview__fold-head:focus-visible,
 .chatview__tool-head:focus-visible,
-.chatview__copy:focus-visible,
 .chatview__jump:focus-visible,
 .chatview__prose .md__copy-btn:focus-visible,
 .chatview__prose .md__link:focus-visible {
@@ -1096,12 +1010,6 @@
 
 .chatview__ticks[data-landed='true'] {
   color: var(--bubble-tick);
-}
-
-.chatview__under .chatview__ticks {
-  min-height: 24px;
-  align-items: center;
-  color: var(--text-dim);
 }
 
 .chatview__menu-layer {
@@ -1548,4 +1456,118 @@
   background: var(--bubble-in);
   border-radius: 8px;
   box-shadow: 0 1px 0.5px var(--bubble-edge);
+}
+
+/* ============================================================= the deck
+ *
+ * The same bubbles in a browser window (`data-desk`), from a ~400px Wall tile
+ * to a 1600px Full screen pane. The chat is its own container, so the pane's
+ * width — not the window's — decides: narrow, it keeps the phone's edges;
+ * wide, the column holds a reading width in the middle and each side keeps
+ * a sixth of it clear, so a reply never runs to 1600px lines.
+ */
+
+.chatview[data-desk] {
+  container-type: inline-size;
+}
+
+.chatview[data-desk] .chatview__column {
+  --bubble-side: 10px;
+  max-width: 880px;
+  padding-top: var(--s-6);
+}
+
+@container (min-width: 720px) {
+  .chatview[data-desk] .chatview__column {
+    --bubble-side: 20px;
+    --bubble-far: 16%;
+    padding-top: var(--s-8);
+  }
+}
+
+/*
+ * The ⋯: just off the bubble's far side, level with its top, in the gap the
+ * row keeps clear. Hidden until the pointer is on the row or the key reaches
+ * it; held on, filled, while its menu is open (aria-expanded) — the fill and
+ * the open menu say so together, not a colour on its own.
+ */
+.chatview__more {
+  position: absolute;
+  top: 1px;
+  left: calc(100% + 5px);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--bubble-meta);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    opacity 120ms var(--ease-out),
+    color 120ms var(--ease-out),
+    background 120ms var(--ease-out);
+}
+
+.chatview__turn[data-role='user'] .chatview__more {
+  left: auto;
+  right: calc(100% + 5px);
+}
+
+.chatview__turn:hover .chatview__more,
+.chatview__turn[data-held] .chatview__more,
+.chatview__more:focus-visible {
+  opacity: 1;
+}
+
+.chatview__more:hover,
+.chatview__more[aria-expanded='true'] {
+  color: var(--bubble-ink);
+  background: color-mix(in srgb, var(--bubble-ink) 12%, transparent);
+}
+
+.chatview__more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The speaker answers a pointer the way the ⋯ does. */
+.chatview[data-desk] .chatview__read:hover {
+  color: var(--bubble-ink);
+  background: color-mix(in srgb, var(--bubble-ink) 8%, transparent);
+}
+
+/* The menu at a mouse's size: 36px rows, the desk's type, icons at 16px. */
+.chatview[data-desk] .chatview__menu {
+  min-width: 188px;
+  padding: 4px 0;
+  border-radius: 10px;
+}
+
+.chatview[data-desk] .chatview__menu-item {
+  gap: 12px;
+  min-height: 36px;
+  padding: 0 18px 0 14px;
+  font-size: 13.5px;
+}
+
+.chatview[data-desk] .chatview__menu-item svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* The turn's seconds, in the working bubble's own quiet ink. */
+.chatview[data-desk] .chatview__busy-time {
+  color: var(--bubble-meta);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatview__more {
+    transition: none;
+  }
 }

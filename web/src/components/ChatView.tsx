@@ -24,7 +24,7 @@ import './ChatView.css'
 /**
  * The chat transcript — a Claude / agent session read as a conversation.
  *
- * On the phone it reads like WhatsApp (`data-bubbles`):
+ * It reads like WhatsApp (`data-bubbles`), on the phone and on the deck alike:
  * - The agent's replies are bubbles on the left, the person's on the right,
  *   each with a small time; a tail marks the first bubble after a change of
  *   speaker, and the agent is named inside it.
@@ -36,10 +36,14 @@ import './ChatView.css'
  * - Long-press a bubble (~450 ms) for Copy, Read aloud and, on your own,
  *   Send again. Right-click does the same with a mouse.
  * - Each run of tool calls folds into one quiet row inside the bubble.
- * - Working is a "typing" bubble; its clock is the status row's, below.
+ * - Working is a "typing" bubble; on the phone its clock is the status row's, below.
  *
- * On the desk it keeps its page look: prompts in bubbles, replies as text on
- * the page, a Copy button under each.
+ * On the deck (`data-desk`) the same bubbles, sized for a window: the column
+ * holds a reading width however wide the pane, and a mouse gets the menu two
+ * ways — right-click a bubble, or the ⋯ that shows beside it on hover and on
+ * Tab. Right-click over a link or a selection keeps the browser's own menu.
+ * The working bubble there keeps the count of the turn's seconds that the
+ * desk's working line always had.
  */
 
 /** How close to the end counts as "reading the latest". */
@@ -66,6 +70,8 @@ interface Held {
   x: number
   y: number
   side: 'left' | 'right'
+  /** Opened from the ⋯ button: the button's top, so the menu can drop below it or rise above. */
+  above?: number
 }
 
 export function ChatView({
@@ -107,7 +113,7 @@ export function ChatView({
   /** Send these words to the pane again ("Send again" on your own bubble). Absent: not offered. */
   onSendAgain?: (text: string) => void
 }): ReactNode {
-  const bubbles = useMobile()
+  const desk = !useMobile()
   const root = useRef<HTMLDivElement | null>(null)
   const scroller = useRef<HTMLDivElement | null>(null)
   const stick = useRef(true)
@@ -172,29 +178,36 @@ export function ChatView({
   /** A hold just opened the menu: the click its lift makes is not a tap on what it was over. */
   const swallowClick = useRef(false)
   const heldEl = useRef<HTMLElement | null>(null)
+  /** The ⋯ the menu was opened from, if it was: focus goes back to it. */
+  const opener = useRef<HTMLElement | null>(null)
 
   const cancelPress = useCallback(() => {
     if (press.current) window.clearTimeout(press.current.timer)
     press.current = null
   }, [])
 
-  const openMenu = useCallback((bubble: HTMLElement, y: number) => {
+  const openMenu = useCallback((bubble: HTMLElement, y: number, from?: HTMLElement) => {
     const box = root.current?.getBoundingClientRect()
     const key = bubble.dataset['bubbleKey']
     const text = bubble.dataset['bubbleText'] ?? ''
     if (!box || !key) return
-    const r = bubble.getBoundingClientRect()
+    // From the ⋯ the menu hangs off the button itself; otherwise off the bubble's edge.
+    const r = (from ?? bubble).getBoundingClientRect()
     const mine = bubble.dataset['bubbleMine'] === 'true'
     heldEl.current?.closest('li')?.removeAttribute('data-held')
+    opener.current?.setAttribute('aria-expanded', 'false')
     heldEl.current = bubble
+    opener.current = from ?? null
     bubble.closest('li')?.setAttribute('data-held', 'true')
+    from?.setAttribute('aria-expanded', 'true')
     setHeld({
       key,
       text,
       mine,
       x: mine ? box.right - r.right : r.left - box.left,
-      y: y - box.top,
-      side: mine ? 'right' : 'left'
+      y: (from ? r.bottom : y) - box.top,
+      side: mine ? 'right' : 'left',
+      above: from ? r.top - box.top : undefined
     })
     // A tick under the thumb, as a phone's own long-press gives.
     try {
@@ -206,17 +219,20 @@ export function ChatView({
 
   const closeMenu = useCallback((refocus: boolean) => {
     const bubble = heldEl.current
+    const from = opener.current
     bubble?.closest('li')?.removeAttribute('data-held')
+    from?.setAttribute('aria-expanded', 'false')
     heldEl.current = null
+    opener.current = null
     setHeld(null)
-    if (refocus) bubble?.focus({ preventScroll: true })
+    if (refocus) (from ?? bubble)?.focus({ preventScroll: true })
   }, [])
 
   const onPointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>) => {
       swallowClick.current = false
       // A mouse has its right button for this; a held left button selects text.
-      if (!bubbles || event.pointerType === 'mouse' || !event.isPrimary) return
+      if (event.pointerType === 'mouse' || !event.isPrimary) return
       const bubble = (event.target as Element).closest<HTMLElement>('[data-bubble-key]')
       if (!bubble) return
       cancelPress()
@@ -232,7 +248,7 @@ export function ChatView({
         }, HOLD_MS)
       }
     },
-    [bubbles, cancelPress, openMenu]
+    [cancelPress, openMenu]
   )
 
   const onPointerMove = useCallback(
@@ -246,16 +262,37 @@ export function ChatView({
 
   const onContextMenu = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
-      if (!bubbles) return
-      const bubble = (event.target as Element).closest<HTMLElement>('[data-bubble-key]')
+      const target = event.target as Element
+      const bubble = target.closest<HTMLElement>('[data-bubble-key]')
       if (!bubble) return
+      if (desk && !held) {
+        // A link, or words picked out of the bubble, want the browser's own
+        // menu (open in a new tab, copy just these words), not ours.
+        if (target.closest('a[href]')) return
+        const picked = window.getSelection()
+        if (picked && !picked.isCollapsed && bubble.contains(picked.anchorNode)) return
+      }
       // The phone's own long-press menu (select, share) would sit on top of ours.
       event.preventDefault()
       if (held || swallowClick.current) return
       cancelPress()
-      openMenu(bubble, event.clientY)
+      // The keyboard's menu key on a focused ⋯ opens it as the ⋯ would.
+      const more = target.closest<HTMLElement>('[data-bubble-more]')
+      openMenu(bubble, event.clientY, more ?? undefined)
     },
-    [bubbles, held, cancelPress, openMenu]
+    [desk, held, cancelPress, openMenu]
+  )
+
+  /** The ⋯ beside a bubble on the deck: the same menu, for a mouse or the keyboard. */
+  const onClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      const more = (event.target as Element).closest<HTMLElement>('[data-bubble-more]')
+      const bubble = more?.closest<HTMLElement>('[data-bubble-key]')
+      if (!more || !bubble) return
+      event.preventDefault()
+      openMenu(bubble, 0, more)
+    },
+    [openMenu]
   )
 
   const onClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
@@ -360,7 +397,7 @@ export function ChatView({
   const lastRole = rows.length ? (rows[rows.length - 1]!.kind === 'user' ? 'user' : 'reply') : null
 
   return (
-    <div className="chatview" ref={root} data-bubbles={bubbles ? 'true' : undefined}>
+    <div className="chatview" ref={root} data-bubbles="true" data-desk={desk ? 'true' : undefined}>
       <div
         className="chatview__scroll"
         ref={scroller}
@@ -378,6 +415,7 @@ export function ChatView({
           onPointerCancel={cancelPress}
           onContextMenu={onContextMenu}
           onClickCapture={onClickCapture}
+          onClick={desk ? onClick : undefined}
         >
           {truncated && turns.length ? (
             <div
@@ -385,7 +423,7 @@ export function ChatView({
               role="note"
               title="The transcript was read mid-file — turns before this point exist on disk but are not shown."
             >
-              <span className="chatview__cut-text">{bubbles ? 'Earlier messages not shown' : 'earlier history not shown'}</span>
+              <span className="chatview__cut-text">Earlier messages not shown</span>
             </div>
           ) : null}
           {turns.length === 0 && waiting.length === 0 ? (
@@ -405,7 +443,7 @@ export function ChatView({
                   <UserRow
                     key={row.key}
                     turn={row.turn}
-                    bubbles={bubbles}
+                    desk={desk}
                     tail={i === 0 || rows[i - 1]!.kind !== 'user'}
                     reading={readingKey === row.key}
                   />
@@ -414,7 +452,7 @@ export function ChatView({
                     key={row.key}
                     row={row}
                     agentName={agentName}
-                    bubbles={bubbles}
+                    desk={desk}
                     reading={readingKey === row.key}
                     onRead={canSpeak ? toggleRead : undefined}
                   />
@@ -424,7 +462,7 @@ export function ChatView({
                 <PendingRow
                   key={`pending-${send.id}`}
                   send={send}
-                  bubbles={bubbles}
+                  desk={desk}
                   tail={i === 0 && lastRole !== 'user'}
                 />
               ))}
@@ -433,7 +471,7 @@ export function ChatView({
           {asking ? (
             <Waiting agentName={agentName} named={!replying} />
           ) : busy ? (
-            <Working activity={activity} agentName={agentName} named={!replying} bubbles={bubbles} />
+            <Working activity={activity} agentName={agentName} named={!replying} counted={desk} />
           ) : null}
           {quota ? <Quota text={quota} /> : null}
         </div>
@@ -529,8 +567,6 @@ type Row =
   | {
       kind: 'reply'
       key: string
-      /** The first record's CLI clock, for the desk's speaker line. */
-      clock?: string
       /** The last record's time, for the bubble: when the reply got to where it is. */
       at: number
       lastClock?: string
@@ -548,7 +584,7 @@ function toRows(turns: ChatTurn[]): Row[] {
     if (!turn.blocks.some((b) => b.kind === 'text' || b.kind === 'tool')) continue
     let reply = rows[rows.length - 1]
     if (!reply || reply.kind !== 'reply') {
-      reply = { kind: 'reply', key: turn.id, clock: turn.clock, at: turn.at, lastClock: turn.clock, segments: [] }
+      reply = { kind: 'reply', key: turn.id, at: turn.at, lastClock: turn.clock, segments: [] }
       rows.push(reply)
     }
     if (turn.at) reply.at = turn.at
@@ -723,31 +759,16 @@ function Prompts({ blocks, room }: { blocks: ChatBlock[]; room?: ReactNode }): R
 // a memo on the turn is all a prompt needs to stay cheap.
 const UserRow = memo(function UserRow({
   turn,
-  bubbles,
+  desk,
   tail,
   reading
 }: {
   turn: ChatTurn
-  bubbles: boolean
+  desk: boolean
   tail: boolean
   reading: boolean
 }): ReactNode {
   const text = textOf(turn)
-  if (!bubbles) {
-    return (
-      <li className="chatview__turn" data-role="user">
-        <div className="chatview__mine">
-          <div className="chatview__bubble">
-            <Prompts blocks={turn.blocks} />
-          </div>
-          <div className="chatview__under">
-            {turn.clock ? <span className="chatview__clock">{turn.clock}</span> : null}
-            {text ? <CopyButton text={text} label="Copy your message" /> : null}
-          </div>
-        </div>
-      </li>
-    )
-  }
   const time = timeOf(turn.at, turn.clock)
   return (
     <li className="chatview__turn" data-role="user" data-tail={tail ? 'true' : undefined}>
@@ -760,29 +781,16 @@ const UserRow = memo(function UserRow({
       >
         <Prompts blocks={turn.blocks} room={<MetaRoom time={time} ticks />} />
         <Meta time={time} ticks="landed" reading={reading} />
+        {desk ? <MoreButton mine /> : null}
       </div>
     </li>
   )
 })
 
 /** Sent from this phone a moment ago; the transcript has not shown it yet. */
-function PendingRow({ send, bubbles, tail }: { send: PendingSend; bubbles: boolean; tail: boolean }): ReactNode {
+function PendingRow({ send, desk, tail }: { send: PendingSend; desk: boolean; tail: boolean }): ReactNode {
   const time = timeOf(send.at)
   const blocks: ChatBlock[] = [{ kind: 'text', text: send.text }]
-  if (!bubbles) {
-    return (
-      <li className="chatview__turn" data-role="user" data-pending="true">
-        <div className="chatview__mine">
-          <div className="chatview__bubble">
-            <Prompts blocks={blocks} />
-          </div>
-          <div className="chatview__under">
-            <Ticks landed={false} />
-          </div>
-        </div>
-      </li>
-    )
-  }
   return (
     <li className="chatview__turn" data-role="user" data-pending="true" data-tail={tail ? 'true' : undefined}>
       <div
@@ -794,6 +802,7 @@ function PendingRow({ send, bubbles, tail }: { send: PendingSend; bubbles: boole
       >
         <Prompts blocks={blocks} room={<MetaRoom time={time} ticks />} />
         <Meta time={time} ticks="sent" />
+        {desk ? <MoreButton mine /> : null}
       </div>
     </li>
   )
@@ -815,13 +824,13 @@ function UserPiece({ block }: { block: ChatBlock }): ReactNode {
 function ReplyRow({
   row,
   agentName,
-  bubbles,
+  desk,
   reading,
   onRead
 }: {
   row: Extract<Row, { kind: 'reply' }>
   agentName?: string
-  bubbles: boolean
+  desk: boolean
   reading: boolean
   /** Read this bubble aloud, or stop it (keyed by the row). Absent: this browser has no voice. */
   onRead?: (key: string, text: string) => void
@@ -839,17 +848,6 @@ function ReplyRow({
       <ToolGroup key={segment.key} tools={segment.tools} />
     )
   )
-  if (!bubbles) {
-    return (
-      <li className="chatview__turn" data-role="assistant">
-        <div className="chatview__reply">
-          <Speaker agentName={agentName} clock={row.clock} />
-          {pieces}
-          {text ? <CopyButton text={text} label="Copy reply" /> : null}
-        </div>
-      </li>
-    )
-  }
   return (
     <li className="chatview__turn" data-role="assistant" data-tail="true">
       <div
@@ -866,6 +864,7 @@ function ReplyRow({
           ) : null}
           <Meta time={timeOf(row.at, row.lastClock)} reading={reading && !(onRead && text)} />
         </div>
+        {desk ? <MoreButton mine={false} /> : null}
       </div>
     </li>
   )
@@ -902,13 +901,38 @@ function ReadAloud({ reading, onToggle }: { reading: boolean; onToggle: () => vo
   )
 }
 
-/** Who is talking: the agent's name (and, on the desk, its dot), once per change of speaker. */
-function Speaker({ agentName, clock }: { agentName?: string; clock?: string }): ReactNode {
+/**
+ * The deck's way into a bubble's menu without a right-click: three dots in a
+ * circle just off the bubble's far side, at its top. Shown while the pointer is
+ * on the row or the key is on it, and held on while its menu is open. The
+ * chat's own click handler opens the menu, so the rows stay memo-cheap.
+ */
+function MoreButton({ mine }: { mine: boolean }): ReactNode {
+  return (
+    <button
+      type="button"
+      className="chatview__more"
+      data-bubble-more="true"
+      aria-haspopup="menu"
+      aria-expanded={false}
+      aria-label={mine ? 'Message options' : 'Reply options'}
+      title={mine ? 'Copy, read aloud, send again' : 'Copy, read aloud'}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="3.2" cy="8" r="1.45" fill="currentColor" />
+        <circle cx="8" cy="8" r="1.45" fill="currentColor" />
+        <circle cx="12.8" cy="8" r="1.45" fill="currentColor" />
+      </svg>
+    </button>
+  )
+}
+
+/** Who is talking: the agent's name, once per change of speaker. */
+function Speaker({ agentName }: { agentName?: string }): ReactNode {
   return (
     <div className="chatview__speaker">
       <span className="chatview__speaker-dot" aria-hidden="true" />
       <span className="chatview__speaker-name">{agentName ?? 'Assistant'}</span>
-      {clock ? <span className="chatview__speaker-clock">{clock}</span> : null}
     </div>
   )
 }
@@ -918,37 +942,6 @@ function Speaker({ agentName, clock }: { agentName?: string; clock?: string }): 
 const Prose = memo(function Prose({ block }: { block: TextBlock }): ReactNode {
   return <div className="chatview__prose">{renderMarkdown(block.text)}</div>
 })
-
-/** The desk's Copy under a message. The phone copies from the long-press menu instead. */
-function CopyButton({ text, label }: { text: string; label: string }): ReactNode {
-  const [copied, setCopied] = useState(false)
-  const timer = useRef<number | null>(null)
-  useEffect(
-    () => () => {
-      if (timer.current) window.clearTimeout(timer.current)
-    },
-    []
-  )
-  const onCopy = (): void => {
-    void navigator.clipboard?.writeText(text).then(() => {
-      setCopied(true)
-      if (timer.current) window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(() => setCopied(false), 2000)
-    })
-  }
-  return (
-    <button
-      type="button"
-      className="chatview__copy"
-      data-done={copied ? 'true' : undefined}
-      aria-label={copied ? 'Copied' : label}
-      onClick={onCopy}
-    >
-      <Icon name={copied ? 'check' : 'clipboard'} size={16} />
-      <span>{copied ? 'Copied' : 'Copy'}</span>
-    </button>
-  )
-}
 
 /* -------------------------------------------------------- the hold menu */
 
@@ -976,6 +969,7 @@ function BubbleMenu({
   const [place, setPlace] = useState<CSSProperties>({ visibility: 'hidden' })
 
   // Above the finger when there is room, below when not; kept inside the chat.
+  // Off the ⋯ it drops below the button, and rises above it only when it must.
   useLayoutEffect(() => {
     const el = menu.current
     const box = el?.parentElement?.getBoundingClientRect()
@@ -983,14 +977,28 @@ function BubbleMenu({
     const h = el.offsetHeight
     const w = el.offsetWidth
     const gap = 12
-    const top = held.y - h - gap >= gap ? held.y - h - gap : Math.min(held.y + gap, box.height - h - gap)
+    const top =
+      held.above !== undefined
+        ? held.y + 4 + h <= box.height - gap
+          ? held.y + 4
+          : held.above - h - 4
+        : held.y - h - gap >= gap
+          ? held.y - h - gap
+          : Math.min(held.y + gap, box.height - h - gap)
     const edge = Math.max(gap, Math.min(held.x, box.width - w - gap))
     setPlace(held.side === 'left' ? { top: Math.max(gap, top), left: edge } : { top: Math.max(gap, top), right: edge })
-    el.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
   }, [held])
 
+  // The first item takes the key once the menu is placed: while it is still
+  // hidden for measuring, a focus() is refused and the key stays behind it.
+  useEffect(() => {
+    if (place.visibility === 'hidden') return
+    menu.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+  }, [place])
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Escape') {
+    // Tab leaves a menu the way Escape does: shut, and back where it came from.
+    if (event.key === 'Escape' || event.key === 'Tab') {
       event.preventDefault()
       onClose(true)
       return
@@ -1179,10 +1187,10 @@ function ToolDetail({ tool }: { tool: ToolBlock }): ReactNode {
 
 /* ---------------------------------------------------------------- working
  *
- * The agent mid-turn. On the phone a "typing" bubble — what it says it is
- * doing and three dots breathing in turn; how long it has been at it is the
+ * The agent mid-turn: a "typing" bubble — what it says it is doing and three
+ * dots breathing in turn. On the phone how long it has been at it is the
  * status row's clock just below, so there is one clock, not two that
- * disagree. On the desk the line keeps its own count. Either way only the
+ * disagree; on the desk the bubble keeps its own count. Either way only the
  * words are in the live region: a screen reader hears "Thinking", not a
  * number every second.
  */
@@ -1191,20 +1199,20 @@ function Working({
   activity,
   agentName,
   named,
-  bubbles
+  counted
 }: {
   activity?: string
   agentName?: string
   /** Nothing of this reply is on the page yet, so say who is working. */
   named: boolean
-  bubbles: boolean
+  /** Count the turn's seconds in the bubble (the desk; the phone's status row has the clock). */
+  counted: boolean
 }): ReactNode {
   const label = (activity ?? 'Thinking').replace(/[…:.]+$/, '')
   return (
-    <div className="chatview__busy-turn" data-tail={bubbles && named ? 'true' : undefined}>
-      {named && !bubbles ? <Speaker agentName={agentName} /> : null}
+    <div className="chatview__busy-turn" data-tail={named ? 'true' : undefined}>
       <div className="chatview__busy-bubble">
-        {named && bubbles ? <Speaker agentName={agentName} /> : null}
+        {named ? <Speaker agentName={agentName} /> : null}
         <span className="chatview__busy-line">
           <span className="chatview__busy-label" role="status" aria-live="polite">
             {label}
@@ -1214,7 +1222,7 @@ function Working({
             <span />
             <span />
           </span>
-          {bubbles ? null : <Elapsed />}
+          {counted ? <Elapsed /> : null}
         </span>
       </div>
     </div>
