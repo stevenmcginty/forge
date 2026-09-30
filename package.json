@@ -94,6 +94,7 @@
     "mobile:auth": "node scripts/mobile-auth-check.mjs",
     "mobile:smoke": "node scripts/mobile-smoke.mjs",
     "web:auth": "node scripts/web-auth-check.mjs",
+    "web:push": "node scripts/web-push-check.mjs",
     "web:smoke": "node scripts/web-smoke.mjs",
     "web:passkey": "node scripts/web-passkey-check.mjs",
     "web:io": "node scripts/web-io-check.mjs",

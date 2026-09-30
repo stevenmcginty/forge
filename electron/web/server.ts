@@ -1000,6 +1000,18 @@ export class WebServer {
     return false
   }
 
+  /**
+   * The same question as `anyVisible`, answered per device: the `hello`
+   * deviceIds of every browser that says Forge Web is on its screen. Push
+   * subscriptions carry that same id, so a push can skip exactly the devices
+   * already showing the news and still buzz every other one.
+   */
+  visibleDeviceIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const client of this.clients) if (client.device && client.visible === true) ids.add(client.device.id)
+    return ids
+  }
+
   address(): { host: string; port: number } | null {
     return this.listening
   }

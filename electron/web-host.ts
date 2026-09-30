@@ -2226,11 +2226,12 @@ export function registerWebHandlers(): void {
    * The renderer is the only half with a terminal buffer to watch, so this is
    * where the news enters main — and it leaves by two doors. Every transition
    * goes down the socket as an `attention` frame, which is a badge on a tab in
-   * a browser that is already open. Only `asking` and `done`, and only when no
-   * browser says it is on screen, become a Web Push: the whole reason push
-   * exists here is the tab that is *not* open, and buzzing a phone that is
-   * already showing the pane would be the fastest way to get notifications
-   * switched off. `idle` is a badge going out, which nobody needs told twice.
+   * a browser that is already open. Only `asking` and `done` become a Web
+   * Push, and only to the devices that do not say they are on screen: the whole
+   * reason push exists here is the tab that is *not* open, and buzzing a phone
+   * that is already showing the pane would be the fastest way to get
+   * notifications switched off. `idle` is a badge going out, which nobody needs
+   * told twice.
    *
    * There is a third door now, and it opens before either of these: the
    * attention bus (electron/attention-bus.ts), which Foreman subscribes to.
@@ -2261,23 +2262,28 @@ export function registerWebHandlers(): void {
     instance.pushAttention(sessionId, state === 'asking', prompt || undefined)
 
     if (state === 'idle') return
-    if (instance.anyVisible()) return
     const live = liveSessions().find((s) => s.id === sessionId)
-    void notify({
-      kind: 'attention',
-      sessionId,
-      state,
-      // The same "<project> — <pane>" label the phone and the quit dialog use;
-      // one naming rule for panes, wherever they are being described. It falls
-      // back to 'Forge' on its own for a pane with neither half.
-      title: remoteControlName(live?.projectName ?? '', live?.paneTitle ?? ''),
-      ...(prompt ? { prompt } : {}),
-      desktopName: hostname()
+    void notify(
+      {
+        kind: 'attention',
+        sessionId,
+        state,
+        // The same "<project> — <pane>" label the phone and the quit dialog use;
+        // one naming rule for panes, wherever they are being described. It falls
+        // back to 'Forge' on its own for a pane with neither half.
+        title: remoteControlName(live?.projectName ?? '', live?.paneTitle ?? ''),
+        ...(prompt ? { prompt } : {}),
+        desktopName: hostname(),
+        at: Date.now()
+      },
+      // Who is looking, device by device: a browser showing Forge Web gets the
+      // `attention` frame above instead, and every other device buzzes.
+      { visibleDevices: instance.visibleDeviceIds(), anyVisible: instance.anyVisible() }
       // `notify` answers every failure itself — a dead subscription, a push
       // service having a bad morning — so there is nothing here to handle. The
       // catch is the belt: an unhandled rejection in main is worse than a
       // notification that did not arrive.
-    }).catch(() => undefined)
+    ).catch(() => undefined)
   })
 
   /** A pane started or stopped actively working (producing output). */
