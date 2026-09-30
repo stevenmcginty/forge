@@ -4,11 +4,15 @@
  *
  * The handle is a slim pill on the right edge, halfway up, quiet until it is
  * wanted; its hit box reaches 44px in from the edge, so a tap can land clear
- * of Android's back-gesture strip. The drum is a panel from the right on the
- * sheets' raised surface, with a fixed band in the middle for "this one".
- * Rows shrink and fade by `--d`, their distance from the middle in rows,
- * which the scroll handler writes. Amber is only the "!" of an asking pane,
- * and it always carries the mark and a word.
+ * of Android's back-gesture strip. The drum is a card from the right, low on
+ * the screen where the thumb is, on the sheets' solid raised surface: a
+ * heading, then the drum. Its middle slot is a fixed lens washed in the
+ * accent, which here means what it means everywhere: act here, a tap opens.
+ * The rows turn through it round a drum; PowerDraw.tsx writes each row's transform
+ * and opacity per frame, and `--a` (0 in the middle, 1 a row or more out),
+ * which the CSS turns into the lift of the name and the fade of the line
+ * under it. Amber is only the "!" of an asking pane, and always carries the
+ * mark and the word.
  */
 
 /* ---------------------------------------------------------------- handle */
@@ -50,16 +54,17 @@
 }
 
 .pdraw-handle__pill {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 72px;
-  background: color-mix(in srgb, var(--p-raised) 80%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 20px;
+  height: 64px;
+  background: var(--p-raised);
   border: 1px solid var(--p-line-strong);
   border-radius: var(--p-r-pill);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
   transition: background var(--p-dur-fast) var(--p-ease);
 }
 
@@ -76,12 +81,17 @@
   outline-offset: 2px;
 }
 
-/* The grip: two short upright bars — a shape to take hold of. */
-.pdraw-handle__grip {
+/* The drum in little: a long rib in the middle, a short one each side. */
+.pdraw-handle__rib {
   width: 6px;
-  height: 22px;
-  border-left: 2px solid var(--p-ink-3);
-  border-right: 2px solid var(--p-ink-3);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--p-ink-3);
+}
+
+.pdraw-handle__rib[data-mid='true'] {
+  width: 10px;
+  background: var(--p-ink-2);
 }
 
 .pdraw-handle[data-attention='true'] .pdraw-handle__pill {
@@ -91,8 +101,8 @@
 /* Another project has an agent asking: an amber disc with the mark in it. */
 .pdraw-handle__ask {
   position: absolute;
-  top: 2px;
-  right: 5px;
+  top: 4px;
+  right: 4px;
   display: grid;
   place-items: center;
   width: 18px;
@@ -100,8 +110,9 @@
   font: 800 12px / 1 var(--p-font);
   color: var(--p-attn-ink);
   background: var(--p-attn);
-  border: 1.5px solid var(--p-bg);
+  border: 2px solid var(--p-bg);
   border-radius: 50%;
+  box-sizing: content-box;
 }
 
 /* ---------------------------------------------------------------- layer */
@@ -131,26 +142,33 @@
   opacity: 1;
 }
 
+/*
+ * The card: low and to the right, where a right thumb rests, sized to the
+ * drum rather than to the screen. A strip of the app stays in view on the
+ * left: context, and somewhere to tap out.
+ */
 .pdraw {
-  /* Row pitch. PowerDraw.tsx has it as ROW_PX; keep the two equal. */
-  --pdraw-row: 76px;
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(300px, 64%);
-  background: color-mix(in srgb, var(--p-raised) 90%, transparent);
-  border-left: 1px solid var(--p-line);
-  border-radius: var(--p-r-sheet) 0 0 var(--p-r-sheet);
-  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.35);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  backdrop-filter: blur(18px) saturate(1.2);
-  transform: translateX(100%);
+  right: calc(env(safe-area-inset-right, 0px) + var(--p-2));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--p-4));
+  display: flex;
+  flex-direction: column;
+  width: min(344px, calc(100% - 52px - env(safe-area-inset-right, 0px)));
+  max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
+  background: var(--p-raised);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-sheet);
+  box-shadow:
+    0 20px 56px rgba(0, 0, 0, 0.3),
+    0 2px 8px rgba(0, 0, 0, 0.14);
+  transform: translateX(calc(100% + 24px));
   transition: transform var(--p-dur-sheet) var(--p-ease-sheet);
   outline: none;
   overflow: hidden;
-  /* The drum turns with the browser's own scroll; a sideways pull closes. */
-  touch-action: pan-y;
+  /* Both directions are ours: up and down turn the drum, right puts it away. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .pdraw-layer[data-state='open'] .pdraw {
@@ -161,35 +179,65 @@
   transition: none;
 }
 
+/* ---------------------------------------------------------------- header */
+
 .pdraw__head {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 2;
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  padding: var(--p-1) var(--p-1) 0 var(--p-5);
+}
+
+.pdraw__title {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: baseline;
   gap: var(--p-2);
-  padding: calc(env(safe-area-inset-top, 0px) + var(--p-4)) var(--p-5) 0;
-  font-size: var(--p-t-label);
-  font-weight: 600;
-  color: var(--p-ink-2);
-  pointer-events: none;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--p-ink);
 }
 
 .pdraw__count {
+  font-size: var(--p-t-chrome);
   font-weight: 500;
+  letter-spacing: 0;
   color: var(--p-ink-3);
   font-variant-numeric: tabular-nums;
 }
 
+.pdraw__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  padding: 0;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.pdraw__close:active {
+  background: var(--p-press);
+}
+
+.pdraw__close:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
 .pdraw__empty {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
   margin: 0;
-  transform: translateY(-50%);
+  padding: var(--p-5) var(--p-5) var(--p-8);
   text-align: center;
   font-size: var(--p-t-chrome);
   color: var(--p-ink-3);
@@ -197,73 +245,102 @@
 
 /* ------------------------------------------------------------------ drum */
 
-/* "This one": a soft band fixed in the middle, under the rows. */
+/* Its height comes from PowerDraw.tsx: the rows it shows, and no more. */
+.pdraw__wheel {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  margin-bottom: var(--p-2);
+  overflow: clip;
+  cursor: grab;
+}
+
+.pdraw__wheel:active {
+  cursor: grabbing;
+}
+
+/* "This one": a fixed lens in the middle that the rows turn through. */
 .pdraw__band {
   position: absolute;
+  z-index: 0;
   top: 50%;
   left: var(--p-2);
   right: var(--p-2);
-  height: var(--pdraw-row);
-  transform: translateY(-50%);
-  background: color-mix(in srgb, var(--p-ink) 6%, transparent);
+  height: var(--pdraw-band);
+  margin-top: calc(var(--pdraw-band) / -2);
+  background: color-mix(in srgb, var(--p-act) 12%, var(--p-raised));
   border-radius: var(--p-r-row);
-  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--p-act) 55%, transparent);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
   pointer-events: none;
 }
 
-.pdraw__wheel {
+/* A finger down on the lens: it takes the press, as a button would. */
+.pdraw[data-press='true'] .pdraw__band {
+  background: color-mix(in srgb, var(--p-act) 22%, var(--p-raised));
+}
+
+/*
+ * One slot per project, all stacked on the middle; PowerDraw.tsx turns each
+ * round the drum. Taps are read off the drum by position, so the slots take
+ * no pointer events of their own; the buttons in them are for keys and
+ * screen readers.
+ */
+.pdraw__slot {
+  --a: 1;
   position: absolute;
-  inset: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scroll-snap-type: y mandatory;
-  scrollbar-width: none;
-  /* Clear under the heading, full in the middle, gone at the foot. */
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent 9%, #000 30%, #000 72%, transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, transparent 9%, #000 30%, #000 72%, transparent 100%);
+  z-index: 1;
+  top: 50%;
+  left: var(--p-2);
+  right: var(--p-2);
+  height: var(--pdraw-band);
+  margin-top: calc(var(--pdraw-band) / -2);
+  opacity: 0;
+  pointer-events: none;
 }
 
-.pdraw__wheel::-webkit-scrollbar {
-  display: none;
-}
-
-/* Half the wheel less half a row, so the first and the last can reach the middle. */
-.pdraw__pad {
-  height: calc(50% - var(--pdraw-row) / 2);
-}
-
-.pdraw__item {
-  height: var(--pdraw-row);
-  scroll-snap-align: center;
+.pdraw__slot[data-far] {
+  visibility: hidden;
 }
 
 .pdrow {
-  --d: 3;
-  /* How far the name rises in the middle to make room for the lines under it. */
-  --lift: 9px;
   display: flex;
   align-items: center;
   width: 100%;
   height: 100%;
-  padding: 0 var(--p-4) 0 var(--p-5);
+  padding: 0 var(--p-3) 0 var(--p-4);
   font: inherit;
   text-align: left;
   color: inherit;
   background: transparent;
   border: 0;
   border-radius: var(--p-r-row);
-  cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  /* 1 in the middle, .83 a row out, .66 two out. */
-  transform-origin: var(--p-5) 50%;
-  transform: scale(max(0.5, 1 - var(--d) * 0.17));
-  opacity: max(0.12, 1 - var(--d) * 0.42);
-  will-change: transform, opacity;
 }
 
 .pdrow:focus-visible {
   outline: 2px solid var(--p-ink);
-  outline-offset: -4px;
+  outline-offset: -3px;
+}
+
+/*
+ * The name line alone sets the row's height, so a row away from the middle
+ * is its name, centred. The line under it fades in as the row reaches the
+ * middle, while the whole block rises to make room.
+ */
+.pdrow__text {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  transform: translateY(calc((1 - var(--a)) * -10px));
+}
+
+.pdrow__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 26px;
 }
 
 .pdrow__dot {
@@ -276,122 +353,104 @@
 
 /* The project on screen: a ringed dot, as in the project sheet. */
 .pdrow[data-current='true'] .pdrow__dot {
-  box-shadow:
-    0 0 0 2.5px var(--p-raised),
-    0 0 0 4px var(--pj-color, var(--p-ink-3));
-}
-
-.pdrow[data-meta='true'] {
-  --lift: 18px;
-}
-
-/*
- * The name line alone sets the row's height, so a row away from the middle is
- * its name, centred. The path and the details hang under it and fade in as
- * the row reaches the middle, while the whole block rises by `--lift`.
- */
-.pdrow__text {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  transform: translateY(calc(max(0, 1 - var(--d)) * var(--lift) * -1));
-}
-
-.pdrow__title {
-  display: flex;
-  align-items: center;
-  gap: var(--p-3);
-  min-width: 0;
-}
-
-.pdrow__path,
-.pdrow__meta {
-  position: absolute;
-  left: 22px;
-  right: 0;
-}
-
-.pdrow__path {
-  top: calc(100% + 2px);
-}
-
-.pdrow__meta {
-  top: calc(100% + 20px);
+  outline: 1.5px solid var(--pj-color, var(--p-ink-3));
+  outline-offset: 2px;
 }
 
 .pdrow__name {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  font-size: 20px;
-  font-weight: 560;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+  letter-spacing: -0.015em;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.pdrow[data-focused='true'] .pdrow__name {
-  font-weight: 680;
-}
-
-/* The details go first as a row leaves the middle; the name goes last. */
-.pdrow__path,
-.pdrow__meta {
-  opacity: max(0, 1 - var(--d) * 1.6);
-}
-
-.pdrow__path {
-  overflow: hidden;
-  font: 400 var(--p-t-mono) / 1.25 var(--p-mono);
-  color: var(--p-ink-3);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.pdrow__meta {
-  display: flex;
+/* "✓ Open": the project on screen, in the words and the tick of the project sheet. */
+.pdrow__here {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
+  height: 24px;
+  padding: 0 9px 0 7px;
   font-size: var(--p-t-small);
-  line-height: 18px;
-  color: var(--p-ink-2);
+  font-weight: 650;
+  line-height: 1;
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border-radius: var(--p-r-pill);
   white-space: nowrap;
 }
 
-.pdrow__meta:empty {
-  display: none;
+.pdrow__here svg {
+  stroke-width: 2;
 }
 
 /* A pane here is asking: the mark in an amber disc, and the word. */
 .pdrow__ask {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px 0 3px;
+  font-size: var(--p-t-small);
   font-weight: 650;
+  line-height: 1;
   color: var(--p-ink);
+  background: var(--p-attn-soft);
+  border-radius: var(--p-r-pill);
+  box-shadow: inset 0 0 0 1px var(--p-attn-line);
+  white-space: nowrap;
 }
 
 .pdrow__ask-mark {
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
-  font: 800 11px / 1 var(--p-font);
+  width: 18px;
+  height: 18px;
+  font: 800 12px / 1 var(--p-font);
   color: var(--p-attn-ink);
   background: var(--p-attn);
   border-radius: 50%;
 }
 
-.pdrow__here {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-weight: 600;
+.pdrow__sub {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 20px;
+  right: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--p-t-small);
+  line-height: 18px;
+  color: var(--p-ink-3);
+  white-space: nowrap;
+  opacity: max(0, 1 - var(--a) * 1.8);
 }
 
-.pdrow__here svg {
-  stroke-width: 2;
+.pdrow__panes {
+  flex: none;
+  font-weight: 500;
+  color: var(--p-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pdrow__sep {
+  flex: none;
+}
+
+.pdrow__path {
+  min-width: 0;
+  overflow: hidden;
+  font: 400 var(--p-t-mono) / 18px var(--p-mono);
+  text-overflow: ellipsis;
 }
 
 .pdraw__sr {

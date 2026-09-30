@@ -9,36 +9,80 @@ import './ChatPreview.css'
  * Compiled out of every `vite build` by the `__DEV_SERVER__` gate in main.tsx,
  * like the chat preview.
  *
- * The bar on top is harness chrome, not product: Volt, Paper and WhatsApp
- * dark and light through the real theme path, and "remove" to take the middle project away
- * while the drum is open. `&n=0` or `&n=1` trims the list for the edge cases.
+ * The fixtures are in the order the real picker gives (shared/project-order):
+ * a pinned project first, then the open one, then the working ones, then the
+ * rest. So by default the open project is second, as on a real phone.
+ *
+ * The bar on top is harness chrome, not product: Volt, Paper and WhatsApp dark
+ * and light through the real theme path; "1st", "mid" and "end" move the open
+ * project; "remove" takes the last project away, even while the drum is open.
+ * URL: `&n=<count>` trims the list, `&current=<index>` picks the open project,
+ * `&open=1` starts with the drum out, `&ask=0` has nobody asking.
  */
 
 const FIXTURES: DrumProject[] = [
-  { id: 'forge', name: 'forge', path: 'C:\\Users\\steve\\Desktop\\forge', color: '#b6f04a', panes: 3, asking: false },
-  { id: 'car', name: 'car-harness', path: 'C:\\Users\\steve\\Desktop\\car-harness', color: '#5ab0ff', panes: 1, asking: true },
-  { id: 'roma', name: 'cafe-roma', path: 'C:\\Users\\steve\\Documents\\cafe-roma', color: '#ff9f43', panes: 0, asking: false },
+  { id: 'chat', name: 'Chat', path: 'C:\\Users\\steve\\Desktop\\chat', color: '#8a94a6', panes: 1, asking: false },
+  { id: 'forge', name: 'forge', path: 'C:\\Users\\steve\\Desktop\\forge', color: '#ff5f6d', panes: 1, asking: false },
+  { id: 'car', name: 'car-harness', path: 'C:\\Users\\steve\\Desktop\\car-harness', color: '#5ab0ff', panes: 2, asking: true },
+  { id: 'ac', name: 'ac sprayers', path: 'C:\\Users\\steve\\Documents\\ac sprayers', color: '#c9b458', panes: 1, asking: false },
+  { id: 'kora', name: 'koraos', path: 'C:\\Users\\steve\\Desktop\\koraos', color: '#3ad0b5', panes: 0, asking: false },
   {
-    id: 'long',
+    id: 'roma',
+    name: 'cafe-roma-homepage',
+    path: 'C:\\Users\\steve\\Documents\\cafe-roma-homepage',
+    color: '#ff9f43',
+    panes: 0,
+    asking: false
+  },
+  { id: 'trading', name: 'Trading', path: 'C:\\Users\\steve\\Documents\\Trading', color: '#b6f04a', panes: 0, asking: false },
+  {
+    id: 'mercedes',
     name: 'mercedes-xentry-slk-ecu-dumps-and-notes',
     path: 'C:\\Users\\steve\\Desktop\\mercedes\\xentry-slk-ecu-dumps-and-notes',
     color: '#c08bff',
-    panes: 2,
+    panes: 0,
     asking: false
   },
   { id: 'land', name: 'land-search', path: 'C:\\Users\\steve\\Documents\\land-search', color: '#f25f8c', panes: 0, asking: false },
-  { id: 'watch', name: 'forge-watch', path: 'C:\\Users\\steve\\Desktop\\forge\\watch', color: '#3ad0b5', panes: 0, asking: false },
+  { id: 'watch', name: 'forge-watch', path: 'C:\\Users\\steve\\Desktop\\forge\\watch', color: '#4fd1ff', panes: 0, asking: false },
   { id: 'vat', name: 'kora-vat', path: 'C:\\Users\\steve\\Documents\\kora-vat', color: '#e0c050', panes: 0, asking: false },
   { id: 'jag', name: 'jaguar-xf', path: 'C:\\Users\\steve\\Desktop\\jaguar-xf', color: '#8aa0ff', panes: 0, asking: false },
-  { id: 'brain', name: 'forge-brain', path: 'C:\\Users\\steve\\Desktop\\forge-brain', color: '#ff6b5a', panes: 1, asking: false }
+  { id: 'brain', name: 'forge-brain', path: 'C:\\Users\\steve\\Desktop\\forge-brain', color: '#ff6b5a', panes: 0, asking: false },
+  {
+    id: 'ssd',
+    name: 'car SSD migration',
+    path: 'C:\\Users\\steve\\Documents\\cars\\ssd-migration',
+    color: '#9ad17a',
+    panes: 0,
+    asking: false
+  },
+  { id: 'obd', name: 'obd-bridge', path: 'C:\\Users\\steve\\Desktop\\obd-bridge', color: '#ffb86b', panes: 0, asking: false },
+  { id: 'notes', name: 'notes', path: 'C:\\Users\\steve\\Documents\\notes', color: '#a0a8b8', panes: 0, asking: false },
+  {
+    id: 'selfbuild',
+    name: 'self-build plot search St Albans',
+    path: 'C:\\Users\\steve\\Documents\\self-build',
+    color: '#7cc4a0',
+    panes: 0,
+    asking: false
+  }
 ]
 
 export function PowerDrawPreview(): ReactNode {
   const { themeId: theme, setTheme } = useDeckTheme(true)
-  const n = new URLSearchParams(location.search).get('n')
-  const [projects, setProjects] = useState(() => (n === null ? FIXTURES : FIXTURES.slice(0, Number(n))))
-  const [current, setCurrent] = useState<string | null>(projects[4]?.id ?? projects[0]?.id ?? null)
-  const [open, setOpen] = useState(false)
+  const params = new URLSearchParams(location.search)
+  const n = params.get('n')
+  const [projects, setProjects] = useState(() => {
+    const list = n === null ? FIXTURES : FIXTURES.slice(0, Number(n))
+    return params.get('ask') === '0' ? list.map((p) => ({ ...p, asking: false })) : list
+  })
+  const [current, setCurrent] = useState<string | null>(() => {
+    const at = Number(params.get('current') ?? 1)
+    return projects[Math.min(projects.length - 1, Math.max(0, at))]?.id ?? null
+  })
+  const [open, setOpen] = useState(params.get('open') === '1')
+
+  const pick = (index: number): void => setCurrent(projects[Math.max(0, Math.min(projects.length - 1, index))]?.id ?? null)
 
   return (
     <div className="chatpreview">
@@ -57,6 +101,15 @@ export function PowerDrawPreview(): ReactNode {
           <button type="button" data-active={theme === 'whatsapp-light'} onClick={() => setTheme('whatsapp-light')}>
             WA light
           </button>
+          <button type="button" onClick={() => pick(1)}>
+            1st
+          </button>
+          <button type="button" onClick={() => pick(Math.floor(projects.length / 2))}>
+            mid
+          </button>
+          <button type="button" onClick={() => pick(projects.length - 1)}>
+            end
+          </button>
           <button type="button" onClick={() => setProjects((all) => all.slice(0, -1))}>
             remove
           </button>
@@ -67,7 +120,7 @@ export function PowerDrawPreview(): ReactNode {
           <p style={{ margin: '0 0 8px', color: 'var(--p-ink)' }}>
             In {projects.find((p) => p.id === current)?.name ?? 'no project'}
           </p>
-          {Array.from({ length: 14 }, (_, i) => (
+          {Array.from({ length: 30 }, (_, i) => (
             <p key={i} style={{ margin: '0 0 6px', opacity: 0.6 }}>
               $ terminal line {i + 1}, text under the handle to show it sits over the pane
             </p>

@@ -7,7 +7,8 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode
+  type ReactNode,
+  type WheelEvent as ReactWheelEvent
 } from 'react'
 import { sortProjectsForPicker } from '@shared/project-order'
 import type { Project } from '@shared/types'
@@ -23,19 +24,24 @@ import './PowerDraw.css'
  * PowerDraw: the phone's one-hand project switcher.
  *
  * A slim pill on the right edge, halfway up. A tap on it, or a pull to the
- * left, slides in a drum of projects from the right. The row in the middle is
- * the chosen one: full size, with its path, its panes and "! Asking" when a pane
- * there waits. The rows above and below shrink and fade as they leave the
- * middle. A tap on the middle row opens that project and puts the drum away;
- * that is the only way it opens one. A tap on any other row only glides it to
- * the middle.
+ * left, slides in a card from the right, low on the screen where the thumb
+ * already is: a heading, and under it a drum of projects that turns. The slot
+ * in the middle of the drum is "this one": the row there stands upright and
+ * full, with its panes and path. The rows above and below tip away round the
+ * drum and dim a little, but every name stays readable. A tap on the middle
+ * row opens that project and puts the card away; a tap on any other row turns
+ * it to the middle.
  *
- * The ☰ and its project sheet stay as they are; this is the thumb's way in.
+ * With three projects or more the drum goes all the way round, as a real one
+ * does: the last project sits above the first. The picker order puts the open
+ * project near the top of the list, so a drum with ends would open with an
+ * empty top half; a round one never does.
  *
- * The shrink is driven by the scroll, not by React: a rAF-throttled scroll
- * handler writes one number (`--d`, rows from the middle) on each row near the
- * view, and the CSS turns it into scale and opacity. React re-renders only
- * when the middle row changes.
+ * The drum is turned by hand, not by the browser's scroll: a finger drags it,
+ * a flick spins it on, and it settles on a row on a critically damped spring,
+ * so it never overshoots. Each frame writes a transform and an opacity on the
+ * rows in view (compositor work, no layout), and React re-renders only when
+ * the middle row changes.
  */
 
 /** One row in the drum. Worked out from the picture by `PowerDraw`; fixtures in the preview. */
@@ -49,18 +55,88 @@ export interface DrumProject {
   asking: boolean
 }
 
-/** Row pitch in px. PowerDraw.css reads it as `--pdraw-row`; keep the two equal. */
-const ROW_PX = 76
-/** Rows further than this from the middle are drawn fully shrunk and are not updated per frame. */
-const FAR = 3
+/** Rows stand this far apart at the middle of the drum, measured round it. */
+const ROW_PX = 56
+/** The middle slot is taller than a row: it has room for the panes and the path. PowerDraw.css reads it as `--pdraw-band`. */
+const BAND_PX = 76
+/** So the two neighbours of the middle row stand this much further off. */
+const SPREAD_PX = (BAND_PX - ROW_PX) / 2
+/** One row turns the drum this far. */
+const STEP_DEG = 15
+const STEP_RAD = (STEP_DEG * Math.PI) / 180
+const RADIUS_PX = ROW_PX / STEP_RAD
+/** How far off the eye stands from the drum: rows round the back look this much smaller. */
+const EYE_PX = 900
+/** At most this many rows show above the middle one, and as many below. */
+const HALF_MAX = 3
+/** A flick spins the drum on by its speed times this. */
+const FLING_S = 0.16
+/**
+ * Spring rates, per second. A fling's rate × FLING_S sits between 1 (it
+ * would overshoot below) and 2 (it would speed up after the finger lifts).
+ */
+const RATE_FLING = 1.5 / FLING_S
+const RATE_GLIDE = 16
+/** The turn into place as the card comes in: a touch slower than the slide, so it lands still turning. */
+const RATE_OPEN = 11
 /** Matches the exit transition in PowerDraw.css (`--p-dur-sheet`). */
 const EXIT_MS = 280
-/** A pull this far to the left on the handle opens the drum; this far right on the panel closes it. */
+/** A pull this far to the left on the handle opens the drum; this far right on the card closes it. */
 const PULL_OPEN_PX = 24
 const DRAG_CLOSE_PX = 80
 const FLICK_PX_PER_MS = 0.5
+/** A pointer that moves less than this is a tap. */
+const TAP_SLOP_PX = 8
 /** The keyboard is up when the visible window is this much shorter than its tallest at this width. */
 const KEYBOARD_PX = 120
+
+/** How the drum is built for this many projects. */
+interface Geometry {
+  count: number
+  /** It goes all the way round. */
+  loop: boolean
+  /** Rows shown each side of the middle one. */
+  half: number
+}
+
+function geometryFor(count: number): Geometry {
+  // A round drum needs every row it shows to be a different project.
+  const loop = count >= 3
+  const half = count <= 1 ? 0 : count === 2 ? 1 : Math.min(HALF_MAX, Math.floor((count - 1) / 2))
+  return { count, loop, half }
+}
+
+function wrapIndex(n: number, count: number): number {
+  return ((n % count) + count) % count
+}
+
+/** Rows from the middle to row `i`; the short way round when the drum is round. */
+function offsetOf(i: number, pos: number, g: Geometry): number {
+  const d = i - pos
+  return g.loop ? d - g.count * Math.round(d / g.count) : d
+}
+
+/**
+ * Where a row `d` rows from the middle sits on the drum, as seen from the
+ * front: its height off the middle, and how much it shrinks across and, more,
+ * top to bottom as it tips away. A flat 2D scale, not a 3D rotation, so the
+ * names stay upright and sharp instead of leaning in perspective.
+ */
+function place(d: number): { y: number; sx: number; sy: number } {
+  const angle = d * STEP_RAD
+  const s = EYE_PX / (EYE_PX - RADIUS_PX * (Math.cos(angle) - 1))
+  return {
+    y: RADIUS_PX * Math.sin(angle) * s + SPREAD_PX * Math.max(-1, Math.min(1, d)),
+    sx: s,
+    sy: s * Math.cos(angle)
+  }
+}
+
+/** The drum's window: the outer rows as they fade out, and no more. */
+function wheelHeight(half: number): number {
+  if (half === 0) return BAND_PX + 16
+  return Math.round(2 * (place(half + 0.2).y + 16))
+}
 
 /* ------------------------------------------------------------ the wiring */
 
@@ -135,7 +211,23 @@ export function PowerDraw({
   )
 }
 
+
 /* ------------------------------------------------------------ the view */
+
+interface Gesture {
+  id: number
+  x: number
+  y: number
+  t: number
+  mode: 'pending' | 'turn' | 'close' | 'none'
+  /** It came down on the drum, not the heading. */
+  inWheel: boolean
+  /** It came down on a turning drum: it holds it, it does not choose. */
+  caught: boolean
+  startPos: number
+  samples: { t: number; p: number }[]
+  dx: number
+}
 
 export function PowerDrawView({
   projects,
@@ -164,6 +256,7 @@ export function PowerDrawView({
 
   const [mounted, setMounted] = useState(open)
   const [shown, setShown] = useState(false)
+  const layerRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const wheelRef = useRef<HTMLDivElement | null>(null)
   const openerRef = useRef<Element | null>(null)
@@ -200,137 +293,359 @@ export function PowerDrawView({
 
   /* ---------------------------------------------------------- the drum */
 
-  const rowsRef = useRef<(HTMLButtonElement | null)[]>([])
-  /** The `--d` last written per row, so a still row is not written again. */
+  const count = projects.length
+  const geo = geometryFor(count)
+  const geoRef = useRef(geo)
+  useLayoutEffect(() => {
+    geoRef.current = geo
+  })
+
+  /** The row slots, in list order. */
+  const rowsRef = useRef<(HTMLDivElement | null)[]>([])
+  /** Each row's offset as last drawn, so a still row is not written again. */
   const lastD = useRef<number[]>([])
-  const frame = useRef(0)
-  /** The middle row, as the scroll handler last saw it. */
+  const farRef = useRef<boolean[]>([])
+  /** Each row's height off the middle as last drawn, on screen: for finding the row under a tap. */
+  const drawnY = useRef<number[]>([])
+  /** Where the drum stands, in rows: row i is in the middle at i. */
+  const posRef = useRef(0)
+  /** The row the drum turns to as the card comes in. */
+  const startRef = useRef(0)
   const centreRef = useRef(-1)
-  /** Positioning on open is not a person turning the drum: no tick for it. */
+  /** Turning into place on open is not a person turning the drum: no tick for it. */
   const quiet = useRef(true)
   const [centre, setCentre] = useState(-1)
+  const motion = useRef<{ x0: number; v0: number; rate: number; t0: number; target: number } | null>(null)
+  const frame = useRef(0)
+  const wheelIdle = useRef(0)
 
-  const count = projects.length
-  const indexAt = (scrollTop: number): number =>
-    count === 0 ? -1 : Math.max(0, Math.min(count - 1, Math.round(scrollTop / ROW_PX)))
-
-  /** Write each nearby row's distance from the middle, and note the middle row. */
+  /** Put every row in view where the drum says, and note the middle row. */
   const paint = useCallback(() => {
-    frame.current = 0
-    const wheel = wheelRef.current
-    if (!wheel) return
-    const top = wheel.scrollTop
-    const at = top / ROW_PX
+    const g = geoRef.current
+    const pos = posRef.current
     const rows = rowsRef.current
-    const seen = lastD.current
-    for (let i = 0; i < count; i += 1) {
+    for (let i = 0; i < g.count; i += 1) {
       const el = rows[i]
       if (!el) continue
-      const d = Math.min(FAR, Math.abs(i - at))
-      const rounded = Math.round(d * 1000) / 1000
-      if (seen[i] === rounded) continue
-      seen[i] = rounded
-      el.style.setProperty('--d', String(rounded))
+      const d = offsetOf(i, pos, g)
+      const a = Math.abs(d)
+      const far = a > g.half + 0.5
+      if (far !== farRef.current[i]) {
+        farRef.current[i] = far
+        if (far) el.setAttribute('data-far', 'true')
+        else el.removeAttribute('data-far')
+      }
+      if (far) {
+        drawnY.current[i] = Number.NaN
+        continue
+      }
+      const r = Math.round(d * 1000) / 1000
+      if (lastD.current[i] === r) continue
+      lastD.current[i] = r
+      const { y, sx, sy } = place(r)
+      const ra = Math.abs(r)
+      // Gently down to about .55 three rows out; then gone by the window's edge.
+      const opacity = Math.max(0, Math.min(1, 1 - ra * 0.13, (g.half + 0.5 - ra) * 2.4))
+      el.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`
+      el.style.opacity = opacity.toFixed(3)
+      el.style.setProperty('--a', Math.min(1, ra).toFixed(3))
+      drawnY.current[i] = y
     }
-    const next = count === 0 ? -1 : Math.max(0, Math.min(count - 1, Math.round(at)))
+    const next = g.count === 0 ? -1 : wrapIndex(Math.round(pos), g.count)
     if (next !== centreRef.current) {
       const had = centreRef.current
       centreRef.current = next
       setCentre(next)
       if (had >= 0 && !quiet.current) tick()
     }
-  }, [count])
+  }, [])
 
-  const onScroll = (): void => {
-    quiet.current = false
-    if (!frame.current) frame.current = requestAnimationFrame(paint)
+  const stop = useCallback(() => {
+    cancelAnimationFrame(frame.current)
+    frame.current = 0
+    motion.current = null
+  }, [])
+
+  const settle = useCallback(
+    (target: number) => {
+      const g = geoRef.current
+      posRef.current = g.loop && g.count > 0 ? wrapIndex(target, g.count) : target
+      paint()
+    },
+    [paint]
+  )
+
+  /** Turn the drum to `target` (a whole row) on a critically damped spring, starting at `velocity` rows/s. */
+  const runTo = useCallback(
+    (target: number, velocity: number, rate: number) => {
+      stop()
+      const x0 = posRef.current - target
+      if (reducedMotion() || Math.abs(x0) < 0.001) {
+        settle(target)
+        return
+      }
+      const m = { x0, v0: velocity, rate, t0: performance.now(), target }
+      motion.current = m
+      const step = (now: number): void => {
+        if (motion.current !== m) return
+        const t = Math.max(0, (now - m.t0) / 1000)
+        let x = (m.x0 + (m.v0 + m.rate * m.x0) * t) * Math.exp(-m.rate * t)
+        // Never past the row it is settling on.
+        if (Math.sign(x) !== Math.sign(m.x0)) x = 0
+        if (Math.abs(x) < 0.0015) {
+          motion.current = null
+          frame.current = 0
+          settle(m.target)
+          return
+        }
+        posRef.current = m.target + x
+        paint()
+        frame.current = requestAnimationFrame(step)
+      }
+      frame.current = requestAnimationFrame(step)
+    },
+    [paint, settle, stop]
+  )
+
+  /** Turn to row `index`, the short way round. */
+  const glideTo = (index: number): void => {
+    const g = geoRef.current
+    if (index < 0 || index >= g.count) return
+    const pos = posRef.current
+    runTo(Math.round(pos + offsetOf(index, pos, g)), 0, RATE_GLIDE)
   }
 
-  useEffect(() => () => cancelAnimationFrame(frame.current), [])
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(frame.current)
+      window.clearTimeout(wheelIdle.current)
+    },
+    []
+  )
 
-  // On open, before first paint: straight to the open project. The pads above
-  // and below the rows are half the wheel less half a row (PowerDraw.css), so
-  // row i sits in the middle at scrollTop i × ROW_PX, and a resize moves nothing.
+  // On open, before first paint: one row short of the open project, so the
+  // drum can turn it into the middle as the card slides in.
   useLayoutEffect(() => {
     if (!mounted) return
-    const wheel = wheelRef.current
-    if (!wheel) return
+    const g = geoRef.current
+    stop()
     quiet.current = true
     centreRef.current = -1
     lastD.current = []
+    farRef.current = []
+    drawnY.current = []
     const start = Math.max(0, projects.findIndex((p) => p.id === currentId))
-    wheel.scrollTop = start * ROW_PX
+    startRef.current = start
+    posRef.current = g.loop && !reducedMotion() ? start - 1 : start
     paint()
-    // Only on mount: a list that changes while open keeps its scroll (below).
+    // Only on mount: a list that changes while open keeps where it stands (below).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted])
 
-  // The list changed under the drum (a project added or removed): redraw the
-  // distances for the rows as they now stand.
+  // The list changed under the drum (a project added or removed): redraw every row.
   const ids = projects.map((p) => p.id).join('\n')
   useLayoutEffect(() => {
     if (!mounted) return
+    const g = geoRef.current
+    rowsRef.current.length = g.count
     lastD.current = []
-    rowsRef.current.length = count
+    farRef.current = []
+    drawnY.current = []
+    if (g.count > 0 && !g.loop) posRef.current = Math.max(0, Math.min(g.count - 1, Math.round(posRef.current)))
     paint()
-  }, [ids, mounted, count, paint])
+  }, [ids, mounted, paint])
 
-  // Focus into the panel once it is on screen: the middle row, or the panel.
+  // On screen: turn into place, and focus the open project's row (or the card).
   useLayoutEffect(() => {
     if (!shown) return
-    const row = rowsRef.current[centreRef.current]
+    const start = startRef.current
+    if (geoRef.current.count > 0 && Math.abs(posRef.current - start) > 0.001) runTo(start, 0, RATE_OPEN)
+    const row = rowsRef.current[start]?.querySelector<HTMLButtonElement>('.pdrow')
     ;(row ?? panelRef.current)?.focus({ preventScroll: true })
-  }, [shown])
+  }, [shown, runTo])
 
-  const glideTo = (index: number): void => {
-    const wheel = wheelRef.current
-    if (!wheel || index < 0 || index >= count) return
-    wheel.scrollTo({ top: index * ROW_PX, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  /** The middle row opens its project; any other row turns to the middle. */
+  const onRow = (index: number): void => {
+    const pos = posRef.current
+    if (Math.abs(offsetOf(index, pos, geoRef.current)) < 0.35) {
+      stop()
+      onSelect(projects[index].id)
+      return
+    }
+    quiet.current = false
+    glideTo(index)
   }
 
-  /* ---------------------------------------------------- swipe right to close */
+  /** The row under a tap: on the middle slot, the middle row; elsewhere, the nearest drawn row. */
+  const rowAt = (clientY: number): number => {
+    const wheel = wheelRef.current
+    if (!wheel) return -1
+    const rect = wheel.getBoundingClientRect()
+    const y = clientY - (rect.top + rect.height / 2)
+    const aim = Math.abs(y) <= BAND_PX / 2 ? 0 : y
+    let best = -1
+    let gap = ROW_PX
+    drawnY.current.forEach((at, i) => {
+      if (Number.isNaN(at)) return
+      const g = Math.abs(at - aim)
+      if (g < gap) {
+        gap = g
+        best = i
+      }
+    })
+    return best
+  }
 
-  const [drag, setDrag] = useState(0)
-  const dragRef = useRef<{ id: number; x: number; y: number; t: number; dx: number; on: boolean } | null>(null)
-  const swallowClick = useRef(false)
+  const inBand = (clientY: number): boolean => {
+    const wheel = wheelRef.current
+    if (!wheel) return false
+    const rect = wheel.getBoundingClientRect()
+    return Math.abs(clientY - (rect.top + rect.height / 2)) <= BAND_PX / 2
+  }
+
+  /* ------------------------------------------- turn, flick, tap, swipe away */
+
+  const gesture = useRef<Gesture | null>(null)
+
+  const setPressed = (on: boolean): void => {
+    const panel = panelRef.current
+    if (!panel) return
+    if (on) panel.setAttribute('data-press', 'true')
+    else panel.removeAttribute('data-press')
+  }
+
+  const endCloseDrag = (): void => {
+    const panel = panelRef.current
+    if (panel) panel.style.transform = ''
+    layerRef.current?.removeAttribute('data-dragging')
+  }
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    if (e.pointerType !== 'touch') return
-    dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), dx: 0, on: false }
-  }
-  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    const d = dragRef.current
-    if (!d || d.id !== e.pointerId) return
-    const dx = e.clientX - d.x
-    const dy = e.clientY - d.y
-    if (!d.on) {
-      // Only a mostly-sideways pull to the right is a close; anything else
-      // turns the drum or is a tap.
-      if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2 || dx < 0) {
-        if (Math.abs(dy) > 10) dragRef.current = null
-        return
-      }
-      d.on = true
-      d.x = e.clientX
-      d.t = performance.now()
-      e.currentTarget.setPointerCapture(e.pointerId)
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    const inWheel = wheelRef.current?.contains(e.target as Node) ?? false
+    const caught = inWheel && motion.current !== null
+    // A finger on the drum holds it where it is.
+    if (inWheel) stop()
+    const now = performance.now()
+    gesture.current = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      t: now,
+      mode: 'pending',
+      inWheel,
+      caught,
+      startPos: posRef.current,
+      samples: [{ t: now, p: posRef.current }],
+      dx: 0
     }
-    d.dx = Math.max(0, e.clientX - d.x)
-    setDrag(d.dx)
-  }
-  const onPointerEnd = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    const d = dragRef.current
-    if (!d || d.id !== e.pointerId) return
-    dragRef.current = null
-    if (!d.on) return
-    swallowClick.current = true
-    window.setTimeout(() => (swallowClick.current = false), 0)
-    const speed = d.dx / Math.max(1, performance.now() - d.t)
-    if (d.dx > DRAG_CLOSE_PX || (d.dx > 24 && speed > FLICK_PX_PER_MS)) onClose()
-    setDrag(0)
+    if (inWheel && !caught && inBand(e.clientY)) setPressed(true)
   }
 
-  /* ---------------------------------------------------------- keys and taps */
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const g = gesture.current
+    if (!g || g.id !== e.pointerId) return
+    if (g.mode === 'pending') {
+      const dx = e.clientX - g.x
+      const dy = e.clientY - g.y
+      if (Math.abs(dx) < TAP_SLOP_PX && Math.abs(dy) < TAP_SLOP_PX) return
+      setPressed(false)
+      if (g.inWheel && Math.abs(dy) >= Math.abs(dx)) {
+        g.mode = 'turn'
+        g.y = e.clientY
+        g.startPos = posRef.current
+        quiet.current = false
+      } else if (dx > 0 && dx > Math.abs(dy) * 1.2) {
+        // A mostly-sideways pull to the right puts the card away.
+        g.mode = 'close'
+        g.x = e.clientX
+        g.t = performance.now()
+        layerRef.current?.setAttribute('data-dragging', 'true')
+      } else {
+        g.mode = 'none'
+        return
+      }
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        /* a pointer that already ended */
+      }
+    }
+    if (g.mode === 'turn') {
+      const geom = geoRef.current
+      let p = g.startPos - (e.clientY - g.y) / ROW_PX
+      if (!geom.loop) {
+        // Past either end the drum gives a little, then holds.
+        const max = Math.max(0, geom.count - 1)
+        if (p < 0) p *= 0.3
+        else if (p > max) p = max + (p - max) * 0.3
+      }
+      posRef.current = p
+      const now = performance.now()
+      g.samples.push({ t: now, p })
+      while (g.samples.length > 2 && now - g.samples[0].t > 100) g.samples.shift()
+      paint()
+    } else if (g.mode === 'close') {
+      g.dx = Math.max(0, e.clientX - g.x)
+      const panel = panelRef.current
+      if (panel) panel.style.transform = `translateX(${g.dx}px)`
+    }
+  }
+
+  const onPointerEnd = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const g = gesture.current
+    if (!g || g.id !== e.pointerId) return
+    gesture.current = null
+    setPressed(false)
+    const cancelled = e.type === 'pointercancel'
+    const geom = geoRef.current
+    if (g.mode === 'turn') {
+      const now = performance.now()
+      const first = g.samples[0]
+      const last = g.samples[g.samples.length - 1]
+      const span = last.t - first.t
+      // Rows a second; nothing if the finger stopped before it lifted.
+      let v = !cancelled && span > 0 && now - last.t < 60 ? ((last.p - first.p) / span) * 1000 : 0
+      v = Math.max(-40, Math.min(40, v))
+      let target = Math.round(posRef.current + v * FLING_S)
+      if (!geom.loop) target = Math.max(0, Math.min(geom.count - 1, target))
+      runTo(target, v, RATE_FLING)
+      return
+    }
+    if (g.mode === 'close') {
+      endCloseDrag()
+      const speed = g.dx / Math.max(1, performance.now() - g.t)
+      if (!cancelled && (g.dx > DRAG_CLOSE_PX || (g.dx > 24 && speed > FLICK_PX_PER_MS))) onClose()
+      return
+    }
+    if (!g.inWheel || geom.count === 0) return
+    if (g.mode === 'pending' && !cancelled && !g.caught) {
+      const index = rowAt(e.clientY)
+      if (index >= 0) {
+        onRow(index)
+        return
+      }
+    }
+    // Held mid-turn, or let go: settle on the nearest row.
+    runTo(Math.round(posRef.current), 0, RATE_GLIDE)
+  }
+
+  /** A mouse wheel or a touchpad turns the drum too, and it settles when they stop. */
+  const onWheel = (e: ReactWheelEvent<HTMLDivElement>): void => {
+    const g = geoRef.current
+    if (g.count === 0) return
+    stop()
+    quiet.current = false
+    const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
+    let p = posRef.current + px / ROW_PX
+    if (!g.loop) p = Math.max(0, Math.min(g.count - 1, p))
+    posRef.current = p
+    paint()
+    window.clearTimeout(wheelIdle.current)
+    wheelIdle.current = window.setTimeout(() => runTo(Math.round(posRef.current), 0, RATE_GLIDE), 120)
+  }
+
+  /* ---------------------------------------------------------- keys */
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
     if (e.key === 'Escape') {
@@ -339,30 +654,20 @@ export function PowerDrawView({
       onClose()
       return
     }
-    const step =
-      e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : e.key === 'Home' ? -count : e.key === 'End' ? count : 0
-    if (!step || count === 0) return
+    const g = geoRef.current
+    if (g.count === 0) return
+    const base = motion.current?.target ?? Math.round(posRef.current)
+    let next: number
+    if (e.key === 'ArrowDown') next = base + 1
+    else if (e.key === 'ArrowUp') next = base - 1
+    else if (e.key === 'Home') next = base + offsetOf(0, base, g)
+    else if (e.key === 'End') next = base + offsetOf(g.count - 1, base, g)
+    else return
     e.preventDefault()
-    const next = Math.max(0, Math.min(count - 1, (centreRef.current < 0 ? 0 : centreRef.current) + step))
-    glideTo(next)
-    rowsRef.current[next]?.focus({ preventScroll: true })
-  }
-
-  /**
-   * The middle row opens its project; any other row only comes to the middle.
-   * The middle is read from the scroll itself, not from state, so a tap during
-   * a glide is judged by where the drum really is.
-   */
-  const onRow = (index: number): void => {
-    if (swallowClick.current) return
-    const wheel = wheelRef.current
-    if (!wheel) return
-    const at = wheel.scrollTop / ROW_PX
-    if (indexAt(wheel.scrollTop) === index && Math.abs(at - index) < 0.35) {
-      onSelect(projects[index].id)
-      return
-    }
-    glideTo(index)
+    if (!g.loop) next = Math.max(0, Math.min(g.count - 1, next))
+    quiet.current = false
+    runTo(next, 0, RATE_GLIDE)
+    rowsRef.current[wrapIndex(next, g.count)]?.querySelector<HTMLButtonElement>('.pdrow')?.focus({ preventScroll: true })
   }
 
   /* ---------------------------------------------------------- the handle */
@@ -393,8 +698,6 @@ export function PowerDrawView({
     if (pull.current?.id === e.pointerId) pull.current = null
   }
 
-  const panelStyle: CSSProperties | undefined = drag > 0 ? { transform: `translateX(${drag}px)` } : undefined
-
   return (
     <>
       <button
@@ -416,7 +719,10 @@ export function PowerDrawView({
         data-testid="powerdraw-handle"
       >
         <span className="pdraw-handle__pill" aria-hidden="true">
-          <span className="pdraw-handle__grip" />
+          {/* A drum in little: a long rib in the middle, short ones round it. */}
+          <span className="pdraw-handle__rib" />
+          <span className="pdraw-handle__rib" data-mid="true" />
+          <span className="pdraw-handle__rib" />
         </span>
         {othersAsking ? (
           <span className="pdraw-handle__ask" aria-hidden="true">
@@ -427,9 +733,9 @@ export function PowerDrawView({
 
       {mounted ? (
         <div
+          ref={layerRef}
           className="pdraw-layer"
           data-state={shown ? 'open' : 'closed'}
-          data-dragging={drag > 0 ? 'true' : undefined}
           data-testid="powerdraw"
         >
           <div className="pdraw__scrim" onClick={onClose} aria-hidden="true" />
@@ -445,85 +751,101 @@ export function PowerDrawView({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerEnd}
             onPointerCancel={onPointerEnd}
-            style={panelStyle}
+            style={{ '--pdraw-band': `${BAND_PX}px` } as CSSProperties}
           >
-            <div className="pdraw__head" aria-hidden="true">
-              <span>Projects</span>
-              {count ? <span className="pdraw__count">{count}</span> : null}
+            <div className="pdraw__head">
+              <span className="pdraw__title" aria-hidden="true">
+                Projects
+                {count ? <span className="pdraw__count">{count}</span> : null}
+              </span>
+              <button
+                type="button"
+                className="pdraw__close"
+                aria-label="Close projects"
+                onClick={onClose}
+                data-testid="powerdraw-close"
+              >
+                <Icon name="close" size={16} />
+              </button>
             </div>
 
             {count === 0 ? (
               <p className="pdraw__empty">No projects yet</p>
             ) : (
-              <>
+              <div
+                ref={wheelRef}
+                className="pdraw__wheel"
+                role="list"
+                aria-label="Projects"
+                onWheel={onWheel}
+                style={{ height: wheelHeight(geo.half) }}
+                data-testid="powerdraw-wheel"
+              >
                 <div className="pdraw__band" aria-hidden="true" />
-                <div
-                  ref={wheelRef}
-                  className="pdraw__wheel"
-                  role="list"
-                  aria-label="Projects"
-                  onScroll={onScroll}
-                  data-testid="powerdraw-wheel"
-                >
-                  <div className="pdraw__pad" aria-hidden="true" />
-                  {projects.map((project, index) => {
-                    const focused = index === centre
-                    const isCurrent = project.id === currentId
-                    return (
-                      <div key={project.id} role="listitem" className="pdraw__item">
-                        <button
-                          ref={(el) => {
-                            rowsRef.current[index] = el
-                          }}
-                          type="button"
-                          className="pdrow"
-                          data-focused={focused ? 'true' : undefined}
-                          data-current={isCurrent ? 'true' : undefined}
-                          data-attention={project.asking ? 'true' : undefined}
-                          data-meta={project.asking || project.panes > 0 || isCurrent ? 'true' : undefined}
-                          aria-current={isCurrent ? 'true' : undefined}
-                          tabIndex={focused ? 0 : -1}
-                          onClick={() => onRow(index)}
-                          style={{ '--pj-color': project.color } as CSSProperties}
-                          data-testid="powerdraw-row"
-                          data-project={project.id}
-                        >
-                          <span className="pdrow__text">
-                            <span className="pdrow__title">
-                              <span className="pdrow__dot" aria-hidden="true" />
-                              <span className="pdrow__name">{project.name}</span>
-                            </span>
-                            <span className="pdrow__path">{shortPath(project.path)}</span>
-                            <span className="pdrow__meta">
-                              {project.asking ? (
-                                <span className="pdrow__ask">
-                                  <span className="pdrow__ask-mark" aria-hidden="true">
-                                    !
-                                  </span>
-                                  Asking
+                {projects.map((project, index) => {
+                  const focused = index === centre
+                  const isCurrent = project.id === currentId
+                  return (
+                    <div
+                      key={project.id}
+                      ref={(el) => {
+                        rowsRef.current[index] = el
+                      }}
+                      role="listitem"
+                      className="pdraw__slot"
+                    >
+                      <button
+                        type="button"
+                        className="pdrow"
+                        data-focused={focused ? 'true' : undefined}
+                        data-current={isCurrent ? 'true' : undefined}
+                        data-attention={project.asking ? 'true' : undefined}
+                        aria-current={isCurrent ? 'true' : undefined}
+                        tabIndex={focused ? 0 : -1}
+                        onClick={() => onRow(index)}
+                        style={{ '--pj-color': project.color } as CSSProperties}
+                        data-testid="powerdraw-row"
+                        data-project={project.id}
+                      >
+                        <span className="pdrow__text">
+                          <span className="pdrow__title">
+                            <span className="pdrow__dot" aria-hidden="true" />
+                            <span className="pdrow__name">{project.name}</span>
+                            {project.asking ? (
+                              <span className="pdrow__ask">
+                                <span className="pdrow__ask-mark" aria-hidden="true">
+                                  !
                                 </span>
-                              ) : null}
-                              {project.panes > 0 ? (
+                                Asking
+                              </span>
+                            ) : null}
+                            {isCurrent ? (
+                              <span className="pdrow__here">
+                                <Icon name="check" size={12} />
+                                Open
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="pdrow__sub">
+                            {project.panes > 0 ? (
+                              <>
                                 <span className="pdrow__panes">
                                   {project.panes} {project.panes === 1 ? 'pane' : 'panes'}
                                 </span>
-                              ) : null}
-                              {isCurrent ? (
-                                <span className="pdrow__here">
-                                  <Icon name="check" size={12} />
-                                  Open
+                                <span className="pdrow__sep" aria-hidden="true">
+                                  ·
                                 </span>
-                              ) : null}
-                            </span>
+                              </>
+                            ) : null}
+                            <span className="pdrow__path">{shortPath(project.path)}</span>
                           </span>
-                          <span className="pdraw__sr">{focused ? ', tap to open' : ', tap to bring to the middle'}</span>
-                        </button>
-                      </div>
-                    )
-                  })}
-                  <div className="pdraw__pad" aria-hidden="true" />
-                </div>
-              </>
+                        </span>
+                        <span className="pdraw__sr">{focused ? ', tap to open' : ', tap to bring to the middle'}</span>
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         </div>
