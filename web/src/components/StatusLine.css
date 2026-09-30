@@ -24,7 +24,8 @@
   box-sizing: border-box;
   height: 52px;
   min-height: 52px;
-  padding: 0 var(--p-3);
+  /* The screen gutter, so the strip's edges line up with the dock and the chat. */
+  padding: 0 var(--p-4);
   overflow: hidden;
   /* Vertical drags still scroll the page; horizontal ones are the tab swipe. */
   touch-action: pan-y;

@@ -7,9 +7,11 @@
  * equalizer (dots at rest, moving bars while a conversation runs), then the
  * agent's mark and a chevron that opens the picker. The switch's glyph is the
  * state, one silhouette per phase (PhoneListen.tsx ListenGlyph). At rest it is
- * a matte pill with a hairline; while a conversation is open the mic half is
- * filled with ink — the phone's "on" (the armed Ctrl key says it the same way)
- * — and the rim is solid; on his turn a halo breathes round it; failed, or
+ * the text box's twin — the box's 56px height, its surface, its hairline and
+ * its pill — so the dock reads as one row on one centre line, the buttons
+ * inset 5px as concentric pills the way the box's "+" is. While a
+ * conversation is open the mic half is filled with ink — the phone's "on"
+ * (the armed Ctrl key says it the same way) — and the rim is solid; on his turn a halo breathes round it; failed, or
  * unable to start, its rim is dashed.
  *
  * The voice line sits on the box's own face, the box's size exactly, so a
@@ -23,15 +25,15 @@
   display: inline-flex;
   align-items: stretch;
   flex: none;
-  height: var(--p-hit);
+  box-sizing: border-box;
+  /* The box's own height, so the capsule, the box and the disc share one line. */
+  height: var(--p-row);
   margin: 0;
-  /* The row sits its items on the bottom edge; this centres the capsule on the 56px box. */
-  margin-bottom: 6px;
-  padding: 0;
+  padding: 5px;
   border-radius: var(--p-r-pill);
   background: var(--p-raised);
-  /* The rim is drawn inside, so it takes nothing from the buttons. */
-  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+  /* The box's hairline, drawn inside so it takes nothing from the buttons. */
+  box-shadow: inset 0 0 0 1px var(--p-line);
   color: var(--p-ink);
   touch-action: manipulation;
   user-select: none;
@@ -100,7 +102,8 @@
   flex: none;
   box-sizing: border-box;
   min-width: var(--p-hit);
-  height: var(--p-hit);
+  /* 46px: the capsule less its 5px inset, a concentric pill inside it. */
+  height: 100%;
   margin: 0;
   border: 0;
   border-radius: var(--p-r-pill);
@@ -124,8 +127,8 @@
 /* ------------------------------------------------ microphone button */
 
 .app[data-mobile] .plisten__btn {
-  gap: 4px;
-  padding: 0 6px 0 8px;
+  gap: 3px;
+  padding: 0 4px 0 5px;
   color: var(--p-ink-2);
 }
 
@@ -286,7 +289,7 @@
 
 .app[data-mobile] .plisten__agent-btn {
   gap: 3px;
-  padding: 0 7px 0 6px;
+  padding: 0 5px 0 4px;
   color: var(--p-ink);
 }
 
@@ -295,8 +298,8 @@
   content: '';
   position: absolute;
   left: -1px;
-  top: 8px;
-  bottom: 8px;
+  top: 10px;
+  bottom: 10px;
   width: 1px;
   background: var(--p-line-strong);
   pointer-events: none;

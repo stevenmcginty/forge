@@ -602,7 +602,8 @@
   border-radius: var(--p-r-pill);
   background: var(--p-raised);
   color: var(--p-ink);
-  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+  /* The box's surface and hairline, so it reads as one family with the box and Listen. */
+  box-shadow: inset 0 0 0 1px var(--p-line);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: transform var(--p-dur-fast) var(--p-ease);
