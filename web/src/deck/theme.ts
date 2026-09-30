@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
 import type { ThemeCore } from '@shared/types'
-import { BUILTIN_THEMES, DEFAULT_THEME_ID, applyTheme, findTheme, resolveTheme } from '@/theme/themes'
+import { BUILTIN_THEMES, applyTheme, findTheme, resolveTheme } from '@/theme/themes'
 import { rethemeTerminals } from '../lib/term'
-import { isKnownTheme, storedThemeId } from '../lib/phone-themes'
+import { defaultThemeId, isKnownTheme, storedThemeId } from '../lib/phone-themes'
+import { isPhoneFace, phoneFaceFromWindow } from '../lib/viewport'
 
 /**
  * The theme this browser wears. Read straight from src/theme/themes.ts — the
@@ -34,13 +35,23 @@ export function phoneThemeCore(id: string): ThemeCore | null {
   return BUILTIN_THEMES.find((t) => t.id === id) ?? null
 }
 
+/** Is this page wearing the phone face? Read the same way Workspace reads it. */
+function onPhone(): boolean {
+  try {
+    return isPhoneFace(phoneFaceFromWindow(false))
+  } catch {
+    return false
+  }
+}
+
 function stored(): string {
+  const fallback = defaultThemeId(onPhone())
   try {
     const raw = window.localStorage.getItem(KEY)
-    const id = storedThemeId(raw)
+    const id = storedThemeId(raw, undefined, fallback)
     // The old one-row WhatsApp is kept under the half it became, so the
     // phone's setting is read once, here, and never again.
-    if (raw && id !== raw && id !== DEFAULT_THEME_ID) {
+    if (raw && id !== raw && id !== fallback) {
       try {
         window.localStorage.setItem(KEY, id)
       } catch {
@@ -51,7 +62,7 @@ function stored(): string {
   } catch {
     /* storage refused (private window): the default is still a theme */
   }
-  return DEFAULT_THEME_ID
+  return fallback
 }
 
 /** What this module last wrote onto the root, so it can be changed or taken off again. */

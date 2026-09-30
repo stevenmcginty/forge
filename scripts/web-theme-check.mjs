@@ -30,7 +30,7 @@ registerHooks({
 const { contrast, DEFAULT_THEME_ID, BUILTIN_THEMES, resolveTheme, forkTheme } = await import(
   '../src/theme/themes.ts'
 )
-const { WHATSAPP_DARK_ID, WHATSAPP_LIGHT_ID, LEGACY_WHATSAPP_ID, storedThemeId, isKnownTheme } = await import(
+const { WHATSAPP_DARK_ID, WHATSAPP_LIGHT_ID, LEGACY_WHATSAPP_ID, storedThemeId, isKnownTheme, defaultThemeId } = await import(
   '../web/src/lib/phone-themes.ts'
 )
 
@@ -87,6 +87,10 @@ ok(storedThemeId('whatsapp-light', true) === 'whatsapp-light', 'whatsapp-light s
 ok(storedThemeId('paper', true) === 'paper', 'a built-in passes through')
 ok(storedThemeId('nonsense', true) === DEFAULT_THEME_ID, 'an unknown id falls back to the default')
 ok(storedThemeId(null, true) === DEFAULT_THEME_ID, 'nothing stored is the default')
+ok(defaultThemeId(true) === 'whatsapp-dark', 'a phone with nothing stored wears WhatsApp dark')
+ok(defaultThemeId(false) === DEFAULT_THEME_ID, 'the desk face keeps Volt')
+ok(storedThemeId(null, true, defaultThemeId(true)) === 'whatsapp-dark', 'nothing stored on a phone is WhatsApp dark')
+ok(storedThemeId('paper', true, defaultThemeId(true)) === 'paper', 'a phone that picked a theme keeps it')
 
 // The default argument reads the phone's own setting: stub the matcher.
 const stub = (isDark) => {

@@ -37,11 +37,22 @@ export function systemDark(): boolean {
 }
 
 /**
+ * What a phone wears until somebody picks: WhatsApp dark (Steve, 2026-09-30).
+ * The desk face keeps the desktop's own default, Volt.
+ */
+export const PHONE_DEFAULT_THEME_ID = WHATSAPP_DARK_ID
+
+/** The theme a browser wears with nothing stored, by face. */
+export function defaultThemeId(phone: boolean): string {
+  return phone ? PHONE_DEFAULT_THEME_ID : DEFAULT_THEME_ID
+}
+
+/**
  * The theme a stored id stands for. The old system-following WhatsApp becomes
  * the half it wears right now, so nothing changes on screen; an id nobody knows
- * (or none) is the default.
+ * (or none) is `fallback` — the face's default, from `defaultThemeId`.
  */
-export function storedThemeId(raw: string | null, dark = systemDark()): string {
+export function storedThemeId(raw: string | null, dark = systemDark(), fallback = DEFAULT_THEME_ID): string {
   const id = raw === LEGACY_WHATSAPP_ID ? (dark ? WHATSAPP_DARK_ID : WHATSAPP_LIGHT_ID) : raw
-  return id && isKnownTheme(id) ? id : DEFAULT_THEME_ID
+  return id && isKnownTheme(id) ? id : fallback
 }
