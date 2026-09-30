@@ -43,7 +43,13 @@ import './BrainMap.css'
  * here writes app state except by the same actions the Agents menu uses.
  */
 
-const MAX_PROJECTS = 16
+/**
+ * Past this many, the quietest projects (fewest agents, never the one on
+ * screen) are left off and the footer counts them. The layout holds 30 at
+ * 1920×1080 without a label touching another; beyond that labels go one-line
+ * and lanes stagger, and it may crowd.
+ */
+const MAX_PROJECTS = 32
 const HEAD_H = 64
 const FOOT_H = 46
 
@@ -185,6 +191,10 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
   const [hover, setHover] = useState<Hover>(null)
   const [door, setDoor] = useState<DoorTarget | null>(null)
   const [reply, setReply] = useState('')
+  /** A project opened out by its "+N not open" chip, until the chip is clicked again. */
+  const [pinned, setPinned] = useState<string | null>(null)
+  /** The project opened out by pointing or focus; lingers a moment so the pointer can reach its agents. */
+  const [pointed, setPointed] = useState<string | null>(null)
   const hideTimer = useRef(0)
 
   /* ----------------------------------------------------------- the data */
@@ -292,6 +302,32 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
   useEffect(() => {
     engineRef.current?.setHover(hover?.key ?? null)
   }, [hover])
+
+  // Pointing at a project (or focusing it), or at one of its not-open agents, opens it out.
+  const hoverProject = ((): string | null => {
+    const key = hover?.key
+    if (!key) return null
+    if (key.startsWith('p:')) return key
+    if (!key.startsWith('a:')) return null
+    const paneId = key.slice(2)
+    const owner = model.list.find((p) => p.agents.some((a) => a.paneId === paneId))
+    return owner && engineRef.current?.stateOf(paneId).state === 'dormant' ? owner.key : null
+  })()
+  useEffect(() => {
+    if (hoverProject) {
+      setPointed(hoverProject)
+      return undefined
+    }
+    const t = window.setTimeout(() => setPointed(null), 420)
+    return () => window.clearTimeout(t)
+  }, [hoverProject])
+
+  const reveal = pointed ?? pinned
+  useEffect(() => {
+    engineRef.current?.setReveal(reveal)
+  }, [reveal])
+
+  const togglePin = useCallback((key: string) => setPinned((p) => (p === key ? null : key)), [])
 
   useEffect(() => {
     engineRef.current?.setPaused(door !== null)
@@ -580,6 +616,9 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
             stateOf={stateOf}
             show={show}
             hideSoon={hideSoon}
+            open={reveal === p.key}
+            pinned={pinned === p.key}
+            onFold={() => togglePin(p.key)}
             onOpen={openAgent}
             onGoProject={() => goTo(p.id, null)}
           />
@@ -628,12 +667,12 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
             <StateGlyph state="idle" /> Ready <i>still ring</i>
           </li>
           <li data-state="dormant">
-            <StateGlyph state="dormant" /> Not open <i>dotted</i>
+            <StateGlyph state="dormant" /> Not open <i>+n on its project, dotted when shown</i>
           </li>
         </ul>
         <span className="bmap__hint">
-          {model.hidden > 0 ? `${model.hidden} quiet projects not drawn · ` : ''}Point at anything for detail · click an agent to
-          open it here
+          {model.hidden > 0 ? `${model.hidden} quiet projects not drawn · ` : ''}Point at a project to show its not-open agents ·
+          click an agent to open it here
         </span>
       </footer>
 
@@ -716,7 +755,10 @@ function ProjectNodes({
   show,
   hideSoon,
   onOpen,
-  onGoProject
+  onGoProject,
+  open,
+  pinned,
+  onFold
 }: {
   project: MapProject
   bind: (key: string) => (el: HTMLElement | null) => void
@@ -725,45 +767,61 @@ function ProjectNodes({
   hideSoon: () => void
   onOpen: (project: MapProject, agent: MapAgent) => void
   onGoProject: () => void
+  open: boolean
+  pinned: boolean
+  onFold: () => void
 }): ReactNode {
-  const counts = { working: 0, attention: 0 }
-  for (const a of project.agents) {
-    const s = stateOf(a.paneId).state
-    if (s === 'working') counts.working++
-    if (s === 'attention') counts.attention++
-  }
+  // Working, needing you, ready and done agents are always drawn beside the
+  // project; the ones not open fold into a count on it.
+  const folded = project.agents.filter((a) => stateOf(a.paneId).state === 'dormant').length
+  const quiet = folded === project.agents.length
   return (
     <>
-      <div className="bmap-anchor" ref={bind(project.key)} data-side="below">
-        <button
-          type="button"
-          className="bmap-proj"
+      <div className="bmap-anchor" ref={bind(project.key)}>
+        <div
+          className="bmap-plabel"
           data-active={project.active ? 'true' : undefined}
+          data-quiet={quiet ? 'true' : undefined}
+          data-open={open ? 'true' : undefined}
           style={{ '--proj': project.color } as CSSProperties}
           onPointerEnter={() => show(project.key)}
           onPointerLeave={hideSoon}
-          onFocus={() => show(project.key)}
-          onBlur={hideSoon}
-          onClick={onGoProject}
         >
-          <span className="bmap-proj__name">{project.name}</span>
+          <button
+            type="button"
+            className="bmap-proj"
+            aria-label={`${project.name}${folded ? `, ${folded} not open` : ''} — go to project`}
+            onFocus={() => show(project.key)}
+            onBlur={hideSoon}
+            onClick={onGoProject}
+          >
+            <span className="bmap-proj__name">{project.name}</span>
+          </button>
           <span className="bmap-proj__meta">
-            {project.agents.length === 0 ? 'no agents' : `${project.agents.length} agent${project.agents.length === 1 ? '' : 's'}`}
-            {counts.working ? (
-              <span className="bmap-proj__n" data-state="working">
-                <StateGlyph state="working" />
-                {counts.working}
+            {folded > 0 ? (
+              <button
+                type="button"
+                className="bmap-proj__fold"
+                aria-expanded={open}
+                aria-pressed={pinned}
+                aria-label={`${pinned ? 'Hide' : 'Show'} ${folded} not-open agent${folded === 1 ? '' : 's'} in ${project.name}`}
+                title={pinned ? 'Fold them away again' : 'Show them (and keep them shown)'}
+                onFocus={() => show(project.key)}
+                onBlur={hideSoon}
+                onClick={onFold}
+              >
+                <StateGlyph state="dormant" />
+                <span className="bmap-proj__fold-n">+{folded}</span>
+                <span className="bmap-proj__fold-w"> not open</span>
+              </button>
+            ) : (
+              <span className="bmap-proj__count">
+                {project.agents.length === 0 ? 'no agents' : `${project.agents.length} agent${project.agents.length === 1 ? '' : 's'}`}
               </span>
-            ) : null}
-            {counts.attention ? (
-              <span className="bmap-proj__n" data-state="attention">
-                <StateGlyph state="attention" />
-                {counts.attention}
-              </span>
-            ) : null}
+            )}
             {project.active ? <span className="bmap-proj__here">here</span> : null}
           </span>
-        </button>
+        </div>
       </div>
       {project.agents.map((a) => {
         const activity = stateOf(a.paneId)

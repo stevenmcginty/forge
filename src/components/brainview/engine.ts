@@ -163,7 +163,8 @@ export class MapEngine {
   private cam: Camera = { yaw: 0, elevation: ELEVATION, focal: FOCAL, cx: 0, cy: 0 }
   private screens = new Map<string, Screen>()
   private els = new Map<string, HTMLElement>()
-  private labelSide = new Map<string, string>()
+  private reveal: string | null = null
+  private focus = 0
   private card: { el: HTMLElement; key: string; w: number; h: number; ro: ResizeObserver } | null = null
   private tracker = new ActivityTracker()
   private paneIds: string[] = []
@@ -260,6 +261,8 @@ export class MapEngine {
       }
     }
     this.knownPanes = new Set(ids)
+    // States first: which agents fold away decides the layout.
+    this.tracker.sample(this.paneIds, Date.now())
     this.relayout()
     this.sample(Date.now())
     // New nodes need their words even when nothing moved.
@@ -317,10 +320,57 @@ export class MapEngine {
     this.showPlaced(key, el)
   }
 
-  /** A node the layout had no room for (a project's third row of agents) is not drawn at 0,0. */
+  /**
+   * Open a project out (its folded "not open" agents bloom round its hub and
+   * everything else dims), or close it again with null.
+   */
+  setReveal(key: string | null): void {
+    if (this.reveal === key) return
+    this.reveal = key
+    if (!this.motion) this.focus = key ? 1 : 0
+    for (const [k, el] of this.els) this.showPlaced(k, el)
+    this.kick()
+  }
+
+  /** The project key a node key belongs to (null for the brain and the stem). */
+  private ownerOf(key: string): string | null {
+    if (key.startsWith('p:')) return key
+    if (!key.startsWith('a:')) return null
+    return this.projectOf.get(key.slice(2))?.key ?? null
+  }
+
+  /** Drawn right now: placed, and not folded away (unless its project is open). */
+  private shown(key: string): boolean {
+    const layout = this.layout
+    if (!layout || !layout.nodes.has(key)) return false
+    if (!key.startsWith('a:')) return true
+    const owner = this.ownerOf(key)
+    const folded = owner ? layout.folded.get(owner) : undefined
+    return !folded || !folded.includes(key) || this.reveal === owner
+  }
+
+  /** Nodes not placed, or folded away, are not drawn (never at 0,0); the rest dim while another project is open. */
   private showPlaced(key: string, el: HTMLElement): void {
-    const placed = this.layout?.nodes.has(key) ?? false
-    el.style.visibility = placed ? '' : 'hidden'
+    el.style.visibility = this.shown(key) ? '' : 'hidden'
+    const owner = this.ownerOf(key)
+    const dim = this.reveal !== null && owner !== null && owner !== this.reveal
+    if ((el.dataset['dim'] === 'true') !== dim) {
+      if (dim) el.dataset['dim'] = 'true'
+      else delete el.dataset['dim']
+    }
+    const lp = key.startsWith('p:') ? this.layout?.labels.get(key) : undefined
+    if (lp) {
+      el.style.setProperty('--lx', `${lp.lx.toFixed(1)}px`)
+      el.style.setProperty('--ly', `${lp.ly.toFixed(1)}px`)
+      el.style.setProperty('--fx', lp.fx.toFixed(3))
+      el.style.setProperty('--fy', lp.fy.toFixed(3))
+    }
+  }
+
+  /** How strongly a project's canvas marks are drawn: full, or dimmed while another is open. */
+  private alphaOf(projectKey: string): number {
+    if (!this.reveal || projectKey === this.reveal) return 1
+    return 1 - 0.72 * this.focus
   }
 
   /** The hover card: kept beside `key`'s point, on whichever side has room. */
@@ -427,6 +477,8 @@ export class MapEngine {
     this.lastSample = now
     const moved = this.tracker.sample(this.paneIds, now)
     if (moved.length === 0) return
+    // An agent opened, or went back to not open: it folds out of or into its project.
+    if (moved.some((t) => t.from === 'dormant' || t.to === 'dormant')) this.relayout()
     if (this.motion) for (const t of moved) this.onTransition(t)
     this.hooks.onStates()
     // A still map has to be redrawn for the new ring.
@@ -472,8 +524,11 @@ export class MapEngine {
 
   private relayout(): void {
     if (this.w <= 0 || this.h <= 0) return
+    const collapsed = new Set<string>()
+    for (const p of this.projects) for (const a of p.agents) if (this.tracker.get(a.paneId).state === 'dormant') collapsed.add(a.key)
     this.layout = layoutMap({
       projects: this.projects,
+      collapsed,
       width: this.w,
       height: this.h,
       top: this.top,
@@ -483,7 +538,11 @@ export class MapEngine {
     })
     this.cam.cx = this.layout.cx
     this.cam.cy = this.layout.cy
-    this.canvas.parentElement?.style.setProperty('--core-r', `${Math.round(this.layout.coreR)}px`)
+    const root = this.canvas.parentElement
+    root?.style.setProperty('--core-r', `${Math.round(this.layout.coreR)}px`)
+    if (root) root.dataset['compact'] = this.layout.compact ? 'true' : 'false'
+    // Nothing left over from the last layout is drawn: a stale point used to draw a ring with no label.
+    for (const key of [...this.screens.keys()]) if (!this.layout.nodes.has(key)) this.screens.delete(key)
     for (const [key, el] of this.els) this.showPlaced(key, el)
   }
 
@@ -505,9 +564,11 @@ export class MapEngine {
       this.swayPhase += dt * this.swaySpeed * ((Math.PI * 2) / 36)
       this.parallax.x += (this.pointer.x - this.parallax.x) * Math.min(1, dt * 2)
       this.parallax.y += (this.pointer.y - this.parallax.y) * Math.min(1, dt * 2)
-      this.cam.yaw = Math.sin(this.swayPhase) * 0.085 + this.parallax.x * 0.05
-      this.cam.elevation = ELEVATION - this.parallax.y * 0.035
+      this.cam.yaw = Math.sin(this.swayPhase) * 0.06 + this.parallax.x * 0.035
+      this.cam.elevation = ELEVATION - this.parallax.y * 0.025
     }
+    const focusTarget = this.reveal ? 1 : 0
+    this.focus = this.motion && dt > 0 ? this.focus + (focusTarget - this.focus) * Math.min(1, dt * 8) : focusTarget
 
     // Project every node, and move its label there.
     for (const node of layout.nodes.values()) {
@@ -544,14 +605,8 @@ export class MapEngine {
   private place(key: string, el: HTMLElement, s: Screen): void {
     const scale = 0.9 + (s.s - 1) * 1.2
     el.style.transform = `translate3d(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px, 0) scale(${scale.toFixed(3)})`
-    el.style.zIndex = String(Math.round(2000 - s.d))
-    if (key.startsWith('p:') && this.layout) {
-      const side = s.y < this.layout.cy ? 'below' : 'above'
-      if (this.labelSide.get(key) !== side) {
-        this.labelSide.set(key, side)
-        el.dataset['side'] = side
-      }
-    }
+    // The open project's nodes stay above the dimmed rest.
+    el.style.zIndex = String(Math.round(2000 - s.d) + (this.reveal && this.ownerOf(key) === this.reveal ? 1000 : 0))
   }
 
   private placeCard(): void {
@@ -562,7 +617,20 @@ export class MapEngine {
     const reach = (c.key === 'brain' && this.layout ? this.layout.coreR * 1.2 : 34) * s.s
     let x = s.x + reach
     if (x + c.w > this.w - 12) x = s.x - reach - c.w
-    x = Math.max(12, x)
+    // A project's card keeps clear of its own label and of the agents blooming out of it.
+    const lp = c.key.startsWith('p:') ? this.layout?.labels.get(c.key) : undefined
+    if (lp) {
+      const sc = 0.9 + (s.s - 1) * 1.2
+      const lx0 = s.x + (lp.lx - lp.fx * lp.w) * sc
+      const lx1 = lx0 + lp.w * sc
+      const dir = this.layout?.bloomDir.get(c.key)?.x ?? (s.x < this.w / 2 ? -1 : 1)
+      const right = Math.max(lx1, s.x + reach) + 12
+      const left = Math.min(lx0, s.x - reach) - 12 - c.w
+      x = dir > 0 ? left : right
+      if (x < 12) x = right
+      if (x + c.w > this.w - 12) x = left
+    }
+    x = Math.max(12, Math.min(this.w - 12 - c.w, x))
     const y = Math.max(this.top + 8, Math.min(this.h - this.bottom - c.h - 8, s.y - c.h / 2))
     c.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`
   }
@@ -625,12 +693,12 @@ export class MapEngine {
       ctx.lineTo(hub.x + 0.01, hub.y)
       for (const a of p.agents) {
         const s = this.screens.get(a.key)
-        if (!s) continue
+        if (!s || !this.shown(a.key)) continue
         ctx.moveTo(hub.x, hub.y)
         ctx.lineTo(s.x, s.y)
       }
       ctx.lineWidth = 58 * hub.s
-      ctx.strokeStyle = rgba(this.colorOf(p.color), pal.dark ? (p.active ? 0.085 : 0.055) : p.active ? 0.12 : 0.08)
+      ctx.strokeStyle = rgba(this.colorOf(p.color), (pal.dark ? (p.active ? 0.085 : 0.055) : p.active ? 0.12 : 0.08) * this.alphaOf(p.key))
       ctx.stroke()
     }
   }
@@ -640,18 +708,20 @@ export class MapEngine {
     const brainOn = this.mood() !== 'off'
     for (const p of this.projects) {
       const color = this.colorOf(p.color)
+      const k = this.alphaOf(p.key)
       ctx.lineWidth = p.active ? 1.6 : 1.1
       ctx.setLineDash(brainOn ? [] : [3, 5])
-      ctx.strokeStyle = rgba(color, (p.active ? 0.5 : 0.3) * (brainOn ? 1 : 0.7))
+      ctx.strokeStyle = rgba(color, (p.active ? 0.5 : 0.3) * (brainOn ? 1 : 0.7) * k)
       this.stroke(ctx, 'brain', p.key)
       ctx.setLineDash([])
       for (const a of p.agents) {
+        if (!this.shown(a.key)) continue
         const state = this.tracker.get(a.paneId).state
         const live = state === 'working' || state === 'attention' || state === 'done'
         ctx.lineWidth = live ? 1.6 : 1
         if (state === 'dormant' || state === 'exited' || state === 'failed') ctx.setLineDash([2, 4])
         ctx.strokeStyle =
-          state === 'attention' ? rgba(pal.warn, 0.6) : rgba(color, live ? 0.6 : state === 'dormant' ? 0.2 : 0.32)
+          state === 'attention' ? rgba(pal.warn, 0.6 * k) : rgba(color, (live ? 0.6 : state === 'dormant' ? 0.3 : 0.32) * k)
         this.stroke(ctx, p.key, a.key)
         ctx.setLineDash([])
       }
@@ -707,20 +777,23 @@ export class MapEngine {
       const s = this.screens.get(p.key)
       if (!s) continue
       const color = this.colorOf(p.color)
-      const r = 6.5 * s.s
+      // A project with nothing live to show is quieter: smaller, softer dot.
+      const quiet = !p.agents.some((a) => this.tracker.get(a.paneId).state !== 'dormant')
+      const k = this.alphaOf(p.key) * (quiet ? 0.6 : 1)
+      const r = (quiet ? 5 : 6.5) * s.s
       const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 4)
-      g.addColorStop(0, rgba(color, pal.dark ? 0.35 : 0.25))
+      g.addColorStop(0, rgba(color, (pal.dark ? 0.35 : 0.25) * k))
       g.addColorStop(1, rgba(color, 0))
       ctx.fillStyle = g
       ctx.beginPath()
       ctx.arc(s.x, s.y, r * 4, 0, Math.PI * 2)
       ctx.fill()
-      ctx.fillStyle = rgba(color, 1)
+      ctx.fillStyle = rgba(color, Math.max(0.3, k))
       ctx.beginPath()
       ctx.arc(s.x, s.y, r, 0, Math.PI * 2)
       ctx.fill()
       ctx.lineWidth = 1.2
-      ctx.strokeStyle = rgba(color, 0.55)
+      ctx.strokeStyle = rgba(color, 0.55 * k)
       ctx.beginPath()
       ctx.arc(s.x, s.y, r + 4.5 * s.s, 0, Math.PI * 2)
       ctx.stroke()
@@ -740,9 +813,10 @@ export class MapEngine {
     const spin = this.motion ? now / 1000 : 0
     for (const p of this.projects) {
       const color = this.colorOf(p.color)
+      ctx.globalAlpha = this.alphaOf(p.key)
       for (const a of p.agents) {
         const s = this.screens.get(a.key)
-        if (!s) continue
+        if (!s || !this.shown(a.key)) continue
         const scale = 0.9 + (s.s - 1) * 1.2
         const r = 23 * scale
         const state = this.tracker.get(a.paneId).state
@@ -820,6 +894,7 @@ export class MapEngine {
 
   /** You and the voice agent: rings that breathe while it listens, spread while it speaks. */
   private drawStem(ctx: CanvasRenderingContext2D, pal: Palette, now: number, dt: number): void {
+    ctx.globalAlpha = 1
     const v = this.screens.get('voice')
     const you = this.screens.get('you')
     if (!v || !you) return
@@ -988,14 +1063,17 @@ export class MapEngine {
 
   private spawnBolt(cx: number, cy: number, R: number, color: Rgb): void {
     if (this.bolts.length >= MAX_BOLTS) return
+    // Short and close in, inside the core's own glow. They used to start 2.3-3 core
+    // radii out, among the project labels, where a two-segment zigzag caught on a
+    // diagonal read as a stray "┘" bracket.
     const a = Math.random() * Math.PI * 2
-    const from = R * (2.3 + Math.random() * 0.7)
-    const to = R * 0.75
+    const from = R * (1.3 + Math.random() * 0.3)
+    const to = R * 0.8
     const pts: { x: number; y: number }[] = []
-    const n = 6
+    const n = 5
     for (let i = 0; i <= n; i++) {
       const r = from + ((to - from) * i) / n
-      const jag = i === 0 || i === n ? 0 : (i % 2 === 0 ? 1 : -1) * R * (0.1 + Math.random() * 0.08)
+      const jag = i === 0 || i === n ? 0 : (i % 2 === 0 ? 1 : -1) * R * (0.03 + Math.random() * 0.04)
       pts.push({
         x: cx + Math.cos(a) * r - Math.sin(a) * jag,
         y: cy + Math.sin(a) * r * 0.8 + Math.cos(a) * jag
@@ -1007,7 +1085,7 @@ export class MapEngine {
   private drawBolts(ctx: CanvasRenderingContext2D, dt: number): void {
     if (this.bolts.length === 0) return
     ctx.lineCap = 'round'
-    ctx.lineJoin = 'miter'
+    ctx.lineJoin = 'round'
     const next: Bolt[] = []
     for (const b of this.bolts) {
       b.t += dt / 0.42

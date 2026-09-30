@@ -301,7 +301,7 @@
 }
 
 .bmap-node__name {
-  max-width: 108px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -349,7 +349,7 @@
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  width: 116px;
+  width: 104px;
   transform: translate(-50%, -19px);
 }
 
@@ -416,8 +416,13 @@
   clip-path: circle(50%);
 }
 
-/* A project's hub label, on the brain's side of its hub. */
-.bmap-proj {
+/*
+ * A project's label, on the brain's side of its hub. The engine says where it
+ * touches (--lx, --ly, relative to the hub) and which part of it touches
+ * (--fx, --fy: 0 its left/top edge, 1 its right/bottom), so it hangs off the
+ * hub the same way whatever its real width.
+ */
+.bmap-plabel {
   position: absolute;
   left: 0;
   top: 0;
@@ -428,34 +433,54 @@
   padding: 5px 11px 6px;
   border-radius: 10px;
   white-space: nowrap;
+  pointer-events: auto;
   background: var(--bmap-label-bg);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--proj) 40%, transparent);
-  transform: translate(-50%, 22px);
+  transform: translate(var(--lx, 0px), var(--ly, 20px)) translate(calc(var(--fx, 0.5) * -100%), calc(var(--fy, 0) * -100%));
   transition: box-shadow var(--dur-fast) var(--ease-out);
 }
 
-.bmap-anchor[data-side='above'] .bmap-proj {
-  transform: translate(-50%, calc(-100% - 22px));
+/* Nothing live in it: it steps back. */
+.bmap-plabel[data-quiet='true'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--proj) 22%, transparent);
 }
 
-.bmap-proj[data-active='true'] {
+.bmap-plabel[data-quiet='true'] .bmap-proj__name {
+  color: var(--text-secondary);
+}
+
+.bmap-plabel[data-active='true'] {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--proj) 75%, transparent),
     0 0 18px -6px color-mix(in srgb, var(--proj) 60%, transparent);
 }
 
-.bmap-proj:hover,
-.bmap-proj:focus-visible {
+.bmap-plabel:hover,
+.bmap-plabel:focus-within,
+.bmap-plabel[data-open='true'] {
   box-shadow: inset 0 0 0 1.5px var(--proj);
 }
 
-.bmap-proj:focus-visible {
+.bmap-plabel:has(.bmap-proj:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
+/* The name is the button, stretched over the whole label: click anywhere on it to go there. */
+.bmap-anchor .bmap-proj {
+  position: static;
+}
+
+.bmap-proj::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
 .bmap-proj__name {
-  max-width: 170px;
+  display: block;
+  max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--font-display);
@@ -466,6 +491,7 @@
 }
 
 .bmap-proj__meta {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -473,18 +499,40 @@
   font-size: 10px;
   letter-spacing: 0.03em;
   color: var(--text-muted);
+  pointer-events: none;
 }
 
-.bmap-proj__n {
+/* "+4 not open": the folded agents, as a dashed chip (the same dotted look they have when shown). */
+.bmap-anchor .bmap-proj__fold {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
+  height: 16px;
+  padding: 0 6px 0 5px;
+  border-radius: var(--r-full);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  outline: 1px dashed color-mix(in srgb, var(--text-muted) 70%, transparent);
+  outline-offset: -1px;
+  pointer-events: auto;
+}
+
+.bmap-proj__fold-n {
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
 
-.bmap-proj__n[data-state='attention'] {
-  color: var(--warn);
+.bmap-anchor .bmap-proj__fold:hover,
+.bmap-anchor .bmap-proj__fold[aria-expanded='true'] {
+  outline-style: solid;
+  outline-color: var(--proj);
+  background: color-mix(in srgb, var(--proj) 14%, transparent);
+}
+
+.bmap-anchor .bmap-proj__fold:focus-visible {
+  outline: 2px solid var(--accent);
 }
 
 .bmap-proj__here {
@@ -495,6 +543,31 @@
   text-transform: uppercase;
   color: var(--text-primary);
   background: color-mix(in srgb, var(--proj) 26%, transparent);
+}
+
+/* Many projects on a small stage: one line, just the name and the count. */
+.bmap[data-compact='true'] .bmap-plabel {
+  flex-direction: row;
+  gap: 6px;
+  padding: 3px 9px;
+}
+
+.bmap[data-compact='true'] .bmap-proj__name {
+  max-width: 124px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.bmap[data-compact='true'] .bmap-proj__fold-w,
+.bmap[data-compact='true'] .bmap-proj__count,
+.bmap[data-compact='true'] .bmap-proj__here {
+  display: none;
+}
+
+/* Another project is opened out: this one steps well back. */
+.bmap-anchor[data-dim='true'] {
+  opacity: 0.28;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
 /* The brain: a round hit area over the drawn core, its name below it. */
@@ -593,6 +666,10 @@
 
 .bmap-stem:focus-visible .bmap-stem__disc {
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+.bmap-stem .bmap-node__name {
+  max-width: 118px;
 }
 
 .bmap-stem--you {
@@ -1172,6 +1249,14 @@
   .bmap-door__panel {
     animation: none;
   }
+
+  .bmap-anchor[data-dim='true'] {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .bmap-anchor[data-dim='true'] {
+  transition: none;
 }
 
 :root[data-reduced-motion='true'] .bmap,
