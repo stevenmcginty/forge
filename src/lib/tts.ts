@@ -431,6 +431,13 @@ export interface VoiceConfig {
   ttsModel: string
   /** `SpeechSynthesisVoice.name` for the local engine. Empty means best-available. */
   localVoice: string
+  /**
+   * Edge voices only, in order, instead of the engine chain: the first is
+   * tried twice (one retry), then each of the rest once. Forge Brain's voice.
+   */
+  edgeVoices?: readonly string[]
+  /** Never the local (SAPI) voice: when every neural try fails, say nothing (`engine: 'none'`). */
+  neuralOnly?: boolean
 }
 
 export interface SpokenResult {
@@ -467,6 +474,17 @@ export function neuralChain(config: VoiceConfig): Array<'edge' | 'gemini'> {
   if (chosen === 'edge') return config.hasKey ? ['edge', 'gemini'] : ['edge']
   if (chosen === 'gemini') return ['gemini', 'edge']
   return []
+}
+
+/**
+ * Each neural request `speak` makes, in order: `edgeVoices` when a config has
+ * them (the first voice twice — one retry — then the others), otherwise the
+ * engine chain, each engine in its configured voice.
+ */
+export function neuralTries(config: VoiceConfig): Array<{ engine: 'edge' | 'gemini'; voice: string }> {
+  const voices = (config.edgeVoices ?? []).filter((v) => v.trim())
+  if (voices.length) return [voices[0]!, ...voices].map((voice) => ({ engine: 'edge' as const, voice }))
+  return neuralChain(config).map((engine) => ({ engine, voice: engine === 'edge' ? config.edgeVoice : config.geminiVoice }))
 }
 
 let requestSeq = 0
@@ -545,10 +563,10 @@ class VoiceSpeaker {
     // sounds human. See neuralChain for why that ordering is the whole fix.
     let lastFailureKind: string | null = null
     let lastFailureError = ''
-    for (const engine of neuralChain(config)) {
+    for (const { engine, voice } of neuralTries(config)) {
       const key =
         engine === 'edge'
-          ? ttsCacheKey(body, config.edgeVoice || 'default', 'edge-neural')
+          ? ttsCacheKey(body, voice || 'default', 'edge-neural')
           : ttsCacheKey(body, config.geminiVoice, config.ttsModel)
       const hit = this.cache.get(key)
       if (hit) {
@@ -563,7 +581,7 @@ class VoiceSpeaker {
         result = await io().speak({
           text: body,
           engine,
-          voice: engine === 'edge' ? config.edgeVoice : config.geminiVoice,
+          voice,
           model: engine === 'gemini' ? config.ttsModel : '',
           requestId
         })
@@ -616,6 +634,11 @@ class VoiceSpeaker {
 
       lastFailureKind = result.kind
       lastFailureError = result.error
+    }
+
+    // Neural only (Forge Brain): silence, never the robot. The caller says so in words.
+    if (config.neuralOnly) {
+      return { spoke: false, engine: 'none', cached: false, latencyMs: Date.now() - started, fellBackBecause: lastFailureKind ?? 'no-voice' }
     }
 
     // Every neural engine failed (or none was configured). The local voice

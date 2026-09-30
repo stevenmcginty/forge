@@ -3086,6 +3086,45 @@ await test('when the neural voice fails, the local one still says the words', as
   delete global.SpeechSynthesisUtterance
 })
 
+await test("Forge Brain's voice: Edge in its own voice, one retry, the other British voices, then silence — never SAPI", async () => {
+  const said = withSpeechSynthesis()
+  const BRAIN = {
+    engine: 'edge',
+    hasKey: true,
+    edgeVoice: 'en-GB-RyanNeural',
+    geminiVoice: 'Sulafat',
+    ttsModel: '',
+    localVoice: '',
+    edgeVoices: ['en-GB-RyanNeural', 'en-GB-ThomasNeural', 'en-GB-SoniaNeural'],
+    neuralOnly: true
+  }
+  // Every Edge request fails: each voice is tried, Ryan twice, and no Gemini, no local.
+  fake = fakeTts(() => ({ ok: false, error: 'Edge refused the voice', kind: 'network' }))
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+  const r = await voiceSpeaker.speak('Two agents are working.', BRAIN)
+  assert.deepEqual(
+    fake.calls.speak.map((q) => `${q.engine}:${q.voice}`),
+    ['edge:en-GB-RyanNeural', 'edge:en-GB-RyanNeural', 'edge:en-GB-ThomasNeural', 'edge:en-GB-SoniaNeural']
+  )
+  assert.equal(r.spoke, false)
+  assert.equal(r.engine, 'none')
+  assert.equal(r.fellBackBecause, 'network')
+  assert.deepEqual(said, [], 'the built-in voice never speaks for the brain')
+
+  // Ryan fails once and answers the retry: Ryan speaks, nobody else is asked.
+  fake = fakeTts((req, n) => (n === 1 ? { ok: false, error: 'blip', kind: 'network' } : { ok: true, format: 'pcm', audio: fakePcm(0.1).toString('base64'), sampleRate: 24_000, channels: 1, model: 'edge-neural', voice: req.voice, ms: 5 }))
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+  const ok = await voiceSpeaker.speak('Two agents are working.', BRAIN)
+  assert.equal(ok.spoke, true)
+  assert.equal(ok.engine, 'edge')
+  assert.deepEqual(fake.calls.speak.map((q) => q.voice), ['en-GB-RyanNeural', 'en-GB-RyanNeural'])
+
+  delete global.window
+  delete global.SpeechSynthesisUtterance
+})
+
 await test('barge-in aborts the request in flight and never plays the late reply', async () => {
   fake = fakeTts()
   fake.hold = true

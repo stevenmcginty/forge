@@ -1906,6 +1906,12 @@ export interface Settings {
   brainEngine: BrainEngine
   /** The first-open pop-up that explains the brain has been seen. */
   brainIntroSeen: boolean
+  /**
+   * The Edge neural voice Forge Brain's spoken replies use — its own, apart
+   * from the voice agents' (`voiceEdgeVoice`), so Steve can hear who is
+   * talking. `BRAIN_VOICE_DEFAULT` (shared/brain.ts) until he picks one.
+   */
+  brainVoice: string
 
   /* -------------------------------------------------------- agent memory */
   /**

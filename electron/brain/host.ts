@@ -1,6 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { app } from 'electron'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import {
   BRAIN_ASK_WAIT_MAX_MS,
@@ -214,6 +215,12 @@ let transcriptArmedFor: string | null = null
 let unavailableCache: { at: number; value: Partial<Record<BrainEngine, string>> } | null = null
 
 /* ------------------------------------------------------------------ paths */
+
+/** Forge's docs folder beside the app's code (a checkout; a packaged build has none). */
+function forgeDocsDir(): string | null {
+  const dir = join(app.getAppPath(), 'docs')
+  return existsSync(dir) ? dir : null
+}
 
 function brainDir(): string {
   return join(getDataDir(), 'brain')
@@ -442,7 +449,7 @@ async function start(engine: BrainEngine): Promise<void> {
   }
   const server: BrainMcpServer = { node: nodePath(), script, linkFile }
   mkdirSync(brainHomeDir(), { recursive: true })
-  prepareBrainHome(brainHomeDir(), server)
+  prepareBrainHome(brainHomeDir(), server, forgeDocsDir())
   ensureProject()
   const leaf = ensureLeaf(engine)
   const launch = buildLaunch(engine, leaf, server)

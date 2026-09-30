@@ -57,6 +57,7 @@ import {
 import { EMPTY_WORKSPACE, makeTab, newTabName, nextTextColor, withPrunedMosaic } from '@shared/workspace'
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { defaultVoiceMenu } from '@shared/agent-brain'
+import { BRAIN_VOICE_DEFAULT } from '@shared/brain'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
@@ -307,6 +308,7 @@ const FALLBACK_SETTINGS: Settings = {
   brainEnabled: false,
   brainEngine: 'claude',
   brainIntroSeen: false,
+  brainVoice: BRAIN_VOICE_DEFAULT,
   memoryLlmSummarize: false,
   // Filled in by the store on hydrate — main knows the real data root.
   skillsLibraryDir: '',

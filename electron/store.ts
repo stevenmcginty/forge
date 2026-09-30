@@ -10,7 +10,8 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
-import { isBrainEngine, isBrainProject } from '@shared/brain'
+import { BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject } from '@shared/brain'
+import { isEdgeVoice } from '@shared/tts'
 import { defaultVoiceMenu, isAgentBrainId, migrateAgentBrain, migrateCodexClaudeModel, normaliseVoiceMenu } from '@shared/agent-brain'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
@@ -320,6 +321,7 @@ function defaultSettings(): Settings {
     brainEnabled: false,
     brainEngine: 'claude',
     brainIntroSeen: false,
+    brainVoice: BRAIN_VOICE_DEFAULT,
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -904,6 +906,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     brainEnabled: s.brainEnabled === true,
     brainEngine: isBrainEngine(s.brainEngine) ? s.brainEngine : DEFAULT_SETTINGS.brainEngine,
     brainIntroSeen: s.brainIntroSeen === true,
+    brainVoice: typeof s.brainVoice === 'string' && isEdgeVoice(s.brainVoice) ? s.brainVoice.trim() : BRAIN_VOICE_DEFAULT,
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()

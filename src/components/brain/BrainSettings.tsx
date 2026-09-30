@@ -3,6 +3,7 @@ import { BRAIN_ENGINE_NAME } from '@shared/brain'
 import { useKeymap } from '@/hooks/useHub'
 import { useApp, type SettingsSection } from '@/state/AppState'
 import { openBrainMap } from '../brainview'
+import { BrainVoicePicker } from '../settings/BrainVoicePicker'
 import { Card, Row, Section, StateChip, Toggle, type ChipTone } from '../settings/parts'
 import { EnginePicker } from './BrainIntro'
 import { pickBrainEngine, startBrainFeed, turnBrainOff, turnBrainOn, useBrain } from './brainStore'
@@ -84,6 +85,9 @@ export function BrainSettings(): ReactNode {
         hint="Switching while it is on starts it again on the new one, with a new conversation. An option this PC cannot run says why."
       >
         <EnginePicker value={engine} unavailable={status?.unavailable ?? {}} disabled={!status} onPick={(e) => void pickBrainEngine(e)} />
+      </Card>
+      <Card title="Voice" hint="Replies are spoken in this voice when Forge Brain is your voice agent.">
+        <BrainVoicePicker />
       </Card>
     </Section>
   )

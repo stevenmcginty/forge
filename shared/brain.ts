@@ -116,6 +116,16 @@ export interface BrainStatus {
 /** The answer to `send`. `queued` = the brain was busy; it is typed when it is free. */
 export type BrainSendResult = { ok: true; queued: boolean } | { ok: false; error: string }
 
+/** Forge Brain's own voice, until Steve picks another (`Settings.brainVoice`): Edge's calm British male. */
+export const BRAIN_VOICE_DEFAULT = 'en-GB-RyanNeural'
+
+/**
+ * Where the brain's voice goes when its own will not answer: other British
+ * neural voices, then silence — never the built-in SAPI voice (src/lib/tts.ts
+ * `neuralOnly`).
+ */
+export const BRAIN_VOICE_FALLBACKS: readonly string[] = ['en-GB-ThomasNeural', 'en-GB-SoniaNeural']
+
 /** Longest message `send` takes. Longer is refused, not cut. */
 export const BRAIN_SEND_MAX = 4000
 
