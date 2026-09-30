@@ -449,10 +449,47 @@ async function openElsewhere(r: Reach, where: Where, args: Record<string, unknow
     ...(name ? { name } : {})
   })
   if (!opened) return `FAILED: Forge refused to open a ${profile.name} pane in ${where.name} — the session limit or that project's tab limit is reached.`
+  const started = await startOffScreen(r, where.id, opened.paneId)
   return [
     `OK: opened ${opened.name} (${profile.name}) in ${where.name} (pane id ${opened.paneId}); Steve's screen stayed where it was.`,
-    `It starts the next time ${where.name} is on screen — Forge only starts the panes of the project on screen${prompt ? `; the prompt goes in once it is ready${submit ? ' and is sent' : ', unsent'}` : ''}.`
+    started
+      ? `It is starting now, off screen${prompt ? `; the prompt goes in once it is ready${submit ? ' and is sent' : ', unsent'}` : ''}. read_pane shows it, and you hear when it finishes.`
+      : `It starts the next time ${where.name} is on screen${prompt ? `; the prompt goes in once it is ready${submit ? ' and is sent' : ', unsent'}` : ''}.`
   ].join(' ')
+}
+
+/**
+ * Start a pane just opened in a project that is not on screen, without
+ * switching to it (TerminalHost.startHidden): the same launch its TerminalPane
+ * would make — the profile's command with the pane's permission mode, the
+ * project folder, the pane's Claude session id. The tab lands in state a
+ * render after `openAgentPane` returns, so it is waited for briefly. False
+ * when it never appeared (the pane then starts when its project is shown).
+ */
+async function startOffScreen(r: Reach, projectId: string, paneId: string): Promise<boolean> {
+  const { launchCommand, leafPermissionMode, paneDisplayTitle, resolveProfile } = await import('./agents')
+  for (let tries = 0; tries < 40; tries++) {
+    const st = r.app.get()
+    const project = st.projects.find((p) => p.id === projectId)
+    const leaf = st.workspaces[projectId]?.tabs.flatMap((t) => collectLeaves(t.root)).find((l) => l.id === paneId)
+    if (project && leaf) {
+      const profile = resolveProfile(st.settings.agentProfiles, leaf.profileId)
+      r.term.startHidden(paneId, {
+        cwd: project.path,
+        bootstrapCommand: launchCommand(profile, leafPermissionMode(leaf)),
+        fontSize: st.settings.terminalFontSize,
+        fontFamily: st.settings.terminalFontFamily,
+        accent: profile.accent,
+        projectName: project.name,
+        paneTitle: paneDisplayTitle(profile, leaf.title),
+        sessionId: leaf.sessionId,
+        repoUrl: project.repoUrl
+      })
+      return true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return false
 }
 
 async function closeTabIn(r: Reach, args: Record<string, unknown>): Promise<string> {

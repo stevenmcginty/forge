@@ -946,6 +946,40 @@ class TerminalHost {
   }
 
   /**
+   * Start pane `paneId` without showing it — a pane Forge Brain opened in a
+   * project that is not on screen (src/lib/agenttools.ts).
+   *
+   * The terminal and its PTY session come up exactly as `attach` brings them
+   * up, in a box off screen at the size Steve's panes are drawn at now, and the
+   * box is then let go. That leaves the pane where a pane of a project Steve
+   * switched away from is: running, read by `snapshotText`, watched for busy
+   * and attention (so the brain hears it finish), and moved into its real box
+   * by the next `attach` — the same terminal and the same process, never a
+   * second one. Let go at once, so a later `focus` on it cannot take the keys
+   * from the pane Steve is typing in. No-op for a pane that already has one.
+   */
+  startHidden(paneId: string, spec: TerminalSpec): void {
+    this.wire()
+    if (this.entries.has(paneId)) return
+    const shown = [...this.entries.values()].find((e) => e.container && e.mode === 'tab' && e.geometry)
+    const size = shown?.geometry ?? DEFAULT_PANE_GEOMETRY
+    const box = document.createElement('div')
+    box.style.cssText = `position:fixed;left:-20000px;top:0;width:${size.width}px;height:${size.height}px;visibility:hidden;pointer-events:none`
+    box.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(box)
+    const entry = this.create(paneId, spec)
+    this.entries.set(paneId, entry)
+    box.appendChild(entry.wrapper)
+    entry.container = box
+    entry.mode = 'tab'
+    entry.term.open(entry.wrapper)
+    this.fit(paneId)
+    void this.start(entry)
+    this.detach(paneId)
+    box.remove()
+  }
+
+  /**
    * The size a mosaic tile should lay this terminal out at: whatever it last
    * measured at full size, or a sane default for one it has never shown.
    */
