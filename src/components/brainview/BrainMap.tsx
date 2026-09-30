@@ -262,10 +262,19 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
     engineRef.current = engine
     engine.setMotion(!reducedMotion())
     engine.setPalette(readPalette(probe))
-    const size = (): void => engine.setSize(root.clientWidth, root.clientHeight, HEAD_H, FOOT_H)
+    // The voice bar stays on over the map (Steve: on every page), so the map
+    // keeps the bar's height clear at the bottom: the footer sits above it and
+    // the layout fits into what is left.
+    const dockEl = document.querySelector<HTMLElement>('.dock')
+    const size = (): void => {
+      const room = dockEl ? Math.max(0, Math.round(root.getBoundingClientRect().bottom - dockEl.getBoundingClientRect().top + 10)) : 0
+      root.style.setProperty('--bmap-dock', `${room}px`)
+      engine.setSize(root.clientWidth, root.clientHeight, HEAD_H, FOOT_H + room)
+    }
     size()
     const ro = new ResizeObserver(size)
     ro.observe(root)
+    if (dockEl) ro.observe(dockEl)
     // Theme and reduced-motion changes both land on <html>'s attributes.
     const mo = new MutationObserver(() => {
       engine.setPalette(readPalette(probe))
