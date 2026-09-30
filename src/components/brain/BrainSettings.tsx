@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { BRAIN_ENGINE_NAME } from '@shared/brain'
+import { BRAIN_CONTEXT_WARN_PCT, BRAIN_ENGINE_NAME } from '@shared/brain'
 import { useKeymap } from '@/hooks/useHub'
 import { useApp, type SettingsSection } from '@/state/AppState'
 import { openBrainMap } from '../brainview'
 import { BrainVoicePicker } from '../settings/BrainVoicePicker'
-import { Card, Row, Section, StateChip, Toggle, type ChipTone } from '../settings/parts'
+import { Card, Row, Section, StateChip, Stepper, Toggle, type ChipTone } from '../settings/parts'
+import { ContextRing, useBrainContext } from './BrainContext'
 import { EnginePicker } from './BrainIntro'
-import { pickBrainEngine, startBrainFeed, turnBrainOff, turnBrainOn, useBrain } from './brainStore'
+import { freshStartBrain, pickBrainEngine, startBrainFeed, turnBrainOff, turnBrainOn, useBrain } from './brainStore'
 import './Brain.css'
 
 /**
@@ -37,6 +38,17 @@ export function BrainSettings(): ReactNode {
   const on = Boolean(status?.enabled)
   const chip = WORD[on && status ? status.state : 'off']!
   const engine = status?.engine ?? state.settings.brainEngine
+  const context = useBrainContext()
+  const warnAt = state.settings.brainContextWarnPct ?? BRAIN_CONTEXT_WARN_PCT
+  const [freshing, setFreshing] = useState(false)
+
+  const freshStart = async (): Promise<void> => {
+    setFreshing(true)
+    setError(null)
+    const why = await freshStartBrain()
+    if (why) setError(why)
+    setFreshing(false)
+  }
 
   const flip = async (next: boolean): Promise<void> => {
     setBusy(true)
@@ -79,6 +91,28 @@ export function BrainSettings(): ReactNode {
           </button>
         </Row>
         {error ? <p className="brainsettings__error" role="alert">× {error}</p> : null}
+      </Card>
+      <Card
+        title="Context window"
+        actions={on ? <ContextRing view={context} /> : undefined}
+        hint="A long conversation fills the brain's context window. Past your line Forge tells you once, with a fresh start: the brain writes HANDOFF.md, then starts a new conversation that reads it first. The panes it opened still report back."
+      >
+        <Row label="Tell me at" hint="How full, in percent, before the one notice.">
+          <Stepper
+            label="Tell me at"
+            value={warnAt}
+            display={`${warnAt}%`}
+            min={5}
+            max={95}
+            step={5}
+            onChange={(next) => actions.patchSettings({ brainContextWarnPct: next })}
+          />
+        </Row>
+        <Row label="Fresh start" hint={freshing ? 'Writing the handoff, then starting fresh…' : 'Now, whatever the number says.'}>
+          <button type="button" className="ghost-btn" disabled={!on || freshing || status?.state === 'error'} onClick={() => void freshStart()}>
+            Fresh start
+          </button>
+        </Row>
       </Card>
       <Card
         title="Who runs it"

@@ -10,7 +10,7 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
-import { BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject } from '@shared/brain'
+import { BRAIN_CONTEXT_WARN_PCT, BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject } from '@shared/brain'
 import { isEdgeVoice } from '@shared/tts'
 import {
   DEFAULT_AGENT_BRAIN,
@@ -331,6 +331,7 @@ function defaultSettings(): Settings {
     brainEngine: 'claude',
     brainIntroSeen: false,
     brainVoice: BRAIN_VOICE_DEFAULT,
+    brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -917,6 +918,10 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     brainEngine: isBrainEngine(s.brainEngine) ? s.brainEngine : DEFAULT_SETTINGS.brainEngine,
     brainIntroSeen: s.brainIntroSeen === true,
     brainVoice: typeof s.brainVoice === 'string' && isEdgeVoice(s.brainVoice) ? s.brainVoice.trim() : BRAIN_VOICE_DEFAULT,
+    brainContextWarnPct:
+      typeof s.brainContextWarnPct === 'number' && Number.isFinite(s.brainContextWarnPct)
+        ? clamp(Math.round(s.brainContextWarnPct), 1, 100)
+        : BRAIN_CONTEXT_WARN_PCT,
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()

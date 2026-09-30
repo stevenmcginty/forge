@@ -555,6 +555,13 @@
   color: var(--text-dim);
 }
 
+/* Its context window: the ring and the % (components/brain/BrainContext). */
+.bmap-core__ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 /* The stem: the voice agent and you. */
 .bmap-stem {
   position: absolute;

@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
@@ -13,6 +13,7 @@ import {
   type BrainAskResult,
   type BrainConfirmRequest,
   type BrainEngine,
+  type BrainFreshStartResult,
   type BrainRisk,
   type BrainSaysEvent,
   type BrainSendResult,
@@ -394,11 +395,12 @@ function profileFor(engine: BrainEngine): string {
 /**
  * The brain's one pane, from its saved layout when it was running this engine
  * (so Claude resumes its conversation), else a new one saved in its place.
+ * `fresh` always makes a new one: a new pane id and a new conversation.
  */
-function ensureLeaf(engine: BrainEngine): PaneLeaf {
+function ensureLeaf(engine: BrainEngine, fresh = false): PaneLeaf {
   const title = BRAIN_ENGINE_NAME[engine]
   const saved = getWorkspace(BRAIN_PROJECT_ID)?.tabs[0]?.root
-  if (saved?.type === 'leaf' && saved.profileId === profileFor(engine) && saved.title === title && saved.sessionId) return saved
+  if (!fresh && saved?.type === 'leaf' && saved.profileId === profileFor(engine) && saved.title === title && saved.sessionId) return saved
   const leaf: PaneLeaf = { type: 'leaf', id: makeId('pane'), profileId: profileFor(engine), title, sessionId: newSessionId() }
   const tabId = makeId('tab')
   const workspace: Workspace = {
@@ -429,7 +431,12 @@ function nodePath(): string {
   return (process.platform === 'win32' ? findWindowsLaunchable('node') : whichCommand('node')) ?? 'node'
 }
 
-async function start(engine: BrainEngine): Promise<void> {
+/**
+ * Start the brain's pane. `fresh` (a fresh start, `freshStartBrain`) starts a
+ * new conversation in a new pane and keeps the panes it opened before: their
+ * report-back is main's to remember, not the conversation's.
+ */
+async function start(engine: BrainEngine, fresh = false): Promise<void> {
   const why = unavailableEngines()[engine]
   if (why) {
     setState('error', why)
@@ -451,7 +458,7 @@ async function start(engine: BrainEngine): Promise<void> {
   mkdirSync(brainHomeDir(), { recursive: true })
   prepareBrainHome(brainHomeDir(), server, forgeDocsDir())
   ensureProject()
-  const leaf = ensureLeaf(engine)
+  const leaf = ensureLeaf(engine, fresh)
   const launch = buildLaunch(engine, leaf, server)
   if (typeof launch === 'string') {
     setState('error', launch)
@@ -483,7 +490,7 @@ async function start(engine: BrainEngine): Promise<void> {
     transcriptCarry: Buffer.alloc(0),
     exited: false
   }
-  opened.clear()
+  if (!fresh) opened.clear()
   setState('starting')
   const result = createPaneSession({ id: leaf.id, cwd: launch.cwd, cols: 120, rows: 40, bootstrapCommand: launch.command })
   if (!result.ok) {
@@ -1009,6 +1016,104 @@ function replyAfter(sessionId: string, offset: number): string {
     }
   }
   return (last.length ? last : all).join('\n\n').trim()
+}
+
+/* ------------------------------------------------------------ fresh start */
+
+/** How long a fresh start waits for the brain's handoff note before Forge writes what it knows instead. */
+const HANDOFF_WAIT_MS = 120_000
+
+const HANDOFF_ASK =
+  '[Forge] Fresh start: your context window is filling up, so Forge restarts you on a new conversation right after this reply. ' +
+  'Reply with your handoff note and nothing else: what you are tracking for Steve, the panes you handed work to ' +
+  '(name, project, pane id, what each is doing), and any open questions. Plain lines, under 250 words. ' +
+  'Forge saves your reply as HANDOFF.md in your home, and your next conversation reads it first.'
+
+const HANDOFF_READ = "[Forge] This is a fresh start. Read HANDOFF.md first, then say you're ready."
+
+let freshStarting = false
+
+function mtimeOf(file: string): number {
+  try {
+    return statSync(file).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * What main knows, below the brain's own note: the panes it opened that are
+ * still up (Forge keeps telling it when they finish), and the notes waiting
+ * for it. Kept here, not in the conversation, so a fresh start loses neither.
+ */
+function forgeHandoff(): string {
+  const live = new Set(liveSessions().map((s) => s.id))
+  const panes = [...opened].filter((id) => live.has(id)).map((id) => `- ${paneLabel(id)} (pane id ${id})`)
+  const notes = queue.filter((q) => q.kind === 'note').map((q) => `- ${q.text}`)
+  return [
+    `## From Forge (${new Date().toISOString()})`,
+    '',
+    'Panes you opened that are still up. Forge still tells you when they finish:',
+    ...(panes.length ? panes : ['- none']),
+    '',
+    'Notes from Forge waiting for you:',
+    ...(notes.length ? notes : ['- none']),
+    ''
+  ].join('\n')
+}
+
+/**
+ * A fresh start: the brain is asked for its handoff note and its turn waited
+ * out; the note goes into HANDOFF.md in its home (the brain's tools cannot
+ * write files, so Forge saves its reply — and if it wrote the file itself,
+ * that is kept), with what main knows added below. No note in time, or an
+ * engine whose reply Forge cannot read: the file is what Forge knows alone.
+ * Then the pane restarts on a new pane and a new conversation whose first
+ * message tells it to read HANDOFF.md. The panes it opened stay tracked.
+ */
+export async function freshStartBrain(): Promise<BrainFreshStartResult> {
+  const r = running
+  if (!getSettings().brainEnabled || !r || r.exited || state === 'error') {
+    return { ok: false, error: lastError ?? 'Forge Brain is not running.' }
+  }
+  if (freshStarting) return { ok: false, error: 'A fresh start is already under way.' }
+  freshStarting = true
+  try {
+    const file = join(brainHomeDir(), 'HANDOFF.md')
+    const before = mtimeOf(file)
+    const answer = await askBrain(HANDOFF_ASK, HANDOFF_WAIT_MS)
+    if (running !== r) return { ok: false, error: 'Forge Brain stopped or changed engine during the fresh start.' }
+    const wroteItself = mtimeOf(file) > before
+    const note = answer.ok && r.engine === 'claude' ? answer.text.trim() : ''
+    let body: string
+    if (wroteItself) body = `${readFileSync(file, 'utf8').trimEnd()}\n\n${forgeHandoff()}`
+    else if (note) body = `# Handoff\n\n${note}\n\n${forgeHandoff()}`
+    else body = `# Handoff\n\nForge Brain gave no handoff note before this fresh start. This is what Forge knows.\n\n${forgeHandoff()}`
+    writeFileSync(file, body, 'utf8')
+    const by: 'brain' | 'forge' = wroteItself || note ? 'brain' : 'forge'
+    let restarted = false
+    // In line with enable, disable and engine switches, so none of them lands halfway through.
+    reconciling = reconciling
+      .then(async () => {
+        if (running !== r) return
+        stop()
+        await start(r.engine, true)
+        if (!running) return
+        restarted = true
+        queue.unshift({ kind: 'user', text: HANDOFF_READ })
+        emit()
+      })
+      .catch((err) => {
+        console.error('[brain] fresh start failed:', err)
+        setState('error', `Forge Brain could not start again: ${err instanceof Error ? err.message : String(err)}`)
+      })
+    await reconciling
+    return restarted ? { ok: true, by } : { ok: false, error: lastError ?? 'Forge Brain did not start again.' }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  } finally {
+    freshStarting = false
+  }
 }
 
 /* ------------------------------------------------------------ report-back */

@@ -554,6 +554,122 @@
   color: var(--danger-ink);
 }
 
+/* ================================================ context window (BrainContext) */
+
+/* The icon widens for the ring and its %. */
+.brainbtn:has(.bctx) {
+  width: auto;
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 0 8px 0 6px;
+}
+
+/* A ring filling up and the % beside it; past the line, a triangle. Never colour alone. */
+.bctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.bctx[data-over='true'] {
+  color: var(--warn);
+}
+
+.bctx__shape {
+  flex: none;
+  overflow: visible;
+}
+
+.bctx__track {
+  fill: none;
+  stroke: color-mix(in srgb, currentColor 30%, transparent);
+  stroke-width: 2;
+}
+
+/* Not known yet: a dashed ring, and "?" for the number. */
+.bctx__track[data-unknown='true'] {
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-dasharray: 1.6 1.6;
+}
+
+.bctx__fill {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.bctx__warn,
+.bctx__warn-mark {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The notice: the app's notice tile, with a fresh start on it. */
+.bctx-toast {
+  padding-right: 8px;
+}
+
+.bctx-toast__mark {
+  display: grid;
+  flex: none;
+  color: var(--warn);
+}
+
+.bctx-toast__mark .bctx__shape {
+  width: 16px;
+  height: 16px;
+}
+
+.bctx-toast__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bctx-toast__btn {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--bg-base);
+  background: var(--accent);
+}
+
+.bctx-toast__btn:disabled,
+.bctx-toast__close:disabled {
+  opacity: 0.55;
+}
+
+.bctx-toast__close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-full);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.bctx-toast__close:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+:is(.bctx-toast__btn, .bctx-toast__close):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 /* ========================================================== reduced motion */
 
 @media (prefers-reduced-motion: reduce) {

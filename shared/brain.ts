@@ -116,6 +116,16 @@ export interface BrainStatus {
 /** The answer to `send`. `queued` = the brain was busy; it is typed when it is free. */
 export type BrainSendResult = { ok: true; queued: boolean } | { ok: false; error: string }
 
+/**
+ * The answer to `freshStart`. `by` says who wrote HANDOFF.md: `brain` = its
+ * own note (Forge adds what it knows below), `forge` = the brain gave none in
+ * time and the note is only what Forge knows.
+ */
+export type BrainFreshStartResult = { ok: true; by: 'brain' | 'forge' } | { ok: false; error: string }
+
+/** The context use, in percent, past which Forge says so once per conversation (`Settings.brainContextWarnPct`). */
+export const BRAIN_CONTEXT_WARN_PCT = 20
+
 /** Forge Brain's own voice, until Steve picks another (`Settings.brainVoice`): Edge's calm British male. */
 export const BRAIN_VOICE_DEFAULT = 'en-GB-RyanNeural'
 
@@ -202,5 +212,11 @@ export const BRAIN_IPC = {
    * R→M invoke, (text: string, timeoutMs?: number). Sends a message and waits
    * for the brain's reply to it. Returns BrainAskResult.
    */
-  ask: 'brain:ask'
+  ask: 'brain:ask',
+  /**
+   * R→M invoke. A fresh start: the brain writes its handoff (HANDOFF.md in its
+   * home), then its pane restarts on a new conversation that reads it first.
+   * Resolves once the new pane is starting. Returns BrainFreshStartResult.
+   */
+  freshStart: 'brain:fresh-start'
 } as const

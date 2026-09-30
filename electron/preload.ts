@@ -155,7 +155,8 @@ const api: ForgeApi = {
     stopTranscript: () => ipcRenderer.invoke(IPC.brainTranscriptStop),
     onTranscript: (cb) => subscribe(IPC.brainTranscript, cb),
     onSays: (cb) => subscribe(IPC.brainSays, cb),
-    ask: (text, timeoutMs) => ipcRenderer.invoke(IPC.brainAsk, String(text ?? ''), timeoutMs)
+    ask: (text, timeoutMs) => ipcRenderer.invoke(IPC.brainAsk, String(text ?? ''), timeoutMs),
+    freshStart: () => ipcRenderer.invoke(IPC.brainFreshStart)
   },
 
   memory: {

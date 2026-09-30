@@ -12,6 +12,8 @@ import { MAIN_AGENT_RULES } from '@shared/brain-persona'
  *                            about Forge (`forgeKnowledge`) after it. Rewritten
  *                            on every start, so an edit to BRAIN.md, and a
  *                            newer Forge's knowledge, reach all three.
+ *   HANDOFF.md               the note a fresh start leaves the next conversation
+ *                            (./host.ts `freshStartBrain`); never written here.
  *   .claude/settings.json    Claude: the brain's Forge tools allowed without a
  *                            prompt; editing and shell tools denied.
  *   .gemini/settings.json    Gemini: the Forge MCP server, trusted; the shell
@@ -64,6 +66,8 @@ export function forgeKnowledge(docsDir: string | null): string {
   }
   return `# FORGE, THE APP
 Forge is Steve's Windows desktop app for running coding agents (Claude Code, Codex, Gemini and others) in real terminal panes. Projects are down the left (the rail); each project has tabs, and a tab holds one or more panes, each named on its tab ("Zeb"). The voice bar sits at the bottom: Listen, the Dictate key and a text box — that is the voice agent, which can ask you things (a line starting "[The voice agent asks" or "[By voice") and hears what you pass it with say_to_voice_agent. Forge Brain (you) is the brain icon in the top bar, with a chat and a CLI view. Forge Web puts the same app on his phone and in a browser; Forge Mobile is the Android app.
+
+HANDOFF.md in your home, when it is there, is the note your last conversation left before a fresh start (Forge restarts you on a new conversation when your context window fills up): what it was tracking, the panes it handed work to, open questions. At the start of a new conversation, read it before anything else.
 
 When Steve spoke (a message starting "[By voice"), your reply is read aloud in your own voice. Talk like a person: one to three short sentences, contractions, no lists, no code, no paths or links in the spoken part. Anything longer (steps, code, a list) goes after a blank line; only the opening is read out, and Forge tells him the rest is in the text.
 

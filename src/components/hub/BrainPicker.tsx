@@ -12,6 +12,7 @@ import { useBrainProbes } from '@/hooks/useBrainStatus'
 import { barBrainLabel, brainSwitchWaits, brainUnavailable, forgeBrainStatus, statusOf, type BrainStatus } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { useApp } from '@/state/AppState'
+import { ContextRing, contextWords, useBrainContext } from '../brain/BrainContext'
 import { BrainIntro } from '../brain/BrainIntro'
 import { brainSnapshot, startBrainFeed, useBrain } from '../brain/brainStore'
 import { Icon } from '../Icon'
@@ -62,6 +63,9 @@ export function BrainPicker(): ReactNode {
   const resolved = resolveAgentBrain(chosen, s)
   const label = barBrainLabel(chosen, resolved)
   const fellBack = label !== agentBrainSpec(resolved.brain).label
+  // Forge Brain answering: how full its context is, on the chip.
+  const context = useBrainContext()
+  const showContext = isForgeBrainAgent(resolved.brain) && context.shown
 
   const close = useCallback((): void => {
     setOpen(false)
@@ -82,7 +86,7 @@ export function BrainPicker(): ReactNode {
         data-fallback={fellBack ? 'true' : undefined}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Voice agent: ${label}. Pick another`}
+        aria-label={`Voice agent: ${label}${showContext ? `, ${contextWords(context)}` : ''}. Pick another`}
         title={`Voice agent: ${label} — pick who answers Listen`}
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
@@ -97,6 +101,7 @@ export function BrainPicker(): ReactNode {
           {fellBack ? <span className="bpick-chip__mark" /> : null}
         </span>
         <span className="bpick-chip__name truncate">{label}</span>
+        {showContext ? <ContextRing view={context} /> : null}
         <Icon name="chevronDown" size={11} className="bpick-chip__chev" />
       </button>
       <Popover anchor={chip} open={open} onClose={close} align="start" width={intro ? 412 : 336} label={intro ? 'Forge Brain' : 'Voice agent'}>

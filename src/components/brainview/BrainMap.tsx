@@ -15,6 +15,7 @@ import { AgentBadge } from '../AgentBadge'
 import { Icon } from '../Icon'
 import { StateChip, StateGlyph } from '../shell/StateChip'
 import { lastLines } from './activity'
+import { ContextRing, contextWords, useBrainContext } from '../brain/BrainContext'
 import { BrainConversation } from './BrainConversation'
 import { BrainGlyph } from './BrainGlyph'
 import { MapEngine, type BrainMood, type Palette } from './engine'
@@ -435,6 +436,7 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
   const engine = engineRef.current
   const stateOf = (paneId: string): PaneActivity => engine?.stateOf(paneId) ?? { state: 'dormant', since: Date.now() }
   const mood: BrainMood = !brain || !brain.enabled ? 'off' : brain.state
+  const context = useBrainContext()
 
   let agents = 0
   const counts: Record<'working' | 'attention' | 'done', number> = { working: 0, attention: 0, done: 0 }
@@ -522,7 +524,7 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
             type="button"
             className="bmap-core"
             data-mood={mood}
-            aria-label={`Forge Brain — ${MOOD_WORD[mood]}`}
+            aria-label={`Forge Brain — ${MOOD_WORD[mood]}${context.shown ? `, ${contextWords(context)}` : ''}`}
             onPointerEnter={() => show('brain')}
             onPointerLeave={hideSoon}
             onFocus={() => show('brain')}
@@ -533,6 +535,12 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
             <span className="bmap-core__state">
               <StateGlyph state={MOOD_GLYPH[mood]} />
               {MOOD_WORD[mood]}
+              {context.shown ? (
+                <span className="bmap-core__ctx">
+                  {' · '}
+                  <ContextRing view={context} />
+                </span>
+              ) : null}
               {brain?.queued ? <span className="bmap-core__q"> · {brain.queued} waiting</span> : null}
               {brain?.confirms?.length ? <span className="bmap-core__ask"> · {brain.confirms.length} to allow</span> : null}
             </span>

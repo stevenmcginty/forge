@@ -3,6 +3,7 @@ import { useKeymap } from '@/hooks/useHub'
 import { shellSheet, useShellSheet } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { openBrainMap } from '../brainview'
+import { BrainContextNotice, ContextRing, contextWords, useBrainContext } from './BrainContext'
 import { BrainGlyph, glyphStateOf } from './BrainGlyph'
 import { BrainIntro } from './BrainIntro'
 import { brainSnapshot, startBrainFeed, useBrain } from './brainStore'
@@ -24,7 +25,10 @@ import './Brain.css'
  *
  * The badge says what needs saying, by shape: "!" when it is asking Steve (a
  * Yes / No it is waiting on, or a question on its screen), "×" when it has
- * stopped. Off, it says nothing at all.
+ * stopped. Off, it says nothing at all. Beside the mark, while it is on, how
+ * full its context window is (./BrainContext): a ring and the %, "?" before
+ * there is a number, a triangle past Steve's line — and, once per
+ * conversation, a notice offering a fresh start.
  */
 
 const COMMAND = 'toggle-brain'
@@ -94,6 +98,7 @@ export function BrainButton(): ReactNode {
   const needs = on && status ? status.state === 'asking' || status.confirms.length > 0 : false
   const stopped = on && status?.state === 'error'
   const glyph = glyphStateOf(status)
+  const context = useBrainContext()
 
   const words = !status
     ? 'Forge Brain'
@@ -109,6 +114,8 @@ export function BrainButton(): ReactNode {
               ? 'Forge Brain — starting'
               : 'Forge Brain — ready. Click for the map'
 
+  const label = on && context.shown ? `${words} — ${contextWords(context)}` : words
+
   return (
     <span className="brainbtn-wrap" ref={wrapRef}>
       <button
@@ -117,14 +124,15 @@ export function BrainButton(): ReactNode {
         className="brainbtn"
         data-state={glyph}
         data-open={intro ? 'true' : undefined}
-        aria-label={words}
+        aria-label={label}
         aria-haspopup={on ? undefined : 'dialog'}
         aria-expanded={on ? undefined : intro}
         aria-controls={intro ? popId : undefined}
-        title={combo ? `${words} (${combo})` : words}
+        title={combo ? `${label} (${combo})` : label}
         onClick={press}
       >
         <BrainGlyph state={glyph} />
+        {on ? <ContextRing view={context} /> : null}
         {needs ? (
           <span className="brainbtn__badge" data-kind="needs" aria-hidden="true">
             !
@@ -147,6 +155,7 @@ export function BrainButton(): ReactNode {
           />
         </div>
       ) : null}
+      <BrainContextNotice />
     </span>
   )
 }

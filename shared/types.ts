@@ -1912,6 +1912,12 @@ export interface Settings {
    * talking. `BRAIN_VOICE_DEFAULT` (shared/brain.ts) until he picks one.
    */
   brainVoice: string
+  /**
+   * How full Forge Brain's context window may get, in percent, before Forge
+   * says so once and offers a fresh start (a handoff note, then a new
+   * conversation). `BRAIN_CONTEXT_WARN_PCT` (shared/brain.ts) by default.
+   */
+  brainContextWarnPct: number
 
   /* -------------------------------------------------------- agent memory */
   /**

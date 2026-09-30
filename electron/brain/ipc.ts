@@ -5,6 +5,7 @@ import {
   type BrainAskResult,
   type BrainConfirmAnswer,
   type BrainEngine,
+  type BrainFreshStartResult,
   type BrainSendResult,
   type BrainStatus
 } from '@shared/brain'
@@ -16,6 +17,7 @@ import {
   askBrain,
   brainStatus,
   disposeBrain,
+  freshStartBrain,
   initBrain,
   onBrainSays,
   onBrainStatus,
@@ -78,6 +80,7 @@ export function registerBrainHandlers(): void {
   ipcMain.handle(IPC.brainConfirm, (_e, answer: BrainConfirmAnswer): boolean =>
     answerConfirm({ id: String(answer?.id ?? ''), allow: answer?.allow === true })
   )
+  ipcMain.handle(IPC.brainFreshStart, (): Promise<BrainFreshStartResult> => freshStartBrain())
   ipcMain.handle(IPC.brainTranscriptWatch, (): boolean => watchBrainTranscript(toRenderer))
   ipcMain.handle(IPC.brainTranscriptStop, (): void => stopBrainTranscript())
   unsubscribe ??= onBrainStatus((status) => send(IPC.brainState, status))

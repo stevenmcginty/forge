@@ -101,7 +101,15 @@ import type {
   ForemanToolRequest,
   ForemanToolResult
 } from './foreman'
-import type { BrainAskResult, BrainConfirmAnswer, BrainEngine, BrainSaysEvent, BrainSendResult, BrainStatus } from './brain'
+import type {
+  BrainAskResult,
+  BrainConfirmAnswer,
+  BrainEngine,
+  BrainFreshStartResult,
+  BrainSaysEvent,
+  BrainSendResult,
+  BrainStatus
+} from './brain'
 import type { ChatUpdate } from './chat'
 import type {
   WebMirrorChunk,
@@ -494,6 +502,11 @@ export interface ForgeApi {
      * preload from before it has no `ask`.
      */
     ask?(text: string, timeoutMs?: number): Promise<BrainAskResult>
+    /**
+     * A fresh start: the brain writes HANDOFF.md, then restarts on a new
+     * conversation that reads it first. Optional on top of `brain?`, like `ask`.
+     */
+    freshStart?(): Promise<BrainFreshStartResult>
   }
 
   /**

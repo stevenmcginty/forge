@@ -87,6 +87,22 @@ export async function turnBrainOff(): Promise<void> {
   if (status) onStatus(status)
 }
 
+/**
+ * A fresh start (main's `freshStartBrain`): the brain writes HANDOFF.md, then
+ * restarts on a new conversation that reads it first. Null when it restarted;
+ * otherwise why not, in words.
+ */
+export async function freshStartBrain(): Promise<string | null> {
+  const fresh = window.forge.brain?.freshStart
+  if (!fresh) return 'This window cannot reach a fresh start — restart Forge.'
+  try {
+    const result = await fresh()
+    return result.ok ? null : result.error
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err)
+  }
+}
+
 export async function pickBrainEngine(engine: BrainEngine): Promise<void> {
   const status = await window.forge.brain?.setEngine(engine).catch(() => null)
   if (status) onStatus(status)
