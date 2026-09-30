@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Icon } from '@/components/Icon'
 import { isYesNo, offersYesNo, readAsk, type ParsedAsk } from '../lib/answer-options'
 import './AnswerCard.css'
 
@@ -23,8 +24,16 @@ import './AnswerCard.css'
  * the dock can move without it.
  */
 
-/** How long a tap waits for the question to go before the buttons come back. */
+/**
+ * How long a tap waits for the question to go before "Send again" is offered.
+ * The buttons never come back on their own: an agent slow to repaint would
+ * otherwise take the same digit twice, the second into its next prompt.
+ */
 const SENT_RETRY_MS = 4000
+/** How many rows of the thing being approved show before it is opened. */
+const CONTEXT_FOLD_ROWS = 6
+/** "  13 -  padding: 12px;" — a diff row, by the sign after its line number. */
+const DIFF_ROW = /^\s*\d+\s+([+-])(?=\s|$)/
 /** The gap between arrow presses while walking to a row. */
 const SETTLE_BETWEEN_KEYS_MS = 80
 /** The gap between the last arrow and the Enter that picks the row. */
@@ -52,8 +61,11 @@ export function plainReplies(question: string): PlainReply[] {
   ]
 }
 
-/** How much of the screen's bottom is worth reading for a menu. */
-export const SCREEN_TAIL_LINES = 60
+/**
+ * How much of the screen's bottom is worth reading for a menu — and for the
+ * plan or diff drawn above it, which is why it is more than a menu needs.
+ */
+export const SCREEN_TAIL_LINES = 120
 
 const UP = '\x1b[A'
 const DOWN = '\x1b[B'
@@ -149,30 +161,47 @@ export function AnswerCard({
   }, [paneId])
   const ask = useMemo(() => readAsk(prompt, screen), [prompt, screen])
 
-  const [sent, setSent] = useState(false)
+  /**
+   * The answer tapped, kept until the question goes — which takes this card
+   * with it, since a new question is a new card. `stale` is the question
+   * outliving SENT_RETRY_MS, when "Send again" is offered instead.
+   */
+  const [sent, setSent] = useState<{ id: string; keys: string[] } | null>(null)
+  const [stale, setStale] = useState(false)
   const retry = useRef(0)
   useEffect(() => () => window.clearTimeout(retry.current), [])
 
-  const choose = async (keys: string[]): Promise<void> => {
-    if (sent || !live) return
+  const send = async (keys: string[]): Promise<void> => {
     try {
       navigator.vibrate?.(10)
     } catch {
       // A browser that refuses to buzz still sends the answer.
     }
-    setSent(true)
+    setStale(false)
     window.clearTimeout(retry.current)
-    // Still asking after this long means the keys did not land where they were
-    // meant to — give the buttons back rather than leave a dead card.
-    retry.current = window.setTimeout(() => setSent(false), SENT_RETRY_MS)
+    // Still asking after this long may mean the keys did not land — or only
+    // that the agent is slow to repaint, so nothing is re-armed by itself.
+    retry.current = window.setTimeout(() => setStale(true), SENT_RETRY_MS)
     await sendAnswerKeys(keys, onWrite)
+  }
+
+  const choose = async (id: string, keys: string[]): Promise<void> => {
+    if (sent || !live) return
+    setSent({ id, keys })
+    await send(keys)
+  }
+
+  /** The same keys once more, on an explicit tap. */
+  const again = async (): Promise<void> => {
+    if (!sent || !stale || !live) return
+    await send(sent.keys)
   }
 
   /** The keys that land on option `index` (0-based) of the parsed menu. */
   const keysFor = (index: number): string[] => answerKeys(ask, index, digits)
 
   const question = ask.question || prompt.trim() || `${agentName} needs an answer.`
-  const disabled = sent || !live
+  const disabled = sent !== null || !live
   /** Prose wants a reply in words, so the hint offers typing one as well. */
   const prose = ask.typed || (!ask.options.length && !isYesNo(question))
   /** "What should I do instead?" gets no buttons: only words answer it. */
@@ -187,6 +216,7 @@ export function AnswerCard({
         </span>
         <span>{agentName} is asking</span>
       </div>
+      {ask.context ? <AskContext rows={ask.context} /> : null}
       <p className="answer__question">{question}</p>
       {buttons ? (
         <div className="answer__options" role="group" aria-label="Answers">
@@ -197,12 +227,17 @@ export function AnswerCard({
                   type="button"
                   className="answer__option"
                   disabled={disabled}
-                  onClick={() => void choose(keysFor(index))}
+                  data-picked={sent?.id === `n${option.n}` ? 'true' : undefined}
+                  onClick={() => void choose(`n${option.n}`, keysFor(index))}
                 >
                   <span className="answer__digit" aria-hidden="true">
                     {option.n}
                   </span>
-                  <span className="answer__label">{option.label}</span>
+                  <span className="answer__text">
+                    <span className="answer__label">{option.label}</span>
+                    {option.detail ? <span className="answer__detail">{option.detail}</span> : null}
+                  </span>
+                  {sent?.id === `n${option.n}` ? <Picked /> : null}
                 </button>
               ))
             : replies.map((reply) => (
@@ -211,17 +246,35 @@ export function AnswerCard({
                   type="button"
                   className="answer__option"
                   disabled={disabled}
-                  onClick={() => void choose(reply.keys)}
+                  data-picked={sent?.id === reply.label ? 'true' : undefined}
+                  onClick={() => void choose(reply.label, reply.keys)}
                 >
-                  <span className="answer__label">{reply.label}</span>
+                  <span className="answer__text">
+                    <span className="answer__label">{reply.label}</span>
+                  </span>
+                  {sent?.id === reply.label ? <Picked /> : null}
                 </button>
               ))}
         </div>
       ) : null}
       {sent ? (
-        <p className="answer__sent" role="status">
-          Sent — waiting for {agentName}
-        </p>
+        <div className="answer__sent">
+          <p className="answer__sent-text" role="status">
+            {stale ? `Still waiting for ${agentName}` : `Sent — waiting for ${agentName}`}
+          </p>
+          {stale ? (
+            <button
+              type="button"
+              className="answer__again"
+              aria-label="Send again"
+              title="Send again"
+              disabled={!live}
+              onClick={() => void again()}
+            >
+              <Icon name="refresh" size={20} />
+            </button>
+          ) : null}
+        </div>
       ) : null}
       <div className="answer__foot">
         {onShowTerminal ? (
@@ -234,5 +287,62 @@ export function AnswerCard({
         </span>
       </div>
     </section>
+  )
+}
+
+/** The tapped row's mark: a shape, so "this one went" never rests on the dimming alone. */
+function Picked(): ReactNode {
+  return (
+    <span className="answer__picked" role="img" aria-label="Sent">
+      <Icon name="check" size={18} />
+    </span>
+  )
+}
+
+/**
+ * What is being approved — the diff, the plan, the command — in the terminal's
+ * own mono, folded to CONTEXT_FOLD_ROWS rows until the chevron opens it. A diff
+ * row's +/- is repeated in a gutter at the row's start, so an added line and a
+ * removed one differ by a character, and the tint is only a second cue.
+ */
+function AskContext({ rows }: { rows: string[] }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const folds = rows.length > CONTEXT_FOLD_ROWS
+  const shown = open || !folds ? rows : rows.slice(0, CONTEXT_FOLD_ROWS)
+  const diff = rows.some((row) => DIFF_ROW.test(row))
+  return (
+    <div className="answer__context" data-open={open ? 'true' : undefined}>
+      <pre className="answer__code" data-gutter={diff ? 'true' : undefined}>
+        {shown.map((row, index) => {
+          const sign = DIFF_ROW.exec(row)?.[1]
+          return (
+            <span
+              key={index}
+              className="answer__row"
+              data-diff={sign === '+' ? 'add' : sign === '-' ? 'del' : undefined}
+            >
+              {diff ? (
+                <span className="answer__sign" aria-hidden="true">
+                  {sign ?? ' '}
+                </span>
+              ) : null}
+              {row || ' '}
+            </span>
+          )
+        })}
+      </pre>
+      {folds ? (
+        <button
+          type="button"
+          className="answer__more"
+          aria-expanded={open}
+          aria-label={open ? 'Show less' : `Show all ${rows.length} lines`}
+          title={open ? 'Show less' : `Show all ${rows.length} lines`}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <Icon name="chevronDown" size={18} />
+        </button>
+      ) : null}
+    </div>
   )
 }

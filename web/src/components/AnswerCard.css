@@ -9,6 +9,10 @@
  * In normal flow above the composer, never fixed over the conversation: the
  * dock grows by the card's height and the pane above gives it up, keyboard
  * and safe area included, the same way it does for the composer's own box.
+ *
+ * Capped at 40dvh so what the agent said above stays readable. Over the cap,
+ * the thing being approved and the answers each scroll inside themselves and
+ * shrink to a floor; the eyebrow, the question and the first answer do not.
  */
 
 .answer {
@@ -18,7 +22,7 @@
   gap: var(--s-4);
   margin: var(--s-4) var(--s-4) 0;
   padding: var(--s-5) var(--s-5) var(--s-4);
-  max-height: 55dvh;
+  max-height: 40dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--warn-line-strong);
@@ -43,11 +47,11 @@
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  font-family: var(--font-mono);
-  font-size: var(--t-xs);
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--p-t-label, 14px);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  line-height: 20px;
   color: var(--warn);
 }
 
@@ -70,6 +74,7 @@
 }
 
 .answer__question {
+  flex: none;
   margin: 0;
   font-size: 17px;
   line-height: 1.4;
@@ -79,6 +84,11 @@
 }
 
 .answer__options {
+  flex: 0 1 auto;
+  /* The first answer, whole: a row is 48px, with room for a description. */
+  min-height: 64px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
@@ -124,7 +134,9 @@
 }
 
 .answer__option:focus-visible,
-.answer__terminal:focus-visible {
+.answer__terminal:focus-visible,
+.answer__again:focus-visible,
+.answer__more:focus-visible {
   outline: 2px solid var(--warn);
   outline-offset: 2px;
 }
@@ -134,36 +146,180 @@
   cursor: default;
 }
 
+/* The tapped row stays at full strength with a check on it; the rest dim. */
+.answer__option[data-picked]:disabled {
+  opacity: 1;
+  border-color: var(--warn-line-strong);
+}
+
+.answer__picked {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-primary);
+}
+
 .answer__digit {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   background: var(--bg-base);
   font-family: var(--font-mono);
-  font-size: var(--t-sm);
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
-.answer__label {
+.answer__text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.answer__label {
+  overflow-wrap: anywhere;
+}
+
+/* An option's description, from the row the menu indents under it. */
+.answer__detail {
+  font-size: var(--p-t-small, 13px);
+  line-height: 1.35;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
 .answer__sent {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+
+.answer__sent-text {
   margin: 0;
   font-size: var(--t-lg);
   font-weight: 500;
   color: var(--text-secondary);
 }
 
+.answer__again {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--warn-line-strong);
+  border-radius: var(--r-full);
+  background: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.answer__again:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ------------------------------------------ what is being approved, folded */
+
+.answer__context {
+  flex: 0 1 auto;
+  min-height: 60px;
+  display: flex;
+  align-items: flex-start;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  background: var(--bg-base);
+}
+
+/* Opened, it is what is being read: the answers give up their room first,
+ * down to their floor, before it does. */
+.answer__context[data-open] {
+  flex-shrink: 0.25;
+}
+
+.answer__code {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  margin: 0;
+  padding: var(--s-4) var(--s-5);
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-family: var(--p-mono, var(--font-mono));
+  font-size: var(--p-t-mono, 13px);
+  line-height: 18px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.answer__row {
+  display: block;
+  min-height: 18px;
+}
+
+/* The sign in the gutter is the cue; the tint only seconds it. */
+.answer__row[data-diff='add'] {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+.answer__row[data-diff='del'] {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.answer__sign {
+  display: inline-block;
+  width: 2ch;
+  text-indent: 0;
+  font-weight: 700;
+}
+
+/* A wrapped diff row hangs past the gutter, so the sign column stays clear. */
+.answer__code[data-gutter] .answer__row {
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+
+.answer__more {
+  flex: none;
+  align-self: flex-end;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: var(--s-2);
+  border: 0;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.answer__more svg {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.answer__context[data-open] .answer__more svg {
+  transform: rotate(180deg);
+}
+
 .answer__foot {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -188,8 +344,8 @@
 
 .answer__hint {
   margin-left: auto;
-  font-size: var(--t-md);
-  color: var(--text-dim);
+  font-size: var(--p-t-label, 14px);
+  color: var(--text-secondary);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -199,6 +355,10 @@
 
   .answer__option:not(:disabled):active {
     transform: none;
+  }
+
+  .answer__more svg {
+    transition: none;
   }
 }
 
@@ -220,5 +380,12 @@
     content: '';
     position: absolute;
     inset: -6px 0;
+  }
+
+  /* The chevron is drawn at 36px and hit at 44. */
+  .answer__more::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
   }
 }

@@ -17,6 +17,11 @@ export interface AnswerOption {
   n: number
   /** The option in its own words, hints and all. */
   label: string
+  /**
+   * The line a menu prints indented under an option to say what it means —
+   * AskUserQuestion's and a plan menu's descriptions. Screen menus only.
+   */
+  detail?: string
 }
 
 export interface ParsedAsk {
@@ -32,6 +37,13 @@ export interface ParsedAsk {
    * a message, not a keystroke into a select list.
    */
   typed?: boolean
+  /**
+   * What is being approved, as the screen draws it above the question: an
+   * edit's diff, a plan, a command. One string per row, box chrome trimmed and
+   * the common indent taken off, so a diff keeps its shape. Screen menus only;
+   * absent when there is nothing above the question but a title.
+   */
+  context?: string[]
 }
 
 /** The row markers the CLIs draw beside the selected option. */
@@ -80,6 +92,54 @@ export function parsePrompt(text: string): ParsedAsk {
 }
 
 const ROW = new RegExp(`^([${CURSOR}]\\s*)?(\\d{1,2})[.)]\\s+(.+)$`)
+/** The column a row's text starts at, past any box border on its left. */
+const textColumn = (raw: string): number => raw.search(/[^\s│┃|╭╮╰╯─━]/)
+/** A TUI's key hints under a menu: "Enter to select · Esc to cancel". Never a description. */
+const KEY_HINT = /^(?:Esc to|Enter to|Press enter|Tab to|↑|↓|ctrl\+)/i
+/** How many rows of description one option may have. */
+const DETAIL_MAX_ROWS = 3
+/** The longest description the card shows under an option. */
+const DETAIL_MAX_CHARS = 160
+/** How far above the question the thing being approved is looked for. */
+const CONTEXT_MAX_ROWS = 80
+/**
+ * Where the thing being approved starts, reading up from the question: the
+ * top border of the prompt's own box (a nested box's row starts with `│`, so
+ * only the outermost matches), a bare rule, or the agent's message marker.
+ */
+const CONTEXT_TOP = /^\s*(?:╭|[─━]{6,}\s*$|[⏺●]\s)/
+/** Box sides, one or nested, at either end of a row. */
+const SIDE_LEFT = /^(?:\s*[│┃])+/
+const SIDE_RIGHT = /(?:[│┃]\s*)+$/
+/** A row that is nothing but box chrome once its sides are off. */
+const CHROME_ONLY = /^[\s╭╮╰╯─━┄┈╌═┌┐└┘│┃]*$/
+
+/** A row of the thing being approved, sides off; empty for a row of chrome. */
+function unbox(raw: string): string {
+  const text = raw.replace(SIDE_RIGHT, '').replace(SIDE_LEFT, '').trimEnd()
+  return CHROME_ONLY.test(text) ? '' : text
+}
+
+/**
+ * The rows between the question and the top of its prompt — the diff an Edit
+ * asks about, the plan ExitPlanMode asks about, the command a Bash call asks
+ * about. Blank rows are dropped — inside a box a blank row and a row of
+ * border read the same, and a phone has no rows to spare — the common indent
+ * comes off, and a lone title ("Edit file") is chrome, not content, so it
+ * comes back empty.
+ */
+function contextAbove(lines: string[], at: number): string[] {
+  const rows: string[] = []
+  for (let i = at - 1; i >= 0 && i >= at - CONTEXT_MAX_ROWS; i--) {
+    const raw = lines[i]!
+    if (CONTEXT_TOP.test(raw) || ECHO_ROW.test(raw)) break
+    const text = unbox(raw)
+    if (text.trim()) rows.unshift(text)
+  }
+  if (rows.length < 2) return []
+  const indent = Math.min(...rows.map((row) => row.search(/\S/)))
+  return rows.map((row) => row.slice(indent))
+}
 
 /**
  * The pane's screen, one string per row, newest last. The menu is the last run
@@ -89,17 +149,25 @@ const ROW = new RegExp(`^([${CURSOR}]\\s*)?(\\d{1,2})[.)]\\s+(.+)$`)
 export function parseScreen(lines: string[]): ParsedAsk | null {
   const rows = lines.map((line) => line.replace(BORDER, ''))
   let cursorRow = -1
+  let labelColumn = 0
   for (let i = rows.length - 1; i >= 0; i--) {
     const m = ROW.exec(rows[i]!)
     if (m && m[1]) {
       cursorRow = i
+      // Where the cursor row's label starts: a description sits under it.
+      labelColumn = textColumn(lines[i]!) + rows[i]!.length - m[3]!.length
       break
     }
   }
   if (cursorRow < 0) return null
+  /** A row indented under the options' labels: one option's description. */
+  const isDetail = (i: number): boolean => {
+    const row = rows[i]!.trim()
+    return Boolean(row) && !ROW.test(rows[i]!) && !KEY_HINT.test(row) && textColumn(lines[i]!) >= labelColumn - 1
+  }
   // Walk out from the cursor row over the option rows either side of it. A
-  // description line under an option, or a blank one, does not end the menu;
-  // two of them in a row does.
+  // description under an option does not end the menu; a blank row or any
+  // other line does not either, but two of those in a row do.
   const items = new Map<number, { n: number; label: string; cursor: boolean }>()
   const take = (i: number): boolean => {
     const m = ROW.exec(rows[i]!)
@@ -110,32 +178,49 @@ export function parseScreen(lines: string[]): ParsedAsk | null {
   take(cursorRow)
   for (const step of [-1, 1]) {
     let misses = 0
-    for (let i = cursorRow + step; i >= 0 && i < rows.length && misses < 2; i += step) {
-      misses = take(i) ? 0 : misses + 1
+    let details = 0
+    for (let i = cursorRow + step; i >= 0 && i < rows.length && misses < 2 && details <= DETAIL_MAX_ROWS; i += step) {
+      if (take(i)) misses = details = 0
+      else if (isDetail(i)) details++
+      else misses++
     }
   }
   const ordered = [...items.entries()].sort((a, b) => a[0] - b[0])
   const first = ordered.findIndex(([, item]) => item.n === 1)
   if (first < 0) return null
-  const chain: { n: number; label: string; cursor: boolean }[] = []
+  const chain: { n: number; label: string; cursor: boolean; row: number }[] = []
   const firstRow = ordered[first]![0]
-  for (const [, item] of ordered.slice(first)) {
-    if (item.n === chain.length + 1) chain.push(item)
+  for (const [row, item] of ordered.slice(first)) {
+    if (item.n === chain.length + 1) chain.push({ ...item, row })
   }
   if (chain.length < 2) return null
   let question = ''
+  let questionAt = -1
   for (let i = firstRow - 1; i >= 0 && i >= firstRow - 6; i--) {
     const line = tidy(rows[i]!)
     if (line) {
       question = line
+      questionAt = i
       break
     }
   }
+  /** The description rows under the option on `row`, joined. */
+  const detailOf = (row: number): string => {
+    const parts: string[] = []
+    for (let i = row + 1; i < rows.length && parts.length < DETAIL_MAX_ROWS && isDetail(i); i++) parts.push(rows[i]!)
+    const text = tidy(parts.join(' '))
+    return text.length > DETAIL_MAX_CHARS ? `${text.slice(0, DETAIL_MAX_CHARS - 1)}…` : text
+  }
   const marked = chain.findIndex((item) => item.cursor)
+  const context = questionAt < 0 ? [] : contextAbove(lines, questionAt)
   return {
     question,
-    options: chain.map(({ n, label }) => ({ n, label })),
-    cursor: marked < 0 ? 0 : marked
+    options: chain.map(({ n, label, row }) => {
+      const detail = detailOf(row)
+      return detail ? { n, label, detail } : { n, label }
+    }),
+    cursor: marked < 0 ? 0 : marked,
+    ...(context.length ? { context } : {})
   }
 }
 
@@ -273,12 +358,36 @@ function parseProsePick(rows: string[], below: number): ParsedAsk | null {
  * the buttons.
  */
 export function readAsk(prompt: string, screen: string[]): ParsedAsk {
+  const ask = readBoth(prompt, screen)
+  return { ...ask, question: oneMark(ask.question) }
+}
+
+/**
+ * "…styles.css? ?" — a question mark drawn twice, which a screen repainted at
+ * a different width can hand over (shot 06 of the phone audit). One is kept.
+ */
+const oneMark = (question: string): string => question.replace(/([?？])(?:\s*[?？])+(\s*)$/, '$1$2')
+
+/**
+ * The prompt's menu with the screen's descriptions and context put on it: the
+ * flattened line has neither, and the rows it names are the screen's.
+ */
+function withScreen(fromPrompt: ParsedAsk, fromScreen: ParsedAsk | null): ParsedAsk {
+  if (!fromScreen) return fromPrompt
+  const options = fromPrompt.options.map((option) => {
+    const detail = fromScreen.options.find((row) => row.n === option.n && row.label === option.label)?.detail
+    return detail ? { ...option, detail } : option
+  })
+  return { ...fromPrompt, options, ...(fromScreen.context ? { context: fromScreen.context } : {}) }
+}
+
+function readBoth(prompt: string, screen: string[]): ParsedAsk {
   const fromPrompt = parsePrompt(prompt)
   const fromScreen = parseScreen(screen)
   if (fromScreen && fromScreen.options.length > fromPrompt.options.length) {
     return { ...fromScreen, question: fromPrompt.options.length ? fromPrompt.question : fromScreen.question || fromPrompt.question }
   }
-  if (fromPrompt.options.length || isYesNo(prompt)) return fromPrompt
+  if (fromPrompt.options.length || isYesNo(prompt)) return withScreen(fromPrompt, fromScreen)
   const at = questionRow(screen, prompt)
   if (at < 0) return fromPrompt
   const pick = parseProsePick(screen, at)

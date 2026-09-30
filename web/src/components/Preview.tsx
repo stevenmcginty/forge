@@ -7,6 +7,7 @@ import { screenTurns } from '../lib/screen-turns'
 import { useMobile } from '../lib/mobile'
 import type { FeedBlock, PaneStatus, PermissionMode, RichLine, Run } from '@/lib/rich'
 import { AgentStatus } from './AgentStatus'
+import { AnswerCard, registerAnswerScreen } from './AnswerCard'
 import { ChatView } from './ChatView'
 import { Composer } from './Composer'
 import { Feed } from './Feed'
@@ -262,6 +263,36 @@ const openCodeStatus: PaneStatus = {
   footer: ['build  grok-4.6  58%  ~/Desktop/forge']
 }
 
+/**
+ * The screen an asking pane has on the phone: an Edit permission prompt with
+ * its diff, so the answer card's folded context, question and answers can be
+ * looked at together.
+ */
+const EDIT_ASK_SCREEN = [
+  '● Update(src/lib/feed.ts)',
+  '',
+  '╭──────────────────────────────────────────────╮',
+  '│ Edit file                                    │',
+  '│ ╭──────────────────────────────────────────╮ │',
+  '│ │ src/lib/feed.ts                          │ │',
+  '│ │                                          │ │',
+  '│ │  40    export function mergeBlocks(      │ │',
+  '│ │  41 -    blocks: FeedBlock[]              │ │',
+  '│ │  41 +    blocks: readonly FeedBlock[],    │ │',
+  '│ │  42 +    cap = 400                        │ │',
+  '│ │  43    ): FeedBlock[] {                   │ │',
+  '│ │  44 -    return blocks.slice()            │ │',
+  '│ │  44 +    return blocks.slice(-cap)        │ │',
+  '│ │  45    }                                  │ │',
+  '│ ╰──────────────────────────────────────────╯ │',
+  '│ Do you want to make this edit to feed.ts? ?  │',
+  '│ ❯ 1. Yes                                     │',
+  "│   2. Yes, and don't ask again this session   │",
+  '│   3. No, and tell OpenCode what to do         │',
+  '│      differently (esc)                        │',
+  '╰──────────────────────────────────────────────╯'
+]
+
 /* ------------------------------------------------------------------ the page */
 
 function profileOf(id: string): AgentProfile {
@@ -351,6 +382,9 @@ function PreviewPane({
   // has no desktop to send a transcript.
   const [view, setView] = useState<'feed' | 'chat' | 'term'>('feed')
   const [blocks, setBlocks] = useState(initial)
+  const mobile = useMobile()
+  const askId = `preview-${profile.id}`
+  useEffect(() => (asking ? registerAnswerScreen(askId, () => EDIT_ASK_SCREEN) : undefined), [asking, askId])
   const turns = useMemo(() => screenTurns(blocks), [blocks])
   const roster = agentModels(profile.command)
   const levels = effortLevels(profile.command)
@@ -411,6 +445,17 @@ function PreviewPane({
       </section>
       <div className="session-composer" data-view={view}>
         <AgentStatus profile={profile} status={status} live={live} />
+        {mobile && asking ? (
+          <AnswerCard
+            paneId={askId}
+            agentName={profile.name}
+            prompt={prompt}
+            digits
+            live={live}
+            onWrite={() => undefined}
+            onShowTerminal={view !== 'term' ? () => setView('term') : undefined}
+          />
+        ) : null}
         <Composer
           draft={draft}
           disabled={!live}
