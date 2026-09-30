@@ -265,7 +265,7 @@ function spokenBrainReply(text: string): string {
   const sentences = said.match(/[^.!?]+[.!?]+(?=\s|$)/g)
   if (sentences && sentences.length > 2) said = sentences.slice(0, 2).join('').trim()
   const more = new RegExp(UNSPEAKABLE.source).test(whole) || clean(whole).length > said.length + 40
-  return more && said ? `${said} I've put the details in the chat.` : said
+  return more && said ? `${said} The details are in the text.` : said
 }
 
 const ERROR_MS = 1800
