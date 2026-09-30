@@ -22,11 +22,9 @@ import { answerConfirm, setBrainOpen, setBrainTab, shownTab, turnBrainOn, useBra
  */
 
 /**
- * Settings → Forge Brain (SettingsPage adds the group). SettingsSection lives in
- * AppState, which this job may not edit, hence the cast; adding 'brain' to
- * that union makes it unnecessary.
+ * Settings → Forge Brain (SettingsPage adds the group).
  */
-export const BRAIN_SETTINGS = 'brain' as SettingsSection
+export const BRAIN_SETTINGS: SettingsSection = 'brain'
 
 const STATE_WORD: Record<BrainStatus['state'], string> = {
   off: 'Off',

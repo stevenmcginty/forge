@@ -108,6 +108,7 @@ export type SettingsSection =
   | 'remoteYes'
   | 'updates'
   | 'advanced'
+  | 'brain'
 
 /**
  * What the main area is showing. Settings and Devices are *views*, not modals:
