@@ -12,11 +12,13 @@ import { useBrainProbes } from '@/hooks/useBrainStatus'
 import { barBrainLabel, brainSwitchWaits, brainUnavailable, forgeBrainStatus, statusOf, type BrainStatus } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { useApp } from '@/state/AppState'
-import { startBrainFeed, useBrain } from '../brain/brainStore'
+import { BrainIntro } from '../brain/BrainIntro'
+import { brainSnapshot, startBrainFeed, useBrain } from '../brain/brainStore'
 import { Icon } from '../Icon'
 import { Popover } from '../Popover'
 import { BrainMark } from './BrainMark'
 import { listenState, useHubView } from './hubView'
+import '../brain/Brain.css'
 import './BrainPicker.css'
 
 /**
@@ -31,7 +33,11 @@ import './BrainPicker.css'
  * the same probe as the card's (hooks/useBrainStatus + lib/brainStatus); a
  * brain that needs a key, is not installed or is not logged in cannot be
  * picked here, and says which. Picking writes `agentBrain`, exactly as the
- * card does.
+ * card does. The rows are the visible list (shared/agent-brain.ts
+ * VISIBLE_AGENT_BRAINS): Forge Brain, Gemini Live, GPT Realtime.
+ *
+ * Forge Brain can be picked while it is off: the pick is kept and the menu
+ * turns into the brain's own intro (components/brain/BrainIntro), with Turn on.
  *
  * Picked while Listen is on, a Parakeet brain answers from the next turn; a
  * pick that involves a live session (ending one, or opening one) waits for the
@@ -47,6 +53,9 @@ export function BrainPicker(): ReactNode {
   const hub = useHubView()
   const [chip, setChip] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
+  // Forge Brain picked while it is off: the pop-over shows its intro instead of the menu.
+  const [intro, setIntro] = useState(false)
+  const brainStatus = useBrain().status
   const byKeyboard = useRef(false)
 
   const chosen = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
@@ -56,6 +65,7 @@ export function BrainPicker(): ReactNode {
 
   const close = useCallback((): void => {
     setOpen(false)
+    setIntro(false)
     // Focus inside the menu goes back to the chip; focus anywhere else (a
     // pane, the bar's text, an outside click's target) stays where it is.
     const at = document.activeElement
@@ -77,6 +87,7 @@ export function BrainPicker(): ReactNode {
         onMouseDown={(e) => e.preventDefault()}
         onClick={(e) => {
           byKeyboard.current = e.detail === 0
+          setIntro(false)
           setOpen((v) => !v)
         }}
       >
@@ -88,22 +99,27 @@ export function BrainPicker(): ReactNode {
         <span className="bpick-chip__name truncate">{label}</span>
         <Icon name="chevronDown" size={11} className="bpick-chip__chev" />
       </button>
-      <Popover anchor={chip} open={open} onClose={close} align="start" width={336} label="Voice agent">
-        <BrainMenu
-          chosen={chosen}
-          current={resolved.brain}
-          listening={listenState(hub).on}
-          liveRealtime={hub.realtime}
-          takeFocus={byKeyboard.current}
-          onPick={(id) => {
-            if (id !== chosen) actions.patchSettings({ agentBrain: id })
-            close()
-          }}
-          onSettings={() => {
-            close()
-            actions.openSettings('voice')
-          }}
-        />
+      <Popover anchor={chip} open={open} onClose={close} align="start" width={intro ? 412 : 336} label={intro ? 'Forge Brain' : 'Voice agent'}>
+        {intro ? (
+          <BrainIntro status={brainStatus} onOn={close} onClose={close} />
+        ) : (
+          <BrainMenu
+            chosen={chosen}
+            current={resolved.brain}
+            listening={listenState(hub).on}
+            liveRealtime={hub.realtime}
+            takeFocus={byKeyboard.current}
+            onPick={(id) => {
+              if (id !== chosen) actions.patchSettings({ agentBrain: id })
+              if (isForgeBrainAgent(id) && brainSnapshot().status?.enabled !== true) setIntro(true)
+              else close()
+            }}
+            onSettings={() => {
+              close()
+              actions.openSettings('voice')
+            }}
+          />
+        )}
       </Popover>
     </>
   )
@@ -176,7 +192,8 @@ function BrainMenu({
   const rowFor = (spec: AgentBrainSpec): ReactNode => {
     const inUse = spec.id === current
     const status = isForgeBrainAgent(spec.id) ? forgeBrainStatus(liveBrain) : statusOf(spec, s, probes[spec.id])
-    const off = !inUse && brainUnavailable(status)
+    // Forge Brain off is still a pick: picking it shows how to turn it on.
+    const off = !inUse && !isForgeBrainAgent(spec.id) && brainUnavailable(status)
     const sub =
       spec.id === chosen && chosen !== current
         ? 'Picked — add it in Voice settings'
@@ -270,8 +287,9 @@ function rowNote(spec: AgentBrainSpec, status: BrainStatus, off: boolean): strin
     if (status.word === 'Needs key') return `Add your ${auth} in Settings`
     if (status.word === 'Not logged in') return `Log in first — ${auth}`
     if (status.word === 'Not installed') return 'Not on this computer yet'
-    if (status.word === 'Off') return 'Turn Forge Brain on first — the brain in the top bar'
   }
-  if (isForgeBrainAgent(spec.id)) return `${KIND_WORD[spec.kind]} · Parakeet hears, your voice setting speaks`
+  if (isForgeBrainAgent(spec.id)) {
+    return status.word === 'Off' ? 'Off — pick it to see how to turn it on' : `${KIND_WORD[spec.kind]} · Parakeet hears, your voice setting speaks`
+  }
   return `${KIND_WORD[spec.kind]} · ${auth}`
 }

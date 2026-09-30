@@ -3,6 +3,7 @@ import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import { usePresence } from '@/lib/motion'
+import { BrainGlyphMark } from '../components/BrainGlyph'
 import { Rail } from '../components/Rail'
 import { withAgentSends } from '../lib/pane-sent'
 import { useActiveProject, useForge, useWorkspace } from '../state'
@@ -247,7 +248,7 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={`Voice agent in use: ${agent}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
-        title={`Voice agent: ${agent} — pick Gemini, ChatGPT or Claude`}
+        title={`Voice agent: ${agent} — pick Forge Brain, Gemini or ChatGPT`}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => deckSheet.toggle('voice')}
       >
@@ -362,15 +363,13 @@ function VoiceAgentGlyph({ look, on }: { look: Look; on: boolean }): ReactNode {
 
 /**
  * Which agent, as a mark rather than a word: Gemini a four-point spark,
- * ChatGPT a hexagon, Claude an eight-ray burst, Forge Brain a brain in
- * outline. Silhouettes that stay apart at 14px; the word is in the title, the
- * accessible name, and the menu.
+ * ChatGPT a hexagon, Claude an eight-ray burst, Forge Brain the desktop top
+ * bar's brain glyph, still (../components/BrainGlyph.tsx). Silhouettes that
+ * stay apart at 14px; the word is in the title, the accessible name, and the
+ * menu.
  */
-/** Forge Brain's two lobes and their seam (the desktop's src/components/brain/BrainGlyph.tsx), on the 14px grid. */
-const BRAIN_MARK =
-  'M7 1.86C6.23 0.95 4.62 0.95 3.92 2C2.52 2 1.54 3.12 1.82 4.45C0.84 5.08 0.7 6.62 1.54 7.39C0.98 8.57 1.61 9.91 2.8 10.19C3.08 11.45 4.48 12.14 5.67 11.66C6.02 12.21 6.58 12.43 7 12.14M7 1.86C7.77 0.95 9.38 0.95 10.08 2C11.48 2 12.46 3.12 12.18 4.45C13.16 5.08 13.3 6.62 12.46 7.39C13.02 8.57 12.39 9.91 11.2 10.19C10.92 11.45 9.52 12.14 8.33 11.66C7.98 12.21 7.42 12.43 7 12.14V1.86'
-
 function AgentMark({ agent }: { agent: WebVoiceAgent }): ReactNode {
+  if (agent === 'forge-brain') return <BrainGlyphMark size={14} className="dk-amark" />
   return (
     <svg className="dk-amark" data-agent={agent} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
       {agent === 'gemini-live' ? (
@@ -383,8 +382,6 @@ function AgentMark({ agent }: { agent: WebVoiceAgent }): ReactNode {
           strokeWidth="1.7"
           strokeLinecap="round"
         />
-      ) : agent === 'forge-brain' ? (
-        <path d={BRAIN_MARK} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
       ) : (
         <path
           d="M7 1.4 11.85 4.2V9.8L7 12.6 2.15 9.8V4.2Z"

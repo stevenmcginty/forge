@@ -297,7 +297,7 @@ const FALLBACK_SETTINGS: Settings = {
   voiceHubVoice: { gemini: '', openai: '' },
   // Mirrors electron/store.ts (B7): the ONE Agent brain, hands-free timing,
   // and the pane agents' browser rule.
-  agentBrain: 'claude',
+  agentBrain: 'forge-brain',
   // Mirrors electron/store.ts. Three on the picker; the rest behind More.
   voiceMenu: defaultVoiceMenu(),
   agentSilenceMs: 800,

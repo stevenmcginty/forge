@@ -30,20 +30,21 @@ export function glyphStateOf(status: BrainStatus | null): GlyphState {
   return status.state
 }
 
-const LEFT =
+/* The paths are exported for the voice pickers' still copy (components/hub/BrainMark.tsx). */
+export const LEFT =
   'M16 8.6C14.9 7.3 12.6 7.3 11.6 8.8C9.6 8.8 8.2 10.4 8.6 12.3C7.2 13.2 7 15.4 8.2 16.5C7.4 18.2 8.3 20.1 10 20.5C10.4 22.3 12.4 23.3 14.1 22.6C14.6 23.4 15.4 23.7 16 23.3'
-const RIGHT =
+export const RIGHT =
   'M16 8.6C17.1 7.3 19.4 7.3 20.4 8.8C22.4 8.8 23.8 10.4 23.4 12.3C24.8 13.2 25 15.4 23.8 16.5C24.6 18.2 23.7 20.1 22 20.5C21.6 22.3 19.6 23.3 17.9 22.6C17.4 23.4 16.6 23.7 16 23.3'
 /** Both halves as one closed shape, for the mask and the core. */
-const SILHOUETTE = `${LEFT}V8.6Z ${RIGHT}V8.6Z`
-const GYRI =
+export const SILHOUETTE = `${LEFT}V8.6Z ${RIGHT}V8.6Z`
+export const GYRI =
   'M11.6 8.8C12.5 9.6 12.7 10.7 12.2 11.6M8.6 12.3C10 12.5 11.2 13.3 11.5 14.6M8.2 16.5C9.7 16.4 11 17 11.6 18.2M20.4 8.8C19.5 9.6 19.3 10.7 19.8 11.6M23.4 12.3C22 12.5 20.8 13.3 20.5 14.6M23.8 16.5C22.3 16.4 21 17 20.4 18.2'
 
 /** The ring, before its tilt: an ellipse round the centre, as two halves. */
-const RING_FAR = 'M1.5 16A14.5 5 0 0 1 30.5 16'
-const RING_NEAR = 'M30.5 16A14.5 5 0 0 1 1.5 16'
+export const RING_FAR = 'M1.5 16A14.5 5 0 0 1 30.5 16'
+export const RING_NEAR = 'M30.5 16A14.5 5 0 0 1 1.5 16'
 const RING_PATH = 'M1.5 16A14.5 5 0 1 1 30.5 16A14.5 5 0 1 1 1.5 16'
-const TILT = 'rotate(-18 16 16)'
+export const TILT = 'rotate(-18 16 16)'
 
 /** A bolt, centred on 0,0. */
 const BOLT = 'M0.7-2.7-1.3 0.3H0.2L-0.7 2.7 1.3-0.3H-0.2Z'

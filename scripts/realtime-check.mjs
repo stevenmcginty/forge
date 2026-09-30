@@ -687,6 +687,15 @@ await check('an older desktop\'s "does not understand" becomes "update the deskt
   assert.equal(voiceFailureWords({ code: 'failed', message: 'Could not reach Gemini: offline' }), 'Could not reach Gemini: offline')
 })
 
+await check('the phone and deck pickers offer three: Forge Brain (the default), Gemini, ChatGPT; a remembered Claude becomes Forge Brain', async () => {
+  const { WEB_VOICE_AGENTS, DEFAULT_WEB_VOICE_AGENT, readVoiceAgent, voiceAgentWord } = await import('../web/src/deck/voice-words.ts')
+  assert.deepEqual(WEB_VOICE_AGENTS, ['forge-brain', 'gemini-live', 'gpt-realtime'])
+  assert.deepEqual(WEB_VOICE_AGENTS.map(voiceAgentWord), ['Forge Brain', 'Gemini', 'ChatGPT'])
+  assert.equal(DEFAULT_WEB_VOICE_AGENT, 'forge-brain')
+  for (const stored of [null, undefined, '', 'nope', 'claude', 'gpt-realtime-mini']) assert.equal(readVoiceAgent(stored), 'forge-brain', String(stored))
+  for (const stored of WEB_VOICE_AGENTS) assert.equal(readVoiceAgent(stored), stored)
+})
+
 await check('a browser that navigates itself is told where to go; the desktop is never asked to move', async () => {
   const { runWebNavTool } = await import('../src/lib/realtime/web-nav.ts')
   const { answerWebVoiceTool, WEB_VOICE_NOTE } = await import('../src/lib/realtime/web-bridge.ts')

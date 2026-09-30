@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { AgentBrainId } from '@shared/agent-brain'
+import { GYRI, LEFT, RIGHT, RING_FAR, RING_NEAR, SILHOUETTE, TILT } from '../brain/BrainGlyph'
 
 /**
  * Which voice agent, as a mark: one silhouette per maker, so a brain reads at
@@ -10,7 +11,8 @@ import type { AgentBrainId } from '@shared/agent-brain'
  *   OpenAI       a hexagon              (Codex, GPT Realtime, GPT Realtime mini)
  *   Groq         a bolt
  *   OpenRouter   one node branching to two
- *   Forge Brain  a brain, in outline
+ *   Forge Brain  the top bar's brain glyph (components/brain/BrainGlyph.tsx),
+ *                idle and still: the brain, its ring and its spark
  *
  * The same shapes as Forge Web's voice bar, drawn on the desktop icons' 16px
  * grid. Monochrome on purpose: the mark takes the ink it sits in, so it never
@@ -32,13 +34,46 @@ const MAKER: Record<AgentBrainId, Maker> = {
   'forge-brain': 'forge'
 }
 
-/** Forge Brain's two lobes and their seam, from components/brain/BrainGlyph.tsx, on this 16px grid. */
-const FORGE_BRAIN =
-  'M8 2.12C7.12 1.08 5.28 1.08 4.48 2.28C2.88 2.28 1.76 3.56 2.08 5.08C0.96 5.8 0.8 7.56 1.76 8.44C1.12 9.8 1.84 11.32 3.2 11.64C3.52 13.08 5.12 13.88 6.48 13.32C6.88 13.96 7.52 14.2 8 13.88' +
-  'M8 2.12C8.88 1.08 10.72 1.08 11.52 2.28C13.12 2.28 14.24 3.56 13.92 5.08C15.04 5.8 15.2 7.56 14.24 8.44C14.88 9.8 14.16 11.32 12.8 11.64C12.48 13.08 10.88 13.88 9.52 13.32C9.12 13.96 8.48 14.2 8 13.88V2.12'
+/**
+ * Forge Brain's mark: the top bar's glyph in its idle look, drawn still (no
+ * spark going round, so nothing moves in a menu and reduced motion has nothing
+ * to stop). The ink is the mark's own, like every other maker; the core and
+ * the spark take the accent. Strokes are heavier than the 26px glyph's so it
+ * holds at 13–20px.
+ */
+function ForgeBrainMark({ size }: { size: number }): ReactNode {
+  const mask = `bm${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  return (
+    <svg className="bmark" data-maker="forge" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <defs>
+        <mask id={mask} maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+          <rect width="32" height="32" fill="#fff" />
+          <path d={SILHOUETTE} fill="#000" stroke="#000" strokeWidth="2.6" />
+        </mask>
+      </defs>
+      <path d={SILHOUETTE} style={{ fill: 'var(--accent)' }} opacity="0.16" />
+      <g transform={TILT} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity="0.6">
+        <path d={RING_FAR} mask={`url(#${mask})`} />
+      </g>
+      <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <path d={LEFT} strokeWidth="2.6" />
+        <path d={RIGHT} strokeWidth="2.6" />
+        <path d="M16 8.6V23.3" strokeWidth="2.6" />
+        <path d={GYRI} strokeWidth="1.9" opacity="0.8" />
+      </g>
+      <g transform={TILT} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity="0.6">
+        <path d={RING_NEAR} />
+      </g>
+      <g transform={TILT}>
+        <circle cx="28.2" cy="18.6" r="2.4" style={{ fill: 'var(--accent)', stroke: 'var(--bg-base)' }} strokeWidth="0.8" />
+      </g>
+    </svg>
+  )
+}
 
 export function BrainMark({ brain, size = 14 }: { brain: AgentBrainId; size?: number }): ReactNode {
   const maker = MAKER[brain] ?? 'claude'
+  if (maker === 'forge') return <ForgeBrainMark size={size} />
   return (
     <svg className="bmark" data-maker={maker} width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
       {maker === 'claude' ? (
@@ -55,8 +90,6 @@ export function BrainMark({ brain, size = 14 }: { brain: AgentBrainId; size?: nu
         <path d="M8 1.7 13.45 4.85V11.15L8 14.3 2.55 11.15V4.85Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
       ) : maker === 'groq' ? (
         <path d="M9.4 1.2 3.2 9.1H7.5L6.6 14.8 12.8 6.9H8.5Z" fill="currentColor" strokeLinejoin="round" />
-      ) : maker === 'forge' ? (
-        <path d={FORGE_BRAIN} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
       ) : (
         <>
           <path d="M4.6 8C8 8 8 3.7 11 3.7M4.6 8C8 8 8 12.3 11 12.3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

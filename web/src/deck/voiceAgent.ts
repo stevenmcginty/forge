@@ -93,7 +93,7 @@ export interface WebVoiceState {
   ended: string | null
   /** The mic is held shut (D is recording). */
   muted: boolean
-  /** The agent Listen runs: this browser's pick, Gemini Live until one is made. */
+  /** The agent Listen runs: this browser's pick, Forge Brain until one is made. */
   agent: WebVoiceAgent
   /** The newest caption, for the bar's voice line: who spoke and what, as it grows. */
   caption: { role: 'user' | 'assistant'; text: string } | null

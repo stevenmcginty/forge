@@ -1,3 +1,4 @@
+import { VISIBLE_AGENT_BRAINS } from '@shared/agent-brain'
 import type { WebVoiceProvider } from '@shared/web'
 
 /**
@@ -46,10 +47,19 @@ export function voiceFailureWords(failure: { code?: string; message?: string }, 
   return message || 'The desktop could not start the voice agent.'
 }
 
-/** The agents the Listen chip offers, in its menu's order. ChatGPT is GPT Realtime, the full model. */
-export const WEB_VOICE_AGENTS: readonly WebVoiceAgent[] = ['gemini-live', 'gpt-realtime', 'claude', 'forge-brain']
+function isWebVoiceAgent(id: string): id is WebVoiceAgent {
+  return id === 'gemini-live' || id === 'gpt-realtime' || id === 'gpt-realtime-mini' || id === 'claude' || id === 'forge-brain'
+}
 
-export const DEFAULT_WEB_VOICE_AGENT: WebVoiceProvider = 'gemini-live'
+/**
+ * The agents the Listen chip offers, in its menu's order: the desktop's visible
+ * list (shared/agent-brain.ts VISIBLE_AGENT_BRAINS) — Forge Brain, Gemini,
+ * ChatGPT. ChatGPT is GPT Realtime, the full model. Claude and ChatGPT mini keep
+ * their code here and come back when that list names them again.
+ */
+export const WEB_VOICE_AGENTS: readonly WebVoiceAgent[] = VISIBLE_AGENT_BRAINS.filter(isWebVoiceAgent)
+
+export const DEFAULT_WEB_VOICE_AGENT: WebVoiceAgent = 'forge-brain'
 
 /** An agent as the chip's one word. */
 export function voiceAgentWord(agent: WebVoiceAgent): string {
@@ -67,15 +77,12 @@ export function voiceAgentWord(agent: WebVoiceAgent): string {
   }
 }
 
-/** A remembered choice, or the default when it is missing or not an agent. */
+/**
+ * A remembered choice, or the default (Forge Brain) when it is missing, not an
+ * agent, or one the chip no longer offers (a remembered Claude).
+ */
 export function readVoiceAgent(stored: string | null | undefined): WebVoiceAgent {
-  return stored === 'gemini-live' ||
-    stored === 'gpt-realtime' ||
-    stored === 'gpt-realtime-mini' ||
-    stored === 'claude' ||
-    stored === 'forge-brain'
-    ? stored
-    : DEFAULT_WEB_VOICE_AGENT
+  return stored && (WEB_VOICE_AGENTS as readonly string[]).includes(stored) ? (stored as WebVoiceAgent) : DEFAULT_WEB_VOICE_AGENT
 }
 
 /** The phase as the switch's word. Muted is its own word: the mic is shut while D records. */

@@ -12,7 +12,15 @@ import {
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
 import { BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject } from '@shared/brain'
 import { isEdgeVoice } from '@shared/tts'
-import { defaultVoiceMenu, isAgentBrainId, migrateAgentBrain, migrateCodexClaudeModel, normaliseVoiceMenu } from '@shared/agent-brain'
+import {
+  DEFAULT_AGENT_BRAIN,
+  defaultVoiceMenu,
+  isAgentBrainId,
+  migrateAgentBrain,
+  migrateCodexClaudeModel,
+  normaliseVoiceMenu,
+  visibleAgentBrain
+} from '@shared/agent-brain'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -306,9 +314,10 @@ function defaultSettings(): Settings {
     // choice made in Settings once a key is there to pay for it.
     voiceHubProvider: 'claude',
     voiceHubVoice: { gemini: '', openai: '' },
-    // The ONE Agent brain (shared/agent-brain.ts). Claude: free, no key.
-    agentBrain: 'claude',
-    // Picker short list: GPT Realtime, Gemini Live, Claude. The rest sit behind More.
+    // The ONE Agent brain (shared/agent-brain.ts). Forge Brain: no key; off
+    // until turned on, and picking it while off shows how.
+    agentBrain: DEFAULT_AGENT_BRAIN,
+    // Picker list: Forge Brain, Gemini Live, GPT Realtime (VISIBLE_AGENT_BRAINS).
     voiceMenu: defaultVoiceMenu(),
     // Hands-free Agent mode: 0.8 s of silence sends the phrase.
     agentSilenceMs: 800,
@@ -884,8 +893,9 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       openai: typeof s.voiceHubVoice?.openai === 'string' ? s.voiceHubVoice.openai.trim().slice(0, 40) : ''
     },
     // Absent = a settings.json from before the one Agent brain: migrated once
-    // from the two old pickers, which stay on disk untouched.
-    agentBrain: isAgentBrainId(s.agentBrain) ? s.agentBrain : migrateAgentBrain(s.voiceHubProvider, s.voiceBrain),
+    // from the two old pickers, which stay on disk untouched. A pick the
+    // pickers no longer offer (Claude, Groq, Codex…) becomes Forge Brain.
+    agentBrain: visibleAgentBrain(isAgentBrainId(s.agentBrain) ? s.agentBrain : migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)),
     voiceMenu: normaliseVoiceMenu(s.voiceMenu),
     agentSilenceMs:
       typeof s.agentSilenceMs === 'number' && Number.isFinite(s.agentSilenceMs)
