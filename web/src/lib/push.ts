@@ -4,9 +4,10 @@ import type { WebPushSubscription } from '@shared/web'
  * Web Push: the half of "tell me when a pane needs me" that survives the tab
  * being closed.
  *
- * `state.tsx` already raises a `new Notification` when a pane starts asking
- * while this tab is hidden, and that is the better path whenever it applies —
- * it is instant, it costs nothing, and no third party is involved. But it only
+ * `state.tsx` already raises a notification (`showLocal` in lib/notify.ts)
+ * when a pane starts asking while this tab is hidden, and that is the better
+ * path whenever it applies — it is instant, it costs nothing, and no third
+ * party is involved. But it only
  * exists while the page does. Close the tab, lock the phone, let iOS evict the
  * browser out of memory, and the one moment the notification was for is the one
  * moment nothing is listening. Push is what covers that: the desktop encrypts a

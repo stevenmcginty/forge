@@ -8,6 +8,7 @@ import { isPhoneFace, phoneFaceFromWindow } from '../lib/viewport'
 import { useActiveProject, useForge, useWorkspace } from '../state'
 import { useWebUpdate } from '../lib/update'
 import { AgentChooser } from './AgentChooser'
+import { AskBanner } from './AskBanner'
 import { MobilePanes } from './MobilePanes'
 import { useTextScale } from './MoreSheet'
 import { OfflineBanner } from './OfflineBanner'
@@ -412,6 +413,7 @@ export function Workspace(): ReactNode {
                 />
               )}
               {mobile ? notice : null}
+              {mobile ? <AskBanner /> : null}
             </div>
             <SessionComposer />
           </div>

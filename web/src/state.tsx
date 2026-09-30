@@ -42,6 +42,7 @@ import {
   type Snapshot
 } from './lib/cache'
 import { deviceId, deviceName } from './lib/device'
+import { closeFor, closeStale, paneLabel, showLocal } from './lib/notify'
 import { registerWorker, subscribe as subscribePush, unsubscribe as unsubscribePush } from './lib/push'
 import { readHost } from './lib/rendezvous'
 
@@ -207,6 +208,18 @@ export interface ForgeState {
    * the bell says so, and there is nothing to press. See `armPush`.
    */
   pushActive: boolean
+  /**
+   * The in-app heads-up on the phone: a pane *other than the one on screen*
+   * just started asking while the page is open. `seq` changes with every new
+   * ask, so the banner can restart its fuse. Null when there is nothing to show.
+   */
+  askBanner: AskBanner | null
+}
+
+/** Which pane the heads-up banner is about. Its words are read off the picture and `prompts`. */
+export interface AskBanner {
+  sessionId: string
+  seq: number
 }
 
 export interface ForgeActions {
@@ -283,6 +296,10 @@ export interface ForgeActions {
   setNotice: (message: string, passing?: boolean) => void
   /** Clear the notice on screen now; the next in the queue, if any, takes its turn. */
   dismissNotice: () => void
+  /** Put the heads-up banner away (its ×, a swipe, its fuse). */
+  dismissAskBanner: () => void
+  /** Go to the banner's pane — the same jump a notification tap makes — and put it away. */
+  openAskBanner: () => void
   /**
    * Ask the browser for OS-notification permission. Must run from a user
    * gesture — see the bell control in TopBar.
@@ -415,28 +432,6 @@ function notifySupport(): NotifySupport {
 }
 
 /**
- * Say something outside the tab, or as near to that as the browser allows.
- *
- * Every gate is read here rather than trusted from the caller: unsupported and
- * ungranted fall through in silence, because the pane's own badge is the
- * truthful record either way and a console error helps nobody. `tag` collapses
- * repeated asks from the same pane into one visible notification instead of a
- * stack of them. Clicking focuses the window — the whole point is coming back.
- */
-function raiseNotification(title: string, body: string, tag: string): void {
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
-  try {
-    const notification = new Notification(title, { body, tag })
-    notification.onclick = () => {
-      window.focus()
-      notification.close()
-    }
-  } catch {
-    /* a browser may still refuse at construction time; the badge already says it */
-  }
-}
-
-/**
  * Read `?session=` once, and take it out of the address bar.
  *
  * That parameter is how `sw.js` names a pane to a window it had to *open* —
@@ -528,6 +523,9 @@ function landingProject(projects: Project[], workspaces: Record<string, Workspac
   return projects[0]?.id ?? null
 }
 
+/** How long after a link goes live (or the page comes on screen) the shade is tidied. See the sweep. */
+const STALE_SWEEP_MS = 1500
+
 /** One short buzz, where the platform has one. iOS has no Vibration API at all. */
 function buzz(): void {
   try {
@@ -552,6 +550,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   const [prompts, setPrompts] = useState<Record<string, string>>({})
   /** Notice queue. The head is what the page shows; the rest wait their turn. */
   const [notices, setNotices] = useState<QueuedNotice[]>([])
+  const [askBanner, setAskBanner] = useState<AskBanner | null>(null)
   const [desktopRecovering, setDesktopRecovering] = useState('')
   const [remoteYes, setRemoteYes] = useState<RemoteYesInfo>(REMOTE_YES_OFF)
   const [warm, setWarm] = useState(false)
@@ -594,6 +593,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   const lastJump = useRef<{ pane: string; from: string | null } | null>(null)
   const waitingRef = useRef<string[]>([])
   const viewPaneRef = useRef<string | null>(null)
+  /** The picture as the client handlers see it — for naming a pane in a notification. */
+  const pictureRef = useRef<Picture | null>(null)
+  /** The banner as the actions see it, so opening it needs no re-built actions. */
+  const askBannerRef = useRef<AskBanner | null>(null)
+  const askSeq = useRef(0)
 
   /**
    * What the client handlers (built once, below) read for the permission
@@ -803,8 +807,19 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         else askingNow.current.delete(sessionId)
         // The in-tab half of the notification below: somebody looking at the
         // page gets one short buzz on the edge into asking — not on a prompt
-        // line that merely changed — and the pill says the rest.
-        if (isAsking && !was && !document.hidden) buzz()
+        // line that merely changed — and the pill says the rest. When the pane
+        // asking is not the one on screen, the phone's heads-up banner says
+        // which one it is (AskBanner); a newer ask replaces an older one.
+        if (isAsking && !was && !document.hidden) {
+          buzz()
+          if (sessionId !== viewPaneRef.current) setAskBanner({ sessionId, seq: ++askSeq.current })
+        }
+        if (!isAsking) {
+          // A question nobody needs to answer any more is put away, on the
+          // screen and in the shade alike.
+          setAskBanner((current) => (current?.sessionId === sessionId ? null : current))
+          if (was) void closeFor(sessionId)
+        }
         setAsking((current) => {
           // Same set back when nothing changed: a fresh Set is a fresh `state`,
           // and that is every consumer re-rendering for a prompt line.
@@ -827,16 +842,17 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         })
         // A pane that asks while the tab is in a pocket cannot be seen asking,
         // so it says so outside the tab. Only while hidden — the badge and the
-        // pane itself are the whole story when somebody is looking. Tagged by
-        // session so a chatty pane replaces its own notification rather than
-        // stacking them.
+        // pane itself are the whole story when somebody is looking. Through the
+        // worker, because Android refuses `new Notification` (lib/notify.ts);
+        // tagged by session so a chatty pane replaces its own notification.
         if (isAsking && document.hidden && notifyPermissionRef.current === 'granted') {
-          const line = prompt.trim()
-          raiseNotification(
-            'Forge needs you',
-            line || 'A pane is asking a question and needs an answer.',
-            sessionId
-          )
+          const picture = pictureRef.current
+          void showLocal({
+            sessionId,
+            label: picture ? paneLabel(picture.projects, picture.workspaces, sessionId) : 'Forge',
+            state: 'asking',
+            prompt
+          })
         }
       },
       onBusy: (sessionId, isBusy) => {
@@ -1283,7 +1299,32 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   useEffect(() => {
     waitingRef.current = waiting
     viewPaneRef.current = viewPane
-  }, [waiting, viewPane])
+    pictureRef.current = picture
+  }, [waiting, viewPane, picture])
+
+  /** The banner's pane came on screen by any route: it has said what it came to say. */
+  useEffect(() => {
+    if (askBanner && askBanner.sessionId === viewPane) setAskBanner(null)
+  }, [askBanner, viewPane])
+  useEffect(() => {
+    askBannerRef.current = askBanner
+  }, [askBanner])
+
+  /**
+   * Tidy the notification shade: every Forge notification whose pane is no
+   * longer asking goes, and — while somebody is looking at the page — every
+   * "finished" one, which has now been seen. Run on a live link, when the page
+   * comes on screen and after each `hello-ok`, but a beat late: the desktop
+   * re-states who is asking in `attention` frames right after `hello-ok`, and
+   * sweeping before they land would put away questions that are still open.
+   */
+  useEffect(() => {
+    if (connection.state !== 'live') return
+    // `connection` whole, not `.state`: every `hello-ok` hands over a new
+    // object even when the link was already live, and each one is a re-sweep.
+    const timer = window.setTimeout(() => void closeStale(askingNow.current, pageVisible), STALE_SWEEP_MS)
+    return () => clearTimeout(timer)
+  }, [connection, pageVisible])
 
   /* --------------------------------------------------------------- actions */
 
@@ -1439,6 +1480,12 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       },
       setNotice: pushNotice,
       dismissNotice: () => setNotices((current) => current.slice(1)),
+      dismissAskBanner: () => setAskBanner(null),
+      openAskBanner: () => {
+        const banner = askBannerRef.current
+        setAskBanner(null)
+        if (banner) setPendingSession(banner.sessionId)
+      },
       requestNotifyPermission: async () => {
         // Only ever meaningful from a click — browsers refuse a permission
         // prompt with no gesture behind it, which is why this lives behind the
@@ -1484,7 +1531,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       warm,
       offlineMode,
       notifyPermission,
-      pushActive
+      pushActive,
+      askBanner
     }),
     [
       stage,
@@ -1505,7 +1553,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       warm,
       offlineMode,
       notifyPermission,
-      pushActive
+      pushActive,
+      askBanner
     ]
   )
 
