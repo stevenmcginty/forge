@@ -84,6 +84,16 @@ const TRANSCRIBE_TIMEOUT_MS = 75_000
 /** How long dictated words sit in the box, with Undo, before they send. */
 const REVIEW_MS = 1500
 
+/** How long Stop waits, spinning, before it offers a second Esc to an agent still working. */
+const STOP_AGAIN_MS = 3000
+
+/**
+ * Stop, pressed: `stopping` while the Esc is given its chance, `again` when
+ * the agent is still working after STOP_AGAIN_MS and the button offers one
+ * more press. Never Ctrl+C on its own — that can end the agent, not the turn.
+ */
+type StopPhase = 'idle' | 'stopping' | 'again'
+
 const IDLE: VoiceState = { phase: 'idle' }
 const KEYS_PREF = 'forge.phone.terminal-keys'
 /** The deck's own: a laptop window narrowed into the phone face keeps the phone's. */
@@ -142,7 +152,12 @@ export function SessionComposer({
   const project = state.picture?.projects?.find((p) => p.id === state.projectId)?.name ?? ''
   const asking = paneId !== null && state.asking.has(paneId)
   const prompt = paneId ? (state.prompts[paneId] ?? '') : ''
-  const busy = Boolean(status?.busy)
+  /*
+   * Working, for Stop and the spoken "stop": the strip's reading of the screen,
+   * or the desktop's own busy frame. Only Claude's screen is read for busy;
+   * the desktop's frame covers Codex, Gemini and Grok too.
+   */
+  const busy = Boolean(status?.busy) || (paneId !== null && state.busy.has(paneId))
   const isAgent = Boolean(profile && !isShellProfile(profile))
   /** Claude Code and Gemini CLI pick a numbered row on its digit; the rest walk to it. */
   const exe = profile ? commandExe(profile.command) : ''
@@ -181,6 +196,18 @@ export function SessionComposer({
   const [voiceLevel, setVoiceLevel] = useState<LevelMonitor | null>(null)
   /** Bumped whenever a round trip is abandoned, so a late answer cannot repaint the button. */
   const voiceRun = useRef(0)
+  /**
+   * The run a pane change abandoned while its words were still on the way.
+   * Not a Cancel: those words land in the draft of the pane they were for.
+   */
+  const movedRun = useRef(0)
+  /** This recording began over a review, so its words join dictated words, not typed ones. */
+  const overReview = useRef(false)
+  /**
+   * The last recording the desktop failed to turn into words, and the pane it
+   * was for — kept in memory so the box can offer to send the same audio again.
+   */
+  const [failedVoice, setFailedVoice] = useState<{ pane: string; audio: Blob } | null>(null)
   /** The microphone is being opened (the browser may be asking permission). */
   const starting = useRef(false)
   /** A stop or cancel that arrived while the microphone was still opening. */
@@ -211,14 +238,21 @@ export function SessionComposer({
   )
 
   /**
-   * Stop was pressed and the agent has not stopped yet. Cleared by the strip
+   * Stop was pressed and the agent has not stopped yet. Cleared by the pane
    * reading idle — the only proof an interrupt landed — or by a pane change.
+   * Still working after STOP_AGAIN_MS, the button offers another press, so a
+   * missed Esc never leaves "Stopping…" stuck.
    */
-  const [stopping, setStopping] = useState(false)
+  const [stopPhase, setStopPhase] = useState<StopPhase>('idle')
   useEffect(() => {
-    if (!busy) setStopping(false)
+    if (!busy) setStopPhase('idle')
   }, [busy])
-  useEffect(() => setStopping(false), [paneId])
+  useEffect(() => setStopPhase('idle'), [paneId])
+  useEffect(() => {
+    if (stopPhase !== 'stopping') return undefined
+    const timer = window.setTimeout(() => setStopPhase('again'), STOP_AGAIN_MS)
+    return () => window.clearTimeout(timer)
+  }, [stopPhase])
 
   /*
    * A desktop moves the focus into the box when the pane changes under it; a
@@ -396,7 +430,7 @@ export function SessionComposer({
       const said = `Heard “${heard}”`
       if (command.kind === 'stop') {
         now.sendRaw(ESC)
-        setStopping(true)
+        setStopPhase('stopping')
         actions.setNotice(`${said} — stopped`)
         return
       }
@@ -462,6 +496,82 @@ export function SessionComposer({
   }, [])
 
   /**
+   * Words for a pane that is no longer on screen: into that pane's own draft,
+   * never the pane now showing, with a line to say where they went.
+   */
+  const parkWords = useCallback(
+    (pane: string, text: string) => {
+      const before = draftsRef.current[pane] ?? ''
+      setDraftFor(pane, before.trim() ? `${before.replace(/\s+$/, '')} ${text}` : text)
+      const home = latest.current.tabs.find((t) => findLeaf(t.root, pane) !== null)
+      actions.setNotice(`Your words went to ${home ? paneNameInTab(home, pane) : 'the pane you left'} — they are waiting in its box.`)
+    },
+    [actions, setDraftFor]
+  )
+
+  /**
+   * The desktop's ears on one recording, and what its words then do — for a
+   * fresh recording and for a retry of one that failed alike. A failure keeps
+   * the audio so the box can offer it again. Words that arrive after the pane
+   * changed go to that pane's draft. Resolves true when the words are in their
+   * review countdown, which then owns the button.
+   */
+  const hear = useCallback(
+    async (pane: string, audio: Blob, run: number, joinsReview: boolean): Promise<boolean> => {
+      const stillMine = (): boolean => voiceRun.current === run
+      const moved = (): boolean => movedRun.current === run
+      let text: string
+      try {
+        text = await Promise.race([
+          transcribeOnDesktop(audio, pane, actions.request),
+          new Promise<never>((_, reject) =>
+            window.setTimeout(() => reject(new Error('The desktop took too long to answer.')), TRANSCRIBE_TIMEOUT_MS)
+          )
+        ])
+      } catch (err) {
+        if (stillMine() || moved()) {
+          setFailedVoice({ pane, audio })
+          const why = (err instanceof Error && err.message ? err.message : 'Dictation failed.').replace(/\.?$/, '.')
+          actions.setNotice(
+            stillMine()
+              ? `${why} Tap ↻ in the box to send the same recording again.`
+              : `${why} The recording is kept — tap ↻ in that pane's box to try again.`
+          )
+        }
+        return false
+      }
+      if (!stillMine() && !moved()) return false
+      setFailedVoice((kept) => (kept?.pane === pane ? null : kept))
+      if (!text) {
+        if (stillMine()) actions.setNotice('The desktop heard nothing in that.')
+        return false
+      }
+      const now = latest.current
+      if (!stillMine() || now.paneId !== pane) {
+        parkWords(pane, text)
+        return false
+      }
+      const command = matchVoiceCommand(text, { busy: now.busy, asking: now.asking })
+      if (command) {
+        runVoiceCommand(command)
+        return false
+      }
+      const before = draftsRef.current[pane] ?? ''
+      const words = before.trim() ? `${before.replace(/\s+$/, '')} ${text}` : text
+      setDraftFor(pane, words)
+      // Words typed by hand are never sent by a countdown: the dictation joins
+      // them and waits for Send. Only dictation on dictation reviews and sends.
+      if (before.trim() && !joinsReview) {
+        actions.setNotice('Added to your message — not sent. Tap Send when it is ready.')
+        return false
+      }
+      startReview(pane, words)
+      return true
+    },
+    [actions, parkWords, runVoiceCommand, setDraftFor, startReview]
+  )
+
+  /**
    * The mic, stopped: this browser's microphone, the desktop's ears.
    *
    * The audio goes to the desktop as `dictate` chunks and the words come back.
@@ -473,11 +583,14 @@ export function SessionComposer({
    * A recording that never came near speech is not uploaded — that is the
    * Bluetooth-routed mic, which Whisper hears as "Thank you." A short whole
    * utterance that is a command ("stop", "yes", "option two") acts at once.
-   * Anything else lands in the box for REVIEW_MS with Undo, then sends.
+   * Anything else lands in the box for REVIEW_MS with Undo, then sends — or,
+   * over words typed by hand, joins them and waits for Send (see `hear`).
    */
   const finishVoice = useCallback(async () => {
     const current = recording.current
     recording.current = null
+    const joinsReview = overReview.current
+    overReview.current = false
     const monitor = levelRef.current
     levelRef.current = null
     setVoiceLevel(null)
@@ -497,7 +610,7 @@ export function SessionComposer({
       const audio = await current.stop()
       const silent = monitor?.silent() ?? false
       monitor?.close()
-      if (!stillMine()) return
+      if (!stillMine() && movedRun.current !== run) return
       if (audio.size === 0) {
         actions.setNotice('Nothing was recorded.')
         return
@@ -506,35 +619,32 @@ export function SessionComposer({
         actions.setNotice('I heard nothing — check the mic (is it on Bluetooth?)')
         return
       }
-      const text = await Promise.race([
-        transcribeOnDesktop(audio, pane, actions.request),
-        new Promise<never>((_, reject) =>
-          window.setTimeout(() => reject(new Error('The desktop took too long to answer.')), TRANSCRIBE_TIMEOUT_MS)
-        )
-      ])
-      if (!stillMine()) return
-      if (!text) {
-        actions.setNotice('The desktop heard nothing in that.')
-        return
-      }
-      const now = latest.current
-      if (now.paneId !== pane) return
-      const command = matchVoiceCommand(text, { busy: now.busy, asking: now.asking })
-      if (command) {
-        runVoiceCommand(command)
-        return
-      }
-      const before = draftsRef.current[pane] ?? ''
-      const words = before.trim() ? `${before.replace(/\s+$/, '')} ${text}` : text
-      setDraftFor(pane, words)
-      reviewing = true
-      startReview(pane, words)
+      reviewing = await hear(pane, audio, run, joinsReview)
     } catch (err) {
       if (stillMine()) actions.setNotice(err instanceof Error ? err.message : 'Dictation failed.')
     } finally {
       if (stillMine() && !reviewing) setVoice(IDLE)
     }
-  }, [actions, runVoiceCommand, setDraftFor, setVoice, startReview])
+  }, [actions, hear, setVoice])
+
+  /** ↻ in the box: the recording that failed, to the desktop's ears once more. */
+  const retryVoice = useCallback(async () => {
+    const kept = failedVoice
+    const now = latest.current
+    if (!kept || !now.canType || now.paneId !== kept.pane) return
+    if (recording.current || starting.current) return
+    if (voiceRef.current.phase === 'recording' || voiceRef.current.phase === 'transcribing') return
+    endReview()
+    setFailedVoice(null)
+    const run = ++voiceRun.current
+    setVoice({ phase: 'transcribing', startedAt: Date.now() })
+    let reviewing = false
+    try {
+      reviewing = await hear(kept.pane, kept.audio, run, false)
+    } finally {
+      if (voiceRun.current === run && !reviewing) setVoice(IDLE)
+    }
+  }, [endReview, failedVoice, hear, setVoice])
   const finishVoiceRef = useRef(finishVoice)
   finishVoiceRef.current = finishVoice
 
@@ -545,8 +655,10 @@ export function SessionComposer({
     if (recording.current || starting.current) return
     // Transcribing has its own Cancel; a press on the mic is not a way out.
     if (voiceRef.current.phase === 'transcribing') return
-    // Dictating over a review keeps its words: the new ones join them.
-    if (voiceRef.current.phase === 'review') endReview()
+    // Dictating over a review keeps its words: the new ones join them, and
+    // the whole of it is dictation, so it reviews and sends as one.
+    overReview.current = voiceRef.current.phase === 'review'
+    if (overReview.current) endReview()
     holdRef.current = false
     pendingEnd.current = null
     starting.current = true
@@ -614,12 +726,15 @@ export function SessionComposer({
   // A pane that goes, or a tab that is switched, does not keep a microphone
   // open, does not keep the button lit for a recording that is gone, and does
   // not send a review into the pane it left — the words stay in its draft.
+  // Words still on their way from the desktop are not dropped either: they
+  // land in the draft of the pane they were spoken for (see `hear`).
   useEffect(() => {
     return () => {
       recording.current?.cancel()
       recording.current = null
       dropLevel()
       window.clearTimeout(reviewTimer.current)
+      if (voiceRef.current.phase === 'transcribing') movedRun.current = voiceRun.current
       voiceRun.current++
       setVoice(IDLE)
     }
@@ -774,11 +889,13 @@ export function SessionComposer({
 
   /**
    * Stop: Esc down the PTY, the key every agent's own footer names for this
-   * (`esc to interrupt`). Pressing it again while "Stopping…" sends it again.
+   * (`esc to interrupt`). While it spins the button takes no press; once it
+   * offers again, a press sends Esc again.
    */
   const sendStop = () => {
+    if (stopPhase === 'stopping') return
     sendRaw(ESC)
-    setStopping(true)
+    setStopPhase('stopping')
   }
 
   // Above the early returns: a hook below them is skipped for a project with no
@@ -838,8 +955,9 @@ export function SessionComposer({
   const nextView: PaneFace = isAgent ? (activeView === 'chat' ? 'feed' : activeView === 'feed' ? 'term' : 'chat') : 'term'
 
   /*
-   * The phone's Send becomes Stop while an agent works — a shell has no busy
-   * signal to read, so it keeps the key row's Ctrl and Esc instead. Not while
+   * The phone's round Stop takes the disc's place while an agent works — any
+   * agent the desktop reads busy, not only one whose screen is parsed. A shell
+   * keeps the key row's Ctrl and Esc instead. Not while
    * the pane is asking: the answer card is how that gets answered, and Esc
    * there is "No".
    */
@@ -999,7 +1117,8 @@ export function SessionComposer({
         onSend={sendDraft}
         onRaw={sendRaw}
         onStop={canStop ? sendStop : undefined}
-        stopping={stopping}
+        stopping={stopPhase !== 'idle'}
+        stopAgain={stopPhase === 'again'}
         models={deck ? undefined : roster}
         currentModelId={currentModelId}
         onModel={!deck && roster.length ? (id) => void sendModel(id) : undefined}
@@ -1027,6 +1146,7 @@ export function SessionComposer({
         sending={sending}
         onNotice={actions.setNotice}
         voice={voiceControls}
+        onVoiceRetry={!deck && failedVoice && failedVoice.pane === paneId ? () => void retryVoice() : undefined}
         voiceState={voice}
         voiceLevel={voiceLevel}
         onShowChat={isAgent && activeView === 'term' ? onFlipView : undefined}

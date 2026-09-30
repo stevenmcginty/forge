@@ -109,6 +109,7 @@ export function Composer({
   onRaw,
   onStop,
   stopping = false,
+  stopAgain = false,
   models,
   currentModelId,
   onModel,
@@ -126,6 +127,7 @@ export function Composer({
   sending = null,
   onNotice,
   voice: voiceControls,
+  onVoiceRetry,
   voiceState = IDLE_VOICE,
   voiceLevel = null,
   onShowChat,
@@ -155,6 +157,12 @@ export function Composer({
   onStop?: () => void
   /** Stop was pressed and the agent has not gone idle yet. */
   stopping?: boolean
+  /**
+   * The phone's Stop, a few seconds on and the agent still working: the
+   * button takes a second press (Esc again). While `stopping` without it, the
+   * button spins and takes none.
+   */
+  stopAgain?: boolean
   /**
    * The models this pane's CLI lists, in that CLI's own words. Empty / absent
    * means the Model chip stays off — Grok's "Grok 4.6" and Claude's "Opus"
@@ -205,6 +213,11 @@ export function Composer({
    * Absent when this browser cannot record.
    */
   voice?: VoiceControls
+  /**
+   * The desktop failed to turn the last recording into words and the audio is
+   * kept: the phone's box offers ↻ in the "+" place to send it again.
+   */
+  onVoiceRetry?: () => void
   /** Where the dictation is — recording, transcribing, the review countdown. */
   voiceState?: VoiceState
   /** The open microphone's loudness while recording; the meter draws from it. */
@@ -609,14 +622,17 @@ export function Composer({
   /*
    * The phone: one row — the box with "+" at its front, and the 56px disc at
    * the bottom right, under the thumb. The disc is the mic while there is
-   * nothing to send and Send the moment there is; Stop joins it, never
-   * replaces it, while an agent works. A dictation takes the box over in place
+   * nothing to send and Send the moment there is; while an agent works and
+   * the box is empty it is Stop, the same size, so the box keeps its width.
+   * A dictation takes the box over in place
    * (Cancel, what it hears, the clock) and never makes it taller, because a
    * taller dock is a shorter terminal and a real PTY resize. The key row sits
    * above, and only the Terminal view shows it — in the status strip's place.
    */
   if (mobile) {
     const live = voiceControls !== undefined && (phase === 'recording' || phase === 'transcribing')
+    /** Stop takes the disc's place: only with nothing to send and no dictation running. */
+    const phoneStop = stopMode && phase === 'idle'
     const pick = (input: HTMLInputElement | null): void => {
       setOpenPick(null)
       input?.click()
@@ -712,6 +728,20 @@ export function Composer({
                   />
                 ) : null}
               </button>
+            ) : onVoiceRetry && phase === 'idle' ? (
+              // The desktop could not hear the last recording: the same audio,
+              // kept in memory, goes again on a tap. "+" is back once it lands.
+              <button
+                type="button"
+                className="composer__lead"
+                data-kind="retry"
+                disabled={disabled}
+                onClick={onVoiceRetry}
+                aria-label="Try the recording again"
+                title="Send the same recording to the desktop again"
+              >
+                <Icon name="refresh" size={20} />
+              </button>
             ) : (
               <button
                 ref={attachRef}
@@ -765,19 +795,30 @@ export function Composer({
             ) : null}
             {phase === 'idle' && !hasDraft ? listenLine : null}
           </div>
-          {micPrimary && phase !== 'idle' ? null : stopMode ? (
+          {/* Stop: the disc's own place and size while the agent works and
+              the box is empty, never a pill that takes the box's width. A
+              square says Stop; a spinning ring says Stopping; a still ring, a
+              few seconds on with the agent still working, says one more press
+              sends Esc again. Words in the box make the disc Send, as ever. */}
+          {phoneStop ? (
             <button
               type="button"
               className="composer__send"
               data-draft="false"
-              data-stop={stopping ? 'stopping' : 'true'}
-              disabled={!ready}
+              data-stop={stopAgain ? 'again' : stopping ? 'stopping' : 'true'}
+              disabled={!ready || (stopping && !stopAgain)}
               onClick={onStop}
-              aria-label={stopping ? 'Stopping' : 'Stop'}
-              title={stopping ? 'Stopping… — tap to send Esc again' : 'Stop — interrupt the agent (Esc)'}
+              aria-label={stopAgain ? 'Stop again' : stopping ? 'Stopping' : 'Stop'}
+              title={
+                stopAgain
+                  ? 'Still working — tap to send Esc again'
+                  : stopping
+                    ? 'Stopping…'
+                    : 'Stop — interrupt the agent (Esc)'
+              }
             >
+              {stopping ? <span className="composer__stop-ring" aria-hidden="true" /> : null}
               <span className="composer__stop-square" aria-hidden="true" />
-              <span>{stopping ? 'Stopping…' : 'Stop'}</span>
             </button>
           ) : micPrimary ? null : (
             <button
@@ -800,7 +841,7 @@ export function Composer({
           )}
           {/* Its own slot, always last: the element survives every state a
               dictation passes through, so a hold keeps its pointer. */}
-          {micPrimary ? mic : null}
+          {micPrimary && !phoneStop ? mic : null}
         </div>
         <BottomSheet open={openPick === 'attach'} onClose={() => setOpenPick(null)} label="Attach" testId="attach-sheet">
           <SheetRow
