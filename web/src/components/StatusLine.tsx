@@ -12,13 +12,12 @@ import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import type { PaneStatus } from '@/lib/rich'
-import { AgentStateGlyph, type DeckAgentState } from '../deck/agents'
+import { AgentStateGlyph, STATE_WORD, type DeckAgentState } from '../deck/agents'
 import { useScreenPane, type ScreenPane } from '../lib/pane-screen'
 import { usePhonePaneState, type PhonePaneState } from '../lib/pane-state'
-import { usePaneReply, type PaneFace } from '../lib/pane-status'
-import { speakReply, speechSupported, stopSpeaking, useSpeakingPane } from '../lib/speak'
+import type { PaneFace } from '../lib/pane-status'
 import { fmtReset, fmtTokens, usageLevel, usePaneUsage, type PaneUsage, type UsageLimit } from '../lib/usage'
-import { useForge } from '../state'
+import { useForge, useForgeOptional } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
 import './StatusLine.css'
 
@@ -116,12 +115,11 @@ export function StatusLine({
   const context = usage.context
   const place = placeOf(status)
   const pane = usePhonePaneState(shell ? null : paneId)
-  const reading = useSpeakingPane() === paneId && paneId !== null
-  // While the agent works its reply is still being written, so "Read aloud"
-  // steps aside and gives its room to the clock — unless it is reading, when
-  // it stays so it can be stopped.
-  const canRead = !shell && paneId !== null && speechSupported() && (pane.state !== 'working' || reading)
-  const reply = usePaneReply(canRead ? paneId : null)
+  // A shell has no screen the phone reads a state from, but the desktop's busy
+  // frames still say whether it is printing: a long build is Working, not idle.
+  const busy = useForgeOptional()?.state.busy
+  const shellState: DeckAgentState | null =
+    shell && live && paneId ? (busy?.has(paneId) ? 'working' : 'idle') : null
 
   /* ------------------------------------------------------------ the swipe */
   const swipe = useRef<{ id: number; x: number; y: number; moving: boolean } | null>(null)
@@ -157,9 +155,12 @@ export function StatusLine({
       type="button"
       className="pstat__who"
       onClick={() => setSheet(true)}
-      aria-label={`${profile.name} — details and Copy screen`}
+      data-state={shellState ?? undefined}
+      title={shellState ? STATE_WORD[shellState] : undefined}
+      aria-label={`${profile.name}${shellState ? `: ${STATE_WORD[shellState]}` : ''} — details and Copy screen`}
     >
       <AgentBadge profile={profile} size="sm" />
+      {shellState ? <AgentStateGlyph state={shellState} /> : null}
       <span className="pstat__name">{profile.name}</span>
       {place ? <span className="pstat__place mono">{place}</span> : null}
     </button>
@@ -232,34 +233,7 @@ export function StatusLine({
       >
         {!shell && onFlipView && screen ? <Segments view={view ?? 'chat'} onPick={screen.showView} /> : null}
         {onToggleKeys && (view ?? 'term') === 'term' ? <KeysToggle shown={keysShown} onClick={onToggleKeys} /> : null}
-        {canRead ? (
-          <button
-            type="button"
-            className="pkeys-toggle pread"
-            aria-pressed={reading}
-            aria-label={reading ? 'Stop reading' : 'Read the reply aloud'}
-            title={reading ? 'Stop reading' : 'Read the reply aloud'}
-            disabled={!reading && !reply}
-            // Straight into speech, no await: a phone only lets a page talk
-            // inside the tap that asked it to.
-            onClick={() => (reading ? stopSpeaking() : reply && speakReply(paneId, reply))}
-          >
-            {/* Reading is a shape, not a colour: the speaker's sound waves
-                give way to a solid stop square. */}
-            <span className="pkeys-toggle__face">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                {reading ? (
-                  <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor" />
-                ) : (
-                  <>
-                    <path d="M3.5 8v4h2.75L10 15.25V4.75L6.25 8z" />
-                    <path d="M13 7.5a3.5 3.5 0 0 1 0 5M15.25 5.25a6.75 6.75 0 0 1 0 9.5" />
-                  </>
-                )}
-              </svg>
-            </span>
-          </button>
-        ) : null}
+        {/* Read aloud lives on the reply itself now (the chat bubble's menu). */}
         {shell ? lead : null}
         <span className="pstat__gap" />
         {/* A condition is the news, so while there is one it is the whole of the

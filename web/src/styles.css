@@ -2420,26 +2420,43 @@ body {
   color: var(--p-ink-3);
 }
 
-/* The agent dot. A split of two agents shows two, overlapped; never more than three. */
-.tab__dots {
+/* The agent: the first pane's real mark (AgentBadge), and "+N" for the rest. */
+.tab__badge {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   flex: none;
 }
 
-.tab__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--p-bg, var(--bg-base));
+.tab__badge .agent-badge {
+  height: 18px;
+  min-width: 22px;
 }
 
-.tab__dot + .tab__dot {
-  margin-left: -2px;
+.tab__badge .tab__more {
+  font-size: var(--p-t-small, 13px);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--p-ink-2);
 }
 
-.app[data-mobile] .tab[data-active='true'] .tab__dot {
-  box-shadow: 0 0 0 2px var(--p-press);
+/* The tab's state as a shape (the "!" disc is WaitingPill.css's .tab__ask):
+   a clock while it works, a tick when it finished and you have not looked. */
+.tab__signal {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--p-ink-2);
+}
+
+.tab__signal[data-signal='done'] {
+  stroke-width: 2.2;
+  color: var(--p-act);
 }
 
 /* Asked for, not yet granted: the pill takes the press surface and a hairline pulses inside it. */
@@ -2454,18 +2471,12 @@ body {
   left: var(--p-4);
 }
 
-/* The long-press sheet's heading: the tab's dots and its title. */
+/* The long-press sheet's heading: the tab's agent mark and its title. */
 .tabsheet__title {
   display: inline-flex;
   align-items: center;
   gap: var(--p-3);
   min-width: 0;
-}
-
-.tabsheet__title .tab__dot {
-  width: 10px;
-  height: 10px;
-  box-shadow: 0 0 0 2px var(--p-raised);
 }
 
 /* Tab close button: subtle red accent styling */
@@ -2584,20 +2595,18 @@ body {
  */
 .app[data-mobile] .pane[data-kind='agent'] .pane__header,
 .app[data-mobile] .pane[data-kind='agent'][data-focused='true'] .pane__header {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, #171920) 0%,
-    color-mix(in srgb, var(--pane-accent, var(--accent)) 8%, #0e0f13) 100%
-  );
-  border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 30%, var(--line-hairline));
-  box-shadow: 0 2px 12px color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, transparent);
+  /* The theme's own surface, so Paper gets a Paper header rather than a dark
+     slab; the agent's colour is a 2px seam under it, not a wash or a glow. */
+  background: var(--p-surface);
+  border-bottom: 1px solid var(--p-line);
+  box-shadow: inset 0 -2px 0 var(--pane-accent, var(--accent));
 }
 
 .app[data-mobile] .pane[data-kind='agent'] .pane__title {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  color: var(--text-primary);
+  color: var(--p-ink);
   text-align: left;
 }
 
@@ -2612,7 +2621,7 @@ body {
   background: color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 24%, transparent);
   border: 1px solid color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 60%, transparent);
   color: var(--badge-accent, var(--pane-accent, var(--accent)));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--badge-accent, var(--pane-accent, var(--accent))) 35%, transparent);
+  box-shadow: none;
 }
 
 /* A monochrome maker's mark (OpenAI, Grok, Z.ai, OpenCode) is drawn in the
@@ -2624,36 +2633,48 @@ body {
 }
 
 .app[data-mobile] .pane .pane__perm {
-  height: 20px;
-  border-radius: var(--r-full);
-  padding: 0 8px;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  /* A small label in words, on the theme's own raised surface: 13px sentence
+     case (the markup says WAITING; the phone says Waiting), no tracking, no
+     glow. Amber is kept for the one chip that means "waiting on you". */
+  display: inline-block;
+  height: 24px;
+  border-radius: var(--p-r-pill);
+  padding: 0 var(--p-3);
+  font: 600 var(--p-t-small) / 22px var(--p-font);
+  letter-spacing: 0;
+  text-transform: lowercase;
+  white-space: nowrap;
   flex: none;
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border: 1px solid var(--p-line-strong);
+  box-shadow: none;
 }
 
-.app[data-mobile] .pane .pane__perm[title*='question'],
-.app[data-mobile] .pane .pane__perm:not([data-frozen]):not([data-reconnecting]):not([data-danger]) {
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 18%, #141518);
-  border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 35%, transparent);
+.app[data-mobile] .pane .pane__perm::first-letter {
+  text-transform: uppercase;
+}
+
+.app[data-mobile] .pane .pane__perm[title*='question'] {
+  color: var(--p-ink);
+  background: var(--p-attn-soft);
+  border-color: var(--p-attn-line);
 }
 
 .app[data-mobile] .pane .pane__perm[data-frozen='true'] {
-  color: var(--info);
-  background: color-mix(in srgb, var(--info) 18%, #141518);
-  border: 1px solid color-mix(in srgb, var(--info) 60%, transparent);
+  color: var(--p-ink-2);
+  background: var(--p-raised);
+  border-color: var(--p-line-strong);
 }
 
-/* The word says RECONNECTING; a ring goes out from the chip and fades. The ring
-   is a pseudo-element on transform and opacity, so it never repaints the header. */
+/* The word says Reconnecting, the border is broken (a shape that stays under
+   reduced motion), and a ring goes out from the chip and fades. The ring is a
+   pseudo-element on transform and opacity, so it never repaints the header. */
 .app[data-mobile] .pane .pane__perm[data-reconnecting='true'] {
   position: relative;
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 18%, #141518);
-  border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  color: var(--p-ink);
+  background: var(--p-attn-soft);
+  border: 1px dashed var(--p-attn-line);
 }
 
 .app[data-mobile] .pane .pane__perm[data-reconnecting='true']::after {
@@ -2661,7 +2682,7 @@ body {
   position: absolute;
   inset: -1px;
   border-radius: inherit;
-  border: 2px solid color-mix(in srgb, var(--feed-accent) 50%, transparent);
+  border: 2px solid var(--p-attn-line);
   opacity: 0;
   pointer-events: none;
   animation: perm-pulse 1.6s ease infinite;
@@ -3035,21 +3056,20 @@ body {
   font-weight: 700;
 }
 
+/* The pane on screen is lifted the way the active tab pill is — press surface,
+   stronger hairline, full ink, heavier weight — on the theme's own tokens, so
+   it reads on Paper as well as on the dark themes. No glow. */
 .mpanes__chip[data-active='true'] {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: #ffffff;
-  font-weight: 600;
-  box-shadow: 0 2px 8px var(--accent-glow);
+  border-color: var(--p-line-strong, var(--line-strong));
+  background: var(--p-press, var(--bg-active));
+  color: var(--p-ink, var(--text-primary));
+  font-weight: 650;
+  box-shadow: none;
 }
 
-.mpanes__chip[data-working='true']::after {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--warn);
-  box-shadow: 0 0 6px var(--warn);
+/* A pane waiting on you wears the tab's "!" disc (.tab__ask), a shape with a label. */
+.mpanes__chip .tab__ask {
+  margin-right: -4px;
 }
 
 .mpanes__body {

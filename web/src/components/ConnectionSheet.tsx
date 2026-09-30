@@ -36,11 +36,21 @@ export function linkWord(link: LinkState): string {
 
 /**
  * The dot. Shape carries the state as well as colour: filled with a halo for
- * live, a hollow ring for quiet, a pulsing ring for reconnecting, a plain grey
- * disc for asleep.
+ * live, a whole hollow ring for quiet, a ring broken into three arcs for
+ * reconnecting (which also pulses, where motion is allowed), a plain grey disc
+ * for asleep. Quiet and reconnecting were once the same ring in lime and amber
+ * — two colours a red-green colourblind eye reads as one.
  */
 export function LinkDot({ link }: { link: LinkState }): ReactNode {
-  return <span className="linkdot" data-state={link} aria-hidden="true" />
+  return (
+    <span className="linkdot" data-state={link} aria-hidden="true">
+      {link === 'reconnecting' ? (
+        <svg viewBox="0 0 12 12" focusable="false">
+          <circle cx="6" cy="6" r="4.8" pathLength={3} strokeDasharray="0.6 0.4" transform="rotate(-72 6 6)" />
+        </svg>
+      ) : null}
+    </span>
+  )
 }
 
 /* ------------------------------------------------------------ last heard

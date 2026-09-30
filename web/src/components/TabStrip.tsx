@@ -6,6 +6,8 @@ import { CHATBOTS, type ChatBotId } from '@shared/chatbots'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { Popover } from '@/components/Popover'
+import { usePaneDone, usePaneStatus } from '../lib/pane-status'
+import { useDoneUnseen, useTrackDone } from '../lib/pane-state'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection } from './BottomSheet'
@@ -45,8 +47,10 @@ import './WaitingPill.css'
  *
  * ## On a phone
  *
- * Neutral pills: an agent dot, the title, and — when it asks — the "!". The
- * active pill is lifted (raised surface, heavier weight), not coloured, so
+ * Neutral pills: the agent's mark, the title, and a shape for its state — the
+ * "!" when it asks, a clock while it works, a tick when it finished while you
+ * were not looking (lib/pane-state.ts "done, unseen"). The active pill is
+ * lifted (raised surface, heavier weight), not coloured, so
  * "which tab am I in" and "which agent is this" stop being the same signal.
  * There is no × in the pill; a long-press opens a sheet with Close tab (behind
  * the same confirm), Hand off and New agent here. `+` sits outside the scroller
@@ -139,6 +143,11 @@ export function TabStrip({ mobile = false }: { mobile?: boolean }): ReactNode {
    * folder, and where even that repeats, its place among the twins.
    */
   const suffixes = tabSuffixes(workspace.tabs, state.picture?.sessions ?? [])
+
+  // "Done, unseen" (lib/pane-state.ts) is kept here, where the strip knows
+  // which pane is on screen: the active tab's.
+  const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? null
+  useTrackDone(activeTab ? activeLeafId(activeTab) : null)
 
   /* ------------------------------------------------------ the long-press sheet */
   const [sheetTabId, setSheetTabId] = useState<string | null>(null)
@@ -318,6 +327,19 @@ function Tab({
   const agentTint = primary && !isShellProfile(primary) ? primary.accent : undefined
   const tint = tab.color ?? agentTint
   const asking = leaves.some((leaf) => state.asking.has(leaf.id))
+  /*
+   * Working and Done, for the phone's pill. Every pane from the desktop's busy
+   * frames, and the pane on screen from its own screen too — the status row's
+   * source — so the pill and the row never disagree about the pane you see.
+   */
+  const leafIds = leaves.map((leaf) => leaf.id)
+  const onScreenId = mobile && active ? activeLeafId(tab) : null
+  const screenBusy = usePaneStatus(onScreenId)?.busy ?? false
+  const screenDone = usePaneDone(onScreenId)
+  const unseenDone = useDoneUnseen(mobile ? leafIds : [])
+  const working = screenBusy || leaves.some((leaf) => state.busy.has(leaf.id))
+  const done = !working && (unseenDone || screenDone)
+  const signal: 'asking' | 'working' | 'done' | null = asking ? 'asking' : working ? 'working' : done ? 'done' : null
   const closeBtnRef = useRef<HTMLButtonElement | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   /** What pressed the pill last. A finger selects on `click`; see below. */
@@ -338,7 +360,6 @@ function Tab({
   useEffect(() => endPress, [])
 
   if (mobile) {
-    const dots = uniqueProfiles(badges)
     return (
       <div
         ref={ref}
@@ -347,7 +368,7 @@ function Tab({
         aria-selected={active}
         aria-busy={pending || undefined}
         aria-haspopup="dialog"
-        aria-label={`${tab.title}${chat ? ' chat' : ''}${suffix ? `, ${suffix}` : ''}${asking ? ', waiting on you' : ''}. Press and hold for more`}
+        aria-label={`${tab.title}${chat ? ' chat' : ''}${suffix ? `, ${suffix}` : ''}${signal ? `, ${SIGNAL_SAID[signal]}` : ''}. Press and hold for more`}
         data-active={active}
         data-chat={chat ? chat.bot : undefined}
         style={chatPaint}
@@ -399,23 +420,15 @@ function Tab({
       >
         {chat ? (
           <ChatBotMark bot={chat.bot} size={16} />
-        ) : (
-          <span className="tab__dots" aria-hidden="true">
-            {dots.map((profile) => (
-              <span key={profile.id} className="tab__dot" style={{ background: profile.accent }} />
-            ))}
-          </span>
-        )}
+        ) : primary ? (
+          <TabBadge profile={primary} extra={leaves.length - 1} />
+        ) : null}
         <span className="tab__title truncate">
           {tab.title}
           {suffix ? <span className="tab__suffix"> · {suffix}</span> : null}
         </span>
         {chat ? <span className="tab__chatkind">Chat</span> : null}
-        {asking ? (
-          <span className="tab__ask" aria-hidden="true">
-            !
-          </span>
-        ) : null}
+        {signal ? <TabSignal signal={signal} /> : null}
         {/*
          * The same sheet as the long-press, in plain sight on the tab you are
          * on. A hidden gesture alone was not found: Steve asked where closing
@@ -583,6 +596,61 @@ function Tab({
   )
 }
 
+/* ------------------------------------------------------------ phone pill parts */
+
+/**
+ * The phone pill's agent: the first pane's real mark (AgentBadge, the brand's
+ * logo), and "+N" for the panes beside it — never a colour dot, which told
+ * two agents in similar hues apart for nobody.
+ */
+function TabBadge({ profile, extra }: { profile: AgentProfile; extra: number }): ReactNode {
+  return (
+    <span className="tab__badge">
+      <AgentBadge profile={profile} size="sm" />
+      {extra > 0 ? (
+        <span className="tab__more mono" aria-label={`and ${extra} more`}>
+          +{extra}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+type TabSignalKind = 'asking' | 'working' | 'done'
+
+const SIGNAL_SAID: Record<TabSignalKind, string> = {
+  asking: 'waiting on you',
+  working: 'working',
+  done: 'finished'
+}
+
+/**
+ * What the tab is doing, as a shape: the "!" disc when it needs you, a clock
+ * while it works, a tick when it has finished and you have not looked. The
+ * words are in the pill's label; the shapes never lean on their colour.
+ */
+function TabSignal({ signal }: { signal: TabSignalKind }): ReactNode {
+  if (signal === 'asking') {
+    return (
+      <span className="tab__ask" aria-hidden="true">
+        !
+      </span>
+    )
+  }
+  return (
+    <svg className="tab__signal" data-signal={signal} width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      {signal === 'working' ? (
+        <>
+          <circle cx="8" cy="8" r="6.2" />
+          <path d="M8 4.6V8l2.4 1.5" />
+        </>
+      ) : (
+        <path d="M2.8 8.6l3.3 3.2 7.1-7.6" />
+      )}
+    </svg>
+  )
+}
+
 /* ------------------------------------------------------------------ helpers */
 
 /** What closing a chat tab does, in the words of the confirm. */
@@ -696,11 +764,7 @@ function TabSheet({
               <ChatTabChip bot={chat.bot} />
             ) : (
               <>
-                <span className="tab__dots" aria-hidden="true">
-                  {names.map((p) => (
-                    <span key={p.id} className="tab__dot" style={{ background: p.accent }} />
-                  ))}
-                </span>
+                {names[0] ? <TabBadge profile={names[0]} extra={leaves.length - 1} /> : null}
                 <span className="truncate">{shown.title}</span>
               </>
             )}

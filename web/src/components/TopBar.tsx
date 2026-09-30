@@ -335,7 +335,13 @@ export function TopBar({
               onClick={() => setMoreOpen(true)}
               data-testid="phone-more"
             >
-              <Icon name="dots" size={24} />
+              {/* The phone's own dots, 4px across: the shared glyph's are under
+                  2px, and on Steve's phone the button all but vanished. */}
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                <circle cx="5" cy="12" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="19" cy="12" r="2" />
+              </svg>
             </button>
           </div>
         </header>

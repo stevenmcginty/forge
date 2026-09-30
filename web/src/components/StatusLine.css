@@ -102,40 +102,6 @@
   outline-offset: 1px;
 }
 
-/*
- * "Read aloud" wears the keys toggle's classes too — same track, same face,
- * raised the same way while it reads — so it is one look, and it stays in the
- * row in every face (styles.css keeps `.pkeys-toggle` up in a landscape
- * Terminal). Reading is a shape: the speaker becomes a stop square. With no
- * reply yet it is faded and does nothing.
- *
- * Unlike the keys toggle it carries a light wash of the agent's own colour, so
- * the eye finds it in a grey row. The colour only draws the eye; the state is
- * still the shape, and reading deepens the wash as a second cue.
- */
-.pread:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.pkeys-toggle.pread:disabled .pkeys-toggle__face {
-  background: none;
-}
-
-.pkeys-toggle.pread:not(:disabled) {
-  color: var(--pane-accent, var(--accent));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 35%, var(--p-line));
-}
-
-.pkeys-toggle.pread:not(:disabled) .pkeys-toggle__face {
-  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 12%, transparent);
-}
-
-.pkeys-toggle.pread[aria-pressed='true'] .pkeys-toggle__face {
-  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 24%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 55%, transparent);
-}
-
 /* -------------------------------------------------------- view switch
  *
  * Three icon segments in a quiet track, each named for screen readers.
@@ -460,7 +426,18 @@
   }
 }
 
-/* A shell: its badge, its name, its folder. */
+/* A shell: its badge, its state's shape (the busy frames), its name, its folder. */
+.pstat__who .dk-sglyph {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--p-ink-2);
+}
+
+.pstat__who[data-state='working'] .dk-sglyph {
+  color: var(--p-act);
+}
+
 .pstat__who {
   flex: 0 1 auto;
   min-width: 0;

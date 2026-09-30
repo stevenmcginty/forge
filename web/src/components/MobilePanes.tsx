@@ -6,6 +6,7 @@ import { AgentBadge } from '@/components/AgentBadge'
 import { useForge, useProfiles } from '../state'
 import { ChatMirror } from './ChatMirror'
 import { PaneView } from './PaneView'
+import './WaitingPill.css'
 
 /**
  * A tab's panes, one at a time, for a screen the width of a hand.
@@ -64,6 +65,7 @@ export function MobilePanes({
         <div className="mpanes__chips" role="tablist" aria-label="Panes in this tab">
           {leaves.map((leaf, i) => {
             const profile = resolveProfile(profiles, leaf.profileId)
+            const asking = state.asking.has(leaf.id)
             return (
               <button
                 key={leaf.id}
@@ -72,11 +74,18 @@ export function MobilePanes({
                 className="mpanes__chip"
                 aria-selected={leaf.id === shown}
                 data-active={leaf.id === shown}
-                data-working={state.asking.has(leaf.id) ? 'true' : undefined}
+                data-working={asking ? 'true' : undefined}
                 onClick={() => pick(leaf.id)}
               >
                 <AgentBadge profile={profile} size="sm" />
                 <span className="truncate">{paneDisplayTitle(profile, leaf.title) || `Pane ${i + 1}`}</span>
+                {/* The tab's own "!" disc, so a pane waiting on you reads the same
+                    here as its tab does — a shape and a label, not a glow. */}
+                {asking ? (
+                  <span className="tab__ask" role="img" aria-label="Waiting on you">
+                    !
+                  </span>
+                ) : null}
               </button>
             )
           })}

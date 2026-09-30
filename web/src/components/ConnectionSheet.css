@@ -2,8 +2,10 @@
  * The link dot and the connection sheet.
  *
  * The dot is drawn in four shapes, not four colours: filled with a halo (live),
- * a hollow ring (live, but quiet), a pulsing ring (reconnecting), a small grey
- * disc (asleep). The words sit next to it in the sheet and in the banners.
+ * a whole hollow ring (live, but quiet), a ring broken into three arcs
+ * (reconnecting; it also pulses where motion is allowed, and stays broken where
+ * it is not), a small grey disc (asleep). The words sit next to it in the sheet
+ * and in the banners.
  */
 
 .linkdot {
@@ -27,9 +29,19 @@
 }
 
 .linkdot[data-state='reconnecting'] {
+  color: var(--p-attn);
   background: transparent;
-  border: 2px solid var(--p-attn);
   animation: linkdot-pulse 1.4s var(--p-ease) infinite alternate;
+}
+
+.linkdot[data-state='reconnecting'] svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
 }
 
 .linkdot[data-state='asleep'] {
