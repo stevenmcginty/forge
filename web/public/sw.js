@@ -31,6 +31,9 @@
 /** The tag every fallback notification shares, so unreadable pushes cannot stack. */
 const FALLBACK_TAG = 'forge'
 
+/** The same notification again inside this window replaces the first without a second buzz. */
+const QUIET_REPEAT_MS = 60000
+
 self.addEventListener('install', () => {
   // Nothing to pre-cache, so there is nothing to wait for: the worker that was
   // just fetched is the one that should be handling pushes, not the one that
@@ -42,6 +45,11 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
 })
 
+/*
+ * The words, and the de-dupe below, are the same as `noteWords` and
+ * `showLocal` in web/src/lib/notify.ts (the tab's own notification). This file
+ * cannot import that one, so a change to either is a change to both.
+ */
 self.addEventListener('push', (event) => {
   let payload = null
   try {
@@ -54,31 +62,58 @@ self.addEventListener('push', (event) => {
   let body = 'A pane on your desktop wants your attention.'
   let tag = FALLBACK_TAG
   let sessionId = ''
+  let key = 'asking|'
+  let at = Date.now()
 
   if (payload && payload.kind === 'attention' && typeof payload.sessionId === 'string') {
     sessionId = payload.sessionId
     tag = payload.sessionId || FALLBACK_TAG
+    if (typeof payload.at === 'number' && payload.at > 0) at = payload.at
+    // "project — pane", as the desktop names it.
     const pane = typeof payload.title === 'string' && payload.title ? payload.title : 'A pane'
-    const desktop = typeof payload.desktopName === 'string' && payload.desktopName ? payload.desktopName : 'your desktop'
+    const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : ''
     if (payload.state === 'done') {
       title = `${pane} finished`
-      body = `On ${desktop}`
+      body = 'Ready for your next message.'
+      key = 'done|'
     } else {
-      title = `${pane} is asking`
-      body = typeof payload.prompt === 'string' && payload.prompt.trim() ? payload.prompt.trim() : 'Needs an answer.'
+      title = `${pane} needs you`
+      body = prompt || 'Waiting for your answer.'
+      key = `asking|${prompt}`
     }
   }
 
   // `tag` per session so a pane that asks twice replaces its own notification
-  // rather than stacking; `renotify` so the replacement still buzzes, which is
-  // the whole reason the second one was sent.
+  // rather than stacking. `renotify` so the replacement still buzzes — unless
+  // it is the same words inside QUIET_REPEAT_MS (this push and the open tab's
+  // own notification both saying it), which is replaced silently. That still
+  // shows a notification, so it still keeps the promise in the header.
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      tag,
-      renotify: true,
-      data: { sessionId }
-    })
+    (async () => {
+      let renotify = true
+      try {
+        const open = await self.registration.getNotifications({ tag })
+        for (const note of open) {
+          const data = note.data || {}
+          if (data.key === key && typeof data.at === 'number' && Date.now() - data.at < QUIET_REPEAT_MS) {
+            renotify = false
+            at = data.at
+            break
+          }
+        }
+      } catch {
+        /* no list to check; buzz */
+      }
+      await self.registration.showNotification(title, {
+        body,
+        tag,
+        renotify,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/badge-96.png',
+        timestamp: at,
+        data: { sessionId, key, at }
+      })
+    })()
   )
 })
 

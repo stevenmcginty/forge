@@ -37,6 +37,7 @@ import './styles.css'
 
 import { App } from './App'
 import { paintStoredTheme } from './deck/theme'
+import { AskBannerPreview } from './components/AskBannerPreview'
 import { ChatPreview } from './components/ChatPreview'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { PowerDrawPreview } from './components/PowerDrawPreview'
@@ -96,6 +97,8 @@ createRoot(host).render(
       <ChatPreview />
     ) : preview === 'powerdraw' ? (
       <PowerDrawPreview />
+    ) : preview === 'askbanner' ? (
+      <AskBannerPreview />
     ) : (
       <ForgeProvider>
         <RepoProvider>

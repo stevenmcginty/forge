@@ -1,0 +1,151 @@
+/*
+ * The heads-up banner: another pane is asking (AskBanner.tsx).
+ *
+ * Sits at the top of the phone's display (position: relative there), so it is
+ * under the top bar and the tabs, over the terminal, and under every sheet.
+ * Amber is the "waiting on you" colour, but the "!" in its filled circle and
+ * the words carry it on their own — the same rule as the waiting pill. Tokens
+ * only, with fallbacks for the harness.
+ */
+
+.askbanner {
+  position: absolute;
+  top: var(--p-2, 8px);
+  right: var(--p-3, 12px);
+  left: var(--p-3, 12px);
+  z-index: 6;
+  display: flex;
+  align-items: stretch;
+  min-height: 64px;
+  color: var(--p-ink, var(--text-primary));
+  background: var(--p-raised, var(--bg-panel-raised));
+  border: 1px solid var(--p-attn-line, var(--warn-line-strong));
+  border-radius: var(--p-r-sheet, 20px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    transform var(--p-dur, 180ms) var(--p-ease, ease-out),
+    opacity var(--p-dur, 180ms) var(--p-ease, ease-out);
+  animation: askbanner-drop var(--p-dur-sheet, 280ms) var(--p-ease-sheet, ease-out);
+}
+
+@keyframes askbanner-drop {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-100% - var(--p-2, 8px)));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The whole card but the × is one tap: go to that pane. */
+.askbanner__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--p-3, 12px);
+  margin: 0;
+  padding: var(--p-3, 12px) 0 var(--p-3, 12px) var(--p-4, 16px);
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.askbanner__body:active {
+  background: var(--p-press, var(--bg-active));
+}
+
+.askbanner__body:focus-visible,
+.askbanner__close:focus-visible {
+  outline: 2px solid var(--p-attn, var(--warn));
+  outline-offset: -3px;
+  border-radius: var(--p-r-row, 12px);
+}
+
+/* The "!" in its filled circle — the waiting pill's shape, a size up. */
+.askbanner__bang {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--p-attn, var(--warn));
+  color: var(--p-attn-ink, var(--bg-base));
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.askbanner__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.askbanner__title {
+  overflow: hidden;
+  font-size: var(--p-t-chrome, 15px);
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.askbanner__prompt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--p-ink-2, var(--text-secondary));
+  font-size: var(--p-t-label, 14px);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* A 44px-wide hit area the full height of the card; the cross drawn inside. */
+.askbanner__close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--p-hit, 44px);
+  min-height: var(--p-hit, 44px);
+  margin: 0 var(--p-1, 4px) 0 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--p-ink-2, var(--text-secondary));
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.askbanner__close:active {
+  color: var(--p-ink, var(--text-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .askbanner {
+    animation: none;
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .askbanner {
+  animation: none;
+  transition: none;
+}
