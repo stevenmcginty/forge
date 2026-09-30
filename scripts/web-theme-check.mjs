@@ -1,11 +1,12 @@
 /**
- * Forge Web's own themes: WhatsApp dark and WhatsApp light.
+ * WhatsApp dark and WhatsApp light, as Forge Web wears them.
  *
  *   node scripts/web-theme-check.mjs
  *
- * Two fixed themes, not one that follows the phone: each id wears its own
- * half, the old one-row id moves to the half the phone was showing, and the
- * chat's text and bubbles stay readable in both.
+ * Two fixed built-ins (src/theme/themes.ts, shared with Forge desktop), not one
+ * that follows the phone: each id wears its own half, the old one-row id moves
+ * to the half the phone was showing, and the chat's text and bubbles stay
+ * readable in both.
  */
 import { registerHooks } from 'node:module'
 
@@ -26,17 +27,23 @@ registerHooks({
   }
 })
 
-const { contrast, DEFAULT_THEME_ID } = await import('../src/theme/themes.ts')
-const {
-  PHONE_ONLY_THEMES,
-  WHATSAPP_DARK_ID,
-  WHATSAPP_LIGHT_ID,
-  LEGACY_WHATSAPP_ID,
-  phoneOnlyCore,
-  resolvePhoneOnly,
-  storedThemeId,
-  isKnownTheme
-} = await import('../web/src/lib/phone-themes.ts')
+const { contrast, DEFAULT_THEME_ID, BUILTIN_THEMES, resolveTheme, forkTheme } = await import(
+  '../src/theme/themes.ts'
+)
+const { WHATSAPP_DARK_ID, WHATSAPP_LIGHT_ID, LEGACY_WHATSAPP_ID, storedThemeId, isKnownTheme } = await import(
+  '../web/src/lib/phone-themes.ts'
+)
+
+const builtin = (id) => BUILTIN_THEMES.find((t) => t.id === id) ?? null
+const BUBBLE_TOKENS = [
+  'theme-bubble-in',
+  'theme-bubble-out',
+  'theme-bubble-ink',
+  'theme-bubble-meta',
+  'theme-bubble-meta-out',
+  'theme-bubble-edge',
+  'theme-tick'
+]
 
 let pass = 0
 let fail = 0
@@ -54,17 +61,20 @@ const ok = (cond, label, detail = '') => {
 
 console.log('\nids')
 ok(WHATSAPP_DARK_ID === 'whatsapp-dark' && WHATSAPP_LIGHT_ID === 'whatsapp-light', 'the two ids')
+const ids = BUILTIN_THEMES.map((t) => t.id).join()
 ok(
-  PHONE_ONLY_THEMES.map((t) => t.id).join() === 'whatsapp-dark,whatsapp-light',
-  'the list adds dark, then light'
+  ids === 'volt,orbit,carbon,ember,ice,paper,whatsapp-dark,whatsapp-light',
+  'the built-ins are the six, then dark, then light',
+  ids
 )
-const dark = phoneOnlyCore('whatsapp-dark')
-const light = phoneOnlyCore('whatsapp-light')
+ok(DEFAULT_THEME_ID === 'volt', 'the default is still Volt')
+const dark = builtin('whatsapp-dark')
+const light = builtin('whatsapp-light')
 ok(dark?.appearance === 'dark', 'whatsapp-dark is dark', dark?.appearance)
 ok(light?.appearance === 'light', 'whatsapp-light is light', light?.appearance)
 ok(dark?.name === 'WhatsApp dark' && light?.name === 'WhatsApp light', 'each name says dark or light')
 ok(dark && light && dark.bg !== light.bg && dark.text !== light.text, 'the two differ')
-ok(phoneOnlyCore(LEGACY_WHATSAPP_ID) === null, 'the legacy id is no theme of its own')
+ok(builtin(LEGACY_WHATSAPP_ID) === null, 'the legacy id is no theme of its own')
 ok(!isKnownTheme(LEGACY_WHATSAPP_ID), 'the legacy id is not offered')
 
 /* ------------------------------------------------------------ migration */
@@ -93,11 +103,31 @@ stub(false)
 ok(storedThemeId('whatsapp') === 'whatsapp-light', 'legacy on a phone set to light (matcher) → whatsapp-light')
 delete globalThis.window
 
+/* --------------------------------------------------------------- tokens */
+
+console.log('\nresolved tokens')
+for (const core of [dark, light]) {
+  const t = resolveTheme(core)
+  const missing = BUBBLE_TOKENS.filter((k) => !t[k])
+  ok(missing.length === 0, `${core.name} resolves every bubble token`, missing.join() || 'all seven')
+}
+ok(
+  resolveTheme(dark)['text-secondary'] === '#aebac1' && resolveTheme(light)['text-secondary'] === '#54656f',
+  'each WhatsApp half wears its own secondary ink over the derived one'
+)
+const others = BUILTIN_THEMES.filter((t) => t !== dark && t !== light)
+ok(
+  others.every((t) => BUBBLE_TOKENS.every((k) => !(k in resolveTheme(t)))),
+  'no other built-in writes a bubble token'
+)
+const fork = forkTheme(dark, 'theme-test', 'WhatsApp dark (mine)')
+ok(!('theme-bubble-in' in resolveTheme(fork)), 'a fork of WhatsApp dark wears the derived set alone')
+
 /* ------------------------------------------------------------- contrast */
 
 for (const core of [dark, light]) {
   console.log(`\n${core.name}`)
-  const t = resolvePhoneOnly(core)
+  const t = resolveTheme(core)
   const pairs = [
     ['text on bg', t['text-primary'] ?? core.text, t['bg-base'] ?? core.bg, 4.5],
     ['bubble-ink on bubble-in', t['theme-bubble-ink'], t['theme-bubble-in'], 4.5],

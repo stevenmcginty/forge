@@ -14,7 +14,7 @@
  * this sheet), on the phone and the deck alike: both sides in bubbles, the
  * time and ticks in the corner, a long-press / right-click menu for Copy. The
  * bubble colours are tokens here, with a theme's own `--theme-bubble-*`
- * (lib/phone-themes.ts: WhatsApp) taking over when it sets them. The deck's
+ * (src/theme/themes.ts: WhatsApp) taking over when it sets them. The deck's
  * window-sized tuning is the sheet's very end (`data-desk`).
  */
 

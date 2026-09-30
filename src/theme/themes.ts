@@ -9,7 +9,11 @@ import type { ThemeCore } from '@shared/types'
  * below). tokens.css still holds the Volt values literally, so the app has a
  * sane painted state before any JavaScript runs; from then on the resolved map
  * is written onto the root element as inline custom properties, which is what
- * makes a custom theme exactly as capable as a built-in one.
+ * makes a custom theme exactly as capable as a built-in one. A built-in may add
+ * a few values of its own over the derived set (`BUILTIN_OVER`: WhatsApp's).
+ *
+ * This is the one list for Forge desktop and Forge Web alike: the web's deck
+ * and phone pickers read `BUILTIN_THEMES` straight from here (web/src/deck/theme.ts).
  *
  * Two rules govern the palettes:
  *
@@ -331,7 +335,129 @@ const PAPER: ThemeCore = {
   ]
 }
 
-export const BUILTIN_THEMES: ThemeCore[] = [VOLT, ORBIT, CARBON, EMBER, ICE, PAPER]
+/**
+ * WhatsApp: the colours people already read a chat in, taken whole — ground,
+ * bars, both bubbles, ink, icons, the green and the blue ticks — so Forge Web's
+ * Chat view reads like the app it borrows its grammar from, and the desktop
+ * wears the same room. Two themes, WhatsApp dark and WhatsApp light, each fixed
+ * like the six: the machine's dark / light setting never picks for you.
+ *
+ * The few places WhatsApp's own value beats the derived one (its secondary ink,
+ * its icon grey, the raised menu surface) are written over the result by
+ * `BUILTIN_OVER`, and the chat's bubble colours ride along as `theme-*` tokens
+ * that Forge Web's ChatView.css reads with a fallback, so every other theme
+ * keeps its own. The desktop has no bubbles; the tokens are simply unread there.
+ */
+export const WHATSAPP_DARK_ID = 'whatsapp-dark'
+export const WHATSAPP_LIGHT_ID = 'whatsapp-light'
+
+const WHATSAPP_DARK: ThemeCore = {
+  id: WHATSAPP_DARK_ID,
+  name: 'WhatsApp dark',
+  appearance: 'dark',
+  bg: '#0b141a',
+  panel: '#202c33',
+  text: '#e9edef',
+  accent: '#00a884',
+  danger: '#f15c6d',
+  warn: '#ffd279',
+  info: '#53bdeb',
+  ok: '#25d366',
+  // The terminal sits on the chat's own ground, so flipping Chat ↔ Terminal is one room.
+  termBg: '#0b141a',
+  termFg: '#e9edef',
+  ansi: [
+    '#111b21',
+    '#f15c6d',
+    '#25d366',
+    '#ffd279',
+    '#53bdeb',
+    '#c89cf5',
+    '#5fd6c9',
+    '#d1d7db',
+    '#8696a0',
+    '#ff8a97',
+    '#6fe7a0',
+    '#ffe3a3',
+    '#8ad4f4',
+    '#dcbdfa',
+    '#93e6dd',
+    '#f7f8fa'
+  ]
+}
+
+const WHATSAPP_LIGHT: ThemeCore = {
+  id: WHATSAPP_LIGHT_ID,
+  name: 'WhatsApp light',
+  appearance: 'light',
+  bg: '#efeae2',
+  panel: '#f0f2f5',
+  text: '#111b21',
+  accent: '#008069',
+  danger: '#d42a3f',
+  warn: '#9a5b00',
+  info: '#027eb5',
+  ok: '#008069',
+  termBg: '#f7f5f1',
+  termFg: '#111b21',
+  ansi: [
+    '#111b21',
+    '#b8182d',
+    '#00705c',
+    '#7a5200',
+    '#02649a',
+    '#7b2fa8',
+    '#00687a',
+    '#54656f',
+    '#5b6b74',
+    '#961426',
+    '#005c4b',
+    '#5e3f00',
+    '#014f7a',
+    '#5f2483',
+    '#005262',
+    '#111b21'
+  ]
+}
+
+/**
+ * A built-in's own values where the derived ones drift from it, keyed by theme
+ * id and spread over `resolveTheme`'s result. A custom theme forked from one of
+ * these gets an id of its own and so wears the derived set alone.
+ */
+const BUILTIN_OVER: Record<string, ResolvedTheme> = {
+  [WHATSAPP_DARK_ID]: {
+    'text-secondary': '#aebac1',
+    'text-muted': '#8696a0',
+    'text-dim': '#8696a0',
+    'bg-panel-raised': '#233138',
+    'bg-sunken': '#111b21',
+    'theme-bubble-in': '#202c33',
+    'theme-bubble-out': '#005c4b',
+    'theme-bubble-ink': '#e9edef',
+    'theme-bubble-meta': '#8696a0',
+    'theme-bubble-meta-out': '#aecfc9',
+    'theme-bubble-edge': 'transparent',
+    'theme-tick': '#53bdeb'
+  },
+  [WHATSAPP_LIGHT_ID]: {
+    'text-secondary': '#54656f',
+    'text-muted': '#54656f',
+    'text-dim': '#667781',
+    'bg-panel-raised': '#ffffff',
+    'bg-sunken': '#f0f2f5',
+    'theme-bubble-in': '#ffffff',
+    'theme-bubble-out': '#d9fdd3',
+    'theme-bubble-ink': '#111b21',
+    'theme-bubble-meta': '#667781',
+    'theme-bubble-meta-out': '#56666f',
+    'theme-bubble-edge': 'rgba(11, 20, 26, 0.13)',
+    'theme-tick': '#53bdeb'
+  }
+}
+
+/** The six, then WhatsApp dark, then WhatsApp light. */
+export const BUILTIN_THEMES: ThemeCore[] = [VOLT, ORBIT, CARBON, EMBER, ICE, PAPER, WHATSAPP_DARK, WHATSAPP_LIGHT]
 
 export const DEFAULT_THEME_ID = 'volt'
 
@@ -496,12 +622,16 @@ export function resolveTheme(core: ThemeCore): ResolvedTheme {
     tokens[`term-${slot}`] = ansi[i] ?? core.termFg
   })
 
-  return tokens
+  // A built-in's own values last (WhatsApp's inks, surfaces and bubble colours).
+  const over = core.custom ? undefined : BUILTIN_OVER[core.id]
+  return over ? { ...tokens, ...over } : tokens
 }
 
 /* -------------------------------------------------------------- application */
 
 let applied: string | null = null
+/** Every token the last apply wrote, so the next can take off what it does not write. */
+let appliedTokens: string[] = []
 
 /**
  * Paint a theme onto the document. Inline custom properties on the root beat
@@ -509,14 +639,19 @@ let applied: string | null = null
  * default and every theme — built-in or made ten seconds ago in the editor —
  * takes exactly the same path to the screen.
  *
+ * A token the previous theme wrote that this one does not (WhatsApp's bubble
+ * colours) comes off, so the stylesheet's fallback shows through again.
+ *
  * Returns the resolved map, which is also what the terminal host needs.
  */
 export function applyTheme(core: ThemeCore): ResolvedTheme {
   const tokens = resolveTheme(core)
   const root = document.documentElement
+  for (const name of appliedTokens) if (!(name in tokens)) root.style.removeProperty(`--${name}`)
   for (const [name, value] of Object.entries(tokens)) {
     root.style.setProperty(`--${name}`, value)
   }
+  appliedTokens = Object.keys(tokens)
   root.dataset['theme'] = core.id
   root.dataset['appearance'] = core.appearance
   applied = core.id

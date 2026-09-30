@@ -6,8 +6,8 @@ import { SheetSection } from './BottomSheet'
 import './PhoneTheme.css'
 
 /**
- * The theme, on the phone: the deck's six (deck/theme.ts), then WhatsApp dark
- * and WhatsApp light (lib/phone-themes.ts), as rows in the More sheet. Each is
+ * The theme, on the phone: the deck's six, then WhatsApp dark and WhatsApp
+ * light (deck/theme.ts, from src/theme/themes.ts), as rows in the More sheet. Each is
  * a swatch of its own background, panel and accent, its name, and whether it
  * is dark or light; the
  * one in use says "In use" and carries a tick, so the pick never rests on

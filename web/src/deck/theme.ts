@@ -2,23 +2,15 @@ import { useCallback, useState } from 'react'
 import type { ThemeCore } from '@shared/types'
 import { BUILTIN_THEMES, DEFAULT_THEME_ID, applyTheme, findTheme, resolveTheme } from '@/theme/themes'
 import { rethemeTerminals } from '../lib/term'
-import {
-  PHONE_ONLY_THEMES,
-  isKnownTheme,
-  isPhoneOnlyTheme,
-  phoneOnlyCore,
-  resolvePhoneOnly,
-  storedThemeId
-} from '../lib/phone-themes'
+import { isKnownTheme, storedThemeId } from '../lib/phone-themes'
 
 /**
  * The theme this browser wears. Read straight from src/theme/themes.ts — the
- * same six cores and the same resolver the desktop uses — so a theme added or
- * retuned on the deck is here on the next build without anyone copying a
- * colour. Forge Web adds its own on top (lib/phone-themes.ts: WhatsApp dark
- * and WhatsApp light), in the phone's Theme list and the deck's picker alike;
- * Forge desktop never sees them, because src/theme/themes.ts does not know
- * them.
+ * same cores (the six, then WhatsApp dark and WhatsApp light) and the same
+ * resolver the desktop uses — so a theme added or retuned on the deck is here
+ * on the next build without anyone copying a colour. lib/phone-themes.ts adds
+ * only the browser's side: which ids it may wear, and the move off the old
+ * one-row WhatsApp id.
  *
  * Remembered per browser (localStorage), never sent to the desktop: this is
  * how *this* window looks, not a setting of that machine.
@@ -32,14 +24,14 @@ import {
 const KEY = 'forge-web-theme'
 
 /** The phone's Theme list: the six, then WhatsApp dark, then WhatsApp light. */
-export const PHONE_THEMES: ThemeCore[] = [...BUILTIN_THEMES, ...PHONE_ONLY_THEMES]
+export const PHONE_THEMES: ThemeCore[] = BUILTIN_THEMES
 
 /** The deck's picker: the same list — the two WhatsApp themes last. */
 export const DECK_THEMES: ThemeCore[] = PHONE_THEMES
 
 /** A theme's core for a label or a swatch. Null for an id nobody knows. */
 export function phoneThemeCore(id: string): ThemeCore | null {
-  return phoneOnlyCore(id) ?? BUILTIN_THEMES.find((t) => t.id === id) ?? null
+  return BUILTIN_THEMES.find((t) => t.id === id) ?? null
 }
 
 function stored(): string {
@@ -74,22 +66,14 @@ function setMeta(name: string, content: string): void {
 }
 
 function put(id: string): void {
-  const phoneOnly = phoneOnlyCore(id)
-  const core = phoneOnly ?? findTheme(id, [])
+  const core = findTheme(id, [])
   const key = `${core.id}:${core.appearance}`
   if (applied?.key === key) return
-  const root = document.documentElement
-  // The themes.ts path for the derived set, so the root reads exactly as the
-  // desktop's would; a phone-only theme's own values go over the top.
-  const tokens: Record<string, string> = phoneOnly ? resolvePhoneOnly(phoneOnly) : applyTheme(core)
-  if (phoneOnly) {
-    applyTheme(phoneOnly)
-    for (const [name, value] of Object.entries(tokens)) root.style.setProperty(`--${name}`, value)
-  }
-  // A token the last theme wrote that this one does not (WhatsApp's bubble
-  // colours) comes off, so the next theme falls back to its own.
+  // The themes.ts path, so the root reads exactly as the desktop's would. It
+  // also takes off a token the last theme wrote that this one does not
+  // (WhatsApp's bubble colours), so the next theme falls back to its own.
+  const tokens = applyTheme(core)
   const names = Object.keys(tokens)
-  for (const name of applied?.tokens ?? []) if (!(name in tokens)) root.style.removeProperty(`--${name}`)
   setMeta('theme-color', tokens['bg-base'] ?? core.bg)
   setMeta('color-scheme', core.appearance)
   const had = applied !== null
@@ -150,6 +134,6 @@ export function useDeckTheme(on: boolean): { themeId: string; setTheme: (id: str
 
 /** The three colours a swatch needs, resolved the way the theme itself resolves them. */
 export function swatchOf(core: ThemeCore): { bg: string; panel: string; accent: string } {
-  const t = isPhoneOnlyTheme(core.id) ? resolvePhoneOnly(core) : resolveTheme(core)
+  const t = resolveTheme(core)
   return { bg: t['bg-base'] ?? core.bg, panel: t['bg-panel'] ?? core.panel, accent: core.accent }
 }
