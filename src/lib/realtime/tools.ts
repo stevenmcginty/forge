@@ -1,3 +1,4 @@
+import { BRAIN_ASK_WAIT_MS } from '@shared/brain'
 import type { RealtimeToolSpec } from '@shared/realtime'
 import {
   answerVoiceAgentTool,
@@ -80,6 +81,56 @@ function runAppActionSpec(): RealtimeToolSpec {
   }
 }
 
+/* -------------------------------------------------------------- forge brain */
+
+/**
+ * The way from a realtime voice agent to Forge Brain (shared/brain.ts), the
+ * same pair electron/voice-agent/host.ts gives the Claude session. Always
+ * declared, because a live session's tools are fixed when it opens; while the
+ * brain is off the answer says so, in words the model can say.
+ */
+export const BRAIN_REALTIME_TOOLS: RealtimeToolSpec[] = [
+  {
+    name: 'ask_brain',
+    description:
+      'Ask Forge Brain — the app-level agent that sees every project and runs the agents — a question, and wait up to a minute for its answer. For anything across projects, or that Forge Brain is running. Say its answer in your own words, briefly. When it is off, or still working, the result says so.',
+    parameters: {
+      type: 'object',
+      properties: { question: { type: 'string', description: 'The question, in plain words, with what Steve asked' } },
+      required: ['question']
+    }
+  },
+  {
+    name: 'tell_brain',
+    description:
+      'Hand Forge Brain a job to do and do not wait: it works on it and reports back by itself when it is done. For work that takes a while or spans projects. Tell Steve in one line that the brain has it.',
+    parameters: {
+      type: 'object',
+      properties: { job: { type: 'string', description: 'The job, in plain words, with everything Steve said about it' } },
+      required: ['job']
+    }
+  }
+]
+
+async function runBrainTool(name: string, args: Record<string, unknown>, waitMs: number): Promise<RealtimeToolAnswer | null> {
+  if (name !== 'ask_brain' && name !== 'tell_brain') return null
+  const brain = window.forge.brain
+  if (!brain?.ask) return { ok: false, text: 'FAILED: this window cannot reach Forge Brain until Forge is restarted.' }
+  if (name === 'ask_brain') {
+    const question = String(args.question ?? '').trim()
+    if (!question) return { ok: false, text: 'FAILED: ask_brain needs a question.' }
+    const answer = await brain.ask(`[The voice agent asks, for Steve] ${question}`, waitMs)
+    if (answer.ok) return { ok: true, text: `Forge Brain says: ${answer.text}` }
+    return { ok: false, text: answer.late ? `STILL WORKING: ${answer.error}` : `FAILED: ${answer.error}` }
+  }
+  const job = String(args.job ?? '').trim()
+  if (!job) return { ok: false, text: 'FAILED: tell_brain needs a job.' }
+  const sent = await brain.send(`[A job from Steve, through the voice agent] ${job} — when it is done, tell him with say_to_voice_agent.`)
+  return sent.ok
+    ? { ok: true, text: `OK: Forge Brain has it${sent.queued ? ' (queued behind what it is doing)' : ''}. It will report back.` }
+    : { ok: false, text: `FAILED: ${sent.error}` }
+}
+
 /* ---------------------------------------------------------------- the list */
 
 const NO_ARGS = { type: 'object', properties: {} }
@@ -118,7 +169,8 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
   },
   ...MAIN_REALTIME_TOOLS,
   ...HUB_REALTIME_TOOLS,
-  ...BROWSER_REALTIME_TOOLS
+  ...BROWSER_REALTIME_TOOLS,
+  ...BRAIN_REALTIME_TOOLS
 ]
 
 /* ---------------------------------------------------------------- answers */
@@ -172,6 +224,8 @@ export interface RealtimeToolEnv {
   deps?: VoiceAgentToolDeps | null
   /** Screen capture. Defaults to window.forge.realtime.screenshot. */
   screenshot?: () => Promise<{ mime: string; base64: string } | null>
+  /** How long ask_brain waits for the brain. A browser's call passes less: its requests die at 30 s. */
+  brainWaitMs?: number
 }
 
 /**
@@ -191,6 +245,8 @@ export async function runRealtimeTool(
     if (hub) return hub
     const browser = await runBrowserHubTool(name, args)
     if (browser) return browser
+    const brain = await runBrainTool(name, args, env.brainWaitMs ?? BRAIN_ASK_WAIT_MS)
+    if (brain) return brain
     switch (name) {
       case 'get_app_state':
       case 'get_project_memory':

@@ -13,7 +13,7 @@ import type { WebVoiceClaudeEvent } from '@shared/web'
 import { getDataDir, getSettings } from '../store'
 import { bridgeConfigPath, resolveBridgeScript } from '../bridge/mcp-config'
 import type { BrowserLink } from '../browser-panes/link'
-import { createBrainLink } from './brain-link'
+import { createBrainLink, type LinkToolHost } from './brain-link'
 import { findWindowsLaunchable } from '../cli-launch'
 import { whichCommand } from '../which'
 import { CODEX_VOICE_MODELS, DEFAULT_VOICE_CLAUDE_MODEL, VoiceAgentHost, type VoiceAgentShot } from './host'
@@ -260,6 +260,15 @@ export function registerVoiceAgentHandlers(): void {
  */
 export function askRendererTool(name: string, args: unknown): Promise<string> {
   return ensureHost().askTool(name, args)
+}
+
+/**
+ * The desk host's Forge tools, for Forge Brain's own link (electron/brain/):
+ * the same definitions and guards every brain gets. Creating the host opens no
+ * session — only `start` does.
+ */
+export function brainToolHost(): LinkToolHost {
+  return ensureHost()
 }
 
 export function disposeVoiceAgent(): void {

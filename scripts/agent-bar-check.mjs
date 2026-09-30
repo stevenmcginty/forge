@@ -152,20 +152,35 @@ await check('the mic stays open for the next turn: the re-arm poll restarts a ph
 })
 
 console.log('one Agent brain')
-await check('migration: Steve\'s profile (hub claude + voiceBrain gemini) → Claude', () => {
-  assert.equal(B.migrateAgentBrain('claude', 'gemini'), 'claude')
+const storeSrc0 = readFileSync(new URL('../electron/store.ts', import.meta.url), 'utf8')
+await check('migration: Steve\'s profile (hub claude + voiceBrain gemini) → the default, Forge Brain', () => {
+  assert.equal(B.migrateAgentBrain('claude', 'gemini'), 'forge-brain')
 })
-await check('migration: a realtime hub pick wins; groq/openrouter text brains carry over; the rest → Claude', () => {
+await check('migration: a realtime hub pick wins; groq/openrouter text brains carry over; the rest → Forge Brain', () => {
   assert.equal(B.migrateAgentBrain('gemini-live', 'groq'), 'gemini-live')
   assert.equal(B.migrateAgentBrain('claude', 'groq'), 'groq')
   assert.equal(B.migrateAgentBrain(undefined, 'openrouter'), 'openrouter')
-  assert.equal(B.migrateAgentBrain(undefined, 'stub'), 'claude')
+  assert.equal(B.migrateAgentBrain(undefined, 'stub'), 'forge-brain')
 })
-await check('a keyed brain with no key falls back to Claude and says why', () => {
+await check('the pickers offer three: Forge Brain (the default), Gemini Live, GPT Realtime; any other pick answers as Forge Brain', () => {
+  assert.deepEqual(B.VISIBLE_AGENT_BRAINS, ['forge-brain', 'gemini-live', 'gpt-realtime'])
+  assert.deepEqual(B.VISIBLE_AGENT_BRAIN_SPECS.map((s) => s.label), ['Forge Brain', 'Gemini Live', 'GPT Realtime'])
+  assert.equal(B.DEFAULT_AGENT_BRAIN, 'forge-brain')
+  for (const id of ['claude', 'codex-cli', 'gemini-cli', 'gpt-realtime-mini', 'gemini-flash', 'groq', 'openrouter']) {
+    assert.ok(B.AGENT_BRAIN_IDS.includes(id), `${id} keeps its adapter`)
+    assert.equal(B.visibleAgentBrain(id), 'forge-brain', id)
+  }
+  for (const id of B.VISIBLE_AGENT_BRAINS) assert.equal(B.visibleAgentBrain(id), id)
+  assert.equal(P.resolveAgentBrain('claude', {}).brain, 'forge-brain')
+  assert.equal(P.resolveAgentBrain('groq', { groqKey: 'gsk_x' }).brain, 'forge-brain')
+  assert.ok(/agentBrain: visibleAgentBrain\(isAgentBrainId\(s\.agentBrain\)/.test(storeSrc0), 'a stored Claude is read back as Forge Brain')
+  assert.ok(/agentBrain: DEFAULT_AGENT_BRAIN,/.test(storeSrc0), 'a new install starts on Forge Brain')
+})
+await check('a keyed brain with no key falls back to Forge Brain and says why', () => {
   const r = P.resolveAgentBrain('gpt-realtime', { openaiKey: '' })
-  assert.equal(r.brain, 'claude')
-  assert.match(r.fallbackReason, /No OpenAI key/)
-  assert.equal(P.resolveAgentBrain('groq', { groqKey: 'gsk_x' }).brain, 'groq')
+  assert.equal(r.brain, 'forge-brain')
+  assert.match(r.fallbackReason, /No OpenAI key — using Forge Brain/)
+  assert.equal(P.resolveAgentBrain('gemini-live', { geminiKey: 'k' }).brain, 'gemini-live')
 })
 
 console.log('live context')
@@ -399,9 +414,9 @@ await check('Settings and the picker read one status: the same probe, the same w
   for (const word of ['Ready', 'Checking…', 'Not ready']) assert.equal(S.brainUnavailable({ word, glyph: '', tone: 'ok' }), false, word)
 })
 await check('the chip names the brain that answers; a fallback says why, in words', () => {
-  assert.equal(S.barBrainLabel('claude', P.resolveAgentBrain('claude', {})), 'Claude')
-  assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', {})), 'Claude · Gemini Live: no key')
-  assert.equal(S.barBrainLabel('groq', P.resolveAgentBrain('groq', {})), 'Claude · Groq (text): no key')
+  assert.equal(S.barBrainLabel('forge-brain', P.resolveAgentBrain('forge-brain', {})), 'Forge Brain')
+  assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', {})), 'Forge Brain · Gemini Live: no key')
+  assert.equal(S.barBrainLabel('gpt-realtime', P.resolveAgentBrain('gpt-realtime', {})), 'Forge Brain · GPT Realtime: no key')
   assert.equal(S.barBrainLabel('gemini-live', P.resolveAgentBrain('gemini-live', { geminiKey: 'k' })), 'Gemini Live')
 })
 await check('a pick made while Listen is on: next turn on Parakeet, next press when a live session is involved', () => {
@@ -419,15 +434,15 @@ const storeSrc = readFileSync(new URL('../electron/store.ts', import.meta.url), 
 const appStateSrc = readFileSync(new URL('../src/state/AppState.tsx', import.meta.url), 'utf8')
 const voiceMenuSrc = readFileSync(new URL('../src/components/settings/VoiceMenu.tsx', import.meta.url), 'utf8')
 
-await check('the voice menu defaults to GPT Realtime, Gemini Live, Claude', () => {
+await check('the voice menu defaults to Forge Brain, Gemini Live, GPT Realtime — all shown, nothing else', () => {
   const def = B.defaultVoiceMenu()
   assert.deepEqual(
     def.map((e) => e.id),
-    ['gpt-realtime', 'gemini-live', 'claude', 'codex-cli', 'gemini-cli', 'gpt-realtime-mini', 'gemini-flash', 'groq', 'openrouter']
+    ['forge-brain', 'gemini-live', 'gpt-realtime']
   )
   assert.deepEqual(
     def.map((e) => e.shown),
-    [true, true, true, false, false, false, false, false, false]
+    [true, true, true]
   )
   assert.deepEqual(B.normaliseVoiceMenu(undefined), def)
   assert.deepEqual(B.normaliseVoiceMenu(null), def)
@@ -435,30 +450,38 @@ await check('the voice menu defaults to GPT Realtime, Gemini Live, Claude', () =
   const empty = B.normaliseVoiceMenu([])
   assert.deepEqual(
     empty.map((e) => e.id),
-    B.AGENT_BRAIN_IDS
+    B.VISIBLE_AGENT_BRAINS
   )
   assert.ok(empty.every((e) => e.shown === false))
-  const custom = B.normaliseVoiceMenu([
-    { id: 'claude', shown: false },
-    { id: 'nope', shown: true },
-    { id: 'groq', shown: true },
+  // A menu saved before the three (it names Claude, Groq…) was for other options: it becomes the default.
+  const old = B.normaliseVoiceMenu([
+    { id: 'gpt-realtime', shown: true },
+    { id: 'gemini-live', shown: true },
     { id: 'claude', shown: true },
-    { id: 'gpt-realtime', shown: true }
+    { id: 'groq', shown: false },
+    { id: 'forge-brain', shown: false }
+  ])
+  assert.deepEqual(old, def)
+  const custom = B.normaliseVoiceMenu([
+    { id: 'gemini-live', shown: false },
+    { id: 'nope', shown: true },
+    { id: 'gpt-realtime', shown: true },
+    { id: 'gemini-live', shown: true }
   ])
   assert.deepEqual(
     custom.map((e) => e.id),
-    ['claude', 'groq', 'gpt-realtime', 'codex-cli', 'gemini-cli', 'gemini-live', 'gpt-realtime-mini', 'gemini-flash', 'openrouter']
+    ['gemini-live', 'gpt-realtime', 'forge-brain']
   )
   assert.deepEqual(
     custom.map((e) => e.shown),
-    [false, true, true, false, false, false, false, false, false]
+    [false, true, false]
   )
-  const noGroq = B.normaliseVoiceMenu(def.filter((e) => e.id !== 'groq'))
-  assert.equal(noGroq.at(-1).id, 'groq')
-  assert.equal(noGroq.at(-1).shown, false)
+  const noForge = B.normaliseVoiceMenu(def.filter((e) => e.id !== 'forge-brain'))
+  assert.equal(noForge.at(-1).id, 'forge-brain')
+  assert.equal(noForge.at(-1).shown, false)
   assert.deepEqual(
-    noGroq.slice(0, -1).map((e) => e.id),
-    def.filter((e) => e.id !== 'groq').map((e) => e.id)
+    noForge.slice(0, -1).map((e) => e.id),
+    def.filter((e) => e.id !== 'forge-brain').map((e) => e.id)
   )
   assert.ok(/voiceMenu: normaliseVoiceMenu\(s\.voiceMenu\)/.test(storeSrc), 'disk read keeps the saved menu')
   assert.ok(/voiceMenu: defaultVoiceMenu\(\)/.test(storeSrc), 'a new install gets the three')
@@ -467,27 +490,43 @@ await check('the voice menu defaults to GPT Realtime, Gemini Live, Claude', () =
 })
 await check('More hides the rest, and the brain in use stays on the short list', () => {
   const def = B.defaultVoiceMenu()
-  const codex = B.voiceMenuRows(def, 'codex-cli')
+  const all = B.voiceMenuRows(def, 'forge-brain')
   assert.deepEqual(
-    codex.first.map((s) => s.id),
-    ['gpt-realtime', 'gemini-live', 'claude', 'codex-cli']
+    all.first.map((s) => s.id),
+    ['forge-brain', 'gemini-live', 'gpt-realtime']
   )
-  assert.ok(!codex.rest.some((s) => s.id === 'codex-cli'))
-  assert.ok(codex.rest.some((s) => s.id === 'gpt-realtime-mini'))
-  const claude = B.voiceMenuRows(def, 'claude')
-  assert.equal(claude.first.filter((s) => s.id === 'claude').length, 1)
-  assert.ok(!claude.rest.some((s) => s.id === 'claude'))
+  assert.deepEqual(all.rest, [])
+  // A hidden pick (a stale Claude) adds no row: the picker offers the three.
+  assert.deepEqual(
+    B.voiceMenuRows(def, 'claude').first.map((s) => s.id),
+    ['forge-brain', 'gemini-live', 'gpt-realtime']
+  )
+  const unticked = B.setVoiceMenuShown(def, 'gpt-realtime', false)
+  const gem = B.voiceMenuRows(unticked, 'gemini-live')
+  assert.deepEqual(gem.first.map((s) => s.id), ['forge-brain', 'gemini-live'])
+  assert.deepEqual(gem.rest.map((s) => s.id), ['gpt-realtime'])
+  const inUse = B.voiceMenuRows(unticked, 'gpt-realtime')
+  assert.equal(inUse.first.filter((s) => s.id === 'gpt-realtime').length, 1)
+  assert.ok(!inUse.rest.some((s) => s.id === 'gpt-realtime'))
   const menu = B.defaultVoiceMenu()
   const moved = B.moveVoiceMenu(menu, 0, 1)
   assert.equal(moved[0].id, 'gemini-live')
-  assert.equal(moved[1].id, 'gpt-realtime')
+  assert.equal(moved[1].id, 'forge-brain')
   assert.equal(B.moveVoiceMenu(menu, -1, 1), menu)
   assert.equal(B.moveVoiceMenu(menu, 0, -1), menu)
   assert.equal(B.moveVoiceMenu(menu, menu.length - 1, 1), menu)
-  const shown = B.setVoiceMenuShown(menu, 'codex-cli', true)
-  assert.equal(shown.find((e) => e.id === 'codex-cli').shown, true)
-  assert.equal(shown.find((e) => e.id === 'claude').shown, true)
-  assert.equal(menu.find((e) => e.id === 'codex-cli').shown, false)
+  const shown = B.setVoiceMenuShown(menu, 'gemini-live', false)
+  assert.equal(shown.find((e) => e.id === 'gemini-live').shown, false)
+  assert.equal(shown.find((e) => e.id === 'forge-brain').shown, true)
+  assert.equal(menu.find((e) => e.id === 'gemini-live').shown, true)
+})
+await check('Forge Brain can be picked while it is off: the pick is kept and its intro shows, with Turn on', () => {
+  assert.ok(/const off = !inUse && !isForgeBrainAgent\(spec\.id\) && brainUnavailable\(status\)/.test(pickerSrc), 'the bar never greys it out')
+  assert.ok(/isForgeBrainAgent\(id\) && brainSnapshot\(\)\.status\?\.enabled !== true\) setIntro\(true\)/.test(pickerSrc), 'picked off: the intro')
+  assert.ok(/<BrainIntro status=\{brainStatus\} onOn=\{close\} onClose=\{close\} \/>/.test(pickerSrc), 'the bar reuses BrainIntro')
+  assert.ok(/onPicked=\{\(\) => setIntro\(isForgeBrainAgent\(spec\.id\) && !brainOn\)\}/.test(mainAgentSrc), 'Settings does the same')
+  assert.ok(/<BrainIntro status=\{liveBrain\}/.test(mainAgentSrc))
+  assert.ok(/VISIBLE_AGENT_BRAIN_SPECS\.filter/.test(mainAgentSrc), 'Settings lists the three')
 })
 
 console.log(`\n${passed} passed, ${failed} failed`)

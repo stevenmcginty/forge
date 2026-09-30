@@ -27,6 +27,7 @@ import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ChatFrameFrame, ChatInputFrame, ChatStateFrame, ChatWatchFrame } from '@shared/chat-mirror'
 import type { ForemanState } from '@shared/foreman'
+import type { BrainSaysEvent, BrainStatus } from '@shared/brain'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 import { publishUsage } from './usage'
 
@@ -341,6 +342,16 @@ export interface ForgeHandlers {
    * time, whether or not this browser started the handoff. See `WebHandoffFrame`.
    */
   onHandoff: (projectId: string, records: HandoffRecord[]) => void
+  /**
+   * Forge Brain's whole picture moved — its state, its pane, a confirm waiting —
+   * every time, to every browser. See `WebBrainFrame`.
+   */
+  onBrain: (status: BrainStatus) => void
+  /**
+   * Forge Brain handed the voice agent a line (`say_to_voice_agent`), to say
+   * aloud (`speak`) or keep as context. See `WebBrainSaysFrame`.
+   */
+  onBrainSays?: (event: BrainSaysEvent) => void
   /**
    * The desktop's own window died or hung, and is coming back — or has.
    *
@@ -1852,6 +1863,26 @@ export class ForgeClient {
         // out of a malformed frame is a menu offering panes that do not exist.
         if (typeof frame.projectId === 'string' && Array.isArray(frame.records)) {
           this.handlers.onHandoff(frame.projectId, frame.records)
+        }
+        return
+
+      case 'brain':
+        // Coerced, not trusted, like the frames above: a status with no state
+        // or no confirm list would draw an icon claiming something nobody
+        // said, so it is dropped rather than half-read.
+        if (
+          frame.status &&
+          typeof frame.status === 'object' &&
+          typeof frame.status.state === 'string' &&
+          Array.isArray(frame.status.confirms)
+        ) {
+          this.handlers.onBrain(frame.status)
+        }
+        return
+
+      case 'brain-says':
+        if (frame.event && typeof frame.event.text === 'string' && typeof frame.event.id === 'string') {
+          this.handlers.onBrainSays?.({ ...frame.event, speak: frame.event.speak !== false })
         }
         return
 

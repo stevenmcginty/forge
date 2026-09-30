@@ -250,6 +250,14 @@ export async function testBrain(target: BrainTestTarget, settings: Settings, fet
       return testCodexCli()
     case 'gemini-cli':
       return testGeminiCli(settings.geminiKey)
+    case 'forge-brain': {
+      // Loaded when asked: electron/brain/host.ts brings Electron with it.
+      const { brainStatus } = await import('./brain/host')
+      const brain = brainStatus()
+      if (!brain.enabled) return { ok: false, reason: 'Forge Brain is off — turn it on from the brain in the top bar' }
+      if (brain.state === 'error') return { ok: false, reason: brain.error ?? 'Forge Brain could not start' }
+      return { ok: true, reason: `Forge Brain is on · ${brain.engine} · ${brain.state}` }
+    }
   }
   return { ok: false, reason: `${spec.label}: no test yet` }
 }

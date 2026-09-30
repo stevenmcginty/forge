@@ -1,0 +1,1196 @@
+/*
+ * Forge Brain's map — "Neural Orrery".
+ *
+ * An instrument, not a scene: the room's own background with a faint dot grid,
+ * hairline orbits, labels set in the deck's DIN (Bahnschrift) with Cascadia for
+ * anything read off a terminal. Colour is the projects' own dots and the
+ * agents' own brand marks; the theme accent belongs to the brain alone. Every
+ * state is a shape and a word first, a colour second.
+ *
+ * Opaque from edge to edge, under the title bar: nothing is blurred over the
+ * live terminals behind it (see SettingsPopup for why), and the native browser
+ * page gets out of the way because the root carries data-shell-overlay.
+ */
+
+.bmap {
+  --bmap-grid: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --bmap-halo: color-mix(in srgb, var(--accent) 9%, var(--bg-base));
+  --bmap-edge: color-mix(in srgb, var(--bg-base) 80%, #000);
+  --bmap-label-bg: color-mix(in srgb, var(--bg-base) 78%, transparent);
+  position: fixed;
+  inset: var(--titlebar-h) 0 0 0;
+  z-index: var(--z-spop);
+  overflow: hidden;
+  outline: none;
+  color: var(--text-primary);
+  background: radial-gradient(ellipse 60% 55% at 50% 52%, var(--bmap-halo) 0%, var(--bg-base) 62%, var(--bmap-edge) 100%);
+  animation: bmap-in var(--dur-pop) var(--ease-out) both;
+}
+
+/* The dot grid, on its own layer so the halo can sit under it. */
+.bmap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--bmap-grid) 0.8px, transparent 1.2px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 52%, #000 30%, transparent 100%);
+  pointer-events: none;
+}
+
+:root[data-appearance='light'] .bmap {
+  --bmap-grid: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  --bmap-halo: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+  --bmap-edge: color-mix(in srgb, var(--bg-base) 92%, var(--text-primary));
+  --bmap-label-bg: color-mix(in srgb, var(--bg-panel) 86%, transparent);
+}
+
+.bmap[data-state='closing'] {
+  animation: bmap-out var(--dur-exit) var(--ease-in-out) both;
+  pointer-events: none;
+}
+
+@keyframes bmap-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes bmap-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.bmap__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.bmap__nodes {
+  animation: bmap-bloom calc(var(--dur-pop) * 1.6) var(--spring-pop) both;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform-origin: 50% 52%;
+}
+
+@keyframes bmap-bloom {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+.bmap__probe {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ chrome */
+
+.bmap__head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3000;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 16px 0 20px;
+  background: linear-gradient(to bottom, var(--bg-base) 30%, transparent);
+}
+
+:root[data-appearance='light'] .bmap__head {
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg-panel) 90%, transparent) 30%, transparent);
+}
+
+.bmap__title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.bmap__mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--accent-ink, var(--accent));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.bmap__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bmap__eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--t-eyebrow);
+  font-weight: 600;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent-ink, var(--accent));
+}
+
+.bmap__h {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.bmap__flow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.bmap__flow li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bmap__flow li + li::before {
+  content: '→';
+  color: var(--text-dim);
+}
+
+.bmap__stats {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.bmap__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bmap__stat b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.bmap__stat[data-state='working'] .statechip__glyph {
+  color: var(--accent);
+}
+
+.bmap__stat[data-state='attention'] {
+  color: var(--warn);
+}
+
+.bmap__stat[data-state='attention'] b {
+  color: var(--warn);
+}
+
+.bmap__close {
+  flex: none;
+}
+
+.bmap__kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.bmap__foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3000;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 20px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.bmap__legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bmap__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.bmap__legend i {
+  font-style: normal;
+  color: var(--text-dim);
+}
+
+.bmap__legend li[data-state='attention'] {
+  color: var(--warn);
+}
+
+.bmap__hint {
+  margin-left: auto;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------------ nodes */
+
+/* A zero-size point the engine moves; its content hangs off it. */
+.bmap-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+.bmap-anchor button {
+  pointer-events: auto;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.bmap-anchor button:focus-visible {
+  outline: none;
+}
+
+.bmap-node__name {
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  text-shadow:
+    0 0 4px var(--bg-base),
+    0 0 8px var(--bg-base);
+}
+
+.bmap-node__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-shadow: 0 0 4px var(--bg-base);
+}
+
+.bmap-node__state[data-state='working'] {
+  color: color-mix(in srgb, var(--pane-accent, var(--accent)) 75%, var(--text-primary));
+}
+
+.bmap-node__state[data-state='attention'] {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.bmap-node__state[data-state='done'] {
+  color: var(--text-primary);
+}
+
+/* An agent: its maker's mark on a disc, its name, its state. */
+.bmap-agent {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 116px;
+  transform: translate(-50%, -19px);
+}
+
+.bmap-agent__disc {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--sheet-bg);
+  box-shadow:
+    0 0 0 1px var(--glass-line),
+    0 6px 16px -8px rgba(0, 0, 0, 0.7);
+  transition: transform var(--dur-glide) var(--spring-pop);
+}
+
+.bmap-agent__disc .agent-badge {
+  transform: scale(1.12);
+}
+
+.bmap-agent:hover .bmap-agent__disc,
+.bmap-agent:focus-visible .bmap-agent__disc {
+  transform: scale(1.12);
+}
+
+.bmap-agent:focus-visible .bmap-agent__disc {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 6px 16px -8px rgba(0, 0, 0, 0.7);
+}
+
+.bmap-agent[data-state='dormant'],
+.bmap-agent[data-state='exited'],
+.bmap-agent[data-state='failed'] {
+  opacity: 0.62;
+}
+
+/* Needs you: a "!" on a diamond, at the disc's shoulder. */
+.bmap-agent__flag {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--bg-base);
+  background: var(--warn);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.bmap-agent__flag--done {
+  width: 16px;
+  height: 16px;
+  top: -5px;
+  right: -7px;
+  color: var(--bg-base);
+  background: var(--text-primary);
+  clip-path: circle(50%);
+}
+
+/* A project's hub label, on the brain's side of its hub. */
+.bmap-proj {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 11px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+  background: var(--bmap-label-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--proj) 40%, transparent);
+  transform: translate(-50%, 22px);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.bmap-anchor[data-side='above'] .bmap-proj {
+  transform: translate(-50%, calc(-100% - 22px));
+}
+
+.bmap-proj[data-active='true'] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--proj) 75%, transparent),
+    0 0 18px -6px color-mix(in srgb, var(--proj) 60%, transparent);
+}
+
+.bmap-proj:hover,
+.bmap-proj:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--proj);
+}
+
+.bmap-proj:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.bmap-proj__name {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bmap-proj__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.bmap-proj__n {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.bmap-proj__n[data-state='attention'] {
+  color: var(--warn);
+}
+
+.bmap-proj__here {
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--proj) 26%, transparent);
+}
+
+/* The brain: a round hit area over the drawn core, its name below it. */
+.bmap-core {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--core-r, 60px) * 2);
+  height: calc(var(--core-r, 60px) * 2);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.bmap-core:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.bmap-core__name,
+.bmap-core__state {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-display);
+  text-shadow:
+    0 0 4px var(--bg-base),
+    0 0 10px var(--bg-base);
+}
+
+.bmap-core__name {
+  top: calc(100% + 18px);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.bmap-core__state {
+  top: calc(100% + 37px);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.bmap-core[data-mood='busy'] .bmap-core__state {
+  color: var(--accent-ink, var(--accent));
+}
+
+.bmap-core[data-mood='asking'] .bmap-core__state {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.bmap-core__q {
+  color: var(--text-dim);
+}
+
+/* Its context window: the ring and the % (components/brain/BrainContext). */
+.bmap-core__ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* The stem: the voice agent and you. */
+.bmap-stem {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 120px;
+  transform: translate(-50%, -18px);
+}
+
+.bmap-stem__disc {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: var(--sheet-bg);
+  box-shadow: 0 0 0 1px var(--glass-line);
+}
+
+.bmap-stem[data-on='true'] .bmap-stem__disc {
+  color: var(--accent-ink, var(--accent));
+}
+
+.bmap-stem:focus-visible .bmap-stem__disc {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.bmap-stem--you {
+  transform: translate(-50%, -16px);
+}
+
+.bmap-stem__disc--you {
+  width: 32px;
+  height: 32px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--you, var(--accent)) 22%, var(--sheet-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--you, var(--accent)) 55%, transparent);
+}
+
+/* ------------------------------------------------------------------- card */
+
+.bmap-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3500;
+  width: 316px;
+  padding: 12px 14px 12px;
+  border-radius: var(--r-sheet);
+  background: var(--sheet-bg);
+  box-shadow:
+    0 0 0 1px var(--glass-line-strong),
+    var(--glass-shadow);
+  animation: bmap-card-in var(--dur-glide) var(--ease-out) both;
+}
+
+@keyframes bmap-card-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.bmap-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bmap-card__head .statechip,
+.bmap-card__tag {
+  margin-left: auto;
+}
+
+.bmap-card__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bmap-card__tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.bmap-card__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.bmap-card__sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.bmap-card__sep {
+  color: var(--text-dim);
+}
+
+.bmap-card__path {
+  margin: 5px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.bmap-card__text {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.bmap-card__text--dim {
+  color: var(--text-muted);
+}
+
+.bmap-card__ask {
+  margin: 9px 0 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warn);
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.bmap-card__screen {
+  margin-top: 9px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-sunken, var(--bg-base)) 85%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.bmap-card__line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bmap-card__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 9px 0 0;
+  font-size: 12px;
+}
+
+.bmap-card__facts dt {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.bmap-card__facts dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.bmap-card__tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.bmap-card__tally li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bmap-card__tally b {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.bmap-card__tally li[data-state='attention'],
+.bmap-card__tally li[data-state='attention'] b {
+  color: var(--warn);
+}
+
+.bmap-card__reply {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.bmap-card__input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  outline: none;
+}
+
+.bmap-card__input:focus {
+  box-shadow: inset 0 0 0 1.5px var(--warn);
+}
+
+.bmap-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.bmap-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 8px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.bmap-btn:hover {
+  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
+}
+
+.bmap-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.bmap-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.bmap-btn--cta {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.bmap-btn--cta:hover {
+  background: color-mix(in srgb, var(--accent) 86%, var(--text-primary));
+}
+
+.bmap-btn--ghost {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* -------------------------------------------------------------- the door */
+
+.bmap-door {
+  position: absolute;
+  inset: 0;
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+  padding: 14px 26px 20px;
+  background: color-mix(in srgb, var(--bg-base) 62%, transparent);
+  animation: bmap-in var(--dur-med) var(--ease-out) both;
+}
+
+.bmap-door__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1320px, 100%);
+  height: 100%;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--sheet-bg);
+  box-shadow:
+    0 0 0 1px var(--glass-line-strong),
+    0 0 0 1px color-mix(in srgb, var(--pane-accent, var(--accent)) 16%, transparent),
+    0 40px 120px -30px rgba(0, 0, 0, 0.75);
+  animation: bmap-door-rise var(--dur-pop) var(--spring-pop) both;
+  transform-origin: 50% 55%;
+}
+
+@keyframes bmap-door-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.97);
+  }
+}
+
+.bmap-door__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 10px;
+  flex: none;
+  box-shadow: inset 0 -1px 0 var(--glass-line);
+}
+
+.bmap-door__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bmap-door__name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bmap-door__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.bmap-door__hint {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.bmap-door__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: 8px 10px 10px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--term-bg, var(--bg-terminal));
+}
+
+.bmap-door__natural {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+
+/* ------------------------------------------- the brain's conversation */
+
+.bmap-door__seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.bmap-door__seg button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.bmap-door__seg button[data-on='true'] {
+  color: var(--text-primary);
+  background: var(--sheet-bg);
+  box-shadow: 0 0 0 1px var(--glass-line-strong);
+}
+
+.bmap-door__seg button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.bmap-door__body--talk {
+  background: color-mix(in srgb, var(--bg-base) 70%, var(--sheet-bg));
+}
+
+.bmap-talk {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px max(18px, calc((100% - 820px) / 2));
+  overflow-y: auto;
+}
+
+.bmap-talk--empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.bmap-talk__cut {
+  align-self: center;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.bmap-talk__turn {
+  display: flex;
+}
+
+.bmap-talk__turn[data-who='you'] {
+  justify-content: flex-end;
+}
+
+.bmap-talk__bubble {
+  position: relative;
+  max-width: min(640px, 78%);
+  padding: 8px 12px 18px;
+  border-radius: 14px 14px 14px 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--sheet-bg);
+  box-shadow: 0 0 0 1px var(--glass-line);
+}
+
+.bmap-talk__turn[data-who='you'] .bmap-talk__bubble {
+  border-radius: 14px 14px 4px 14px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--sheet-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.bmap-talk__text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bmap-talk__text + .bmap-talk__text {
+  margin-top: 6px;
+}
+
+.bmap-talk__tools {
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.bmap-talk__when {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------ the brain asks */
+
+.bmap-core__ask {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.bmap-asks {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  z-index: 3200;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(560px, calc(100% - 32px));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform: translateX(-50%);
+}
+
+.bmap-asks .bmap-ask {
+  padding: 8px 8px 8px 12px;
+  border-radius: 12px;
+  background: var(--sheet-bg);
+  box-shadow:
+    inset 0 0 0 1px var(--warn-line),
+    var(--glass-shadow);
+}
+
+.bmap-card__asks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bmap-card__asks .bmap-ask {
+  padding: 6px 6px 6px 9px;
+  border-radius: 8px;
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.bmap-ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bmap-ask__glyph {
+  flex: none;
+  color: var(--warn);
+}
+
+.bmap-ask__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.bmap-ask__what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.bmap-ask__risk {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--warn);
+}
+
+.bmap-ask[data-risk='high'] .bmap-ask__risk {
+  font-weight: 700;
+}
+
+.bmap-ask .bmap-btn {
+  flex: none;
+  height: 26px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bmap,
+  .bmap__nodes,
+  .bmap-card,
+  .bmap-door,
+  .bmap-door__panel {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .bmap,
+:root[data-reduced-motion='true'] .bmap__nodes,
+:root[data-reduced-motion='true'] .bmap-card,
+:root[data-reduced-motion='true'] .bmap-door,
+:root[data-reduced-motion='true'] .bmap-door__panel {
+  animation: none;
+}
+
+@media (max-width: 1100px) {
+  .bmap__flow {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .bmap__legend i,
+  .bmap__hint {
+    display: none;
+  }
+}

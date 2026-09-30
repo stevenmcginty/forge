@@ -27,7 +27,8 @@ import {
   stopAgentBrain
 } from '@/lib/agentbrain'
 import { describePaneText, registerVoiceAgentTools } from '@/lib/agenttools'
-import { migrateAgentBrain } from '@shared/agent-brain'
+import { isForgeBrainAgent, migrateAgentBrain } from '@shared/agent-brain'
+import { BRAIN_VOICE_DEFAULT, BRAIN_VOICE_FALLBACKS, type BrainAskResult, type BrainSaysEvent } from '@shared/brain'
 import { getHubRuntime } from '@/lib/hubRuntime'
 import { buildAppContext, ContextTracker, projectBranch, type PaneStateWord } from '@/lib/realtime/context'
 import { endedNote, parseVoiceDictation, stopPhraseOf, type ConversationEnd, type VoiceDictation } from '@/lib/realtime/conversation'
@@ -39,7 +40,7 @@ import { agentMemory } from '@/lib/agentmemory'
 import { bargeIn } from '@/lib/bargein'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { earconListening } from '@/lib/earcon'
-import { speaker } from '@/lib/speech'
+import { speakable, speaker } from '@/lib/speech'
 import { chooseEngine, pickVaried, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { buildActionPanes } from '@/lib/actionPanes'
 import { resolveProfile } from '@/lib/agents'
@@ -137,6 +138,11 @@ export interface BrainTurnState extends TurnBase {
   /** The draft prompt as the user has edited it. */
   draft: string
   outcomes?: ActionOutcome[]
+  /**
+   * When the reply landed, for a brain slow enough that "when he said it" is
+   * the wrong clock for showing it (Forge Brain: a whole agent turn).
+   */
+  repliedAt?: number
 }
 
 /** A one-line note from the agent itself — "held, nothing sent". */
@@ -238,6 +244,30 @@ const DUCK_LEVEL = 0.2
 
 /** How long the flash states hold before falling back to listening. */
 const REPLIED_MS = 900
+/** In front of a turn Listen hands Forge Brain, so it knows the reply is read out. */
+const FORGE_BRAIN_VOICE_TAG = '[By voice: keep the reply short, it is read aloud]'
+
+/** Code, links and paths: things a voice must never read out. */
+const UNSPEAKABLE = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/\S+|\b[A-Za-z]:\\[^\s,;)]+|(?:^|\s)(?:\.{0,2}\/)(?:[\w.-]+\/)*[\w.-]+|(?:^|\s)(?:[\w.-]+\/){2,}[\w.-]+/g
+
+/**
+ * Forge Brain's reply as it is read out: the talking part only — its opening
+ * paragraph, before any list or code, cut to two sentences — in plain words
+ * (no markdown, code, links or paths). When the reply had more than that, it
+ * says the rest is in the chat instead of reading it. The whole reply is in
+ * the log and the brain's chat.
+ */
+function spokenBrainReply(text: string): string {
+  const whole = String(text ?? '').trim()
+  const lead = whole.split(/\n\s*\n|\n\s*(?:[-*•]|\d+[.)])\s|```/)[0] ?? ''
+  const clean = (s: string): string => speakable(s.replace(UNSPEAKABLE, ' '), 400)
+  let said = clean(lead) || clean(whole)
+  const sentences = said.match(/[^.!?]+[.!?]+(?=\s|$)/g)
+  if (sentences && sentences.length > 2) said = sentences.slice(0, 2).join('').trim()
+  const more = new RegExp(UNSPEAKABLE.source).test(whole) || clean(whole).length > said.length + 40
+  return more && said ? `${said} The details are in the text.` : said
+}
+
 const ERROR_MS = 1800
 /** How long the activity strip lingers after the last tool call ends. */
 const TOOL_LINGER_MS = 1200
@@ -399,6 +429,13 @@ export interface VoiceAgentCtx {
   ended?: string | null
   /** Close the conversation and say why: a stop phrase, the idle clock, a press. */
   endConversation?(end: ConversationEnd): void
+  /**
+   * A line from Forge Brain (`say_to_voice_agent`, shared/brain.ts): said
+   * aloud in the TTS voice when `speak`, otherwise kept and put in front of
+   * the next turn. VoiceHubController routes a line here when no live
+   * realtime session is there to take it.
+   */
+  hearBrain?(event: BrainSaysEvent): void
 }
 
 /**
@@ -580,6 +617,19 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   )
   const voiceConfigRef = useRef(voiceConfig)
   voiceConfigRef.current = voiceConfig
+  /**
+   * Forge Brain's voice: Edge only, its own voice (`brainVoice`), one retry,
+   * then the other British neural voices — and never SAPI (`neuralOnly`).
+   */
+  const brainVoiceName = state.settings.brainVoice || BRAIN_VOICE_DEFAULT
+  const brainVoiceRef = useRef<VoiceConfig>(voiceConfig)
+  brainVoiceRef.current = {
+    ...voiceConfig,
+    engine: 'edge',
+    edgeVoice: brainVoiceName,
+    edgeVoices: [brainVoiceName, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== brainVoiceName)],
+    neuralOnly: true
+  }
 
   /**
    * Can anything speak at all?
@@ -662,7 +712,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    */
 
   /** Chunks waiting their turn, in the order they must be said. */
-  const speakQueue = useRef<{ key: string; text: string }[]>([])
+  /** `brain`: Forge Brain speaking — its own voice, neural only (`brainVoiceRef`). */
+  const speakQueue = useRef<{ key: string; text: string; brain?: boolean }[]>([])
   /** Set while more chunks may still arrive: the drain waits instead of ending. */
   const speakOpen = useRef(false)
   /** Wakes the drain the instant there is something to say. */
@@ -779,7 +830,16 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         // Dev evidence (B11): each spoken chunk's start and end, in dev.log.
         const saidAt = Date.now()
         if (import.meta.env.DEV) console.info(`[hub] event=tts-start key=${next.key} chars=${next.text.length}`)
-        const said = await voiceSpeaker.speakOnce(next.key, next.text, voiceConfigRef.current, (msg) => noticeRef.current(msg))
+        const said = await voiceSpeaker.speakOnce(
+          next.key,
+          next.text,
+          next.brain ? brainVoiceRef.current : voiceConfigRef.current,
+          (msg) => noticeRef.current(msg)
+        )
+        // The brain's voice never falls back to the robot: silence, said in words.
+        if (next.brain && said.engine === 'none' && said.fellBackBecause) {
+          setTurns((prev) => [...prev, { id: `${next.key}:unvoiced`, said: 'Voice unavailable', at: Date.now(), kind: 'note', tone: 'warn' }])
+        }
         if (import.meta.env.DEV) {
           console.info(`[hub] event=tts-end key=${next.key} spoke=${said.spoke} engine=${said.engine} ms=${Date.now() - saidAt}`)
         }
@@ -818,15 +878,26 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     })
   }, [runMouth])
 
-  /** Hand one finished chunk to the mouth. Silent when nothing can speak. */
+  /** Hand one finished chunk to the mouth. Silent when nothing can speak. `brain`: in Forge Brain's voice. */
   const pushSpeech = useCallback(
-    (key: string, text: string): void => {
+    (key: string, text: string, brain = false): void => {
       if (!speaksAloudRef.current || !text.trim()) return
-      if (!speaker.available && chooseEngine(voiceConfigRef.current) === 'local') return
-      speakQueue.current.push({ key, text })
+      if (!brain && !speaker.available && chooseEngine(voiceConfigRef.current) === 'local') return
+      speakQueue.current.push({ key, text, brain })
       pump()
     },
     [pump]
+  )
+
+  /** Forge Brain says one whole thing, in its own voice, and waits for it to be said. */
+  const sayBrain = useCallback(
+    async (key: string, text: string): Promise<void> => {
+      if (!speaksAloud || !text.trim()) return
+      pushSpeech(key, text, true)
+      closeMouth()
+      await speakRun.current
+    },
+    [closeMouth, pushSpeech, speaksAloud]
   )
 
   /** Say one whole thing and wait for it to be said. The one-shot brains' mouth. */
@@ -1549,6 +1620,13 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const usingClaude = jsonBrainId === 'claude'
   const usingClaudeRef = useRef(usingClaude)
   usingClaudeRef.current = usingClaude
+  // Listen on "Forge Brain": the turn goes to the brain pane itself, before
+  // either fork above is asked.
+  const usingForgeBrain = isForgeBrainAgent(agentBrain)
+  const usingForgeBrainRef = useRef(usingForgeBrain)
+  usingForgeBrainRef.current = usingForgeBrain
+  /** What Forge Brain handed over as context (speak false), put in front of the next turn. */
+  const brainNoteRef = useRef<string | null>(null)
 
   const projectPathRef = useRef(project?.path ?? null)
   projectPathRef.current = project?.path ?? null
@@ -1964,6 +2042,49 @@ ${said}` : said)
       resetToolActivity()
       setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'brain', phase: 'thinking', draft: '' }])
 
+      // Forge Brain's context line, if one came in since the last turn.
+      const brainNote = brainNoteRef.current
+      brainNoteRef.current = null
+
+      // 2, first — Forge Brain itself: his words into the brain pane, its reply to
+      // them once its turn is over, read out short. The whole reply is on the
+      // card and in the brain's chat. Its own sentence when it is off, stopped
+      // or still working is the answer: those are true, not failures to vary.
+      if (usingForgeBrainRef.current) {
+        const ask = window.forge.brain?.ask
+        const answer: BrainAskResult = ask
+          ? await ask(`${FORGE_BRAIN_VOICE_TAG} ${said}`).catch((err: unknown) => ({
+              ok: false as const,
+              error: err instanceof Error ? err.message : String(err)
+            }))
+          : { ok: false, error: 'This window cannot reach Forge Brain. Restart Forge.' }
+        thinkingSince.current = null
+        if (answer.ok || answer.late) {
+          const text = answer.ok ? answer.text : answer.error
+          if (armedRef.current && !speaksAloud) flash('replied', REPLIED_MS)
+          const reply: BrainReply = { understood: text, confidence: 'high' }
+          const repliedAt = Date.now()
+          setTurns((prev) => prev.map((t) => (t.id === id && t.kind === 'brain' ? { ...t, phase: 'done', reply, repliedAt } : t)))
+          if (!opts?.silent && wakeWordRef.current && armedRef.current) wantFollowUp.current = true
+          if (!opts?.silent) await sayBrain(id, spokenBrainReply(text))
+          return text
+        }
+        if (armedRef.current) flash('error', ERROR_MS)
+        setTurns((prev) =>
+          prev.map((t) =>
+            t.id === id && t.kind === 'brain'
+              ? // The sentence is the reply too, so the bar's caption shows why.
+                { ...t, phase: 'error', error: answer.error, reply: { understood: answer.error, confidence: 'low' }, repliedAt: Date.now() }
+              : t
+          )
+        )
+        await speak(`${id}:error`, answer.error)
+        return answer.error
+      }
+      const heard = brainNote ? `[Forge Brain told you, for context: ${brainNote}]
+
+${said}` : said
+
       /** What a failed turn looks like, whichever brain failed. */
       const failed = async (err: unknown): Promise<string> => {
         thinkingSince.current = null
@@ -1993,7 +2114,7 @@ ${said}` : said)
       // not that kind of claim.
       if (usingClaudeRef.current) {
         try {
-          const text = await runClaudeTurn(id, said, {
+          const text = await runClaudeTurn(id, heard, {
             silent: opts?.silent,
             onText: (partial) =>
               setTurns((prev) =>
@@ -2030,7 +2151,7 @@ ${said}` : said)
         projectPath: project?.path,
         recentTranscript: [...historyRef.current.filter((t) => t.role === 'user').map((t) => t.text), said],
         manifest: manifestRef.current,
-        history: [...historyRef.current],
+        history: [...historyRef.current, ...(brainNote ? [{ role: 'agent' as const, text: `[Forge Brain] ${brainNote}` }] : [])],
         projectMemory: agentMemory.cached(ctx?.activeProjectId ?? null)
       }
 
@@ -2094,11 +2215,28 @@ ${said}` : said)
       runClaudeTurn,
       runVoiceDictation,
       sayAloud,
+      sayBrain,
       speaksAloud
     ]
   )
 
   const handlePhrase = useCallback((said: string) => void runPhrase(said), [runPhrase])
+
+  /** A line from Forge Brain (VoiceAgentCtx.hearBrain): aloud, or kept for the next turn. */
+  const hearBrain = useCallback(
+    (event: BrainSaysEvent): void => {
+      const text = event.text.trim()
+      if (!text) return
+      if (!event.speak) {
+        brainNoteRef.current = brainNoteRef.current ? `${brainNoteRef.current} ${text}` : text
+        return
+      }
+      const id = `brain-says-${event.id}`
+      setTurns((prev) => [...prev, { id, said: `Forge Brain: ${text}`, at: event.at, kind: 'note', tone: 'ok' }])
+      void sayBrain(id, spokenBrainReply(text))
+    },
+    [sayBrain]
+  )
 
   // One subscription for every source that ever registers with the bus — which
   // is how dictation joins in without any surface changing. It is registered
@@ -2156,6 +2294,14 @@ ${said}` : said)
       // actions, and it says so instead of pretending.
       try {
         const memory = await agentMemory.prime(e.projectId)
+
+        // Forge Brain sees every project, so the question goes to it as asked,
+        // with the project named.
+        if (usingForgeBrainRef.current) {
+          const answer = await window.forge.brain?.ask?.(`[From Steve's phone, about the project "${e.projectName}"] ${text}`)
+          await say(answer ? (answer.ok ? answer.text : answer.error) : 'This window cannot reach Forge Brain. Restart Forge.')
+          return
+        }
 
         // The Claude session has no `interpret()` to call — it is a
         // conversation, not a request — so the same caveat is put to it in
@@ -2407,7 +2553,7 @@ ${said}` : said)
       draftPhrase,
       setDraftPhrase,
       submitPhrase,
-      brainName: brain.name,
+      brainName: usingForgeBrain ? 'Forge Brain' : brain.name,
       brainStatus,
       brainModel,
       setBrainModel,
@@ -2425,6 +2571,7 @@ ${said}` : said)
       listenNow,
       ended,
       endConversation,
+      hearBrain,
       recogniser: {
         phase: stt.phase,
         ready: stt.ready,
@@ -2450,6 +2597,7 @@ ${said}` : said)
       draftPhrase,
       submitPhrase,
       brain.name,
+      usingForgeBrain,
       brainStatus,
       brainModel,
       setBrainModel,
@@ -2466,6 +2614,7 @@ ${said}` : said)
       listenNow,
       ended,
       endConversation,
+      hearBrain,
       captureWanted
     ]
   )

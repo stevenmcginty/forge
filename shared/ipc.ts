@@ -1,4 +1,5 @@
 import { FOREMAN_IPC } from './foreman'
+import { BRAIN_IPC } from './brain'
 
 /** Every IPC channel name in one place, so main and preload cannot drift. */
 export const IPC = {
@@ -248,6 +249,25 @@ export const IPC = {
   foremanState: FOREMAN_IPC.state,
   foremanToolRequest: FOREMAN_IPC.toolRequest,
   foremanToolResult: FOREMAN_IPC.toolResult,
+
+  /* ------------------------------------------------------------ forge brain
+   *
+   * The app-level CLI agent in its hidden pane. See electron/brain/ and
+   * shared/brain.ts, where the names below and every type on them live.
+   */
+  brainStatus: BRAIN_IPC.status,
+  brainEnable: BRAIN_IPC.enable,
+  brainDisable: BRAIN_IPC.disable,
+  brainSetEngine: BRAIN_IPC.setEngine,
+  brainSend: BRAIN_IPC.send,
+  brainConfirm: BRAIN_IPC.confirm,
+  brainState: BRAIN_IPC.state,
+  brainTranscriptWatch: BRAIN_IPC.transcriptWatch,
+  brainTranscriptStop: BRAIN_IPC.transcriptStop,
+  brainTranscript: BRAIN_IPC.transcript,
+  brainSays: BRAIN_IPC.says,
+  brainAsk: BRAIN_IPC.ask,
+  brainFreshStart: BRAIN_IPC.freshStart,
 
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.

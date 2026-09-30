@@ -21,6 +21,10 @@
  *    `gemini-cli` and `codex-cli` are this kind.
  *  - `json`     — a per-turn HTTP brain in the renderer (src/lib/voicebrain.ts)
  *    that answers with JSON actions from the manifest.
+ *  - `brain`    — Forge Brain itself (shared/brain.ts): Parakeet hears, the
+ *    words are typed into the brain pane, its reply is read out in the TTS
+ *    voice. It has its own tools; nothing here is handed to it. Off until
+ *    Forge Brain is turned on.
  *
  * No Electron and no DOM here: both processes import it.
  */
@@ -30,7 +34,7 @@ import type { AgentBrainId, VoiceMenuEntry } from './types'
 /** The union itself lives in shared/types.ts (dependency-free). */
 export type { AgentBrainId, VoiceMenuEntry }
 
-export type AgentBrainKind = 'realtime' | 'session' | 'json'
+export type AgentBrainKind = 'realtime' | 'session' | 'json' | 'brain'
 
 /** The settings key an adapter needs, or null for subscription/login auth. */
 export type AgentBrainKey = 'geminiKey' | 'openaiKey' | 'groqKey' | 'openrouterKey'
@@ -77,32 +81,62 @@ export const AGENT_BRAINS: readonly AgentBrainSpec[] = [
   { id: 'gpt-realtime', label: 'GPT Realtime', kind: 'realtime', key: 'openaiKey', auth: 'OpenAI key', note: 'Live two-way talk — about $10–20 for a heavy day' },
   { id: 'gemini-flash', label: 'Gemini Flash (text)', kind: 'json', key: 'geminiKey', auth: 'Gemini key', note: 'Parakeet in, one Gemini call per turn, Edge voice out' },
   { id: 'groq', label: 'Groq (text)', kind: 'json', key: 'groqKey', auth: 'Groq key', note: 'Parakeet in, one Groq call per turn — fast, free tier' },
-  { id: 'openrouter', label: 'OpenRouter (text)', kind: 'json', key: 'openrouterKey', auth: 'OpenRouter key', note: 'Parakeet in, one OpenRouter call per turn' }
+  { id: 'openrouter', label: 'OpenRouter (text)', kind: 'json', key: 'openrouterKey', auth: 'OpenRouter key', note: 'Parakeet in, one OpenRouter call per turn' },
+  {
+    id: 'forge-brain',
+    label: 'Forge Brain',
+    kind: 'brain',
+    key: null,
+    auth: 'the engine Forge Brain runs on',
+    note: 'Talk straight to Forge Brain — Parakeet hears, the brain answers, your voice setting speaks'
+  }
 ]
 
 export const AGENT_BRAIN_IDS: readonly AgentBrainId[] = AGENT_BRAINS.map((b) => b.id)
-
-export const DEFAULT_AGENT_BRAIN: AgentBrainId = 'claude'
 
 export function isAgentBrainId(value: unknown): value is AgentBrainId {
   return typeof value === 'string' && (AGENT_BRAIN_IDS as readonly string[]).includes(value)
 }
 
-/** Short list first. "GPT Live" is `gpt-realtime` (label "GPT Realtime"), not the mini model. */
-const VOICE_MENU_SHOWN_FIRST: readonly AgentBrainId[] = ['gpt-realtime', 'gemini-live', 'claude']
+/**
+ * The voice agents every picker offers — the bar's, Settings' Main agent card,
+ * the phone's and the deck's — in this order. Forge Brain, Gemini Live and GPT
+ * Realtime (the web calls them Forge Brain, Gemini and ChatGPT). The others
+ * keep their adapters and their code in AGENT_BRAINS; one comes back by adding
+ * its id here. A stored pick outside this list answers as Forge Brain
+ * (`visibleAgentBrain`): Claude "doesn't quite work", and Forge Brain on its
+ * own CLI replaces it.
+ */
+export const VISIBLE_AGENT_BRAINS: readonly AgentBrainId[] = ['forge-brain', 'gemini-live', 'gpt-realtime']
 
-/** The picker order when Settings has never stored one. */
+/** The same list as specs, in the same order. */
+export const VISIBLE_AGENT_BRAIN_SPECS: readonly AgentBrainSpec[] = VISIBLE_AGENT_BRAINS.map(
+  (id) => AGENT_BRAINS.find((b) => b.id === id)!
+)
+
+export const DEFAULT_AGENT_BRAIN: AgentBrainId = 'forge-brain'
+
+export function isVisibleAgentBrain(value: unknown): value is AgentBrainId {
+  return typeof value === 'string' && (VISIBLE_AGENT_BRAINS as readonly string[]).includes(value)
+}
+
+/** A pick a picker still offers stays; anything else (Claude, Groq, Codex…) becomes the default, Forge Brain. */
+export function visibleAgentBrain(id: AgentBrainId): AgentBrainId {
+  return isVisibleAgentBrain(id) ? id : DEFAULT_AGENT_BRAIN
+}
+
+/** The picker order when Settings has never stored one: the visible three, all shown. */
 export function defaultVoiceMenu(): VoiceMenuEntry[] {
-  const shown = new Set<string>(VOICE_MENU_SHOWN_FIRST)
-  const head = VOICE_MENU_SHOWN_FIRST.filter((id) => isAgentBrainId(id))
-  const rest = AGENT_BRAIN_IDS.filter((id) => !shown.has(id))
-  return [...head, ...rest].map((id) => ({ id, shown: shown.has(id) }))
+  return VISIBLE_AGENT_BRAINS.map((id) => ({ id, shown: true }))
 }
 
 /**
  * A non-array (an old settings.json has no field) becomes the default three.
- * An array is kept: unknown ids and later duplicates drop, and any brain the
- * list forgot is appended behind More (`shown: false`). `[]` stays all hidden.
+ * So does a menu saved before the visible list (it names a brain the pickers no
+ * longer offer, e.g. Claude): its order and ticks were for other options.
+ * Otherwise the array is kept: unknown ids and later duplicates drop, and any
+ * visible brain the list forgot is appended behind More (`shown: false`). `[]`
+ * stays all hidden.
  */
 export function normaliseVoiceMenu(raw: unknown): VoiceMenuEntry[] {
   if (!Array.isArray(raw)) return defaultVoiceMenu()
@@ -112,10 +146,11 @@ export function normaliseVoiceMenu(raw: unknown): VoiceMenuEntry[] {
     if (!item || typeof item !== 'object') continue
     const id = (item as { id?: unknown }).id
     if (!isAgentBrainId(id) || seen.has(id)) continue
+    if (!isVisibleAgentBrain(id)) return defaultVoiceMenu()
     seen.add(id)
     out.push({ id, shown: Boolean((item as { shown?: unknown }).shown) })
   }
-  for (const id of AGENT_BRAIN_IDS) {
+  for (const id of VISIBLE_AGENT_BRAINS) {
     if (!seen.has(id)) out.push({ id, shown: false })
   }
   return out
@@ -132,7 +167,7 @@ export function voiceMenuRows(
   const first: AgentBrainSpec[] = []
   const rest: AgentBrainSpec[] = []
   for (const entry of normaliseVoiceMenu(menu)) {
-    const spec = AGENT_BRAINS.find((b) => b.id === entry.id)
+    const spec = VISIBLE_AGENT_BRAIN_SPECS.find((b) => b.id === entry.id)
     if (!spec) continue
     if (entry.shown || entry.id === current) first.push(spec)
     else rest.push(spec)
@@ -165,6 +200,11 @@ export function isRealtimeBrain(id: AgentBrainId): id is 'gemini-live' | 'gpt-re
   return agentBrainSpec(id).kind === 'realtime'
 }
 
+/** Does Listen talk straight to Forge Brain (the brain pane) rather than a voice agent of its own? */
+export function isForgeBrainAgent(id: AgentBrainId | string | undefined | null): boolean {
+  return id === 'forge-brain'
+}
+
 /**
  * One-time migration from the two old fields.
  *
@@ -173,8 +213,11 @@ export function isRealtimeBrain(id: AgentBrainId): id is 'gemini-live' | 'gpt-re
  *  2. A `voiceBrain` of groq or openrouter was a deliberate pick too (the
  *     default was gemini), so those become their text adapters.
  *  3. Everything else — voiceBrain 'gemini' (the old default, and Steve's case:
- *     he chose Claude in the hub), 'claude', 'stub', 'openai' — becomes Claude,
- *     which is what the hub said it was using.
+ *     he chose Claude in the hub), 'claude', 'stub', 'openai' — becomes the
+ *     default, Forge Brain (it was Claude, what the hub said it was using).
+ *
+ * A result the pickers no longer offer (groq, a mini model) is left to the
+ * callers' `visibleAgentBrain`, like any other stored pick.
  */
 export function migrateAgentBrain(voiceHubProvider: unknown, voiceBrain: unknown): AgentBrainId {
   if (voiceHubProvider === 'gemini-live' || voiceHubProvider === 'gpt-realtime' || voiceHubProvider === 'gpt-realtime-mini') {

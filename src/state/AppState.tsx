@@ -57,6 +57,7 @@ import {
 import { EMPTY_WORKSPACE, makeTab, newTabName, nextTextColor, withPrunedMosaic } from '@shared/workspace'
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { defaultVoiceMenu } from '@shared/agent-brain'
+import { BRAIN_CONTEXT_WARN_PCT, BRAIN_VOICE_DEFAULT } from '@shared/brain'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
@@ -108,6 +109,7 @@ export type SettingsSection =
   | 'remoteYes'
   | 'updates'
   | 'advanced'
+  | 'brain'
 
 /**
  * What the main area is showing. Settings and Devices are *views*, not modals:
@@ -295,13 +297,19 @@ const FALLBACK_SETTINGS: Settings = {
   voiceHubVoice: { gemini: '', openai: '' },
   // Mirrors electron/store.ts (B7): the ONE Agent brain, hands-free timing,
   // and the pane agents' browser rule.
-  agentBrain: 'claude',
+  agentBrain: 'forge-brain',
   // Mirrors electron/store.ts. Three on the picker; the rest behind More.
   voiceMenu: defaultVoiceMenu(),
   agentSilenceMs: 800,
   agentIdleTimeoutMs: 120_000,
   dictateAutoSend: false,
   agentsForgeBrowserOnly: true,
+  // Mirrors electron/store.ts: Forge Brain off until turned on.
+  brainEnabled: false,
+  brainEngine: 'claude',
+  brainIntroSeen: false,
+  brainVoice: BRAIN_VOICE_DEFAULT,
+  brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
   memoryLlmSummarize: false,
   // Filled in by the store on hydrate — main knows the real data root.
   skillsLibraryDir: '',
@@ -454,7 +462,8 @@ type Action =
       relay?: { from: string | null }
     }
   | { type: 'drainTypes'; paneIds: string[] }
-  | { type: 'closeTab'; tabId: string }
+  /** `projectId`: a tab in another project than the one on screen (Forge Brain's close_tab). */
+  | { type: 'closeTab'; tabId: string; projectId?: string }
   | { type: 'selectTab'; tabId: string }
   | { type: 'renameTab'; tabId: string; title: string }
   | { type: 'paintTab'; tabId: string; patch: TabPaint }
@@ -1081,11 +1090,12 @@ function reducer(state: AppState, action: Action): AppState {
     }
 
     case 'closeTab': {
-      const ws = workspaceOf(state, state.activeProjectId)
+      const projectId = action.projectId ?? state.activeProjectId
+      const ws = workspaceOf(state, projectId)
       const tab = ws.tabs.find((t) => t.id === action.tabId)
-      if (!tab) return state
+      if (!tab || !projectId) return state
       const kills = collectLeaves(tab.root).map((l) => l.id)
-      const next = mapActiveWorkspace(state, (current) => {
+      const next = mapWorkspace(state, projectId, (current) => {
         const tabs = current.tabs.filter((t) => t.id !== action.tabId)
         const activeTabId =
           current.activeTabId === action.tabId
@@ -1444,6 +1454,12 @@ export interface AppActions {
   removeProject(id: string): void
   moveProject(from: number, to: number): void
   selectProject(id: string): void
+  /**
+   * Read a project's saved tabs into state without switching to it, so a pane
+   * can be opened there (Forge Brain's open_agent_pane naming another project).
+   * True once they are in state; false for an unknown project.
+   */
+  loadWorkspace(projectId: string): Promise<boolean>
   revealProject(id: string): void
   toggleRail(): void
   /**
@@ -1534,9 +1550,16 @@ export interface AppActions {
        * unique if another tab wears it. Absent, the next pool name, as ever.
        */
       name?: string
+      /**
+       * Open it in this project (Forge Brain naming one) rather than the one on
+       * screen, which stays on screen. Its workspace must be loaded
+       * (`loadWorkspace`); `anchorPaneId` wins over it.
+       */
+      projectId?: string
     }
   ): { paneId: string; name: string } | null
-  closeTab(tabId: string): void
+  /** `projectId`: a tab in a project other than the one on screen, which stays on screen. */
+  closeTab(tabId: string, projectId?: string): void
   selectTab(tabId: string): void
   renameTab(tabId: string, title: string): void
   /** Recolour a tab's chip, its terminals' text, or both. `null` clears one. */
@@ -2095,6 +2118,28 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       },
       moveProject: (from, to) => dispatch({ type: 'moveProject', from, to }),
       selectProject: (id) => dispatch({ type: 'selectProject', projectId: id }),
+      loadWorkspace: async (projectId) => {
+        const has = (): boolean => Boolean(liveStateRef.current.workspaces[projectId])
+        if (has()) return true
+        const live = liveStateRef.current
+        if (!live.ready || !live.projects.some((p) => p.id === projectId)) return false
+        // The same read the lazy load below does for the project on screen.
+        if (!loadingWorkspaces.current.has(projectId)) {
+          loadingWorkspaces.current.add(projectId)
+          try {
+            const raw = await window.forge.store.getWorkspace(projectId)
+            const profileIds = new Set(liveStateRef.current.settings.agentProfiles.map((p) => p.id))
+            const workspace = sanitiseWorkspace(raw, profileIds)
+            persisted.current.workspaces.set(projectId, JSON.stringify(workspace))
+            dispatch({ type: 'workspaceLoaded', projectId, workspace })
+          } finally {
+            loadingWorkspaces.current.delete(projectId)
+          }
+        }
+        // The dispatch reaches liveStateRef on the next render, not here.
+        for (let i = 0; i < 100 && !has(); i++) await new Promise((r) => setTimeout(r, 20))
+        return has()
+      },
       revealProject: (id) => {
         const project = liveStateRef.current.projects.find((p) => p.id === id)
         if (project) void window.forge.openPath(project.path)
@@ -2180,7 +2225,11 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         // workspaces, and the limits below are about the panes open right now.
         const live = liveStateRef.current
         const owner = opts?.anchorPaneId ? tabOwning(live, opts.anchorPaneId) : null
-        const projectId = owner?.projectId ?? live.activeProjectId
+        const named = opts?.projectId && live.workspaces[opts.projectId] ? opts.projectId : null
+        // A named project that is not loaded is refused outright, never
+        // quietly swapped for the one on screen.
+        if (opts?.projectId && !owner && !named) return null
+        const projectId = owner?.projectId ?? named ?? live.activeProjectId
         const refused =
           !projectId ||
           totalPanes(live) >= MAX_SESSIONS ||
@@ -2223,7 +2272,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         // A refusal still went through the reducer, which says why in the notice.
         return refused ? null : { paneId, name }
       },
-      closeTab: (tabId) => dispatch({ type: 'closeTab', tabId }),
+      closeTab: (tabId, projectId) => dispatch({ type: 'closeTab', tabId, ...(projectId ? { projectId } : {}) }),
       hireTab: (projectId, profileId, count, title, paneIds) =>
         dispatch({ type: 'hireTab', projectId, profileId, count, title, ...(paneIds ? { paneIds } : {}) }),
       selectTab: (tabId) => dispatch({ type: 'selectTab', tabId }),
@@ -2583,6 +2632,16 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     })
   }, [])
 
+  // Every project's state and the actions, for Forge Brain's tools outside
+  // React (src/lib/agenttools.ts) — see `readLiveApp`.
+  useEffect(() => {
+    const app = { get: store.get, actions }
+    liveApp = app
+    return () => {
+      if (liveApp === app) liveApp = null
+    }
+  }, [store, actions])
+
   const value = useMemo<Ctx>(() => ({ state, actions }), [state, actions])
 
   return (
@@ -2599,6 +2658,23 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
 }
 
 /* ------------------------------------------------------------- selectors */
+
+/** The live app as the brain's tools reach it: the latest state, and the actions. */
+export interface LiveApp {
+  get(): AppState
+  actions: AppActions
+}
+
+let liveApp: LiveApp | null = null
+
+/**
+ * The live app outside React, for the one reader that has to see every
+ * project rather than the one on screen: Forge Brain's tools
+ * (src/lib/agenttools.ts). Null before the provider mounts.
+ */
+export function readLiveApp(): LiveApp | null {
+  return liveApp
+}
 
 export function useApp(): Ctx {
   const ctx = useContext(AppStateContext)

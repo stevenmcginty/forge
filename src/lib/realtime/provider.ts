@@ -3,6 +3,7 @@ import {
   DEFAULT_AGENT_BRAIN,
   isAgentBrainId,
   isRealtimeBrain,
+  visibleAgentBrain,
   type AgentBrainId
 } from '@shared/agent-brain'
 import { providerSpec } from '@shared/realtime'
@@ -61,7 +62,7 @@ export function resolveHubProvider(requested: VoiceHubProvider | undefined, keys
 export type BrainKeys = Pick<Settings, 'geminiKey' | 'openaiKey' | 'groqKey' | 'openrouterKey'>
 
 export interface ResolvedBrain {
-  /** The adapter actually in use: a keyed brain with no key falls back to Claude. */
+  /** The adapter actually in use: a keyed brain with no key falls back to the default (Forge Brain). */
   brain: AgentBrainId
   /** Set when `brain` is a realtime adapter — the provider to open a session on. */
   realtime: RealtimeProviderId | null
@@ -74,18 +75,20 @@ export function brainHasKey(id: AgentBrainId, keys: Partial<BrainKeys>): boolean
 }
 
 /**
- * The ONE routing rule: `settings.agentBrain`, with a keyed adapter that has no
- * key falling back to Claude (which needs none) and saying why.
+ * The ONE routing rule: `settings.agentBrain`, with a pick the pickers no
+ * longer offer answering as the default (shared/agent-brain.ts
+ * VISIBLE_AGENT_BRAINS), and a keyed adapter that has no key falling back to
+ * the default (Forge Brain, which needs none) and saying why.
  */
 export function resolveAgentBrain(requested: AgentBrainId | undefined, keys: Partial<BrainKeys>): ResolvedBrain {
-  const wanted: AgentBrainId = isAgentBrainId(requested) ? requested : DEFAULT_AGENT_BRAIN
+  const wanted: AgentBrainId = visibleAgentBrain(isAgentBrainId(requested) ? requested : DEFAULT_AGENT_BRAIN)
   const spec = agentBrainSpec(wanted)
   if (!brainHasKey(wanted, keys)) {
     const vendor = spec.auth.replace(/ key$/, '')
     return {
       brain: DEFAULT_AGENT_BRAIN,
       realtime: null,
-      fallbackReason: `No ${vendor} key — using Claude. Add one in Settings → Voice & Agent for ${spec.label}.`
+      fallbackReason: `No ${vendor} key — using ${agentBrainSpec(DEFAULT_AGENT_BRAIN).label}. Add one in Settings → Voice & Agent for ${spec.label}.`
     }
   }
   return { brain: wanted, realtime: isRealtimeBrain(wanted) ? wanted : null, fallbackReason: null }

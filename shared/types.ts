@@ -127,6 +127,13 @@ export interface Project {
    * Optional, and absent on every project saved before it existed.
    */
   pinned?: boolean
+  /**
+   * `'brain'` marks Forge Brain's hidden project (shared/brain.ts): one pane
+   * running the brain's CLI in its home under the data dir. Main keeps it out
+   * of every list it hands out (electron/store.ts `getProjects`), so no rail,
+   * picker, order or Forge Web list ever draws it. Absent on every real project.
+   */
+  kind?: 'brain'
 }
 
 /* ------------------------------------------------------------ pane layouts */
@@ -920,6 +927,9 @@ export type VoiceHubProvider = 'claude' | 'gemini-live' | 'gpt-realtime' | 'gpt-
  * The Agent brain adapters — the one list that picks who answers the bottom
  * bar. Specs, labels and the migration live in shared/agent-brain.ts.
  */
+/** Which CLI runs Forge Brain (shared/brain.ts). `local` is Codex's open-source mode over Ollama. */
+export type BrainEngine = 'claude' | 'codex' | 'gemini' | 'local'
+
 export type AgentBrainId =
   | 'claude'
   | 'gemini-live'
@@ -930,6 +940,8 @@ export type AgentBrainId =
   | 'openrouter'
   | 'gemini-cli'
   | 'codex-cli'
+  /** Forge Brain itself (shared/brain.ts): Parakeet hears, the brain pane answers, the TTS voice speaks. */
+  | 'forge-brain'
 
 /**
  * One row of the desktop voice menu, in display order.
@@ -1883,6 +1895,29 @@ export interface Settings {
    * On by default.
    */
   agentsForgeBrowserOnly: boolean
+
+  /* ----------------------------------------------------------- forge brain */
+  /**
+   * Forge Brain on (shared/brain.ts, electron/brain/). Off by default and for
+   * every settings.json written before it existed: Forge works without it.
+   */
+  brainEnabled: boolean
+  /** Which CLI runs Forge Brain. Claude by default. */
+  brainEngine: BrainEngine
+  /** The first-open pop-up that explains the brain has been seen. */
+  brainIntroSeen: boolean
+  /**
+   * The Edge neural voice Forge Brain's spoken replies use — its own, apart
+   * from the voice agents' (`voiceEdgeVoice`), so Steve can hear who is
+   * talking. `BRAIN_VOICE_DEFAULT` (shared/brain.ts) until he picks one.
+   */
+  brainVoice: string
+  /**
+   * How full Forge Brain's context window may get, in percent, before Forge
+   * says so once and offers a fresh start (a handoff note, then a new
+   * conversation). `BRAIN_CONTEXT_WARN_PCT` (shared/brain.ts) by default.
+   */
+  brainContextWarnPct: number
 
   /* -------------------------------------------------------- agent memory */
   /**

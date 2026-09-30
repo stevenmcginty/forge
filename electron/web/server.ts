@@ -76,6 +76,15 @@ import {
  * server's restatement of it.
  */
 import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
+import {
+  BRAIN_ASK_WAIT_WEB_MS,
+  BRAIN_SEND_MAX,
+  isBrainEngine,
+  type BrainAskResult,
+  type BrainEngine,
+  type BrainSaysEvent,
+  type BrainStatus
+} from '@shared/brain'
 /*
  * The Handoff vocabulary and its one boundary rule, from the file that owns
  * them — the same arrangement this file has with shared/foreman.ts above. A
@@ -337,7 +346,7 @@ export interface WebServerHost {
   /** The opening picture: whatever the browser needs to draw the workspace. */
   snapshot: () => Pick<
     WebHelloOkFrame,
-    'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman' | 'handoff'
+    'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman' | 'handoff' | 'brain'
   >
 
   /**
@@ -525,6 +534,20 @@ export interface WebServerHost {
   foremanStop?: (paneId: string) => Promise<{ ok: true } | { ok: false; error: string }>
   /** A word in Foreman's ear. `ok: false` when nobody is driving that pane. */
   foremanSay?: (paneId: string, text: string) => Promise<{ ok: true } | { ok: false; error: string }>
+
+  /* ----------------------------------------------------------- forge brain
+   *
+   * Forge Brain's controls (shared/brain.ts), performed in main like
+   * Foreman's. Optional: a host without them answers `unsupported`. `ok:
+   * false` carries the sentence the browser shows; the picture itself goes
+   * out as a `brain` push.
+   */
+  brainEnable?: (on: boolean) => Promise<{ ok: true } | { ok: false; error: string }>
+  brainEngine?: (engine: BrainEngine) => Promise<{ ok: true } | { ok: false; error: string }>
+  brainSend?: (text: string) => { ok: true } | { ok: false; error: string }
+  brainConfirm?: (id: string, allow: boolean) => boolean
+  /** Send a message and wait (at most `waitMs`) for the brain's reply to it. Never rejects. */
+  brainAsk?: (text: string, waitMs: number) => Promise<BrainAskResult>
 
   /* --------------------------------------------------------------- handoff
    *
@@ -1247,6 +1270,16 @@ export class WebServer {
    */
   pushForeman(state: ForemanState): void {
     this.broadcast({ type: 'foreman', state })
+  }
+
+  /** Forge Brain's picture moved, to every authenticated browser — see `WebBrainFrame`. */
+  pushBrain(status: BrainStatus): void {
+    this.broadcast({ type: 'brain', status })
+  }
+
+  /** A line from Forge Brain for a browser's voice agent — see `WebBrainSaysFrame`. */
+  pushBrainSays(event: BrainSaysEvent): void {
+    this.broadcast({ type: 'brain-says', event })
   }
 
   /**
@@ -2154,6 +2187,8 @@ export class WebServer {
       // panes are driven" is a real answer about this desktop, not an absent
       // one, and only undefined — a host with no Foreman at all — is left out.
       ...(snapshot.foreman ? { foreman: snapshot.foreman } : {}),
+      // Only from a desktop that has a brain at all; its `enabled` says whether it is on.
+      ...(snapshot.brain ? { brain: snapshot.brain } : {}),
       // The same rule as `foreman`: an empty list per project is a real answer
       // — that project has no packs — and only a host with no handoffs at all
       // is left out.
@@ -3164,6 +3199,92 @@ export class WebServer {
           const said = await this.host.foremanSay(paneId, text)
           if (!said.ok) {
             failed('failed', said.error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        /* ------------------------------------------------------ forge brain
+         *
+         * Performed in main (electron/brain/), like Foreman's switch. What a
+         * brain op changes arrives as a `brain` push to every browser; the
+         * answer only says whether it was done.
+         */
+
+        case 'brain-enable': {
+          if (!this.host.brainEnable) {
+            failed('unsupported', 'This Forge has no Forge Brain.')
+            return
+          }
+          const done = await this.host.brainEnable(request.on === true)
+          if (!done.ok) {
+            failed('failed', done.error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'brain-engine': {
+          if (!this.host.brainEngine) {
+            failed('unsupported', 'This Forge has no Forge Brain.')
+            return
+          }
+          if (!isBrainEngine(request.engine)) {
+            failed('bad-frame', 'That is not an engine Forge Brain can run on.')
+            return
+          }
+          const done = await this.host.brainEngine(request.engine)
+          if (!done.ok) {
+            failed('failed', done.error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'brain-send': {
+          if (!this.host.brainSend) {
+            failed('unsupported', 'This Forge has no Forge Brain.')
+            return
+          }
+          // Read one past the cap, so an over-long message is refused by the
+          // host in words rather than cut here without a word.
+          const text = wireString(request.text, BRAIN_SEND_MAX + 1)
+          const sent = this.host.brainSend(text)
+          if (!sent.ok) {
+            failed('failed', sent.error)
+            return
+          }
+          answer({ kind: 'ok' })
+          return
+        }
+
+        case 'brain-ask': {
+          if (!this.host.brainAsk) {
+            failed('unsupported', 'This Forge has no Forge Brain.')
+            return
+          }
+          const text = wireString(request.text, BRAIN_SEND_MAX + 1)
+          const asked = typeof request.waitMs === 'number' && Number.isFinite(request.waitMs) ? request.waitMs : BRAIN_ASK_WAIT_WEB_MS
+          const reply = await this.host.brainAsk(text, Math.min(Math.max(asked, 1000), BRAIN_ASK_WAIT_WEB_MS))
+          if (!reply.ok) {
+            failed('failed', reply.error)
+            return
+          }
+          answer({ kind: 'brain-reply', text: reply.text })
+          return
+        }
+
+        case 'brain-confirm': {
+          if (!this.host.brainConfirm) {
+            failed('unsupported', 'This Forge has no Forge Brain.')
+            return
+          }
+          const id = wireString(request.id, 128)
+          if (!id || !this.host.brainConfirm(id, request.allow === true)) {
+            failed('failed', 'That question is no longer waiting.')
             return
           }
           answer({ kind: 'ok' })

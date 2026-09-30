@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { AgentBrainId } from '@shared/agent-brain'
+import { GYRI, LEFT, RIGHT, RING_FAR, RING_NEAR, SILHOUETTE, TILT } from '../brain/BrainGlyph'
 
 /**
  * Which voice agent, as a mark: one silhouette per maker, so a brain reads at
@@ -10,13 +11,15 @@ import type { AgentBrainId } from '@shared/agent-brain'
  *   OpenAI       a hexagon              (Codex, GPT Realtime, GPT Realtime mini)
  *   Groq         a bolt
  *   OpenRouter   one node branching to two
+ *   Forge Brain  the top bar's brain glyph (components/brain/BrainGlyph.tsx),
+ *                idle and still: the brain, its ring and its spark
  *
  * The same shapes as Forge Web's voice bar, drawn on the desktop icons' 16px
  * grid. Monochrome on purpose: the mark takes the ink it sits in, so it never
  * fades on a light theme and colour never carries the meaning. The brain's
  * name is always in the row, the title and the accessible name.
  */
-type Maker = 'claude' | 'gemini' | 'openai' | 'groq' | 'openrouter'
+type Maker = 'claude' | 'gemini' | 'openai' | 'groq' | 'openrouter' | 'forge'
 
 const MAKER: Record<AgentBrainId, Maker> = {
   claude: 'claude',
@@ -27,11 +30,50 @@ const MAKER: Record<AgentBrainId, Maker> = {
   'gpt-realtime': 'openai',
   'gemini-flash': 'gemini',
   groq: 'groq',
-  openrouter: 'openrouter'
+  openrouter: 'openrouter',
+  'forge-brain': 'forge'
+}
+
+/**
+ * Forge Brain's mark: the top bar's glyph in its idle look, drawn still (no
+ * spark going round, so nothing moves in a menu and reduced motion has nothing
+ * to stop). The ink is the mark's own, like every other maker; the core and
+ * the spark take the accent. Strokes are heavier than the 26px glyph's so it
+ * holds at 13–20px.
+ */
+function ForgeBrainMark({ size }: { size: number }): ReactNode {
+  const mask = `bm${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  return (
+    <svg className="bmark" data-maker="forge" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <defs>
+        <mask id={mask} maskUnits="userSpaceOnUse" x="0" y="0" width="32" height="32">
+          <rect width="32" height="32" fill="#fff" />
+          <path d={SILHOUETTE} fill="#000" stroke="#000" strokeWidth="2.6" />
+        </mask>
+      </defs>
+      <path d={SILHOUETTE} style={{ fill: 'var(--accent)' }} opacity="0.16" />
+      <g transform={TILT} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity="0.6">
+        <path d={RING_FAR} mask={`url(#${mask})`} />
+      </g>
+      <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <path d={LEFT} strokeWidth="2.6" />
+        <path d={RIGHT} strokeWidth="2.6" />
+        <path d="M16 8.6V23.3" strokeWidth="2.6" />
+        <path d={GYRI} strokeWidth="1.9" opacity="0.8" />
+      </g>
+      <g transform={TILT} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity="0.6">
+        <path d={RING_NEAR} />
+      </g>
+      <g transform={TILT}>
+        <circle cx="28.2" cy="18.6" r="2.4" style={{ fill: 'var(--accent)', stroke: 'var(--bg-base)' }} strokeWidth="0.8" />
+      </g>
+    </svg>
+  )
 }
 
 export function BrainMark({ brain, size = 14 }: { brain: AgentBrainId; size?: number }): ReactNode {
   const maker = MAKER[brain] ?? 'claude'
+  if (maker === 'forge') return <ForgeBrainMark size={size} />
   return (
     <svg className="bmark" data-maker={maker} width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
       {maker === 'claude' ? (

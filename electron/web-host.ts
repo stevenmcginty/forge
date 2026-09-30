@@ -92,7 +92,9 @@ import {
 } from './pty-host'
 import { UNSUPPORTED, layoutEngine } from './layout-engine'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
-import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
+import { getAllProjects, getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
+import { answerConfirm, askBrain, brainStatus, onBrainSays, onBrainStatus, sendToBrain } from './brain/host'
+import { setBrainEnabled, setBrainEngine } from './brain/ipc'
 import { getSkillsStore } from './skills-store'
 import { commandsFeed } from './commands'
 import { probeAgents } from './agent-probe'
@@ -262,6 +264,9 @@ let unsubscribeGit: (() => void) | null = null
  * gone is the same dead-end a pending geometry push guards against below.
  */
 let unsubscribeForeman: (() => void) | null = null
+/** Forge Brain's status pushes, for as long as the link is up — the same terms as Foreman's. */
+let unsubscribeBrain: (() => void) | null = null
+let unsubscribeBrainSays: (() => void) | null = null
 
 /**
  * The handoff packs' changes, fanned out to every connected browser for as long
@@ -1326,7 +1331,7 @@ async function signOut(): Promise<void> {
 
 function snapshotForBrowser(): Pick<
   WebHelloOkFrame,
-  'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman' | 'handoff'
+  'projects' | 'profiles' | 'workspaces' | 'projectsRoot' | 'foreman' | 'handoff' | 'brain'
 > {
   const projects = getProjects()
   const workspaces: Record<string, Workspace> = {}
@@ -1349,7 +1354,9 @@ function snapshotForBrowser(): Pick<
     // Every project, not just the one the desk's window is watching: the
     // watcher is singular and a browser may be reading any project on the rail.
     // See `listHandoffsFor`, which reads the folder rather than the watch.
-    handoff: projects.map((project) => ({ projectId: project.id, records: listHandoffsFor(project.id) }))
+    handoff: projects.map((project) => ({ projectId: project.id, records: listHandoffsFor(project.id) })),
+    // Its project is in no list above; its pane is found by `paneId`.
+    brain: brainStatus()
   }
 }
 
@@ -1372,19 +1379,28 @@ function snapshotForBrowser(): Pick<
  * the browser is told in a sentence.
  */
 
-/** The Claude session uuid the layout has for this pane, or '' — see `PaneLeaf.sessionId`. */
-function paneSessionId(paneId: string): string {
-  for (const project of getProjects()) {
+/**
+ * The saved layout that holds this pane: its project and its leaf. Every
+ * project, Forge Brain's hidden one included — its pane is read by the chat
+ * view like any other.
+ */
+function paneHome(paneId: string): { projectId: string; leaf: Extract<LayoutNode, { type: 'leaf' }> } | null {
+  for (const project of getAllProjects()) {
     const workspace = getWorkspace(project.id)
     if (!workspace) continue
     for (const tab of workspace.tabs) {
       const leaf = findLeaf(tab.root, paneId)
-      // Found, but never given an id — a pane written before the field existed,
-      // or one whose profile is not Claude at all.
-      if (leaf) return leaf.sessionId ?? ''
+      if (leaf) return { projectId: project.id, leaf }
     }
   }
-  return ''
+  return null
+}
+
+/** The Claude session uuid the layout has for this pane, or '' — see `PaneLeaf.sessionId`. */
+function paneSessionId(paneId: string): string {
+  // Found, but never given an id — a pane written before the field existed,
+  // or one whose profile is not Claude at all.
+  return paneHome(paneId)?.leaf.sessionId ?? ''
 }
 
 /**
@@ -1668,6 +1684,22 @@ async function start(): Promise<void> {
       const driving = state.status === 'starting' || state.status === 'driving' || state.status === 'waiting'
       return driving ? { ok: true } : { ok: false, error: 'Foreman is not driving that pane — start it with a seed instead.' }
     },
+    // Forge Brain, performed here in main (electron/brain/). A turn-on that
+    // could not start answers with the brain's own sentence.
+    brainEnable: async (on) => {
+      const status = await setBrainEnabled(on)
+      return on && status.state === 'error' ? { ok: false, error: status.error || 'Forge Brain could not start.' } : { ok: true }
+    },
+    brainEngine: async (engine) => {
+      const status = await setBrainEngine(engine)
+      return status.enabled && status.state === 'error' ? { ok: false, error: status.error || 'Forge Brain could not start.' } : { ok: true }
+    },
+    brainSend: (text) => {
+      const sent = sendToBrain(text)
+      return sent.ok ? { ok: true } : sent
+    },
+    brainConfirm: (id, allow) => answerConfirm({ id, allow }),
+    brainAsk: (text, waitMs) => askBrain(text, waitMs),
     offerClipboardImage: (bytes) => {
       try {
         const img = nativeImage.createFromBuffer(Buffer.from(bytes))
@@ -1750,6 +1782,8 @@ async function start(): Promise<void> {
   // with the rest. A browser that connects mid-job gets the current states
   // from the snapshot instead — this is the *changes*, that is the picture.
   unsubscribeForeman = onForemanState((state) => instance.pushForeman(state))
+  unsubscribeBrain = onBrainStatus((status) => instance.pushBrain(status))
+  unsubscribeBrainSays = onBrainSays((event) => instance.pushBrainSays(event))
 
   // And the handoff packs, on the same terms. A browser that connects mid-flow
   // gets the current lists from the snapshot; this is everything that moves
@@ -2034,6 +2068,10 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribeGit = null
   unsubscribeForeman?.()
   unsubscribeForeman = null
+  unsubscribeBrain?.()
+  unsubscribeBrain = null
+  unsubscribeBrainSays?.()
+  unsubscribeBrainSays = null
   unsubscribeHandoff?.()
   unsubscribeHandoff = null
   // The readers keep running for the desktop; only the phone stops listening.
@@ -2210,7 +2248,10 @@ export function registerWebHandlers(): void {
     // and what arrives here ends up on a public wire.
     const prompt = String(payload?.prompt ?? '').slice(0, ATTENTION_PROMPT_MAX)
 
-    publishAttention({ paneId: sessionId, state, prompt })
+    // With the project that holds the pane, from main's own saved layouts —
+    // Forge Brain words its note as "<pane> in <project>".
+    const projectId = paneHome(sessionId)?.projectId
+    publishAttention({ paneId: sessionId, state, prompt, ...(projectId ? { projectId } : {}) })
 
     const instance = server
     // No link, no browsers, nothing to notify — and no keypair generated for a

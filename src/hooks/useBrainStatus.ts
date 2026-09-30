@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Settings } from '@shared/types'
-import { AGENT_BRAINS, type AgentBrainSpec, type BrainTestResult, type BrainTestTarget } from '@shared/agent-brain'
+import { VISIBLE_AGENT_BRAIN_SPECS as AGENT_BRAINS, type AgentBrainSpec, type BrainTestResult, type BrainTestTarget } from '@shared/agent-brain'
 import { keyOf, probeSig, type Probe } from '@/lib/brainStatus'
 
 /**

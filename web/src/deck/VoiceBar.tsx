@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import type { WebVoiceProvider } from '@shared/web'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import { usePresence } from '@/lib/motion'
+import { BrainGlyphMark } from '../components/BrainGlyph'
 import { Rail } from '../components/Rail'
 import { withAgentSends } from '../lib/pane-sent'
 import { useActiveProject, useForge, useWorkspace } from '../state'
@@ -43,6 +43,7 @@ import {
   voiceHint,
   voicePhaseWord,
   WEB_VOICE_AGENTS,
+  type WebVoiceAgent,
   type WebVoicePhase
 } from './voice-words'
 
@@ -246,8 +247,8 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
         data-sheet-toggle="voice"
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label={`Voice agent in use: ${agent}. Pick Gemini, ChatGPT or Claude`}
-        title={`Voice agent: ${agent} — pick Gemini, ChatGPT or Claude`}
+        aria-label={`Voice agent in use: ${agent}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
+        title={`Voice agent: ${agent} — pick Forge Brain, Gemini or ChatGPT`}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => deckSheet.toggle('voice')}
       >
@@ -362,10 +363,13 @@ function VoiceAgentGlyph({ look, on }: { look: Look; on: boolean }): ReactNode {
 
 /**
  * Which agent, as a mark rather than a word: Gemini a four-point spark,
- * ChatGPT a hexagon, Claude an eight-ray burst. Three silhouettes that stay
- * apart at 14px; the word is in the title, the accessible name, and the menu.
+ * ChatGPT a hexagon, Claude an eight-ray burst, Forge Brain the desktop top
+ * bar's brain glyph, still (../components/BrainGlyph.tsx). Silhouettes that
+ * stay apart at 14px; the word is in the title, the accessible name, and the
+ * menu.
  */
-function AgentMark({ agent }: { agent: WebVoiceProvider }): ReactNode {
+function AgentMark({ agent }: { agent: WebVoiceAgent }): ReactNode {
+  if (agent === 'forge-brain') return <BrainGlyphMark size={14} className="dk-amark" />
   return (
     <svg className="dk-amark" data-agent={agent} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
       {agent === 'gemini-live' ? (

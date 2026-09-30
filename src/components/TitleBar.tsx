@@ -4,15 +4,14 @@ import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
 import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
-import { setVoiceBarPlace, useVoiceBarPlace } from '@/lib/voiceBarPlace'
 import { useActiveProject, useApp, usePaneCount, useViewMode } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
 import { CommandKeys } from './hub/KeyRecorder'
 import { Icon } from './Icon'
 import { ScreenshotTray } from './ScreenshotTray'
 import type { NewTabDetail } from './TerminalGrid'
+import { BrainButton } from './brain/BrainButton'
 import { AgentsMenu } from './shell/AgentsMenu'
-import { Dock } from './shell/Dock'
 import { toggleSheet } from './shell/Sheet'
 import { useBranch } from './shell/useBranch'
 import './shell/DeckBar.css'
@@ -20,14 +19,14 @@ import './shell/DeckBar.css'
 /**
  * The deck's one top layer. On the left: the mark, the Agents menu (every agent
  * in the project; pick one to open it Full screen), the new-agent button and
- * the Wall switch. In the middle: the voice bar (project, Listen, D, the text)
- * — unless it has been clipped to the bottom edge, when the mode switcher takes
- * the middle back. On the right: the modes (while the voice bar is up here) and
+ * the Wall switch. In the middle: the mode switcher. On the right: Forge Brain
+ * (its mark, and the chat that drops from it — ./brain), the project chip and
  * one "…" menu that holds everything else — Settings, the keyboard sheet, the
- * agents list, the voice bar's place, the tools (Skills, Commands, tab
- * colours, Wall text), the screenshot shelf and the account. Three grid
- * columns, so nothing can collide. There is nothing over the terminals: Full
- * screen is one terminal, the Wall is all of them, and Ctrl+G flips the two.
+ * agents list, the tools (Skills, Commands, tab colours, Wall text), the
+ * screenshot shelf and the account. The voice bar is not up here: it is fixed
+ * to the bottom edge (shell/Dock). Three grid columns, so nothing can collide.
+ * There is nothing over the terminals: Full screen is one terminal, the Wall is
+ * all of them, and Ctrl+G flips the two.
  * Transparent over the backdrop — the window is draggable anywhere along it —
  * with the native minimise/maximise/close buttons drawn by Windows into the
  * reserved gap on the far right (titleBarOverlay), never re-implemented here.
@@ -39,12 +38,11 @@ export function TitleBar(): ReactNode {
   const { state } = useApp()
   const [focused, setFocused] = useState(true)
   const isDevChannel = state.info?.channel === 'dev'
-  const place = useVoiceBarPlace()
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
 
   return (
-    <header className="deckbar" data-focused={focused} data-voicebar={place}>
+    <header className="deckbar" data-focused={focused}>
       <div className="deckbar__left">
         <span className="deckbar__mark" data-channel={isDevChannel ? 'dev' : undefined}>
           <Icon name="forge" size={15} />
@@ -54,16 +52,10 @@ export function TitleBar(): ReactNode {
         <AgentControls />
       </div>
 
-      {place === 'top' ? (
-        <div className="deckbar__voice">
-          <Dock place="top" />
-        </div>
-      ) : (
-        <ModePill />
-      )}
+      <ModePill />
 
       <div className="deckbar__right">
-        {place === 'top' ? <ModePill /> : null}
+        <BrainButton />
         <ProjectChip />
         <DeckMenu />
         {/* Reserved for the native window controls (3 × 46px on Windows 11). */}
@@ -429,7 +421,6 @@ function DeckMenu(): ReactNode {
             <CommandKeys id="ui.toggle-panes-switcher" />
           </button>
         </div>
-        <VoiceBarPlaceRow />
         <div className="deckmenu__section">
           <span className="deckmenu__eyebrow">Tools</span>
           <div className="deckmenu__tools" ref={toolsHost.set}>
@@ -442,34 +433,5 @@ function DeckMenu(): ReactNode {
         </div>
       </div>
     </span>
-  )
-}
-
-/* ------------------------------------------------------- voice bar place */
-
-/**
- * Voice bar: Top or Bottom — the same choice as dragging the bar by its grip,
- * kept per machine (lib/voiceBarPlace). The chosen side is lit and ticked.
- */
-function VoiceBarPlaceRow(): ReactNode {
-  const place = useVoiceBarPlace()
-  return (
-    <div className="deckmenu__section">
-      <span className="deckmenu__eyebrow">Voice bar</span>
-      <div className="deckmenu__seg" role="group" aria-label="Voice bar place">
-        {(['top', 'bottom'] as const).map((p) => (
-          <button
-            key={p}
-            type="button"
-            data-on={place === p ? 'true' : undefined}
-            aria-pressed={place === p}
-            onClick={() => setVoiceBarPlace(p)}
-          >
-            {place === p ? <span aria-hidden="true">✓</span> : null}
-            {p === 'top' ? 'Top' : 'Bottom'}
-          </button>
-        ))}
-      </div>
-    </div>
   )
 }

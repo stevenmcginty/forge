@@ -1,29 +1,36 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Settings } from '@shared/types'
 import {
   AGENT_BRAINS,
+  isForgeBrainAgent,
   isRealtimeBrain,
   migrateAgentBrain,
+  VISIBLE_AGENT_BRAIN_SPECS,
   type AgentBrainKey,
   type AgentBrainKind,
   type AgentBrainSpec
 } from '@shared/agent-brain'
 import { GEMINI_VOICES, OPENAI_VOICES, providerSpec, resolveVoice } from '@shared/realtime'
 import { useBrainProbes } from '@/hooks/useBrainStatus'
-import { statusOf, type BrainStatus as Status, type Probe } from '@/lib/brainStatus'
+import { statusOf, forgeBrainStatus, type BrainStatus as Status, type Probe } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { useApp } from '@/state/AppState'
+import { BrainIntro } from '../brain/BrainIntro'
+import { startBrainFeed, useBrain } from '../brain/brainStore'
 import { KeyField, Row, TextField } from './parts'
+import '../brain/Brain.css'
 import './MainAgent.css'
 
 /**
- * The Main agent picker: one card per engine in AGENT_BRAINS, grouped by how
- * it runs, each with what it is good at, what it costs, a status word, a Test
- * button and — opened — its own settings (the key, the model, the voice).
+ * The Main agent picker: one card per engine in VISIBLE_AGENT_BRAINS (Forge
+ * Brain, Gemini Live, GPT Realtime), grouped by how it runs, each with what it
+ * is good at, what it costs, a status word, a Test button and — opened — its
+ * own settings (the key, the model, the voice). Forge Brain picked while it is
+ * off shows the brain's intro, with Turn on, under the head.
  *
- * Built from the list, not for it: a row added to AGENT_BRAINS (B8's
- * gemini-cli and codex-cli, or whatever comes next) appears here with no UI
+ * Built from the list, not for it: an id added to VISIBLE_AGENT_BRAINS (B8's
+ * gemini-cli and codex-cli are in AGENT_BRAINS, waiting) appears here with no UI
  * work. It gets its `note` as its line and its `auth` as its cost until a
  * better sentence is written into BRAIN_COPY, a key field if it has a `key`,
  * and a status from the same Test IPC every other row uses.
@@ -71,6 +78,10 @@ const BRAIN_COPY: Record<string, { good: string; cost: string }> = {
   openrouter: {
     good: 'Any model OpenRouter serves — for trying others.',
     cost: 'OpenRouter key · depends on the model'
+  },
+  'forge-brain': {
+    good: 'Talk straight to Forge Brain — it sees every project and runs the agents. Parakeet hears you, your voice setting reads its reply.',
+    cost: 'Whatever Forge Brain runs on · turn it on from the brain in the top bar'
   }
 }
 
@@ -80,6 +91,7 @@ function copyFor(spec: AgentBrainSpec): { good: string; cost: string } {
 
 /** The groups, in order. A kind not listed here lands in a last "Other" group, so nothing is ever hidden. */
 const GROUPS: Array<{ kind: AgentBrainKind; title: string; note: string }> = [
+  { kind: 'brain', title: 'Forge Brain', note: 'Listen talks to the brain itself. The other agents reach it with ask_brain and tell_brain.' },
   { kind: 'session', title: 'On your subscription', note: 'No key. A hidden session thinks; Parakeet hears you, Edge speaks.' },
   { kind: 'realtime', title: 'Live voice', note: 'Two-way audio you can talk over. A key, billed as you use it.' },
   { kind: 'json', title: 'Quick text brains', note: 'One call per phrase. Parakeet in, Edge out.' }
@@ -116,7 +128,18 @@ export function MainAgentCard(): ReactNode {
   const chosen = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
   const resolved = resolveAgentBrain(chosen, s)
   const { probes, test } = useBrainProbes(s)
+  // Forge Brain's row reads the brain's live status, not a probe.
+  useEffect(() => startBrainFeed(), [])
+  const liveBrain = useBrain().status
+  const statusFor = (spec: AgentBrainSpec): Status =>
+    isForgeBrainAgent(spec.id) ? forgeBrainStatus(liveBrain) : statusOf(spec, s, probes[spec.id])
   const [open, setOpen] = useState<Set<string>>(() => new Set())
+  // Forge Brain picked while it is off: its intro, until it is on or put away.
+  const [intro, setIntro] = useState(false)
+  const brainOn = liveBrain?.enabled === true
+  useEffect(() => {
+    if (brainOn) setIntro(false)
+  }, [brainOn])
 
   const toggleOpen = (id: string): void =>
     setOpen((prev) => {
@@ -128,12 +151,12 @@ export function MainAgentCard(): ReactNode {
 
   const answering = AGENT_BRAINS.find((b) => b.id === resolved.brain) ?? AGENT_BRAINS[0]!
   const chosenSpec = AGENT_BRAINS.find((b) => b.id === chosen) ?? answering
-  const answeringStatus = statusOf(answering, s, probes[answering.id])
+  const answeringStatus = statusFor(answering)
 
   const known = new Set(GROUPS.map((g) => g.kind))
   const groups = [
-    ...GROUPS.map((g) => ({ ...g, rows: AGENT_BRAINS.filter((b) => b.kind === g.kind) })),
-    { kind: 'other' as AgentBrainKind, title: 'Other', note: '', rows: AGENT_BRAINS.filter((b) => !known.has(b.kind)) }
+    ...GROUPS.map((g) => ({ ...g, rows: VISIBLE_AGENT_BRAIN_SPECS.filter((b) => b.kind === g.kind) })),
+    { kind: 'other' as AgentBrainKind, title: 'Other', note: '', rows: VISIBLE_AGENT_BRAIN_SPECS.filter((b) => !known.has(b.kind)) }
   ].filter((g) => g.rows.length > 0)
 
   return (
@@ -160,6 +183,10 @@ export function MainAgentCard(): ReactNode {
         </p>
       ) : null}
 
+      {intro && !brainOn ? (
+        <BrainIntro status={liveBrain} onOn={() => setIntro(false)} onClose={() => setIntro(false)} />
+      ) : null}
+
       <div className="mag__groups" role="radiogroup" aria-label="Main agent">
         {groups.map((g) => (
           <div key={g.kind} className="mag__group">
@@ -173,9 +200,10 @@ export function MainAgentCard(): ReactNode {
                 spec={spec}
                 picked={chosen === spec.id}
                 open={chosen === spec.id || open.has(spec.id)}
-                status={statusOf(spec, s, probes[spec.id])}
+                status={statusFor(spec)}
                 probe={probes[spec.id]}
                 onPick={() => actions.patchSettings({ agentBrain: spec.id })}
+                onPicked={() => setIntro(isForgeBrainAgent(spec.id) && !brainOn)}
                 onToggle={() => toggleOpen(spec.id)}
                 onTest={() => test(spec)}
               />
@@ -205,6 +233,7 @@ function BrainRow({
   status,
   probe,
   onPick,
+  onPicked,
   onToggle,
   onTest
 }: {
@@ -214,6 +243,8 @@ function BrainRow({
   status: Status
   probe: Probe | undefined
   onPick: () => void
+  /** After the pick: Forge Brain while it is off opens its intro. */
+  onPicked: () => void
   onToggle: () => void
   onTest: () => void
 }): ReactNode {
@@ -222,7 +253,16 @@ function BrainRow({
   return (
     <div className="mag__row" data-picked={picked ? 'true' : undefined} data-open={open ? 'true' : undefined}>
       <div className="mag__line">
-        <button type="button" role="radio" aria-checked={picked} className="mag__pick" onClick={onPick}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={picked}
+          className="mag__pick"
+          onClick={() => {
+            onPick()
+            onPicked()
+          }}
+        >
           <span className="mag__lamp" aria-hidden="true" />
           <span className="mag__text">
             <span className="mag__nameline">

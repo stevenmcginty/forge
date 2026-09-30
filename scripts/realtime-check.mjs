@@ -217,7 +217,7 @@ await check('every field an ACTION_SPECS example names is a typed parameter', ()
   assert.equal(props.submit.type, 'boolean')
 })
 
-await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four hub tools and B3’s eight browser tools, unique names', () => {
+await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four hub tools, B3’s eight browser tools and Forge Brain’s two, unique names', () => {
   const names = tools.REALTIME_TOOLS.map((t) => t.name)
   assert.deepEqual(names, [
     'get_app_state',
@@ -240,7 +240,9 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
     'browser_type',
     'browser_screenshot',
     'browser_close',
-    'browser_upload'
+    'browser_upload',
+    'ask_brain',
+    'tell_brain'
   ])
   const gem = tools.toGeminiTools()[0].functionDeclarations
   assert.deepEqual(gem.map((d) => d.name), names)
@@ -683,6 +685,15 @@ await check('an older desktop\'s "does not understand" becomes "update the deskt
   )
   assert.equal(voiceFailureWords({ code: 'failed', message: 'No Gemini key is set — add one in Settings → Models & APIs' }), NO_KEY_WORDS)
   assert.equal(voiceFailureWords({ code: 'failed', message: 'Could not reach Gemini: offline' }), 'Could not reach Gemini: offline')
+})
+
+await check('the phone and deck pickers offer three: Forge Brain (the default), Gemini, ChatGPT; a remembered Claude becomes Forge Brain', async () => {
+  const { WEB_VOICE_AGENTS, DEFAULT_WEB_VOICE_AGENT, readVoiceAgent, voiceAgentWord } = await import('../web/src/deck/voice-words.ts')
+  assert.deepEqual(WEB_VOICE_AGENTS, ['forge-brain', 'gemini-live', 'gpt-realtime'])
+  assert.deepEqual(WEB_VOICE_AGENTS.map(voiceAgentWord), ['Forge Brain', 'Gemini', 'ChatGPT'])
+  assert.equal(DEFAULT_WEB_VOICE_AGENT, 'forge-brain')
+  for (const stored of [null, undefined, '', 'nope', 'claude', 'gpt-realtime-mini']) assert.equal(readVoiceAgent(stored), 'forge-brain', String(stored))
+  for (const stored of WEB_VOICE_AGENTS) assert.equal(readVoiceAgent(stored), stored)
 })
 
 await check('a browser that navigates itself is told where to go; the desktop is never asked to move', async () => {

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { DictationCueHost } from '@/components/DictationCue'
 import { AccountPrompt } from '@/components/AccountPrompt'
+import { BrainMapHost } from '@/components/brainview'
 import { Onboarding } from '@/components/Onboarding'
 import { WhatsNew } from '@/components/WhatsNew'
 import { TerminalGrid } from '@/components/TerminalGrid'
@@ -22,7 +23,6 @@ import { HUB_FOCUS_EVENT, type HubFocusDetail } from '@/lib/hubnav'
 import { fadeIn } from '@/lib/motion'
 import { shellMode, shellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { terminalHost } from '@/lib/terminals'
-import { useVoiceBarPlace } from '@/lib/voiceBarPlace'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { useActiveProject, useApp, type SettingsSection } from '@/state/AppState'
 import '@/components/shell/deck-tokens.css'
@@ -34,11 +34,11 @@ import './App.css'
  * The desktop shell: a command deck.
  *
  * One backdrop (the room), a slim top bar (the mark, the Agents menu and the
- * Wall switch, the voice bar, the modes, the tools), and the stage under it
- * with almost no margin: the agents' terminals — the Wall, or one Full screen —
- * or a registered surface such as the browser. The voice bar can be clipped to
- * the bottom edge instead (lib/voiceBarPlace). Settings is a pop-up over all of it: the panes stay live
- * behind it and Esc puts you back.
+ * Wall switch, the modes, Forge Brain, the tools), the stage under it with
+ * almost no margin — the agents' terminals (the Wall, or one Full screen) or a
+ * registered surface such as the browser — and the voice bar, clipped to the
+ * bottom edge. Settings is a pop-up over all of it: the panes stay live behind
+ * it and Esc puts you back.
  *
  * The terminals never notice any of this. terminalHost owns every xterm, so a
  * mode switch that unmounts the grid costs nothing and coming back is instant —
@@ -55,14 +55,13 @@ export function App(): ReactNode {
   const surface = surfaces.find((s) => s.id === surfaceId) ?? null
   const modes = useDeckModes()
   const mode = useDeckMode()
-  const voiceBar = useVoiceBarPlace()
 
   // Every layout change that moves pane edges gets a refit once it settles —
   // the same 200ms beat the app has always used, now also after a mode glide.
   useEffect(() => {
     const t = setTimeout(() => terminalHost.fitAll(), 380)
     return () => clearTimeout(t)
-  }, [state.view, surfaceId, voiceBar])
+  }, [state.view, surfaceId])
 
   /* ------------------------------------------------------------ modes */
 
@@ -160,7 +159,7 @@ export function App(): ReactNode {
   const Surface = surface?.render ?? null
 
   return (
-    <div className="app deck" data-ready={state.ready} data-mode={mode} data-voicebar={voiceBar}>
+    <div className="app deck" data-ready={state.ready} data-mode={mode} data-voicebar="bottom">
       <Backdrop />
       <TitleBar />
       {/*
@@ -196,11 +195,13 @@ export function App(): ReactNode {
           </div>
         )}
       </main>
-      {/* The voice bar: in the top bar (TitleBar) unless clipped down here. */}
-      {voiceBar === 'bottom' ? <Dock place="bottom" /> : null}
+      {/* The voice bar, clipped to the bottom edge. */}
+      <Dock />
       <DeckToast />
       {/* The Dictate key's dictation, lit where its words land (the pane, the bar, or a band). */}
       <DictationCueHost />
+      {/* Forge Brain's expanded map (src/components/brainview): nothing until opened. */}
+      <BrainMapHost />
       <SettingsPopup />
       {/*
         The voice hub's UI: the dock's voice pill, the Board surface,

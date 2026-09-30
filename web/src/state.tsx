@@ -21,12 +21,14 @@ import {
 import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
+import type { BrainStatus } from '@shared/brain'
 import type { AgentProfile, GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 import type { HandoffTargetWire } from '@shared/handoffview'
 import { collectLeaves } from '@/lib/splitTree'
 import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } from './config'
 import { Auth, isSignedOutError, type Session } from './lib/auth'
 import { ForgeClient, type Connection } from './lib/client'
+import { hearBrainSays } from './deck/voiceAgent'
 import {
   clearSnapshot,
   loadSnapshot,
@@ -87,6 +89,12 @@ export interface Picture {
    * the same name on `WebHelloOkFrame`.
    */
   handoff: Record<string, HandoffRecord[]>
+  /**
+   * Forge Brain as the desktop last said (shared/brain.ts). From `hello-ok`
+   * and kept current by the `brain` push. Null from an older desktop, which
+   * has no brain: then no surface draws one.
+   */
+  brain: BrainStatus | null
 }
 
 /* ------------------------------------------------------- insert into draft
@@ -707,7 +715,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           foreman: Object.fromEntries((frame.foreman ?? []).map((s) => [s.paneId, s])),
           // The same snapshot rule: absent (an older desktop) reads as no
           // handoffs anywhere, which is the only safe reading.
-          handoff: Object.fromEntries((frame.handoff ?? []).map((h) => [h.projectId, h.records]))
+          handoff: Object.fromEntries((frame.handoff ?? []).map((h) => [h.projectId, h.records])),
+          // Absent (an older desktop) is no brain at all, not a brain that is off.
+          brain: frame.brain ?? null
         })
         // Written down and held, from the one object rather than by reading back
         // what was just written: `rememberPicture` hands over what it stored.
@@ -761,6 +771,12 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           current ? { ...current, handoff: { ...current.handoff, [projectId]: records } } : current
         )
       },
+      onBrain: (status) => {
+        // The whole picture replaces the last one; there is nothing to merge.
+        setPicture((current) => (current ? { ...current, brain: status } : current))
+      },
+      // Said by whichever voice conversation is live on this page (deck/voiceAgent.ts).
+      onBrainSays: (event) => hearBrainSays(event),
       onDesktop: (state, reason) => {
         // A reason is a courtesy, not a requirement: the band is drawn on the
         // state alone, so a desktop that sends 'recovering' with nothing to say

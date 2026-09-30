@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
-import type { WebVoiceProvider } from '@shared/web'
 import { Icon } from '@/components/Icon'
+import { BrainGlyphMark } from './BrainGlyph'
 import { SynthesizerIndicator } from '@/components/hub/SynthesizerIndicator'
 import type { HubLook } from '@/components/hub/hubLook'
 import {
@@ -15,15 +15,15 @@ import {
   webVoiceSupported,
   type WebVoiceState
 } from '../deck/voiceAgent'
-import { voiceAgentWord, voiceHint, voicePhaseWord, WEB_VOICE_AGENTS } from '../deck/voice-words'
+import { voiceAgentWord, voiceHint, voicePhaseWord, WEB_VOICE_AGENTS, type WebVoiceAgent } from '../deck/voice-words'
 import { withAgentSends } from '../lib/pane-sent'
 import { useForge, useWorkspace } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
 import './PhoneListen.css'
 
 /**
- * Listen, on the phone: the voice agent the deck's voice bar runs (Gemini
- * Live, ChatGPT or Claude, ../deck/voiceAgent.ts), as a conversation rather
+ * Listen, on the phone: the voice agent the deck's voice bar runs (Forge
+ * Brain, Gemini Live or ChatGPT, ../deck/voiceAgent.ts), as a conversation rather
  * than dictation.
  *
  * Two things on screen, two silhouettes, as on the deck: Listen is a capsule
@@ -300,8 +300,8 @@ export function ListenUnit({
       <button
         type="button"
         className="plisten__agent-btn"
-        title={`Voice agent: ${agent} — tap to pick Gemini, ChatGPT or Claude`}
-        aria-label={`Voice agent: ${agent}. Pick Gemini, ChatGPT or Claude`}
+        title={`Voice agent: ${agent} — tap to pick Gemini, ChatGPT, Claude or Forge Brain`}
+        aria-label={`Voice agent: ${agent}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
         onClick={handleOpenPicker}
       >
         <span className="plisten__agent-tile" aria-hidden="true">
@@ -373,10 +373,12 @@ function ListenGlyph({ look }: { look: HubLook }): ReactNode {
 
 /**
  * Which agent, as a mark: Gemini a four-point spark, ChatGPT a hexagon,
- * Claude an eight-ray burst — the deck's three silhouettes. The word is
- * always beside it somewhere: the line, the picker, the accessible name.
+ * Claude an eight-ray burst, Forge Brain the desktop top bar's brain glyph,
+ * still (./BrainGlyph.tsx) — the deck's silhouettes. The word is always
+ * beside it somewhere: the line, the picker, the accessible name.
  */
-function AgentMark({ agent, size = 14, className }: { agent: WebVoiceProvider; size?: number; className?: string }): ReactNode {
+function AgentMark({ agent, size = 14, className }: { agent: WebVoiceAgent; size?: number; className?: string }): ReactNode {
+  if (agent === 'forge-brain') return <BrainGlyphMark size={size} className={className} />
   return (
     <svg className={className} data-agent={agent} width={size} height={size} viewBox="0 0 14 14" aria-hidden="true">
       {agent === 'gemini-live' ? (
@@ -509,7 +511,7 @@ export function ListenLine({
         <button
           type="button"
           className="plisten-line__pick"
-          aria-label={`Voice agent: ${voiceAgentWord(voice.agent)}. Pick Gemini, ChatGPT or Claude`}
+          aria-label={`Voice agent: ${voiceAgentWord(voice.agent)}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
           title="Pick the voice agent"
           onClick={onPick}
         >
@@ -581,7 +583,7 @@ export function VoicePicker({
   open: boolean
   voice: WebVoiceState
   onClose: () => void
-  onPick: (agent: WebVoiceProvider) => void
+  onPick: (agent: WebVoiceAgent) => void
   onOff: () => void
 }): ReactNode {
   const on = isOn(voice)

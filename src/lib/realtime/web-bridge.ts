@@ -1,4 +1,5 @@
 import { providerSpec, resolveVoice } from '@shared/realtime'
+import { BRAIN_ASK_WAIT_WEB_MS } from '@shared/brain'
 import type { Settings } from '@shared/types'
 import {
   WEB_VOICE_NAV_ARG,
@@ -105,7 +106,7 @@ export function buildWebVoiceSetup(
 export async function answerWebVoiceTool(name: string, rawArgs: Record<string, unknown>): Promise<WebVoiceToolAnswer> {
   const { [WEB_VOICE_NAV_ARG]: navigates, ...args } = rawArgs
   const nav = navigates === true ? runWebNavTool(name, args, currentVoiceAgentToolDeps()) : null
-  return nav ?? runRealtimeTool(name, args)
+  return nav ?? runRealtimeTool(name, args, { brainWaitMs: BRAIN_ASK_WAIT_WEB_MS })
 }
 
 /** One ask from main, answered. Never rejects: a failure is an `error` sentence. */

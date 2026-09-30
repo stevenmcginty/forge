@@ -143,6 +143,22 @@ const api: ForgeApi = {
     toolResult: (result) => ipcRenderer.invoke(IPC.foremanToolResult, result)
   },
 
+  brain: {
+    status: () => ipcRenderer.invoke(IPC.brainStatus),
+    enable: () => ipcRenderer.invoke(IPC.brainEnable),
+    disable: () => ipcRenderer.invoke(IPC.brainDisable),
+    setEngine: (engine) => ipcRenderer.invoke(IPC.brainSetEngine, engine),
+    send: (text) => ipcRenderer.invoke(IPC.brainSend, String(text ?? '')),
+    confirm: (answer) => ipcRenderer.invoke(IPC.brainConfirm, answer),
+    onStatus: (cb) => subscribe(IPC.brainState, cb),
+    watchTranscript: () => ipcRenderer.invoke(IPC.brainTranscriptWatch),
+    stopTranscript: () => ipcRenderer.invoke(IPC.brainTranscriptStop),
+    onTranscript: (cb) => subscribe(IPC.brainTranscript, cb),
+    onSays: (cb) => subscribe(IPC.brainSays, cb),
+    ask: (text, timeoutMs) => ipcRenderer.invoke(IPC.brainAsk, String(text ?? ''), timeoutMs),
+    freshStart: () => ipcRenderer.invoke(IPC.brainFreshStart)
+  },
+
   memory: {
     read: (projectId) => ipcRenderer.invoke(IPC.memoryRead, projectId),
     append: (projectId, section, entry, at) => ipcRenderer.invoke(IPC.memoryAppend, projectId, section, entry, at),

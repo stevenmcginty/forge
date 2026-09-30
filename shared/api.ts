@@ -102,6 +102,16 @@ import type {
   ForemanToolResult
 } from './foreman'
 import type {
+  BrainAskResult,
+  BrainConfirmAnswer,
+  BrainEngine,
+  BrainFreshStartResult,
+  BrainSaysEvent,
+  BrainSendResult,
+  BrainStatus
+} from './brain'
+import type { ChatUpdate } from './chat'
+import type {
   WebMirrorChunk,
   WebMirrorConfig,
   WebProjectRemoveEvent,
@@ -457,6 +467,46 @@ export interface ForgeApi {
     onState(cb: (state: ForemanState) => void): () => void
     onToolRequest(cb: (request: ForemanToolRequest) => void): () => void
     toolResult(result: ForemanToolResult): Promise<boolean>
+  }
+
+  /**
+   * Forge Brain (shared/brain.ts, electron/brain/): the app-level CLI agent in
+   * its hidden pane. Optional, because a renderer can outlive its preload
+   * (dev HMR): call it as `window.forge.brain?.…`.
+   *
+   * `enable`/`disable`/`setEngine` are the only way the brain's settings change
+   * (they are main-owned). `send` types a message in — at once when the brain
+   * is idle, otherwise queued. `onStatus` pushes every change. The pane itself
+   * is `status.paneId`: a terminal attached to that id shows the brain's CLI.
+   * `watchTranscript` streams its conversation (claude engine) on `onTranscript`
+   * as ChatUpdates; true = there is one now, false = it starts by itself once
+   * the first turn is on disk. Every call re-seeds with a `reset`.
+   */
+  brain?: {
+    status(): Promise<BrainStatus>
+    enable(): Promise<BrainStatus>
+    disable(): Promise<BrainStatus>
+    setEngine(engine: BrainEngine): Promise<BrainStatus>
+    send(text: string): Promise<BrainSendResult>
+    /** Answer one `status.confirms` entry. True when it was waiting. */
+    confirm(answer: BrainConfirmAnswer): Promise<boolean>
+    onStatus(cb: (status: BrainStatus) => void): () => void
+    watchTranscript(): Promise<boolean>
+    stopTranscript(): Promise<void>
+    onTranscript(cb: (update: ChatUpdate) => void): () => void
+    /** A line the brain wants the live voice agent to say or know (BrainSaysEvent). */
+    onSays(cb: (event: BrainSaysEvent) => void): () => void
+    /**
+     * Send a message and wait for the brain's reply to it (BRAIN_ASK_WAIT_MS
+     * unless `timeoutMs` says otherwise). Optional on top of `brain?`: a
+     * preload from before it has no `ask`.
+     */
+    ask?(text: string, timeoutMs?: number): Promise<BrainAskResult>
+    /**
+     * A fresh start: the brain writes HANDOFF.md, then restarts on a new
+     * conversation that reads it first. Optional on top of `brain?`, like `ask`.
+     */
+    freshStart?(): Promise<BrainFreshStartResult>
   }
 
   /**

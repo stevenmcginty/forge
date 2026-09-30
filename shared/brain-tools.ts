@@ -106,3 +106,71 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
     }
   }
 ]
+
+/* ------------------------------------------------------- across projects */
+
+/**
+ * The `project` argument Forge Brain's pane tools take (electron/voice-agent/
+ * host.ts adds it to the specs in `BRAIN_PROJECT_TOOLS`). Only the tools served
+ * from main get it: the renderer answers it (src/lib/agenttools.ts), and the
+ * realtime brains, which call the pane tools in the renderer directly, keep
+ * the specs above without it rather than a field they would silently ignore.
+ */
+export const PROJECT_PROPERTY: BrainToolProperty = {
+  type: 'string',
+  description:
+    'Optional: the project, by name, when it is not the one on screen. Steve’s screen stays where it is. Omit for the project on screen.'
+}
+
+export const BRAIN_PROJECT_TOOLS: readonly string[] = ['open_agent_pane', 'type_into_pane', 'read_pane']
+
+/** `specs` with the `project` argument on every tool in `BRAIN_PROJECT_TOOLS`. */
+export function withProjectArg(specs: readonly BrainToolSpec[]): BrainToolSpec[] {
+  return specs.map((spec) =>
+    BRAIN_PROJECT_TOOLS.includes(spec.name)
+      ? { ...spec, parameters: { ...spec.parameters, properties: { ...spec.parameters.properties, project: PROJECT_PROPERTY } } }
+      : spec
+  )
+}
+
+/* -------------------------------------------------------------- settings */
+
+/**
+ * The settings Forge Brain may read and change (get_settings / set_setting),
+ * and nothing else: plain preferences Steve could flip himself in a click.
+ * Never a key, a secret, a path, a brain or anything main owns. Every change
+ * waits for Steve's yes (the confirm gate in electron/voice-agent/host.ts).
+ *
+ * `choices` absent on a `choice` setting means the renderer supplies them live
+ * (the theme list includes Steve's own themes).
+ */
+export interface BrainSetting {
+  /** The `Settings` field. */
+  key: string
+  /** What it is, in words. */
+  label: string
+  kind: 'boolean' | 'integer' | 'choice'
+  min?: number
+  max?: number
+  choices?: readonly string[]
+}
+
+export const BRAIN_SETTINGS: readonly BrainSetting[] = [
+  { key: 'themeId', label: 'theme', kind: 'choice' },
+  { key: 'terminalFontSize', label: 'terminal text size (px)', kind: 'integer', min: 9, max: 24 },
+  { key: 'railCollapsed', label: 'projects rail collapsed', kind: 'boolean' },
+  { key: 'reducedMotion', label: 'reduced motion', kind: 'boolean' },
+  { key: 'mosaicText', label: 'Wall text: life-size or scaled', kind: 'choice', choices: ['lifesize', 'scaled'] },
+  { key: 'tabTextColours', label: 'coloured text per tab', kind: 'boolean' },
+  { key: 'catchShots', label: 'catch screenshots from the clipboard', kind: 'boolean' },
+  { key: 'terminalExitChime', label: 'chime when a terminal exits', kind: 'boolean' },
+  { key: 'voiceReplyMode', label: 'voice agent replies as', kind: 'choice', choices: ['text', 'both', 'voice'] },
+  { key: 'voiceEarcons', label: 'voice agent sounds', kind: 'boolean' },
+  { key: 'voiceAutoRelay', label: 'auto-relay: the voice agent presses Enter when it sends a prompt to an agent', kind: 'boolean' },
+  { key: 'dictateAutoSend', label: 'dictation presses Enter after each phrase', kind: 'boolean' }
+]
+
+export function brainSetting(key: string): BrainSetting | null {
+  const k = String(key ?? '').trim()
+  return BRAIN_SETTINGS.find((s) => s.key === k || s.key.toLowerCase() === k.toLowerCase()) ?? null
+}

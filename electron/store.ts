@@ -10,7 +10,17 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
-import { defaultVoiceMenu, isAgentBrainId, migrateAgentBrain, migrateCodexClaudeModel, normaliseVoiceMenu } from '@shared/agent-brain'
+import { BRAIN_CONTEXT_WARN_PCT, BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject } from '@shared/brain'
+import { isEdgeVoice } from '@shared/tts'
+import {
+  DEFAULT_AGENT_BRAIN,
+  defaultVoiceMenu,
+  isAgentBrainId,
+  migrateAgentBrain,
+  migrateCodexClaudeModel,
+  normaliseVoiceMenu,
+  visibleAgentBrain
+} from '@shared/agent-brain'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -304,9 +314,10 @@ function defaultSettings(): Settings {
     // choice made in Settings once a key is there to pay for it.
     voiceHubProvider: 'claude',
     voiceHubVoice: { gemini: '', openai: '' },
-    // The ONE Agent brain (shared/agent-brain.ts). Claude: free, no key.
-    agentBrain: 'claude',
-    // Picker short list: GPT Realtime, Gemini Live, Claude. The rest sit behind More.
+    // The ONE Agent brain (shared/agent-brain.ts). Forge Brain: no key; off
+    // until turned on, and picking it while off shows how.
+    agentBrain: DEFAULT_AGENT_BRAIN,
+    // Picker list: Forge Brain, Gemini Live, GPT Realtime (VISIBLE_AGENT_BRAINS).
     voiceMenu: defaultVoiceMenu(),
     // Hands-free Agent mode: 0.8 s of silence sends the phrase.
     agentSilenceMs: 800,
@@ -315,6 +326,12 @@ function defaultSettings(): Settings {
     dictateAutoSend: false,
     // Forge-launched Claude panes cannot reach Claude-in-Chrome / Playwright.
     agentsForgeBrowserOnly: true,
+    // Forge Brain: off until Steve turns it on; Claude when he does.
+    brainEnabled: false,
+    brainEngine: 'claude',
+    brainIntroSeen: false,
+    brainVoice: BRAIN_VOICE_DEFAULT,
+    brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -877,8 +894,9 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       openai: typeof s.voiceHubVoice?.openai === 'string' ? s.voiceHubVoice.openai.trim().slice(0, 40) : ''
     },
     // Absent = a settings.json from before the one Agent brain: migrated once
-    // from the two old pickers, which stay on disk untouched.
-    agentBrain: isAgentBrainId(s.agentBrain) ? s.agentBrain : migrateAgentBrain(s.voiceHubProvider, s.voiceBrain),
+    // from the two old pickers, which stay on disk untouched. A pick the
+    // pickers no longer offer (Claude, Groq, Codex…) becomes Forge Brain.
+    agentBrain: visibleAgentBrain(isAgentBrainId(s.agentBrain) ? s.agentBrain : migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)),
     voiceMenu: normaliseVoiceMenu(s.voiceMenu),
     agentSilenceMs:
       typeof s.agentSilenceMs === 'number' && Number.isFinite(s.agentSilenceMs)
@@ -894,6 +912,16 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         : DEFAULT_SETTINGS.agentIdleTimeoutMs,
     dictateAutoSend: s.dictateAutoSend === true,
     agentsForgeBrowserOnly: s.agentsForgeBrowserOnly === undefined ? DEFAULT_SETTINGS.agentsForgeBrowserOnly : Boolean(s.agentsForgeBrowserOnly),
+    // Strictly `true`: a settings.json from before the brain existed has no
+    // field, and every existing user stays off until they turn it on.
+    brainEnabled: s.brainEnabled === true,
+    brainEngine: isBrainEngine(s.brainEngine) ? s.brainEngine : DEFAULT_SETTINGS.brainEngine,
+    brainIntroSeen: s.brainIntroSeen === true,
+    brainVoice: typeof s.brainVoice === 'string' && isEdgeVoice(s.brainVoice) ? s.brainVoice.trim() : BRAIN_VOICE_DEFAULT,
+    brainContextWarnPct:
+      typeof s.brainContextWarnPct === 'number' && Number.isFinite(s.brainContextWarnPct)
+        ? clamp(Math.round(s.brainContextWarnPct), 1, 100)
+        : BRAIN_CONTEXT_WARN_PCT,
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()
@@ -1214,7 +1242,8 @@ export function setSettings(patch: Partial<Settings>): Settings {
   return settingsCache
 }
 
-export function getProjects(): Project[] {
+/** Every project on disk, Forge Brain's hidden one included. */
+export function getAllProjects(): Project[] {
   if (!projectsCache) {
     const raw = readJson<Project[]>('projects.json', [])
     projectsCache = Array.isArray(raw) ? raw.filter((p) => p && p.id && p.path) : []
@@ -1222,7 +1251,41 @@ export function getProjects(): Project[] {
   return projectsCache
 }
 
+/**
+ * The projects Steve has — every list, rail, picker and Forge Web frame is
+ * built from this. Forge Brain's hidden project (`kind: 'brain'`) is left out
+ * here, at the source, so nothing downstream has to remember to filter it.
+ * Main code that must find the brain's pane too uses `getAllProjects`.
+ */
+export function getProjects(): Project[] {
+  return getAllProjects().filter((p) => !isBrainProject(p))
+}
+
+/** Forge Brain's hidden project, or null when it has never been made. */
+export function getBrainProject(): Project | null {
+  return getAllProjects().find((p) => isBrainProject(p)) ?? null
+}
+
+/** Save (or with null, drop) Forge Brain's hidden project. Every visible project is kept as it is. */
+export function setBrainProject(project: Project | null): void {
+  const visible = getProjects()
+  writeProjects(project ? [...visible, { ...project, kind: 'brain' }] : visible)
+}
+
+/**
+ * Save the visible project list — the renderer's whole list, which never holds
+ * the brain's project. The hidden one is carried over from what is on disk, and
+ * its layout is not a layout "for a project that no longer exists". Returns the
+ * visible list, so the renderer is never handed the hidden one.
+ */
 export function setProjects(projects: Project[]): Project[] {
+  const visible = projects.filter((p) => !isBrainProject(p))
+  const hidden = getAllProjects().filter((p) => isBrainProject(p))
+  writeProjects([...visible, ...hidden])
+  return visible
+}
+
+function writeProjects(projects: Project[]): void {
   projectsCache = projects
   writeJson('projects.json', projects)
   // Drop layout files for projects that no longer exist.
@@ -1236,7 +1299,6 @@ export function setProjects(projects: Project[]): Project[] {
   } catch {
     /* best effort */
   }
-  return projects
 }
 
 function layoutFile(projectId: string): string {

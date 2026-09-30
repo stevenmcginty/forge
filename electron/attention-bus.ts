@@ -25,6 +25,11 @@ export interface AttentionEvent {
   state: AttentionState
   /** The one-line question, when there is one. Already capped by the sender. */
   prompt: string
+  /**
+   * The project whose layout holds the pane, found by main from the saved
+   * layouts (electron/web-host.ts). Absent when no layout holds it.
+   */
+  projectId?: string
 }
 
 type Listener = (event: AttentionEvent) => void

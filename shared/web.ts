@@ -102,6 +102,7 @@ import type { CommandsFeed } from './commands'
  * shared/foreman.ts directly — this file carries the shape, not the rule.
  */
 import type { ForemanState } from './foreman'
+import type { BrainEngine, BrainSaysEvent, BrainStatus } from './brain'
 /*
  * How a client names the pane or profile a handoff should go to, imported from
  * the file that owns the whole Handoff vocabulary rather than restated here —
@@ -1490,6 +1491,30 @@ export type WebRequest =
    * instead. Capped at FOREMAN_SEED_MAX like a seed.
    */
   | { kind: 'foreman-say'; paneId: string; text: string }
+  /* -------------------------------------------------------------- brain
+   *
+   * Forge Brain (shared/brain.ts): performed by main, like Foreman's. Each is
+   * answered `{ kind: 'ok' }` or `failed` with the desktop's sentence; the
+   * picture itself arrives as a `brain` frame to every browser. The brain's
+   * pane is `BrainStatus.paneId`: `attach` and `transcript-watch` take it like
+   * any pane's, although its project is in no list.
+   */
+  /** Turn Forge Brain on (`on: true`) or off. */
+  | { kind: 'brain-enable'; on: boolean }
+  /** Pick its engine; a running brain restarts on it. */
+  | { kind: 'brain-engine'; engine: BrainEngine }
+  /** Type a message into it — at once when idle, queued otherwise. Capped at BRAIN_SEND_MAX; longer is refused. */
+  | { kind: 'brain-send'; text: string }
+  /** Answer one of `BrainStatus.confirms`. `failed` when it was no longer waiting. */
+  | { kind: 'brain-confirm'; id: string; allow: boolean }
+  /**
+   * Type a message into it and wait for its reply to that message — the voice
+   * agents' way in. Answered `{ kind: 'brain-reply' }` with the reply, or
+   * `failed` with the desktop's sentence (off, stopped, or still working —
+   * it reports back by itself). `waitMs` is capped at BRAIN_ASK_WAIT_WEB_MS
+   * (shared/brain.ts) so the answer beats the browser's request deadline.
+   */
+  | { kind: 'brain-ask'; text: string; waitMs?: number }
   /**
    * Hand one pane's work to another agent — the browser's half of the Handoff
    * menu in a pane header, and the same act the desktop's own menu performs.
@@ -1689,6 +1714,11 @@ export interface WebHelloOkFrame {
    * gives, and the only safe one.
    */
   foreman?: ForemanState[]
+  /**
+   * Forge Brain as it stands (shared/brain.ts), the snapshot half of the
+   * `brain` push. Absent from an older desktop, which has no brain.
+   */
+  brain?: BrainStatus
   /**
    * Every project's handoff packs as they stand right now, project by project.
    *
@@ -1996,6 +2026,26 @@ export interface WebForemanFrame {
 }
 
 /**
+ * Forge Brain's picture moved: its state, its pane, a confirm waiting. To
+ * every browser, hidden tabs included, like `foreman`: a small object, and a
+ * phone back from the lock screen should read a brain that is true.
+ */
+export interface WebBrainFrame {
+  type: 'brain'
+  status: BrainStatus
+}
+
+/**
+ * Forge Brain wants the live voice agent to say something, or to know it
+ * (shared/brain.ts `BrainSaysEvent`). To every browser; a page with no voice
+ * agent running ignores it.
+ */
+export interface WebBrainSaysFrame {
+  type: 'brain-says'
+  event: BrainSaysEvent
+}
+
+/**
  * "The desktop's window is being rebuilt. Your taps land in a moment."
  *
  * The one frame on this wire that is about the *desktop* rather than about
@@ -2227,6 +2277,8 @@ export type WebResult =
   | { kind: 'voice-claude-events'; events: WebVoiceClaudeEvent[]; open: boolean }
   /** The answer to `voice-claude` `speak`: one sentence, base64. */
   | { kind: 'voice-speech'; audio: string; mime: string }
+  /** The answer to `brain-ask`: Forge Brain's reply to that one message. */
+  | { kind: 'brain-reply'; text: string }
 
 /* ------------------------------------------------------ the voice agent
  *
@@ -2432,6 +2484,8 @@ export type WebServerFrame =
   | WebBusyFrame
   | WebUsageFrame
   | WebForemanFrame
+  | WebBrainFrame
+  | WebBrainSaysFrame
   | WebHandoffFrame
   | WebDesktopFrame
   | WebRemoteYesFrame

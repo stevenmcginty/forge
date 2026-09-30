@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import {
   createSdkMcpServer,
   query,
@@ -42,6 +43,9 @@ import { brainHubTools } from '../hub-brain-tools'
 import { brainSpecAllowed, brainSpecTools } from '../brain-tools-mcp'
 import { refuseAppLaunch, refuseCommand, routeOpenTarget } from './launch-guard'
 import { BRAIN_BROWSER_ALLOWED, brainBrowserTools } from '../browser-panes/brain'
+import { transcriptPath } from '../bridge/claude-transcripts'
+import { MAIN_AGENT_TOOL_SPECS, PROJECT_PROPERTY, withProjectArg } from '@shared/brain-tools'
+import type { BrainRisk } from '@shared/brain'
 
 /**
  * The voice brain: one persistent Claude Agent SDK session, living for as long
@@ -85,6 +89,15 @@ import { BRAIN_BROWSER_ALLOWED, brainBrowserTools } from '../browser-panes/brain
 
 /** A tool round trip the renderer never answered. Never hang the session. */
 const TOOL_TIMEOUT_MS = 15_000
+
+/**
+ * A confirm that took this long went unanswered rather than refused: just
+ * under electron/brain/host.ts's two-minute timeout, which answers "no".
+ */
+const CONFIRM_UNANSWERED_MS = 115_000
+
+/** The tools the confirm gate looks at (`VoiceAgentHost.gate`); every other call goes straight through. */
+const GATED_TOOLS = new Set(['create_project', 'set_setting', 'close_tab', 'type_into_pane', 'help_prompt', 'run_app_action'])
 
 /**
  * Generous rather than tight. A voice turn that has to look at the app, act on
@@ -694,14 +707,15 @@ export class VoiceAgentHost {
 
   /** The tool definitions themselves. One list, served in-process and over the brain link. */
   private forgeToolDefs(): ForgeToolDef[] {
+    // Never an empty result: a model reads silence as nothing having happened.
     const text = (body: string): { content: Array<{ type: 'text'; text: string }> } => ({
-      content: [{ type: 'text', text: body }]
+      content: [{ type: 'text', text: body.trim() ? body : 'Forge sent back no answer to that.' }]
     })
 
-    return [
+    const defs = [
         tool(
           'get_app_state',
-          'Read what is actually open in Forge right now: every project, the tabs and terminal panes in the active one, which pane is focused, and what each terminal is running. Call this before answering any question about the app, and again after run_app_action if you need to confirm what changed. Takes no arguments.',
+          'Read what is actually open in Forge right now: every project, the terminals in the active one (which is focused, what each runs and its state: working, needs you, done, idle, not started), and every other project’s terminals the same way. Call this before answering any question about the app, and again after run_app_action if you need to confirm what changed. Takes no arguments.',
           {},
           async () => text(await this.askRenderer('get_app_state', {}))
         ),
@@ -714,9 +728,9 @@ export class VoiceAgentHost {
             'Layout:',
             '- {"kind":"open_tabs","profileId":"claude","count":3} — open N terminal tabs on a launch profile. N terminals is ONE action with count N, never N actions. Profile ids come from get_app_state; "pwsh" is a plain shell.',
             '- {"kind":"open_panes","profileId":"claude","count":1,"direction":"row"} — split the focused pane. row is side by side, column is stacked.',
-            '- {"kind":"close_tab","which":"tab 1"} — close one tab and everything in it. DESTRUCTIVE: confirm first.',
-            '- {"kind":"close_tabs","which":"all"} — close several. DESTRUCTIVE: confirm first.',
-            '- {"kind":"close_pane","which":"Zeb"} — close one pane, by its name. DESTRUCTIVE: confirm first.',
+            '- {"kind":"close_tab","which":"tab 1"} — close one tab and everything in it. DESTRUCTIVE: Forge asks Steve on screen first; do not ask him twice.',
+            '- {"kind":"close_tabs","which":"all"} — close several. DESTRUCTIVE: Forge asks Steve first.',
+            '- {"kind":"close_pane","which":"Zeb"} — close one pane, by its name. DESTRUCTIVE: Forge asks Steve first.',
             '- {"kind":"focus_tab","index":2} — bring a tab forward. 1-based.',
             '- {"kind":"rename_tab","which":"Zeb","name":"notes"} — rename a terminal; a split pane ("Zeb 2") is renamed on its own.',
             '- {"kind":"set_view","mode":"mosaic"} — the Wall, every terminal at once; "tabs" — Full screen, one terminal at a time. "Full screen" and "leave the wall" mean tabs.',
@@ -724,11 +738,12 @@ export class VoiceAgentHost {
             '',
             'Projects:',
             '- {"kind":"switch_project","name":"forge"} — make another project active.',
-            '- {"kind":"create_project","name":"landing-page"} — make a folder and add it to the rail.',
+            '- {"kind":"create_project","name":"landing-page"} — make a folder and add it to the rail (Forge asks Steve first; the create_project tool does the same).',
             '- {"kind":"open_settings","section":"voice"}',
             '',
             'Work:',
-            '- {"kind":"send_prompt","target":"Zeb","text":"<the full brief>","submit":true} — hand a prompt to a terminal. `target` is its name ("Zeb"), or spoken words: "the claude one", "this". Put the whole brief in `text`; never speak it aloud as well.',
+            '- {"kind":"send_prompt","target":"Zeb","text":"<the full brief>","submit":true} — hand a prompt to a terminal. `target` is its name ("Zeb"), or spoken words: "the claude one", "this". Put the whole brief in `text`; never speak it aloud as well. Add "project":"<name>" for a terminal in a project not on screen; nothing on screen changes.',
+            'A terminal that is asking a question (state: needs you) is answered only after Steve says yes on screen — Forge asks him itself.',
             '- {"kind":"use_skill","name":"code-review","target":"Zeb"} — type /name into a terminal, unsubmitted.',
             '',
             'Media (these take seconds to minutes — say so before you start):',
@@ -1010,12 +1025,241 @@ export class VoiceAgentHost {
           async () => text(this.selfDescription())
         ),
 
+        /* ------------------------------------------- every project (Brain)
+         *
+         * Reach across the whole app without moving Steve's screen: the pane
+         * tools take `project`, and these round it out. The renderer answers
+         * them (src/lib/agenttools.ts); the risky ones wait for Steve's yes
+         * in `gate` below, not on the model's good manners.
+         */
+
+        tool(
+          'list_panes_with_names',
+          'List every terminal in a project by its name, with its agent and state (working, needs you, done, idle, not started). With no project, the one on screen.',
+          { project: z.string().optional().describe(PROJECT_PROPERTY.description) },
+          async (args) => text(await this.askRenderer('list_panes_with_names', args.project ? { project: args.project } : {}))
+        ),
+
+        tool(
+          'close_tab',
+          'Close one tab and every terminal in it, in any project, by the tab’s name. DESTRUCTIVE: Forge shows Steve what will close and waits for his yes; the answer says whether he agreed. Do not ask him twice.',
+          {
+            which: z.string().describe('The tab, by its name ("Zeb")'),
+            project: z.string().optional().describe(PROJECT_PROPERTY.description)
+          },
+          async (args) => text(await this.askRenderer('close_tab', args))
+        ),
+
+        tool(
+          'create_project',
+          'Make a new project: a new folder, added to the projects rail and opened on screen. Forge asks Steve first. `folder` is where the new folder goes; omit it for his usual projects folder.',
+          {
+            name: z.string().describe('The project’s name; also the new folder’s name'),
+            folder: z.string().optional().describe('Optional: absolute path of the folder to make it inside')
+          },
+          async (args) => text(await this.askRenderer('create_project', args))
+        ),
+
+        tool(
+          'get_settings',
+          'The settings you may change with set_setting — each one’s key, what it is, its value now and the values it takes. Keys, sign-ins, paths and the brains are not among them: those are Steve’s, in Settings. Takes no arguments.',
+          {},
+          async () => text(await this.askRenderer('get_settings', {}))
+        ),
+
+        tool(
+          'set_setting',
+          'Change one setting from get_settings. Forge shows Steve the change and waits for his yes; the answer says what happened. Anything not on get_settings’ list is refused.',
+          {
+            key: z.string().describe('The setting’s key, from get_settings'),
+            value: z.string().describe('The new value: on/off, a number, or one of its choices')
+          },
+          async (args) => text(await this.askRenderer('set_setting', args))
+        ),
+
+        tool(
+          'list_subagents',
+          'The sub-agents a Claude Code pane has started with its Task/Agent tool, from its recent transcript: each one’s type, its job, and whether it is still running. Read-only — talk to the pane that started them, never to them. Claude panes only.',
+          {
+            target: z.string().describe('Which pane, in words'),
+            project: z.string().optional().describe(PROJECT_PROPERTY.description)
+          },
+          async (args) => {
+            const raw = await this.askRenderer('pane_session', args)
+            let pane: { name?: string; cwd?: string; sessionId?: string | null }
+            try {
+              pane = JSON.parse(raw) as typeof pane
+            } catch {
+              return text(raw)
+            }
+            if (!pane.cwd || !pane.sessionId) {
+              return text(`${pane.name ?? 'That pane'} keeps no Claude transcript Forge can read — it is not a Claude pane, or has not started.`)
+            }
+            return text(readSubagents(transcriptPath(pane.cwd, pane.sessionId), pane.name ?? 'That pane'))
+          }
+        ),
+
+        tool(
+          'say_to_voice_agent',
+          'For Forge Brain: hand a line to the voice agent Steve talks to at the bottom bar. speak true (the default) and it says the line aloud; false and it keeps it as context for his next question. One or two short spoken sentences. The voice agent itself never needs this.',
+          {
+            text: z.string().describe('What to say, as it should be heard'),
+            speak: z.boolean().optional().describe('Say it aloud (default) or keep it as context')
+          },
+          async (args) => {
+            // Loaded when used: electron/brain/host.ts is Electron's side, and
+            // this file stays importable without it (see the header).
+            const { brainSays } = await import('../brain/host')
+            const said = brainSays(args.text, args.speak ?? true)
+            return text(said ? `OK: passed to the voice agent${said.speak ? ' to say aloud' : ' as context'}.` : 'FAILED: there was nothing to say.')
+          }
+        ),
+
+        // The way from any voice agent to Forge Brain (shared/brain.ts): the
+        // Claude session and the CLI brains get these here; the realtime
+        // brains' copies are src/lib/realtime/tools.ts. Hidden from the brain
+        // pane itself (electron/brain/host.ts `toolHost`).
+        tool(
+          'ask_brain',
+          'Ask Forge Brain — the app-level agent that sees every project and runs the agents — a question, and wait up to a minute for its answer. For anything across projects, or that Forge Brain is running. Say its answer in your own words, briefly. When it is off, or still working, the result says so.',
+          { question: z.string().describe('The question, in plain words, with what Steve asked') },
+          async (args) => {
+            // Loaded when used, like say_to_voice_agent above.
+            const { askBrain } = await import('../brain/host')
+            const answer = await askBrain(`[The voice agent asks, for Steve] ${args.question}`)
+            return text(answer.ok ? `Forge Brain says: ${answer.text}` : answer.late ? `STILL WORKING: ${answer.error}` : `FAILED: ${answer.error}`)
+          }
+        ),
+
+        tool(
+          'tell_brain',
+          'Hand Forge Brain a job to do and do not wait: it works on it, and reports back by itself through the voice agent when it is done. For work that takes a while or spans projects. Tell Steve in one line that the brain has it.',
+          { job: z.string().describe('The job, in plain words, with everything Steve said about it') },
+          async (args) => {
+            const { sendToBrain } = await import('../brain/host')
+            const sent = sendToBrain(`[A job from Steve, through the voice agent] ${args.job} — when it is done, tell him with say_to_voice_agent.`)
+            return text(sent.ok ? `OK: Forge Brain has it${sent.queued ? ' (queued behind what it is doing)' : ''}. It will report back.` : `FAILED: ${sent.error}`)
+          }
+        ),
+
         ...brainBrowserTools().map((t) => tool(t.name, t.description, t.shape, t.handler)),
         // open_agent_pane, type_into_pane, help_prompt, read_pane — generated
-        // from shared/brain-tools.ts, the same specs every brain gets.
-        ...brainSpecTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler)),
-        ...brainHubTools((n, a) => this.askRenderer(n, a)).map((t) => tool(t.name, t.description, t.shape, t.handler))
+        // from shared/brain-tools.ts, the same specs every brain gets, plus the
+        // `project` argument this side answers (the realtime brains' copies
+        // have none).
+        ...brainSpecTools((n, a) => this.askRenderer(n, a), withProjectArg(MAIN_AGENT_TOOL_SPECS)).map((t) =>
+          tool(t.name, t.description, t.shape, t.handler)
+        ),
+        // The hub's list_panes_with_names is replaced by the one above, which takes a project.
+        ...brainHubTools((n, a) => this.askRenderer(n, a))
+          .filter((t) => t.name !== 'list_panes_with_names')
+          .map((t) => tool(t.name, t.description, t.shape, t.handler))
     ] as ForgeToolDef[]
+
+    // The confirm gate sits in front of every handler that can do harm, so it
+    // covers each way in: the Claude session, the CLI brains and Forge Brain's
+    // pane over the brain link.
+    return defs.map((def) =>
+      GATED_TOOLS.has(def.name)
+        ? {
+            ...def,
+            handler: async (args: Record<string, unknown>, extra: unknown) => {
+              const passed = await this.gate(def.name, args ?? {})
+              if ('answer' in passed) return text(passed.answer)
+              return def.handler(passed.args as never, extra as never)
+            }
+          }
+        : def
+    )
+  }
+
+  /* ------------------------------------------------------ the confirm gate */
+
+  /**
+   * Steve's yes before a risky call, in code rather than in the persona:
+   * making a project, changing a setting, closing a tab or pane, and typing
+   * into a pane that is asking a question (that is answering it for him).
+   *
+   * The question goes up through electron/brain/host.ts `requestConfirm`,
+   * which shows it on every surface (`BrainStatus.confirms`) whether Forge
+   * Brain is on or not, and answers no after two minutes. Answers the args to
+   * go ahead with (a checked close names the exact tab it found), or the
+   * sentence the model gets instead.
+   */
+  private async gate(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<{ args: Record<string, unknown> } | { answer: string }> {
+    const ask = async (
+      summary: string,
+      risk: BrainRisk,
+      next: Record<string, unknown> = args
+    ): Promise<{ args: Record<string, unknown> } | { answer: string }> => {
+      const words = summary.length > 240 ? `${summary.slice(0, 239)}…` : summary
+      const started = Date.now()
+      // Loaded when used: electron/brain/host.ts imports this file's module
+      // graph back (through ./ipc.ts) and Electron with it.
+      const { requestConfirm } = await import('../brain/host')
+      if (await requestConfirm(name, words, risk)) return { args: next }
+      return Date.now() - started >= CONFIRM_UNANSWERED_MS
+        ? { answer: `Steve did not answer, so nothing was done (${words}). Ask him again if it still matters.` }
+        : { answer: `Steve did not allow it, so nothing was done (${words}).` }
+    }
+
+    // Resolved by the renderer first, so Steve is asked about the exact thing
+    // and a call that would fail anyway never bothers him.
+    const checked = async (risk: BrainRisk): Promise<{ args: Record<string, unknown> } | { answer: string }> => {
+      const out = await this.askRenderer(name, { ...args, check: true })
+      const hit = /^CHECK\[([^\]]*)\]: ([\s\S]+)$/.exec(out)
+      if (!hit) return { answer: out }
+      return ask(hit[2]!, risk, hit[1] ? { ...args, tabId: hit[1] } : args)
+    }
+
+    // Typing into a pane that is showing a question answers it on Steve's behalf.
+    const intoPane = async (
+      target: unknown,
+      project: unknown,
+      typed: string
+    ): Promise<{ args: Record<string, unknown> } | { answer: string }> => {
+      const where = typeof project === 'string' && project.trim() ? { project } : {}
+      const q = await this.askRenderer('pane_question', { target: typeof target === 'string' ? target : '', ...where })
+      if (!q.startsWith('ASKING: ')) return { args }
+      const said = typed.trim() ? `typing "${typed.trim().slice(0, 80)}"` : 'pressing Enter'
+      return ask(`answer ${q.slice('ASKING: '.length)} — by ${said}`, 'high')
+    }
+
+    const said = (key: string): string => (typeof args[key] === 'string' ? (args[key] as string).trim() : '')
+    switch (name) {
+      case 'create_project': {
+        const folder = said('folder')
+        return ask(`create the project "${said('name')}"${folder ? ` in ${folder}` : ''} and open it`, 'medium')
+      }
+      case 'set_setting':
+        return checked('medium')
+      case 'close_tab':
+        return checked('high')
+      case 'type_into_pane':
+        return intoPane(args['target'], args['project'], said('text'))
+      case 'help_prompt':
+        return intoPane(args['target'], undefined, said('prompt'))
+      case 'run_app_action': {
+        const action = (args['action'] ?? {}) as Record<string, unknown>
+        const kind = typeof action['kind'] === 'string' ? action['kind'] : ''
+        const which = typeof action['which'] === 'string' ? action['which'] : ''
+        if (kind === 'close_tab') return ask(`close the tab "${which}" and everything in it`, 'high')
+        if (kind === 'close_tabs') return ask(`close the tabs: ${which || 'all'}`, 'high')
+        if (kind === 'close_pane') return ask(`close the pane "${which}"`, 'high')
+        if (kind === 'create_project') {
+          return ask(`create the project "${String(action['name'] ?? '').trim()}" and open it`, 'medium')
+        }
+        if (kind === 'send_prompt' || kind === 'use_skill') {
+          const typed = kind === 'use_skill' ? `/${String(action['name'] ?? '')}` : String(action['text'] ?? '')
+          return intoPane(action['target'], action['project'], typed)
+        }
+        return { args }
+      }
+    }
+    return { args }
   }
 
   /**
@@ -1139,6 +1383,12 @@ export class VoiceAgentHost {
       'mcp__forge__write_file',
       'mcp__forge__run_command',
       'mcp__forge__describe_self',
+      'mcp__forge__close_tab',
+      'mcp__forge__create_project',
+      'mcp__forge__get_settings',
+      'mcp__forge__set_setting',
+      'mcp__forge__list_subagents',
+      'mcp__forge__say_to_voice_agent',
       ...brainSpecAllowed(),
       ...BRAIN_BROWSER_ALLOWED,
       ...(bridge
@@ -1233,6 +1483,63 @@ export class VoiceAgentHost {
 
 /** One tool as `tool()` makes it. The shapes differ per tool, so the list is loosely typed. */
 type ForgeToolDef = SdkMcpToolDefinition<any> // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** How much of a transcript's end list_subagents reads: recent work, not the whole history. */
+const SUBAGENT_TAIL_BYTES = 512 * 1024
+
+/**
+ * A Claude pane's sub-agents, from the end of its transcript: every Task /
+ * Agent tool call, and whether its result has come back yet. Read-only and
+ * best-effort — a call that started before the tail is not seen.
+ */
+function readSubagents(file: string, paneName: string): string {
+  let body = ''
+  try {
+    const fd = openSync(file, 'r')
+    try {
+      const size = fstatSync(fd).size
+      const length = Math.min(size, SUBAGENT_TAIL_BYTES)
+      const buf = Buffer.alloc(length)
+      readSync(fd, buf, 0, length, size - length)
+      body = buf.toString('utf8')
+    } finally {
+      closeSync(fd)
+    }
+  } catch {
+    return `${paneName} has no transcript yet, so no sub-agents.`
+  }
+  const started: Array<{ id: string; kind: string; job: string }> = []
+  const finished = new Set<string>()
+  for (const line of body.split('\n')) {
+    if (!line.includes('tool_use')) continue
+    let entry: { message?: { content?: unknown } }
+    try {
+      entry = JSON.parse(line) as typeof entry
+    } catch {
+      continue // the first line of the tail is usually cut in half
+    }
+    const content = entry.message?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (block['type'] === 'tool_use' && (block['name'] === 'Task' || block['name'] === 'Agent')) {
+        const input = (block['input'] ?? {}) as Record<string, unknown>
+        started.push({
+          id: String(block['id'] ?? ''),
+          kind: String(input['subagent_type'] ?? 'general-purpose'),
+          job: String(input['description'] ?? '').slice(0, 120)
+        })
+      } else if (block['type'] === 'tool_result' && typeof block['tool_use_id'] === 'string') {
+        finished.add(block['tool_use_id'])
+      }
+    }
+  }
+  if (started.length === 0) return `${paneName} has started no sub-agents in its recent work.`
+  const running = started.filter((s) => !finished.has(s.id)).length
+  return [
+    `${paneName}'s sub-agents, oldest first (${running} still running):`,
+    ...started.slice(-12).map((s) => `- ${s.kind}: ${s.job || '(no description)'} — ${finished.has(s.id) ? 'finished' : 'running'}`)
+  ].join('\n')
+}
 
 /**
  * A zod-made JSON Schema, trimmed to what every CLI accepts: no `$schema`, and
