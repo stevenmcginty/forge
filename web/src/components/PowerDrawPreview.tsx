@@ -10,7 +10,7 @@ import './ChatPreview.css'
  * like the chat preview.
  *
  * The bar on top is harness chrome, not product: Volt, Paper and WhatsApp
- * through the real theme path, and "remove" to take the middle project away
+ * dark and light through the real theme path, and "remove" to take the middle project away
  * while the drum is open. `&n=0` or `&n=1` trims the list for the edge cases.
  */
 
@@ -51,8 +51,11 @@ export function PowerDrawPreview(): ReactNode {
           <button type="button" data-active={theme === 'paper'} onClick={() => setTheme('paper')}>
             Paper
           </button>
-          <button type="button" data-active={theme === 'whatsapp'} onClick={() => setTheme('whatsapp')}>
-            WA
+          <button type="button" data-active={theme === 'whatsapp-dark'} onClick={() => setTheme('whatsapp-dark')}>
+            WA dark
+          </button>
+          <button type="button" data-active={theme === 'whatsapp-light'} onClick={() => setTheme('whatsapp-light')}>
+            WA light
           </button>
           <button type="button" onClick={() => setProjects((all) => all.slice(0, -1))}>
             remove

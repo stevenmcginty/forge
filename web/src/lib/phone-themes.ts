@@ -1,6 +1,5 @@
-import { useSyncExternalStore } from 'react'
 import type { ThemeCore } from '@shared/types'
-import { resolveTheme, type ResolvedTheme } from '@/theme/themes'
+import { BUILTIN_THEMES, DEFAULT_THEME_ID, resolveTheme, type ResolvedTheme } from '@/theme/themes'
 
 /**
  * Themes only Forge Web wears, on the phone and in the Forge browser's deck
@@ -9,9 +8,9 @@ import { resolveTheme, type ResolvedTheme } from '@/theme/themes'
  *
  * WhatsApp: the colours people already read a chat in, taken whole — ground,
  * bars, both bubbles, ink, icons, the green and the blue ticks — so the phone's
- * Chat view reads like the app it borrows its grammar from. It follows the
- * phone's own dark / light setting live, the way WhatsApp does, so it is two
- * cores behind one row in the Theme list.
+ * Chat view reads like the app it borrows its grammar from. It is two themes,
+ * WhatsApp dark and WhatsApp light, each a row of its own and fixed like the
+ * six: the phone's (or computer's) dark / light setting never picks for you.
  *
  * A core is the dozen colours every other token derives from (themes.ts
  * `resolveTheme`); the few places WhatsApp's own value beats the derived one
@@ -20,11 +19,18 @@ import { resolveTheme, type ResolvedTheme } from '@/theme/themes'
  * that ChatView.css reads with a fallback, so every other theme keeps its own.
  */
 
-export const WHATSAPP_ID = 'whatsapp'
+export const WHATSAPP_DARK_ID = 'whatsapp-dark'
+export const WHATSAPP_LIGHT_ID = 'whatsapp-light'
+
+/**
+ * The id the one system-following WhatsApp row was stored under. A browser that
+ * still holds it is moved to the half it was wearing (`storedThemeId`).
+ */
+export const LEGACY_WHATSAPP_ID = 'whatsapp'
 
 const WHATSAPP_DARK: ThemeCore = {
-  id: WHATSAPP_ID,
-  name: 'WhatsApp',
+  id: WHATSAPP_DARK_ID,
+  name: 'WhatsApp dark',
   appearance: 'dark',
   bg: '#0b141a',
   panel: '#202c33',
@@ -58,8 +64,8 @@ const WHATSAPP_DARK: ThemeCore = {
 }
 
 const WHATSAPP_LIGHT: ThemeCore = {
-  id: WHATSAPP_ID,
-  name: 'WhatsApp',
+  id: WHATSAPP_LIGHT_ID,
+  name: 'WhatsApp light',
   appearance: 'light',
   bg: '#efeae2',
   panel: '#f0f2f5',
@@ -123,16 +129,16 @@ const WHATSAPP_OVER: Record<'dark' | 'light', ResolvedTheme> = {
   }
 }
 
-/** The one row the phone's Theme list adds; its swatch shows both halves. */
-export const PHONE_ONLY_THEMES: ThemeCore[] = [WHATSAPP_DARK]
+/** The rows the phone's Theme list (and the deck's picker) adds after the six. */
+export const PHONE_ONLY_THEMES: ThemeCore[] = [WHATSAPP_DARK, WHATSAPP_LIGHT]
 
 export function isPhoneOnlyTheme(id: string): boolean {
-  return id === WHATSAPP_ID
+  return PHONE_ONLY_THEMES.some((t) => t.id === id)
 }
 
-/** Does this theme follow the phone's dark / light setting? */
-export function followsSystem(id: string): boolean {
-  return id === WHATSAPP_ID
+/** A theme this browser can wear: one of the six, or one of the rows above. */
+export function isKnownTheme(id: string): boolean {
+  return BUILTIN_THEMES.some((t) => t.id === id) || isPhoneOnlyTheme(id)
 }
 
 const DARK_QUERY = '(prefers-color-scheme: dark)'
@@ -150,27 +156,19 @@ export function systemDark(): boolean {
   }
 }
 
-function subscribeSystem(listener: () => void): () => void {
-  if (typeof window === 'undefined' || !window.matchMedia) return () => {}
-  const query = window.matchMedia(DARK_QUERY)
-  query.addEventListener('change', listener)
-  return () => query.removeEventListener('change', listener)
+/**
+ * The theme a stored id stands for. The old system-following WhatsApp becomes
+ * the half it wears right now, so nothing changes on screen; an id nobody knows
+ * (or none) is the default.
+ */
+export function storedThemeId(raw: string | null, dark = systemDark()): string {
+  const id = raw === LEGACY_WHATSAPP_ID ? (dark ? WHATSAPP_DARK_ID : WHATSAPP_LIGHT_ID) : raw
+  return id && isKnownTheme(id) ? id : DEFAULT_THEME_ID
 }
 
-/** The phone's dark / light setting, live. */
-export function useSystemDark(): boolean {
-  return useSyncExternalStore(subscribeSystem, systemDark, () => true)
-}
-
-/** The core this phone-only theme wears right now. */
-export function phoneOnlyCore(id: string, dark = systemDark()): ThemeCore | null {
-  if (id === WHATSAPP_ID) return dark ? WHATSAPP_DARK : WHATSAPP_LIGHT
-  return null
-}
-
-/** Both of a system-following theme's cores, for a swatch that shows it follows. */
-export function phoneOnlyPair(id: string): { dark: ThemeCore; light: ThemeCore } | null {
-  return id === WHATSAPP_ID ? { dark: WHATSAPP_DARK, light: WHATSAPP_LIGHT } : null
+/** The core of a phone-only theme; null for any other id. */
+export function phoneOnlyCore(id: string): ThemeCore | null {
+  return PHONE_ONLY_THEMES.find((t) => t.id === id) ?? null
 }
 
 /** Every token the theme writes: the derived set plus its own overrides and bubble colours. */

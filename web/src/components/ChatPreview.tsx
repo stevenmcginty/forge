@@ -15,7 +15,7 @@ import './ChatPreview.css'
  * the feed preview.
  *
  * The bar on top is harness chrome, not product: it flips Volt, Paper and
- * the phone's WhatsApp through the Forge browser's own theme path
+ * the phone's WhatsApp dark and light through the Forge browser's own theme path
  * (`useDeckTheme`, so each is the real palette and WhatsApp's bubble tokens
  * come off again), toggles the busy dot, and appends a turn — which is how
  * stick-to-bottom and the jump pill get exercised. One append also fires on
@@ -67,8 +67,11 @@ export function ChatPreview(): ReactNode {
           <button type="button" data-active={theme === 'paper'} onClick={() => setTheme('paper')}>
             Paper
           </button>
-          <button type="button" data-active={theme === 'whatsapp'} onClick={() => setTheme('whatsapp')}>
-            WhatsApp
+          <button type="button" data-active={theme === 'whatsapp-dark'} onClick={() => setTheme('whatsapp-dark')}>
+            WA dark
+          </button>
+          <button type="button" data-active={theme === 'whatsapp-light'} onClick={() => setTheme('whatsapp-light')}>
+            WA light
           </button>
           <button type="button" data-active={busy} onClick={() => setBusy((v) => !v)}>
             busy

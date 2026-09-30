@@ -1,23 +1,24 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { ThemeCore } from '@shared/types'
 import { BUILTIN_THEMES, DEFAULT_THEME_ID, applyTheme, findTheme, resolveTheme } from '@/theme/themes'
 import { rethemeTerminals } from '../lib/term'
 import {
   PHONE_ONLY_THEMES,
-  followsSystem,
+  isKnownTheme,
   isPhoneOnlyTheme,
   phoneOnlyCore,
   resolvePhoneOnly,
-  systemDark
+  storedThemeId
 } from '../lib/phone-themes'
 
 /**
  * The theme this browser wears. Read straight from src/theme/themes.ts — the
  * same six cores and the same resolver the desktop uses — so a theme added or
  * retuned on the deck is here on the next build without anyone copying a
- * colour. Forge Web adds its own on top (lib/phone-themes.ts: WhatsApp), in
- * the phone's Theme list and the deck's picker alike; Forge desktop never
- * sees it, because src/theme/themes.ts does not know it.
+ * colour. Forge Web adds its own on top (lib/phone-themes.ts: WhatsApp dark
+ * and WhatsApp light), in the phone's Theme list and the deck's picker alike;
+ * Forge desktop never sees them, because src/theme/themes.ts does not know
+ * them.
  *
  * Remembered per browser (localStorage), never sent to the desktop: this is
  * how *this* window looks, not a setting of that machine.
@@ -30,28 +31,31 @@ import {
 
 const KEY = 'forge-web-theme'
 
-/** The phone's Theme list: the six, then WhatsApp. */
+/** The phone's Theme list: the six, then WhatsApp dark, then WhatsApp light. */
 export const PHONE_THEMES: ThemeCore[] = [...BUILTIN_THEMES, ...PHONE_ONLY_THEMES]
 
-/** The deck's picker: the same list — WhatsApp last, following this computer's dark / light. */
+/** The deck's picker: the same list — the two WhatsApp themes last. */
 export const DECK_THEMES: ThemeCore[] = PHONE_THEMES
 
-function known(id: string): boolean {
-  return BUILTIN_THEMES.some((t) => t.id === id) || isPhoneOnlyTheme(id)
-}
-
-/**
- * A theme's core for a label or a swatch: a system-following theme answers
- * with the half it wears right now. Null for an id nobody knows.
- */
+/** A theme's core for a label or a swatch. Null for an id nobody knows. */
 export function phoneThemeCore(id: string): ThemeCore | null {
   return phoneOnlyCore(id) ?? BUILTIN_THEMES.find((t) => t.id === id) ?? null
 }
 
 function stored(): string {
   try {
-    const id = window.localStorage.getItem(KEY)
-    if (id && known(id)) return id
+    const raw = window.localStorage.getItem(KEY)
+    const id = storedThemeId(raw)
+    // The old one-row WhatsApp is kept under the half it became, so the
+    // phone's setting is read once, here, and never again.
+    if (raw && id !== raw && id !== DEFAULT_THEME_ID) {
+      try {
+        window.localStorage.setItem(KEY, id)
+      } catch {
+        /* this page still wears it; the next one migrates again */
+      }
+    }
+    return id
   } catch {
     /* storage refused (private window): the default is still a theme */
   }
@@ -127,22 +131,12 @@ export function paintStoredTheme(): void {
  */
 export function useDeckTheme(on: boolean): { themeId: string; setTheme: (id: string) => void } {
   const [themeId, setThemeId] = useState(stored)
-  // A theme that follows the system re-wears itself when the phone (or computer) flips.
-  const [, setScheme] = useState(systemDark)
-  const follows = on && followsSystem(themeId)
-  useEffect(() => {
-    if (!follows || !window.matchMedia) return undefined
-    const query = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = (): void => setScheme(systemDark())
-    query.addEventListener('change', onChange)
-    return () => query.removeEventListener('change', onChange)
-  }, [follows])
 
   if (on) put(themeId)
   else takeOff()
 
   const setTheme = useCallback((id: string) => {
-    if (!known(id)) return
+    if (!isKnownTheme(id)) return
     try {
       window.localStorage.setItem(KEY, id)
     } catch {
