@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentProfile } from '@shared/types'
 import { terminalHost, type TerminalSpec } from '@/lib/terminals'
 import type { PaneActivity } from '@/lib/paneActivity'
@@ -41,14 +41,84 @@ export function PaneDoor({
   activity,
   accent,
   onBack,
-  onGo
+  onGo,
+  conversation
 }: {
   target: DoorTarget
   activity: PaneActivity
   accent: string
   onBack: () => void
   onGo: (() => void) | null
+  /** Forge Brain's door has two faces: its conversation (the default) and its terminal. */
+  conversation?: ReactNode
 }): ReactNode {
+  const [view, setView] = useState<'conversation' | 'terminal'>(conversation ? 'conversation' : 'terminal')
+  const talking = view === 'conversation' && conversation !== undefined
+
+  // In the conversation there is no agent to hand Esc to: it goes back to the map.
+  useEffect(() => {
+    if (!talking) return undefined
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      onBack()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [talking, onBack])
+
+  return (
+    <div
+      className="bmap-door"
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) onBack()
+      }}
+    >
+      <section
+        className="bmap-door__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${target.name} — ${talking ? 'conversation' : 'terminal'}`}
+        style={{ '--pane-accent': accent } as React.CSSProperties}
+      >
+        <header className="bmap-door__head">
+          <button type="button" className="bmap-btn bmap-btn--ghost" onClick={onBack} title="Back to the map (it keeps running)">
+            <Icon name="chevronLeft" size={13} />
+            Map
+          </button>
+          <span className="bmap-door__who">
+            {target.profile ? <AgentBadge profile={target.profile} /> : <BrainGlyph size={18} />}
+            <span className="bmap-door__name">{target.name}</span>
+            <span className="bmap-door__sub">{target.subtitle}</span>
+          </span>
+          <StateChip activity={activity} />
+          {conversation !== undefined ? (
+            <span className="bmap-door__seg" role="group" aria-label="View">
+              <button type="button" aria-pressed={talking} data-on={talking ? 'true' : undefined} onClick={() => setView('conversation')}>
+                Conversation
+              </button>
+              <button type="button" aria-pressed={!talking} data-on={!talking ? 'true' : undefined} onClick={() => setView('terminal')}>
+                Terminal
+              </button>
+            </span>
+          ) : null}
+          <span className="bmap-door__hint">{talking ? 'Esc goes back to the map' : 'Esc goes to the agent'}</span>
+          {onGo ? (
+            <button type="button" className="bmap-btn bmap-btn--cta" onClick={onGo} title="Switch Forge to this project and pane, and close the map">
+              Go to it
+              <Icon name="chevronRight" size={13} />
+            </button>
+          ) : null}
+        </header>
+        {talking ? <div className="bmap-door__body bmap-door__body--talk">{conversation}</div> : <DoorTerminal target={target} />}
+      </section>
+    </div>
+  )
+}
+
+/** The borrowed terminal: attached while mounted, handed back on unmount. */
+function DoorTerminal({ target }: { target: DoorTarget }): ReactNode {
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const naturalRef = useRef<HTMLDivElement | null>(null)
   const specRef = useRef(target.spec)
@@ -120,42 +190,8 @@ export function PaneDoor({
   }, [target.paneId])
 
   return (
-    <div
-      className="bmap-door"
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) onBack()
-      }}
-    >
-      <section
-        className="bmap-door__panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${target.name} — terminal`}
-        style={{ '--pane-accent': accent } as React.CSSProperties}
-      >
-        <header className="bmap-door__head">
-          <button type="button" className="bmap-btn bmap-btn--ghost" onClick={onBack} title="Back to the map (the terminal keeps running)">
-            <Icon name="chevronLeft" size={13} />
-            Map
-          </button>
-          <span className="bmap-door__who">
-            {target.profile ? <AgentBadge profile={target.profile} /> : <BrainGlyph size={18} />}
-            <span className="bmap-door__name">{target.name}</span>
-            <span className="bmap-door__sub">{target.subtitle}</span>
-          </span>
-          <StateChip activity={activity} />
-          <span className="bmap-door__hint">Esc goes to the agent</span>
-          {onGo ? (
-            <button type="button" className="bmap-btn bmap-btn--cta" onClick={onGo} title="Switch Forge to this project and pane, and close the map">
-              Go to it
-              <Icon name="chevronRight" size={13} />
-            </button>
-          ) : null}
-        </header>
-        <div className="bmap-door__body" ref={bodyRef}>
-          <div className="bmap-door__natural" ref={naturalRef} />
-        </div>
-      </section>
+    <div className="bmap-door__body" ref={bodyRef}>
+      <div className="bmap-door__natural" ref={naturalRef} />
     </div>
   )
 }

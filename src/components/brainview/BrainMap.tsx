@@ -15,6 +15,7 @@ import { AgentBadge } from '../AgentBadge'
 import { Icon } from '../Icon'
 import { StateChip, StateGlyph } from '../shell/StateChip'
 import { lastLines } from './activity'
+import { BrainConversation } from './BrainConversation'
 import { BrainGlyph } from './BrainGlyph'
 import { MapEngine, type BrainMood, type Palette } from './engine'
 import { PaneDoor, type DoorTarget } from './PaneDoor'
@@ -88,11 +89,12 @@ function buildModel(
       for (const tab of Array.isArray(ws?.tabs) ? ws.tabs : []) {
         if (!tab?.root || tab.root.type === 'chat') continue
         for (const leaf of collectLeaves(tab.root)) {
+          if (!leaf || typeof leaf.id !== 'string') continue
           agents.push({
             key: `a:${leaf.id}`,
             paneId: leaf.id,
             projectId: p.id,
-            name: paneNameInTab(tab, leaf.id),
+            name: safeName(() => paneNameInTab(tab, leaf.id)) || text(leaf.title) || 'Terminal',
             profile: resolveProfile(profiles, leaf.profileId),
             leaf
           })
@@ -101,9 +103,9 @@ function buildModel(
       return {
         key: `p:${p.id}`,
         id: p.id,
-        name: p.name,
-        color: p.color,
-        path: p.path,
+        name: text(p.name) || text(p.id) || 'Project',
+        color: projectColor(p.color, p.id),
+        path: text(p.path),
         repoUrl: p.repoUrl,
         agents,
         active: p.id === activeProjectId
@@ -114,6 +116,30 @@ function buildModel(
   const ranked = [...all].sort((a, b) => Number(b.active) - Number(a.active) || b.agents.length - a.agents.length)
   const keep = new Set(ranked.slice(0, MAX_PROJECTS).map((p) => p.id))
   return { list: all.filter((p) => keep.has(p.id)), hidden: all.length - keep.size }
+}
+
+/** A string, or '' for anything else: saved data is never trusted to have every field. */
+function text(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function safeName(read: () => unknown): string {
+  try {
+    return text(read())
+  } catch {
+    return ''
+  }
+}
+
+const FALLBACK_COLORS = ['#7aa2ff', '#ff9f43', '#c77dff', '#4dd4ac', '#ff6b9a', '#f2c94c', '#56ccf2', '#a0e060']
+
+/** The project's own dot colour when it is a usable hex; otherwise a steady pick from its id. */
+function projectColor(color: unknown, id: unknown): string {
+  if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color.trim())) return color.trim()
+  const key = text(id)
+  let h = 0
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0
+  return FALLBACK_COLORS[h % FALLBACK_COLORS.length]!
 }
 
 function readPalette(probe: HTMLElement): Palette {
@@ -359,7 +385,7 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
     const paneId = brain?.enabled ? brain.paneId : null
     if (!paneId) return
     setHover(null)
-    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#C6FF4A'
+    const accent = text(getComputedStyle(document.documentElement).getPropertyValue('--accent')).trim() || '#C6FF4A'
     setDoor({
       paneId,
       name: BRAIN_PROJECT_NAME,
@@ -487,6 +513,8 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
         </button>
       </header>
 
+      <Confirms brain={brain} strip />
+
       <div className="bmap__nodes">
         {/* The brain, at the centre. */}
         <div className="bmap-anchor" ref={bind('brain')}>
@@ -506,6 +534,7 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
               <StateGlyph state={MOOD_GLYPH[mood]} />
               {MOOD_WORD[mood]}
               {brain?.queued ? <span className="bmap-core__q"> · {brain.queued} waiting</span> : null}
+              {brain?.confirms?.length ? <span className="bmap-core__ask"> · {brain.confirms.length} to allow</span> : null}
             </span>
           </button>
         </div>
@@ -530,7 +559,7 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
         </div>
         <div className="bmap-anchor" ref={bind('you')}>
           <div className="bmap-stem bmap-stem--you" style={{ '--you': you.color } as CSSProperties}>
-            <span className="bmap-stem__disc bmap-stem__disc--you">{(you.name || 'You').slice(0, 1).toUpperCase()}</span>
+            <span className="bmap-stem__disc bmap-stem__disc--you">{(text(you.name) || 'You').slice(0, 1).toUpperCase()}</span>
             <span className="bmap-node__name">You</span>
           </div>
         </div>
@@ -612,9 +641,57 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
             requestAnimationFrame(() => rootRef.current?.querySelector<HTMLElement>(`[data-node="a:${CSS.escape(id)}"]`)?.focus())
           }}
           onGo={door.projectId ? () => goTo(door.projectId!, door.paneId) : null}
+          conversation={
+            door.projectId === null ? <BrainConversation sessionId={brain?.sessionId ?? null} engine={text(brain?.engine)} /> : undefined
+          }
         />
       ) : null}
     </div>
+  )
+}
+
+const RISK_WORD: Record<string, string> = { low: 'Low risk', medium: 'Some risk', high: 'High risk' }
+
+/**
+ * What the brain is waiting for Steve to allow, each with Yes and No. Shown on
+ * the map itself (under the header) and in the brain's card: a confirm must
+ * never be something you have to go looking for.
+ */
+function Confirms({ brain, strip = false }: { brain: BrainStatus | null; strip?: boolean }): ReactNode {
+  const list = Array.isArray(brain?.confirms) ? brain!.confirms : []
+  const [sent, setSent] = useState<Record<string, boolean>>({})
+  if (list.length === 0) return null
+  const answer = (id: string, allow: boolean): void => {
+    setSent((m) => ({ ...m, [id]: true }))
+    void window.forge?.brain
+      ?.confirm?.({ id, allow })
+      ?.catch(() => setSent((m) => ({ ...m, [id]: false })))
+  }
+  return (
+    <ul className={strip ? 'bmap-asks' : 'bmap-card__asks'} aria-label="Forge Brain asks you">
+      {list.map((c) => (
+        <li key={text(c?.id)} className="bmap-ask" data-risk={text(c?.risk)}>
+          <span className="bmap-ask__glyph" aria-hidden="true">
+            <StateGlyph state="attention" />
+          </span>
+          <span className="bmap-ask__text">
+            <span className="bmap-ask__what">{text(c?.summary) || text(c?.tool) || 'An action'}</span>
+            <span className="bmap-ask__risk">{RISK_WORD[text(c?.risk)] ?? 'Asks first'}</span>
+          </span>
+          <button
+            type="button"
+            className="bmap-btn bmap-btn--cta"
+            disabled={sent[text(c?.id)] === true}
+            onClick={() => answer(text(c?.id), true)}
+          >
+            Yes
+          </button>
+          <button type="button" className="bmap-btn" disabled={sent[text(c?.id)] === true} onClick={() => answer(text(c?.id), false)}>
+            No
+          </button>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -777,23 +854,26 @@ function CardBody({
           <StateChip activity={brainActivity(mood)} compact />
         </div>
         {mood === 'off' ? (
-          <p className="bmap-card__text">Off. Turn it on from the brain menu in the top bar; Forge works without it.</p>
+          <p className="bmap-card__text">
+            Off. Turn it on in Settings; Forge works without it.
+          </p>
         ) : (
           <>
             <dl className="bmap-card__facts">
+              <dt>State</dt>
+              <dd>{MOOD_WORD[mood]}</dd>
               <dt>Runs on</dt>
-              <dd>{brain ? BRAIN_ENGINE_NAME[brain.engine] : '—'}</dd>
+              <dd>{brain ? (BRAIN_ENGINE_NAME[brain.engine] ?? text(brain.engine)) : '—'}</dd>
               <dt>Waiting</dt>
-              <dd>{brain?.queued ?? 0} message{brain?.queued === 1 ? '' : 's'}</dd>
-              {brain?.confirms.length ? (
-                <>
-                  <dt>Asks you</dt>
-                  <dd>{brain.confirms[0]!.summary}</dd>
-                </>
-              ) : null}
+              <dd>
+                {brain?.queued ?? 0} message{brain?.queued === 1 ? '' : 's'}
+              </dd>
             </dl>
-            {mood === 'error' && brain?.error ? <p className="bmap-card__text">{brain.error}</p> : null}
-            <p className="bmap-card__text bmap-card__text--dim">It sees every project and hands work to the agents around it.</p>
+            {mood === 'error' && text(brain?.error) ? <p className="bmap-card__text">{text(brain?.error)}</p> : null}
+            <Confirms brain={brain} />
+            {brain?.paneId ? null : (
+              <p className="bmap-card__text bmap-card__text--dim">Its terminal appears here once it has started.</p>
+            )}
           </>
         )}
         {brain?.enabled && brain.paneId ? (

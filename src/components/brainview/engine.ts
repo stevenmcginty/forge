@@ -195,6 +195,7 @@ export class MapEngine {
   private paused = false
   private motion = true
   private destroyed = false
+  private broken = false
   private clock = 0
 
   constructor(
@@ -273,8 +274,8 @@ export class MapEngine {
     if (mood === 'busy') this.brainBusyAt = Date.now()
     if (before && status && this.motion) {
       // Something new was handed to the brain.
-      if (status.queued > before.queued) this.pulse(['you', 'brain'], 'dot', this.palette?.accent ?? { r: 200, g: 255, b: 80 })
-      if (status.confirms.length > before.confirms.length)
+      if ((status.queued ?? 0) > (before.queued ?? 0)) this.pulse(['you', 'brain'], 'dot', this.palette?.accent ?? { r: 200, g: 255, b: 80 })
+      if ((status.confirms?.length ?? 0) > (before.confirms?.length ?? 0))
         this.pulse(['brain', 'you'], 'diamond', this.palette?.warn ?? { r: 255, g: 180, b: 60 })
     }
     this.kick()
@@ -387,7 +388,7 @@ export class MapEngine {
   private kick(): void {
     if (!this.running || this.destroyed) return
     if (!this.motion || this.paused || document.hidden) {
-      if (!this.paused) this.drawFrame(performance.now(), 0)
+      if (!this.paused) this.safeDraw(performance.now(), 0)
       return
     }
     if (this.raf) return
@@ -400,8 +401,26 @@ export class MapEngine {
     if (!this.running || this.paused || document.hidden || !this.motion) return
     const dt = Math.min(0.05, Math.max(0, (now - this.last) / 1000))
     this.last = now
-    this.drawFrame(now, dt)
+    if (!this.safeDraw(now, dt)) return
     this.raf = requestAnimationFrame(this.frame)
+  }
+
+  /**
+   * Draw, and never let a drawing bug escape: this runs inside React effects
+   * (a still frame is drawn on the spot), and an exception there would take
+   * the whole renderer down. A broken map stops animating and says so once.
+   */
+  private safeDraw(now: number, dt: number): boolean {
+    if (this.broken) return false
+    try {
+      this.drawFrame(now, dt)
+      return true
+    } catch (err) {
+      this.broken = true
+      this.stopLoop()
+      console.error('[brain map] drawing stopped:', err)
+      return false
+    }
   }
 
   private sample(now: number): void {
@@ -444,8 +463,8 @@ export class MapEngine {
     this.kick()
   }
 
-  private colorOf(hex: string): Rgb {
-    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  private colorOf(hex: unknown): Rgb {
+    const m = typeof hex === 'string' ? /^#?([0-9a-f]{6})$/i.exec(hex.trim()) : null
     if (!m) return this.palette?.accent ?? { r: 160, g: 160, b: 160 }
     const h = m[1]!
     return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) }
