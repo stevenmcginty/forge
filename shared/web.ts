@@ -1508,6 +1508,14 @@ export type WebRequest =
   /** Answer one of `BrainStatus.confirms`. `failed` when it was no longer waiting. */
   | { kind: 'brain-confirm'; id: string; allow: boolean }
   /**
+   * Type a message into it and wait for its reply to that message — the voice
+   * agents' way in. Answered `{ kind: 'brain-reply' }` with the reply, or
+   * `failed` with the desktop's sentence (off, stopped, or still working —
+   * it reports back by itself). `waitMs` is capped at BRAIN_ASK_WAIT_WEB_MS
+   * (shared/brain.ts) so the answer beats the browser's request deadline.
+   */
+  | { kind: 'brain-ask'; text: string; waitMs?: number }
+  /**
    * Hand one pane's work to another agent — the browser's half of the Handoff
    * menu in a pane header, and the same act the desktop's own menu performs.
    *
@@ -2269,6 +2277,8 @@ export type WebResult =
   | { kind: 'voice-claude-events'; events: WebVoiceClaudeEvent[]; open: boolean }
   /** The answer to `voice-claude` `speak`: one sentence, base64. */
   | { kind: 'voice-speech'; audio: string; mime: string }
+  /** The answer to `brain-ask`: Forge Brain's reply to that one message. */
+  | { kind: 'brain-reply'; text: string }
 
 /* ------------------------------------------------------ the voice agent
  *

@@ -279,6 +279,26 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   const liveProviderRef = useRef(liveProvider)
   liveProviderRef.current = liveProvider
 
+  // Forge Brain talking to the voice agent (`say_to_voice_agent`). A live
+  // realtime session says it in its own voice — one voice, not two over each
+  // other — or keeps it as context; with none live, the Parakeet side does,
+  // in the TTS voice (VoiceAgent `hearBrain`).
+  useEffect(() => {
+    const brain = window.forge.brain
+    if (!brain?.onSays) return undefined
+    return brain.onSays((event) => {
+      const session = sessionRef.current
+      if (!session) {
+        agentRef.current.hearBrain?.(event)
+        return
+      }
+      session.sendContext(
+        event.speak ? `[Forge Brain] ${event.text} — tell Steve this now, briefly, in your own words.` : `[Forge Brain] ${event.text}`,
+        event.speak
+      )
+    })
+  }, [])
+
   const setNotice = useCallback((text: string | null): void => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
     setNoticeState(text)
@@ -555,7 +575,8 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
           role: 'assistant',
           text: reply,
           final: turn.kind !== 'brain' || turn.phase !== 'thinking',
-          at: turn.at
+          // A slow brain's reply is shown from when it landed, not from when he spoke.
+          at: turn.kind === 'brain' ? (turn.repliedAt ?? turn.at) : turn.at
         })
       }
     }

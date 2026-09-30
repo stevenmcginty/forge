@@ -423,11 +423,11 @@ await check('the voice menu defaults to GPT Realtime, Gemini Live, Claude', () =
   const def = B.defaultVoiceMenu()
   assert.deepEqual(
     def.map((e) => e.id),
-    ['gpt-realtime', 'gemini-live', 'claude', 'codex-cli', 'gemini-cli', 'gpt-realtime-mini', 'gemini-flash', 'groq', 'openrouter']
+    ['gpt-realtime', 'gemini-live', 'claude', 'codex-cli', 'gemini-cli', 'gpt-realtime-mini', 'gemini-flash', 'groq', 'openrouter', 'forge-brain']
   )
   assert.deepEqual(
     def.map((e) => e.shown),
-    [true, true, true, false, false, false, false, false, false]
+    [true, true, true, false, false, false, false, false, false, false]
   )
   assert.deepEqual(B.normaliseVoiceMenu(undefined), def)
   assert.deepEqual(B.normaliseVoiceMenu(null), def)
@@ -447,11 +447,11 @@ await check('the voice menu defaults to GPT Realtime, Gemini Live, Claude', () =
   ])
   assert.deepEqual(
     custom.map((e) => e.id),
-    ['claude', 'groq', 'gpt-realtime', 'codex-cli', 'gemini-cli', 'gemini-live', 'gpt-realtime-mini', 'gemini-flash', 'openrouter']
+    ['claude', 'groq', 'gpt-realtime', 'codex-cli', 'gemini-cli', 'gemini-live', 'gpt-realtime-mini', 'gemini-flash', 'openrouter', 'forge-brain']
   )
   assert.deepEqual(
     custom.map((e) => e.shown),
-    [false, true, true, false, false, false, false, false, false]
+    [false, true, true, false, false, false, false, false, false, false]
   )
   const noGroq = B.normaliseVoiceMenu(def.filter((e) => e.id !== 'groq'))
   assert.equal(noGroq.at(-1).id, 'groq')

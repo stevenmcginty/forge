@@ -93,7 +93,7 @@ import {
 import { UNSUPPORTED, layoutEngine } from './layout-engine'
 import { addGitSink, gitRefresh, runAction } from './git-watcher'
 import { getAllProjects, getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
-import { answerConfirm, brainStatus, onBrainSays, onBrainStatus, sendToBrain } from './brain/host'
+import { answerConfirm, askBrain, brainStatus, onBrainSays, onBrainStatus, sendToBrain } from './brain/host'
 import { setBrainEnabled, setBrainEngine } from './brain/ipc'
 import { getSkillsStore } from './skills-store'
 import { commandsFeed } from './commands'
@@ -1699,6 +1699,7 @@ async function start(): Promise<void> {
       return sent.ok ? { ok: true } : sent
     },
     brainConfirm: (id, allow) => answerConfirm({ id, allow }),
+    brainAsk: (text, waitMs) => askBrain(text, waitMs),
     offerClipboardImage: (bytes) => {
       try {
         const img = nativeImage.createFromBuffer(Buffer.from(bytes))

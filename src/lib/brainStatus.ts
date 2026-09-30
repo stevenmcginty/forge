@@ -28,6 +28,20 @@ export interface BrainStatus {
 export const READY: BrainStatus = { word: 'Ready', glyph: '●', tone: 'ok' }
 export const NEEDS_KEY: BrainStatus = { word: 'Needs key', glyph: '◇', tone: 'need' }
 export const CHECKING: BrainStatus = { word: 'Checking…', glyph: '◌', tone: 'wait' }
+export const BRAIN_OFF: BrainStatus = { word: 'Off', glyph: '○', tone: 'need' }
+
+/**
+ * Forge Brain's row ("forge-brain"): read off the brain's own live status
+ * (window.forge.brain), not a probe, so turning it on shows at once. Null =
+ * not heard yet.
+ */
+export function forgeBrainStatus(brain: { enabled: boolean; state: string } | null): BrainStatus {
+  if (!brain) return CHECKING
+  if (!brain.enabled) return BRAIN_OFF
+  if (brain.state === 'error') return { word: 'Not ready', glyph: '!', tone: 'bad' }
+  if (brain.state === 'starting') return { word: 'Starting…', glyph: '◌', tone: 'wait' }
+  return READY
+}
 
 export function keyOf(s: Settings, key: AgentBrainKey | null): string {
   return key ? String(s[key] ?? '').trim() : ''
@@ -56,7 +70,7 @@ export function probeSig(spec: AgentBrainSpec, s: Settings): string {
 }
 
 /** A brain the picker will not switch to until it is fixed in Settings. */
-const UNAVAILABLE = new Set(['Needs key', 'Not installed', 'Not logged in'])
+const UNAVAILABLE = new Set(['Needs key', 'Not installed', 'Not logged in', BRAIN_OFF.word])
 export function brainUnavailable(status: BrainStatus): boolean {
   return UNAVAILABLE.has(status.word)
 }

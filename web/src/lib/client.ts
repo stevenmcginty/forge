@@ -27,7 +27,7 @@ import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ChatFrameFrame, ChatInputFrame, ChatStateFrame, ChatWatchFrame } from '@shared/chat-mirror'
 import type { ForemanState } from '@shared/foreman'
-import type { BrainStatus } from '@shared/brain'
+import type { BrainSaysEvent, BrainStatus } from '@shared/brain'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 import { publishUsage } from './usage'
 
@@ -328,6 +328,11 @@ export interface ForgeHandlers {
    * every time, to every browser. See `WebBrainFrame`.
    */
   onBrain: (status: BrainStatus) => void
+  /**
+   * Forge Brain handed the voice agent a line (`say_to_voice_agent`), to say
+   * aloud (`speak`) or keep as context. See `WebBrainSaysFrame`.
+   */
+  onBrainSays?: (event: BrainSaysEvent) => void
   /**
    * The desktop's own window died or hung, and is coming back — or has.
    *
@@ -1853,6 +1858,12 @@ export class ForgeClient {
           Array.isArray(frame.status.confirms)
         ) {
           this.handlers.onBrain(frame.status)
+        }
+        return
+
+      case 'brain-says':
+        if (frame.event && typeof frame.event.text === 'string' && typeof frame.event.id === 'string') {
+          this.handlers.onBrainSays?.({ ...frame.event, speak: frame.event.speak !== false })
         }
         return
 

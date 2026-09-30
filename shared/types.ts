@@ -940,6 +940,8 @@ export type AgentBrainId =
   | 'openrouter'
   | 'gemini-cli'
   | 'codex-cli'
+  /** Forge Brain itself (shared/brain.ts): Parakeet hears, the brain pane answers, the TTS voice speaks. */
+  | 'forge-brain'
 
 /**
  * One row of the desktop voice menu, in display order.

@@ -3,10 +3,13 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import {
+  BRAIN_ASK_WAIT_MAX_MS,
+  BRAIN_ASK_WAIT_MS,
   BRAIN_ENGINE_NAME,
   BRAIN_PROJECT_ID,
   BRAIN_PROJECT_NAME,
   BRAIN_SEND_MAX,
+  type BrainAskResult,
   type BrainConfirmRequest,
   type BrainEngine,
   type BrainRisk,
@@ -179,7 +182,8 @@ interface Sending {
   prompts: number
 }
 
-type QueueItem = { kind: 'user' | 'note'; text: string }
+/** `taken` (askBrain) is told the moment its message starts going in. */
+type QueueItem = { kind: 'user' | 'note'; text: string; taken?: (r: Running) => void }
 
 interface PendingConfirm {
   request: BrainConfirmRequest
@@ -290,13 +294,25 @@ function setState(next: BrainState, error: string | null = null): void {
 /* -------------------------------------------------------------- the link */
 
 /**
+ * The voice agents' way in to the brain (electron/voice-agent/host.ts). The
+ * brain is not offered them: asking itself would wait on its own turn.
+ */
+const NOT_FOR_THE_BRAIN = new Set(['ask_brain', 'tell_brain'])
+
+/**
  * The brain pane's tools: the desk host's, with every call seen first. Opening
  * a pane marks the next few seconds' spawns as the brain's, and the pane id in
  * the answer (appactions.ts says "pane id <id>") marks that one for certain.
  */
 const toolHost: LinkToolHost = {
-  listLinkTools: () => brainToolHost().listLinkTools(),
+  listLinkTools: () => {
+    const tools = brainToolHost().listLinkTools()
+    return Array.isArray(tools) ? tools.filter((t: { name?: unknown }) => !NOT_FOR_THE_BRAIN.has(String(t?.name))) : tools
+  },
   callLinkTool: async (name, args) => {
+    if (NOT_FOR_THE_BRAIN.has(name)) {
+      return { content: [{ type: 'text', text: `${name} is the voice agents' way to reach you; you are Forge Brain.` }], isError: true }
+    }
     if (opensPane(name, args)) openWindowUntil = Date.now() + OPEN_WINDOW_MS
     const result = (await brainToolHost().callLinkTool(name, args)) as CallToolResult
     for (const block of result?.content ?? []) {
@@ -764,11 +780,7 @@ function noteRecord(r: Running, line: string): void {
   }
   if (record.isSidechain === true) return
   if (record.type === 'user' && record.isMeta !== true) {
-    const content = record.message?.content
-    const blocks = Array.isArray(content) ? (content as Array<{ type?: unknown }>) : []
-    const prompt =
-      typeof content === 'string' || (blocks.some((b) => b?.type === 'text') && !blocks.some((b) => b?.type === 'tool_result'))
-    if (prompt) {
+    if (isPrompt(record.message?.content)) {
       r.prompts += 1
       r.turnOpen = true
       r.turnReplied = false
@@ -782,6 +794,12 @@ function noteRecord(r: Running, line: string): void {
     return
   }
   if (record.type === 'system' && record.subtype === 'turn_duration') r.turnOpen = false
+}
+
+/** A user record's content is a prompt (words), not a tool result. */
+function isPrompt(content: unknown): boolean {
+  const blocks = Array.isArray(content) ? (content as Array<{ type?: unknown }>) : []
+  return typeof content === 'string' || (blocks.some((b) => b?.type === 'text') && !blocks.some((b) => b?.type === 'tool_result'))
 }
 
 /* ---------------------------------------------------------------- typing */
@@ -799,18 +817,22 @@ function flush(r: Running, now: number): void {
   const head = queue[0]
   if (!head) return
   let text: string
+  let taken: QueueItem['taken']
   if (head.kind === 'note') {
     if (now - lastNoteAt < NOTE_SETTLE_MS) return
     const notes: string[] = []
     while (queue[0]?.kind === 'note') notes.push(queue.shift()!.text)
     text = `[Forge] ${notes.join(' ')}`
   } else {
-    text = queue.shift()!.text
+    const item = queue.shift()!
+    text = item.text
+    taken = item.taken
   }
   // The text alone first; Enter only once it shows (`advanceSend`). A CLI that
   // is still starting drops keys, and a line typed into nothing would otherwise
   // be an Enter on an empty prompt and a message lost without a word.
   r.sending = { text, stage: 'typed', at: now, tries: 1, prompts: r.prompts }
+  taken?.(r)
   press(r, text)
   r.burst = ''
   setState('busy')
@@ -821,16 +843,165 @@ function flush(r: Running, now: number): void {
  * and typed when it is — the answer says which.
  */
 export function sendToBrain(raw: string): BrainSendResult {
+  return enqueue(raw)
+}
+
+function enqueue(raw: string, taken?: QueueItem['taken']): BrainSendResult {
   if (!getSettings().brainEnabled) return { ok: false, error: 'Forge Brain is off. Turn it on first.' }
   const text = clean(raw)
   if (!text) return { ok: false, error: 'Nothing to send.' }
   if (text.length > BRAIN_SEND_MAX) return { ok: false, error: `That message is ${text.length} characters; the brain takes ${BRAIN_SEND_MAX}.` }
   if (!running || running.exited || state === 'error') return { ok: false, error: lastError ?? 'Forge Brain is not running.' }
   const idleNow = state === 'idle' && queue.length === 0
-  queue.push({ kind: 'user', text })
+  queue.push({ kind: 'user', text, taken })
   emit()
   if (idleNow) tick()
   return { ok: true, queued: queue.length > 0 }
+}
+
+/* -------------------------------------------------------------- ask + wait */
+
+/** The other engines keep no transcript: their turn is over once the screen has settled after this long. */
+const ASK_MIN_TURN_MS = 3000
+
+/**
+ * Send a message and wait for the brain's reply to it: the voice agents' way in
+ * (Listen on "Forge Brain", `ask_brain`, Forge Web's `brain-ask`). Never
+ * rejects; every answer is a sentence a voice can say.
+ *
+ * Claude's reply is read from its transcript, from the message's own prompt to
+ * that turn's end: the words after its last tool call, which is the answer
+ * rather than the narration before it. The other engines keep no transcript
+ * Forge reads, so their turn ends when the screen settles, and the reply is
+ * whatever they handed the voice agent meanwhile (`say_to_voice_agent`), or a
+ * sentence pointing at the CLI view. Past `timeoutMs` the answer says it is
+ * still working (`late`): the message is in, and the brain reports back.
+ */
+export function askBrain(raw: string, timeoutMs = BRAIN_ASK_WAIT_MS): Promise<BrainAskResult> {
+  const wait = Math.min(Math.max(1000, Number.isFinite(timeoutMs) ? timeoutMs : BRAIN_ASK_WAIT_MS), BRAIN_ASK_WAIT_MAX_MS)
+  return new Promise<BrainAskResult>((resolve) => {
+    let start: { r: Running; prompts: number; offset: number; at: number } | null = null
+    const said: string[] = []
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let poll: ReturnType<typeof setInterval> | null = null
+    const offSays = onBrainSays((event) => {
+      if (start) said.push(event.text)
+    })
+    const finish = (result: BrainAskResult): void => {
+      if (timer) clearTimeout(timer)
+      if (poll) clearInterval(poll)
+      offSays()
+      resolve(result)
+    }
+    const sent = enqueue(raw, (r) => {
+      start = { r, prompts: r.prompts, offset: transcriptSize(r.sessionId), at: Date.now() }
+    })
+    if (!sent.ok) {
+      finish({ ok: false, error: sent.error })
+      return
+    }
+    timer = setTimeout(
+      () => finish({ ok: false, late: true, error: 'Forge Brain is still working on that. It will report back when it is done.' }),
+      wait
+    )
+    poll = setInterval(() => {
+      const s = start
+      if (!s) {
+        // Still queued behind something else. A brain that stopped meanwhile never takes it.
+        if (!running || running.exited || !getSettings().brainEnabled) finish({ ok: false, error: 'Forge Brain stopped before it read that.' })
+        return
+      }
+      const r = s.r
+      if (running !== r || r.exited) {
+        finish({ ok: false, error: 'Forge Brain stopped before it answered.' })
+        return
+      }
+      if (r.engine === 'claude' && r.sessionId) {
+        if (r.prompts <= s.prompts) {
+          // Not in the transcript yet. No longer sending means it was given up on.
+          if (!r.sending) finish({ ok: false, error: r.notice ?? 'Forge Brain did not take that message.' })
+          return
+        }
+        if (r.turnOpen) return
+        const reply = replyAfter(r.sessionId, s.offset) || said.join(' ')
+        finish(reply ? { ok: true, text: reply } : { ok: false, error: 'Forge Brain finished without saying anything.' })
+        return
+      }
+      if (r.sending) return
+      if (r.notice) {
+        finish({ ok: false, error: r.notice })
+        return
+      }
+      if (Date.now() - s.at < ASK_MIN_TURN_MS) return
+      if (state === 'asking') {
+        finish({ ok: false, error: 'Forge Brain is showing a question on its screen. Open its CLI view to answer it.' })
+        return
+      }
+      if (state !== 'idle') return
+      finish({
+        ok: true,
+        text: said.length
+          ? said.join(' ')
+          : `${BRAIN_ENGINE_NAME[r.engine]} has finished. Its answer is in Forge Brain's CLI view — only the Claude engine's replies can be read back.`
+      })
+    }, TICK_MS)
+  })
+}
+
+/**
+ * The brain's reply to the prompt that starts at `offset` in its transcript:
+ * the text after the turn's last tool call (what it wrote before a tool is
+ * narration), or all of its text when that is empty. Stops at the next prompt.
+ */
+function replyAfter(sessionId: string, offset: number): string {
+  let body: string
+  try {
+    const file = transcriptPath(brainHomeDir(), sessionId)
+    const size = statSync(file).size
+    if (size <= offset) return ''
+    const length = Math.min(size - offset, 4 * 1024 * 1024)
+    const chunk = Buffer.alloc(length)
+    const fd = openSync(file, 'r')
+    try {
+      readSync(fd, chunk, 0, length, offset)
+    } finally {
+      closeSync(fd)
+    }
+    body = chunk.toString('utf8')
+  } catch {
+    return ''
+  }
+  let prompted = false
+  let all: string[] = []
+  let last: string[] = []
+  for (const line of body.split('\n')) {
+    let record: { type?: unknown; isMeta?: unknown; isSidechain?: unknown; message?: { content?: unknown } }
+    try {
+      record = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (record.isSidechain === true) continue
+    const content = record.message?.content
+    if (record.type === 'user' && record.isMeta !== true) {
+      if (isPrompt(content)) {
+        if (prompted) break
+        prompted = true
+        all = []
+        last = []
+      } else last = []
+      continue
+    }
+    if (record.type !== 'assistant' || !prompted) continue
+    const blocks = Array.isArray(content) ? (content as Array<{ type?: unknown; text?: unknown }>) : []
+    for (const b of blocks) {
+      if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+        all.push(b.text.trim())
+        last.push(b.text.trim())
+      } else if (b?.type === 'tool_use') last = []
+    }
+  }
+  return (last.length ? last : all).join('\n\n').trim()
 }
 
 /* ------------------------------------------------------------ report-back */

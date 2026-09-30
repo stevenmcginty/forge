@@ -76,7 +76,15 @@ import {
  * server's restatement of it.
  */
 import { FOREMAN_SEED_MAX, type ForemanStartRequest, type ForemanState } from '@shared/foreman'
-import { BRAIN_SEND_MAX, isBrainEngine, type BrainEngine, type BrainSaysEvent, type BrainStatus } from '@shared/brain'
+import {
+  BRAIN_ASK_WAIT_WEB_MS,
+  BRAIN_SEND_MAX,
+  isBrainEngine,
+  type BrainAskResult,
+  type BrainEngine,
+  type BrainSaysEvent,
+  type BrainStatus
+} from '@shared/brain'
 /*
  * The Handoff vocabulary and its one boundary rule, from the file that owns
  * them — the same arrangement this file has with shared/foreman.ts above. A
@@ -538,6 +546,8 @@ export interface WebServerHost {
   brainEngine?: (engine: BrainEngine) => Promise<{ ok: true } | { ok: false; error: string }>
   brainSend?: (text: string) => { ok: true } | { ok: false; error: string }
   brainConfirm?: (id: string, allow: boolean) => boolean
+  /** Send a message and wait (at most `waitMs`) for the brain's reply to it. Never rejects. */
+  brainAsk?: (text: string, waitMs: number) => Promise<BrainAskResult>
 
   /* --------------------------------------------------------------- handoff
    *
@@ -3211,6 +3221,22 @@ export class WebServer {
             return
           }
           answer({ kind: 'ok' })
+          return
+        }
+
+        case 'brain-ask': {
+          if (!this.host.brainAsk) {
+            failed('unsupported', 'This Forge has no Forge Brain.')
+            return
+          }
+          const text = wireString(request.text, BRAIN_SEND_MAX + 1)
+          const asked = typeof request.waitMs === 'number' && Number.isFinite(request.waitMs) ? request.waitMs : BRAIN_ASK_WAIT_WEB_MS
+          const reply = await this.host.brainAsk(text, Math.min(Math.max(asked, 1000), BRAIN_ASK_WAIT_WEB_MS))
+          if (!reply.ok) {
+            failed('failed', reply.error)
+            return
+          }
+          answer({ kind: 'brain-reply', text: reply.text })
           return
         }
 

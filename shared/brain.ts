@@ -120,6 +120,25 @@ export type BrainSendResult = { ok: true; queued: boolean } | { ok: false; error
 export const BRAIN_SEND_MAX = 4000
 
 /**
+ * The answer to `ask`: the brain's reply to that one message, or why there is
+ * none. `late` = it took the message and is still working past the wait; it
+ * reports back by itself (`say_to_voice_agent`).
+ */
+export type BrainAskResult = { ok: true; text: string } | { ok: false; error: string; late?: boolean }
+
+/** How long `ask` waits for the brain's reply by default. */
+export const BRAIN_ASK_WAIT_MS = 60_000
+
+/**
+ * A browser's wait, at most: its requests die at 30 s, and a browser voice
+ * agent's tool call at 25 s (electron/web-host.ts VOICE_TOOL_MS).
+ */
+export const BRAIN_ASK_WAIT_WEB_MS = 20_000
+
+/** The longest wait `ask` takes, so a stuck caller cannot hold one open for ever. */
+export const BRAIN_ASK_WAIT_MAX_MS = 5 * 60_000
+
+/**
  * The brain speaking through the voice agents: a line for whichever voice agent
  * is live to say aloud (`speak: true`) or to take as context (`speak: false`).
  * Emitted by main (electron/brain/host.ts `brainSays`); the desktop renderer
@@ -168,5 +187,10 @@ export const BRAIN_IPC = {
   /** M→R push. One ChatUpdate (shared/chat.ts) for the brain pane. */
   transcript: 'brain:transcript',
   /** M→R push. One BrainSaysEvent: a line for the live voice agent. */
-  says: 'brain:says'
+  says: 'brain:says',
+  /**
+   * R→M invoke, (text: string, timeoutMs?: number). Sends a message and waits
+   * for the brain's reply to it. Returns BrainAskResult.
+   */
+  ask: 'brain:ask'
 } as const

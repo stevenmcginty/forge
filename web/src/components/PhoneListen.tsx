@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
-import type { WebVoiceProvider } from '@shared/web'
 import { Icon } from '@/components/Icon'
 import { SynthesizerIndicator } from '@/components/hub/SynthesizerIndicator'
 import type { HubLook } from '@/components/hub/hubLook'
@@ -15,7 +14,7 @@ import {
   webVoiceSupported,
   type WebVoiceState
 } from '../deck/voiceAgent'
-import { voiceAgentWord, voiceHint, voicePhaseWord, WEB_VOICE_AGENTS } from '../deck/voice-words'
+import { voiceAgentWord, voiceHint, voicePhaseWord, WEB_VOICE_AGENTS, type WebVoiceAgent } from '../deck/voice-words'
 import { withAgentSends } from '../lib/pane-sent'
 import { useForge, useWorkspace } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
@@ -300,8 +299,8 @@ export function ListenUnit({
       <button
         type="button"
         className="plisten__agent-btn"
-        title={`Voice agent: ${agent} — tap to pick Gemini, ChatGPT or Claude`}
-        aria-label={`Voice agent: ${agent}. Pick Gemini, ChatGPT or Claude`}
+        title={`Voice agent: ${agent} — tap to pick Gemini, ChatGPT, Claude or Forge Brain`}
+        aria-label={`Voice agent: ${agent}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
         onClick={handleOpenPicker}
       >
         <span className="plisten__agent-tile" aria-hidden="true">
@@ -371,12 +370,17 @@ function ListenGlyph({ look }: { look: HubLook }): ReactNode {
   )
 }
 
+/** Forge Brain's two lobes and their seam (web/src/components/BrainGlyph.tsx), on the 14px grid. */
+const BRAIN_MARK =
+  'M7 1.86C6.23 0.95 4.62 0.95 3.92 2C2.52 2 1.54 3.12 1.82 4.45C0.84 5.08 0.7 6.62 1.54 7.39C0.98 8.57 1.61 9.91 2.8 10.19C3.08 11.45 4.48 12.14 5.67 11.66C6.02 12.21 6.58 12.43 7 12.14M7 1.86C7.77 0.95 9.38 0.95 10.08 2C11.48 2 12.46 3.12 12.18 4.45C13.16 5.08 13.3 6.62 12.46 7.39C13.02 8.57 12.39 9.91 11.2 10.19C10.92 11.45 9.52 12.14 8.33 11.66C7.98 12.21 7.42 12.43 7 12.14V1.86'
+
 /**
  * Which agent, as a mark: Gemini a four-point spark, ChatGPT a hexagon,
- * Claude an eight-ray burst — the deck's three silhouettes. The word is
- * always beside it somewhere: the line, the picker, the accessible name.
+ * Claude an eight-ray burst, Forge Brain a brain in outline — the deck's
+ * silhouettes. The word is always beside it somewhere: the line, the picker,
+ * the accessible name.
  */
-function AgentMark({ agent, size = 14, className }: { agent: WebVoiceProvider; size?: number; className?: string }): ReactNode {
+function AgentMark({ agent, size = 14, className }: { agent: WebVoiceAgent; size?: number; className?: string }): ReactNode {
   return (
     <svg className={className} data-agent={agent} width={size} height={size} viewBox="0 0 14 14" aria-hidden="true">
       {agent === 'gemini-live' ? (
@@ -389,6 +393,8 @@ function AgentMark({ agent, size = 14, className }: { agent: WebVoiceProvider; s
           strokeWidth="1.7"
           strokeLinecap="round"
         />
+      ) : agent === 'forge-brain' ? (
+        <path d={BRAIN_MARK} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
       ) : (
         <path d="M7 1.4 11.85 4.2V9.8L7 12.6 2.15 9.8V4.2Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
       )}
@@ -509,7 +515,7 @@ export function ListenLine({
         <button
           type="button"
           className="plisten-line__pick"
-          aria-label={`Voice agent: ${voiceAgentWord(voice.agent)}. Pick Gemini, ChatGPT or Claude`}
+          aria-label={`Voice agent: ${voiceAgentWord(voice.agent)}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
           title="Pick the voice agent"
           onClick={onPick}
         >
@@ -581,7 +587,7 @@ export function VoicePicker({
   open: boolean
   voice: WebVoiceState
   onClose: () => void
-  onPick: (agent: WebVoiceProvider) => void
+  onPick: (agent: WebVoiceAgent) => void
   onOff: () => void
 }): ReactNode {
   const on = isOn(voice)

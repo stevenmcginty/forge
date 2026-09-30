@@ -1,10 +1,13 @@
 import { useSyncExternalStore } from 'react'
+import type { BrainSaysEvent } from '@shared/brain'
 import { providerSpec } from '@shared/realtime'
 import {
   isWebVoiceOpenAIProvider,
+  VOICE_CLAUDE_POLL_MS,
   WEB_VOICE_NAV_ARG,
   type WebRequest,
   type WebResult,
+  type WebVoiceClaudeEvent,
   type WebVoiceNav,
   type WebVoiceOpenAIProvider,
   type WebVoiceProvider,
@@ -22,10 +25,11 @@ import type {
   RealtimeToolCall
 } from '@/lib/realtime/session'
 import { buildRolloverSummary } from '@/lib/realtime/summary'
+import { speakable } from '@/lib/speech'
 import { toolLabel } from '@/lib/toolLabels'
 import { ClaudeVoiceSession } from './claudeVoice'
 import { alertNote, PaneAlertTracker, parsePaneStates, type PaneAlert } from './voice-alerts'
-import { readVoiceAgent, updateDesktopWords, voiceFailureWords, type WebVoicePhase } from './voice-words'
+import { readVoiceAgent, updateDesktopWords, voiceFailureWords, type WebVoiceAgent, type WebVoicePhase } from './voice-words'
 
 /**
  * Listen, on the deck face: the desktop's main voice agent, run in this
@@ -69,6 +73,8 @@ import { readVoiceAgent, updateDesktopWords, voiceFailureWords, type WebVoicePha
  *
  * Which agent is this browser's own choice (the chip beside Listen),
  * remembered here and never sent to the desktop's `agentBrain` setting.
+ * "Forge Brain" is heard the way Claude is and answered by the brain pane
+ * itself (`forgeBrainAsk`): each turn a `brain-ask`.
  *
  * A module store, like ./dictation.ts, so the session outlives the switch
  * moving between the top bar and the dock. DeckKeys (./VoiceBar.tsx) owns its
@@ -88,7 +94,7 @@ export interface WebVoiceState {
   /** The mic is held shut (D is recording). */
   muted: boolean
   /** The agent Listen runs: this browser's pick, Gemini Live until one is made. */
-  agent: WebVoiceProvider
+  agent: WebVoiceAgent
   /** The newest caption, for the bar's voice line: who spoke and what, as it grows. */
   caption: { role: 'user' | 'assistant'; text: string } | null
   /** The newest tool call in words ("Opening tabs", then what it said), until the next conversation. */
@@ -104,7 +110,7 @@ const IDLE_HOLD_MAX_MS = 20 * 60_000
 /** A caption of his still growing this recently: he is mid-sentence, and an alert waits. */
 const TALKING_GRACE_MS = 8000
 
-function storedAgent(): WebVoiceProvider {
+function storedAgent(): WebVoiceAgent {
   try {
     return readVoiceAgent(window.localStorage.getItem(AGENT_KEY))
   } catch {
@@ -315,7 +321,8 @@ function deliverAlerts(): void {
   if (talkingAt && Date.now() - talkingAt < TALKING_GRACE_MS) return
   const note = alertNote(heldAlerts)
   heldAlerts = []
-  if (!note) return
+  // Forge Brain hears about the panes itself, and says what matters (hearBrainSays).
+  if (!note || state.agent === 'forge-brain') return
   if (setup?.provider === 'claude') {
     alertTurns.add(note)
     live.sendText(note)
@@ -461,11 +468,91 @@ function connectFor(provider: WebVoiceOpenAIProvider): OpenAIConnect {
   }
 }
 
+/** A line Forge Brain handed the voice agent, sent into its session as a turn: said, not asked. */
+const BRAIN_SAYS_TAG = '[Forge Brain says] '
+/** In front of a turn Listen hands Forge Brain, so it knows the reply is read out. */
+const BRAIN_VOICE_TAG = '[By voice: keep the reply short, it is read aloud]'
+
+/** A reply, as the events a Claude turn sends: the short spoken form, then the whole text for the caption. */
+function replyEvents(text: string): WebVoiceClaudeEvent[] {
+  return [
+    { type: 'delta', text: speakable(text) },
+    { type: 'assistant', text },
+    { type: 'result', ok: true, text, turns: 1, costUsd: 0, durationMs: 0 }
+  ]
+}
+
+/**
+ * Listen on "Forge Brain": Claude's hearing (./claudeVoice.ts — this page's
+ * mic and its pause, the desktop's transcription, the desktop's Edge voice)
+ * with the thinking swapped. A turn is a `brain-ask` to the brain pane, and
+ * its reply comes back as the events a Claude turn would send; a barge-in
+ * drops the reply that was coming. Every other request goes to the desktop
+ * as it is.
+ */
+function forgeBrainAsk(): (body: WebRequest) => Promise<WebResult> {
+  let queued: WebVoiceClaudeEvent[] = []
+  let wake: (() => void) | null = null
+  let turn = 0
+  const push = (events: WebVoiceClaudeEvent[]): void => {
+    queued = [...queued, ...events]
+    wake?.()
+  }
+  return async (body) => {
+    if (body.kind !== 'voice-claude') return ask(body)
+    switch (body.op) {
+      case 'say': {
+        const mine = ++turn
+        if (body.text.startsWith(BRAIN_SAYS_TAG)) {
+          push(replyEvents(body.text.slice(BRAIN_SAYS_TAG.length)))
+          return { kind: 'ok' }
+        }
+        void ask({ kind: 'brain-ask', text: `${BRAIN_VOICE_TAG} ${body.text}` }).then((res) => {
+          if (mine !== turn) return
+          // Its own sentence when it is off, stopped or still working: true, so said as is.
+          push(
+            replyEvents(
+              res.kind === 'brain-reply'
+                ? res.text
+                : res.kind === 'failed'
+                  ? voiceFailureWords(res, 'forge-brain')
+                  : 'The desktop answered with something this page does not understand.'
+            )
+          )
+        })
+        return { kind: 'ok' }
+      }
+      case 'events': {
+        if (!queued.length) {
+          await new Promise<void>((resolve) => {
+            wake = resolve
+            window.setTimeout(resolve, VOICE_CLAUDE_POLL_MS)
+          })
+        }
+        wake = null
+        const events = queued
+        queued = []
+        return { kind: 'voice-claude-events', events, open: true }
+      }
+      case 'interrupt':
+        // The talked-over turn still ends, so the session's count of stale turns comes right.
+        turn++
+        push([{ type: 'result', ok: false, text: '', turns: 0, costUsd: 0, durationMs: 0 }])
+        return { kind: 'ok' }
+      case 'close':
+        wake?.()
+        return ask(body)
+      default:
+        return ask(body)
+    }
+  }
+}
+
 /** The session for the setup's provider, or null for one this page cannot run. */
-function makeSession(setup: WebVoiceSetup, events: RealtimeSessionEvents): LiveSession | null {
+function makeSession(setup: WebVoiceSetup, events: RealtimeSessionEvents, agent: WebVoiceAgent): LiveSession | null {
   if (setup.provider === 'claude') {
     return new ClaudeVoiceSession({
-      ask,
+      ask: agent === 'forge-brain' ? forgeBrainAsk() : ask,
       events: {
         ...events,
         // Claude's tools run on the desktop, not through relayTool; any sign of
@@ -513,8 +600,10 @@ function fail(reason: string): void {
 async function open(carryover: string | null): Promise<void> {
   const mine = ++run
   const agent = state.agent
+  // Forge Brain is heard the way Claude is: Claude's setup, without Claude thinking.
+  const provider: WebVoiceProvider = agent === 'forge-brain' ? 'claude' : agent
   set({ phase: 'connecting', error: null, ended: null })
-  const res = await ask({ kind: 'voice-setup', provider: agent, ...(carryover ? { carryover } : {}) })
+  const res = await ask({ kind: 'voice-setup', provider, ...(carryover ? { carryover } : {}) })
   if (mine !== run) return
   if (res.kind !== 'voice-setup') {
     set({
@@ -525,12 +614,12 @@ async function open(carryover: string | null): Promise<void> {
     return
   }
   // A desktop that built another agent's setup predates this one's.
-  if (res.setup.provider !== agent) {
+  if (res.setup.provider !== provider) {
     set({ phase: 'error', error: updateDesktopWords(agent) })
     return
   }
   setup = res.setup
-  label = agent === 'claude' ? 'Claude' : providerSpec(agent).label
+  label = agent === 'forge-brain' ? 'Forge Brain' : provider === 'claude' ? 'Claude' : providerSpec(provider).label
   const live: LiveSession | null = makeSession(res.setup, {
     onState: (st, detail) => {
       if (session !== live) return
@@ -563,7 +652,7 @@ async function open(carryover: string | null): Promise<void> {
     onExpiring: (reason) => {
       if (session === live) void rollover(reason)
     }
-  })
+  }, agent)
   if (!live) {
     set({ phase: 'error', error: updateDesktopWords(agent) })
     return
@@ -682,7 +771,7 @@ export function holdWebVoiceMic(held: boolean): void {
  * stays on; picked while off (or failed), it is simply the next one Listen
  * opens.
  */
-export function setWebVoiceAgent(next: WebVoiceProvider): void {
+export function setWebVoiceAgent(next: WebVoiceAgent): void {
   if (next === state.agent) return
   try {
     window.localStorage.setItem(AGENT_KEY, next)
@@ -702,6 +791,28 @@ export function setWebVoiceAgent(next: WebVoiceProvider): void {
   show({ caption: null, lastAction: null })
   set({ agent: next })
   void open(null)
+}
+
+/**
+ * A line from Forge Brain (`say_to_voice_agent` → a `brain-says` frame): said
+ * by the live conversation when `speak`, in its own voice — a realtime model
+ * is asked to pass it on, Claude and Forge Brain say it as a turn — or, for a
+ * realtime model, kept as context. With no conversation live there is nothing
+ * here to say it with; the brain's chat has it.
+ */
+export function hearBrainSays(event: BrainSaysEvent): void {
+  const live = session
+  const text = event.text.trim()
+  if (!live || !text || state.phase === 'connecting') return
+  if (setup?.provider !== 'claude') {
+    live.sendContext(event.speak ? `[Forge Brain] ${text} — tell Steve this now, briefly, in your own words.` : `[Forge Brain] ${text}`, event.speak)
+    return
+  }
+  if (!event.speak) return
+  // Claude hears it as a turn and answers it; Forge Brain's own session just says it.
+  const note = state.agent === 'forge-brain' ? `${BRAIN_SAYS_TAG}${text}` : `[Forge Brain] ${text} — tell Steve this, briefly.`
+  alertTurns.add(note)
+  live.sendText(note)
 }
 
 /** Read live microphone and output levels for UI visualization. */

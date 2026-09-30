@@ -7,6 +7,12 @@ import type { WebVoiceProvider } from '@shared/web'
 
 export type WebVoicePhase = 'off' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error'
 
+/**
+ * Who Listen talks to: a voice agent (`WebVoiceProvider`), or Forge Brain
+ * itself — heard the way Claude is, answered by the brain pane (./voiceAgent.ts).
+ */
+export type WebVoiceAgent = WebVoiceProvider | 'forge-brain'
+
 /** What an older desktop is told to do: it answers the voice requests `unsupported`. */
 export const UPDATE_DESKTOP_WORDS = 'Update the desktop app to use voice here'
 
@@ -15,7 +21,7 @@ export const UPDATE_DESKTOP_WORDS = 'Update the desktop app to use voice here'
  * ChatGPT and Claude runs Gemini alone, so "use voice here" would read as if
  * no voice worked. Gemini keeps the plain sentence.
  */
-export function updateDesktopWords(agent?: WebVoiceProvider): string {
+export function updateDesktopWords(agent?: WebVoiceAgent): string {
   return agent && agent !== 'gemini-live' ? `Update the desktop app to use ${voiceAgentWord(agent)} here` : UPDATE_DESKTOP_WORDS
 }
 
@@ -31,7 +37,7 @@ export const NO_OPENAI_KEY_WORDS = 'Add an OpenAI key in Settings on the desktop
  * picked. A current desktop says an agent it cannot run *yet* in so many
  * words, and that is shown as is.
  */
-export function voiceFailureWords(failure: { code?: string; message?: string }, agent?: WebVoiceProvider): string {
+export function voiceFailureWords(failure: { code?: string; message?: string }, agent?: WebVoiceAgent): string {
   const message = failure.message ?? ''
   if (failure.code === 'unsupported' && /not yet/i.test(message)) return message
   if (failure.code === 'unsupported' || /does not understand/i.test(message)) return updateDesktopWords(agent)
@@ -41,12 +47,12 @@ export function voiceFailureWords(failure: { code?: string; message?: string }, 
 }
 
 /** The agents the Listen chip offers, in its menu's order. ChatGPT is GPT Realtime, the full model. */
-export const WEB_VOICE_AGENTS: readonly WebVoiceProvider[] = ['gemini-live', 'gpt-realtime', 'claude']
+export const WEB_VOICE_AGENTS: readonly WebVoiceAgent[] = ['gemini-live', 'gpt-realtime', 'claude', 'forge-brain']
 
 export const DEFAULT_WEB_VOICE_AGENT: WebVoiceProvider = 'gemini-live'
 
 /** An agent as the chip's one word. */
-export function voiceAgentWord(agent: WebVoiceProvider): string {
+export function voiceAgentWord(agent: WebVoiceAgent): string {
   switch (agent) {
     case 'gemini-live':
       return 'Gemini'
@@ -56,12 +62,18 @@ export function voiceAgentWord(agent: WebVoiceProvider): string {
       return 'ChatGPT mini'
     case 'claude':
       return 'Claude'
+    case 'forge-brain':
+      return 'Forge Brain'
   }
 }
 
 /** A remembered choice, or the default when it is missing or not an agent. */
-export function readVoiceAgent(stored: string | null | undefined): WebVoiceProvider {
-  return stored === 'gemini-live' || stored === 'gpt-realtime' || stored === 'gpt-realtime-mini' || stored === 'claude'
+export function readVoiceAgent(stored: string | null | undefined): WebVoiceAgent {
+  return stored === 'gemini-live' ||
+    stored === 'gpt-realtime' ||
+    stored === 'gpt-realtime-mini' ||
+    stored === 'claude' ||
+    stored === 'forge-brain'
     ? stored
     : DEFAULT_WEB_VOICE_AGENT
 }

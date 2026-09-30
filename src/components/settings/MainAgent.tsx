@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Settings } from '@shared/types'
 import {
   AGENT_BRAINS,
+  isForgeBrainAgent,
   isRealtimeBrain,
   migrateAgentBrain,
   type AgentBrainKey,
@@ -10,10 +11,11 @@ import {
 } from '@shared/agent-brain'
 import { GEMINI_VOICES, OPENAI_VOICES, providerSpec, resolveVoice } from '@shared/realtime'
 import { useBrainProbes } from '@/hooks/useBrainStatus'
-import { statusOf, type BrainStatus as Status, type Probe } from '@/lib/brainStatus'
+import { statusOf, forgeBrainStatus, type BrainStatus as Status, type Probe } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENROUTER_MODEL } from '@/lib/voicebrain'
 import { useApp } from '@/state/AppState'
+import { startBrainFeed, useBrain } from '../brain/brainStore'
 import { KeyField, Row, TextField } from './parts'
 import './MainAgent.css'
 
@@ -71,6 +73,10 @@ const BRAIN_COPY: Record<string, { good: string; cost: string }> = {
   openrouter: {
     good: 'Any model OpenRouter serves — for trying others.',
     cost: 'OpenRouter key · depends on the model'
+  },
+  'forge-brain': {
+    good: 'Talk straight to Forge Brain — it sees every project and runs the agents. Parakeet hears you, your voice setting reads its reply.',
+    cost: 'Whatever Forge Brain runs on · turn it on from the brain in the top bar'
   }
 }
 
@@ -82,7 +88,8 @@ function copyFor(spec: AgentBrainSpec): { good: string; cost: string } {
 const GROUPS: Array<{ kind: AgentBrainKind; title: string; note: string }> = [
   { kind: 'session', title: 'On your subscription', note: 'No key. A hidden session thinks; Parakeet hears you, Edge speaks.' },
   { kind: 'realtime', title: 'Live voice', note: 'Two-way audio you can talk over. A key, billed as you use it.' },
-  { kind: 'json', title: 'Quick text brains', note: 'One call per phrase. Parakeet in, Edge out.' }
+  { kind: 'json', title: 'Quick text brains', note: 'One call per phrase. Parakeet in, Edge out.' },
+  { kind: 'brain', title: 'Forge Brain', note: 'Listen talks to the brain itself. The other agents reach it with ask_brain and tell_brain.' }
 ]
 
 const CLAUDE_MODELS = [
@@ -116,6 +123,11 @@ export function MainAgentCard(): ReactNode {
   const chosen = s.agentBrain ?? migrateAgentBrain(s.voiceHubProvider, s.voiceBrain)
   const resolved = resolveAgentBrain(chosen, s)
   const { probes, test } = useBrainProbes(s)
+  // Forge Brain's row reads the brain's live status, not a probe.
+  useEffect(() => startBrainFeed(), [])
+  const liveBrain = useBrain().status
+  const statusFor = (spec: AgentBrainSpec): Status =>
+    isForgeBrainAgent(spec.id) ? forgeBrainStatus(liveBrain) : statusOf(spec, s, probes[spec.id])
   const [open, setOpen] = useState<Set<string>>(() => new Set())
 
   const toggleOpen = (id: string): void =>
@@ -128,7 +140,7 @@ export function MainAgentCard(): ReactNode {
 
   const answering = AGENT_BRAINS.find((b) => b.id === resolved.brain) ?? AGENT_BRAINS[0]!
   const chosenSpec = AGENT_BRAINS.find((b) => b.id === chosen) ?? answering
-  const answeringStatus = statusOf(answering, s, probes[answering.id])
+  const answeringStatus = statusFor(answering)
 
   const known = new Set(GROUPS.map((g) => g.kind))
   const groups = [
@@ -173,7 +185,7 @@ export function MainAgentCard(): ReactNode {
                 spec={spec}
                 picked={chosen === spec.id}
                 open={chosen === spec.id || open.has(spec.id)}
-                status={statusOf(spec, s, probes[spec.id])}
+                status={statusFor(spec)}
                 probe={probes[spec.id]}
                 onPick={() => actions.patchSettings({ agentBrain: spec.id })}
                 onToggle={() => toggleOpen(spec.id)}

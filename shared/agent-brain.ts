@@ -21,6 +21,10 @@
  *    `gemini-cli` and `codex-cli` are this kind.
  *  - `json`     — a per-turn HTTP brain in the renderer (src/lib/voicebrain.ts)
  *    that answers with JSON actions from the manifest.
+ *  - `brain`    — Forge Brain itself (shared/brain.ts): Parakeet hears, the
+ *    words are typed into the brain pane, its reply is read out in the TTS
+ *    voice. It has its own tools; nothing here is handed to it. Off until
+ *    Forge Brain is turned on.
  *
  * No Electron and no DOM here: both processes import it.
  */
@@ -30,7 +34,7 @@ import type { AgentBrainId, VoiceMenuEntry } from './types'
 /** The union itself lives in shared/types.ts (dependency-free). */
 export type { AgentBrainId, VoiceMenuEntry }
 
-export type AgentBrainKind = 'realtime' | 'session' | 'json'
+export type AgentBrainKind = 'realtime' | 'session' | 'json' | 'brain'
 
 /** The settings key an adapter needs, or null for subscription/login auth. */
 export type AgentBrainKey = 'geminiKey' | 'openaiKey' | 'groqKey' | 'openrouterKey'
@@ -77,7 +81,15 @@ export const AGENT_BRAINS: readonly AgentBrainSpec[] = [
   { id: 'gpt-realtime', label: 'GPT Realtime', kind: 'realtime', key: 'openaiKey', auth: 'OpenAI key', note: 'Live two-way talk — about $10–20 for a heavy day' },
   { id: 'gemini-flash', label: 'Gemini Flash (text)', kind: 'json', key: 'geminiKey', auth: 'Gemini key', note: 'Parakeet in, one Gemini call per turn, Edge voice out' },
   { id: 'groq', label: 'Groq (text)', kind: 'json', key: 'groqKey', auth: 'Groq key', note: 'Parakeet in, one Groq call per turn — fast, free tier' },
-  { id: 'openrouter', label: 'OpenRouter (text)', kind: 'json', key: 'openrouterKey', auth: 'OpenRouter key', note: 'Parakeet in, one OpenRouter call per turn' }
+  { id: 'openrouter', label: 'OpenRouter (text)', kind: 'json', key: 'openrouterKey', auth: 'OpenRouter key', note: 'Parakeet in, one OpenRouter call per turn' },
+  {
+    id: 'forge-brain',
+    label: 'Forge Brain',
+    kind: 'brain',
+    key: null,
+    auth: 'the engine Forge Brain runs on',
+    note: 'Talk straight to Forge Brain — Parakeet hears, the brain answers, your voice setting speaks'
+  }
 ]
 
 export const AGENT_BRAIN_IDS: readonly AgentBrainId[] = AGENT_BRAINS.map((b) => b.id)
@@ -163,6 +175,11 @@ export function agentBrainSpec(id: AgentBrainId | string | undefined | null): Ag
 /** Does this adapter run as a live realtime session (renderer audio)? */
 export function isRealtimeBrain(id: AgentBrainId): id is 'gemini-live' | 'gpt-realtime-mini' | 'gpt-realtime' {
   return agentBrainSpec(id).kind === 'realtime'
+}
+
+/** Does Listen talk straight to Forge Brain (the brain pane) rather than a voice agent of its own? */
+export function isForgeBrainAgent(id: AgentBrainId | string | undefined | null): boolean {
+  return id === 'forge-brain'
 }
 
 /**

@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { agentBrainSpec, migrateAgentBrain, voiceMenuRows, type AgentBrainId, type AgentBrainKind, type AgentBrainSpec } from '@shared/agent-brain'
+import {
+  agentBrainSpec,
+  isForgeBrainAgent,
+  migrateAgentBrain,
+  voiceMenuRows,
+  type AgentBrainId,
+  type AgentBrainKind,
+  type AgentBrainSpec
+} from '@shared/agent-brain'
 import { useBrainProbes } from '@/hooks/useBrainStatus'
-import { barBrainLabel, brainSwitchWaits, brainUnavailable, statusOf, type BrainStatus } from '@/lib/brainStatus'
+import { barBrainLabel, brainSwitchWaits, brainUnavailable, forgeBrainStatus, statusOf, type BrainStatus } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
 import { useApp } from '@/state/AppState'
+import { startBrainFeed, useBrain } from '../brain/brainStore'
 import { Icon } from '../Icon'
 import { Popover } from '../Popover'
 import { BrainMark } from './BrainMark'
@@ -125,7 +134,15 @@ function BrainMenu({
   const { probes } = useBrainProbes(s)
   const ref = useRef<HTMLDivElement | null>(null)
   const [more, setMore] = useState(false)
-  const { first, rest } = voiceMenuRows(s.voiceMenu, current)
+  // Forge Brain's row reads the brain's live status (components/brain/brainStore).
+  useEffect(() => startBrainFeed(), [])
+  const liveBrain = useBrain().status
+  const rows = voiceMenuRows(s.voiceMenu, current)
+  // While Forge Brain is on it is always in the short list: talking straight
+  // to it is the point of turning it on.
+  const lift = liveBrain?.enabled === true ? rows.rest.filter((spec) => isForgeBrainAgent(spec.id)) : []
+  const first = [...rows.first, ...lift]
+  const rest = rows.rest.filter((spec) => !lift.includes(spec))
 
   // From the keyboard: onto the brain in use. The popover is placed a frame
   // after it mounts, and a hidden button cannot take focus before that.
@@ -158,7 +175,7 @@ function BrainMenu({
 
   const rowFor = (spec: AgentBrainSpec): ReactNode => {
     const inUse = spec.id === current
-    const status = statusOf(spec, s, probes[spec.id])
+    const status = isForgeBrainAgent(spec.id) ? forgeBrainStatus(liveBrain) : statusOf(spec, s, probes[spec.id])
     const off = !inUse && brainUnavailable(status)
     const sub =
       spec.id === chosen && chosen !== current
@@ -238,7 +255,8 @@ function BrainMenu({
 const KIND_WORD: Record<AgentBrainKind, string> = {
   realtime: 'Live audio',
   session: 'Agent session',
-  json: 'Text turns'
+  json: 'Text turns',
+  brain: 'Straight to the brain'
 }
 
 /**
@@ -252,6 +270,8 @@ function rowNote(spec: AgentBrainSpec, status: BrainStatus, off: boolean): strin
     if (status.word === 'Needs key') return `Add your ${auth} in Settings`
     if (status.word === 'Not logged in') return `Log in first — ${auth}`
     if (status.word === 'Not installed') return 'Not on this computer yet'
+    if (status.word === 'Off') return 'Turn Forge Brain on first — the brain in the top bar'
   }
+  if (isForgeBrainAgent(spec.id)) return `${KIND_WORD[spec.kind]} · Parakeet hears, your voice setting speaks`
   return `${KIND_WORD[spec.kind]} · ${auth}`
 }

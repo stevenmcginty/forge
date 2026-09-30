@@ -266,6 +266,7 @@ export const IPC = {
   brainTranscriptStop: BRAIN_IPC.transcriptStop,
   brainTranscript: BRAIN_IPC.transcript,
   brainSays: BRAIN_IPC.says,
+  brainAsk: BRAIN_IPC.ask,
 
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.

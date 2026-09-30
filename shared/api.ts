@@ -101,7 +101,7 @@ import type {
   ForemanToolRequest,
   ForemanToolResult
 } from './foreman'
-import type { BrainConfirmAnswer, BrainEngine, BrainSaysEvent, BrainSendResult, BrainStatus } from './brain'
+import type { BrainAskResult, BrainConfirmAnswer, BrainEngine, BrainSaysEvent, BrainSendResult, BrainStatus } from './brain'
 import type { ChatUpdate } from './chat'
 import type {
   WebMirrorChunk,
@@ -488,6 +488,12 @@ export interface ForgeApi {
     onTranscript(cb: (update: ChatUpdate) => void): () => void
     /** A line the brain wants the live voice agent to say or know (BrainSaysEvent). */
     onSays(cb: (event: BrainSaysEvent) => void): () => void
+    /**
+     * Send a message and wait for the brain's reply to it (BRAIN_ASK_WAIT_MS
+     * unless `timeoutMs` says otherwise). Optional on top of `brain?`: a
+     * preload from before it has no `ask`.
+     */
+    ask?(text: string, timeoutMs?: number): Promise<BrainAskResult>
   }
 
   /**

@@ -1115,6 +1115,33 @@ export class VoiceAgentHost {
           }
         ),
 
+        // The way from any voice agent to Forge Brain (shared/brain.ts): the
+        // Claude session and the CLI brains get these here; the realtime
+        // brains' copies are src/lib/realtime/tools.ts. Hidden from the brain
+        // pane itself (electron/brain/host.ts `toolHost`).
+        tool(
+          'ask_brain',
+          'Ask Forge Brain — the app-level agent that sees every project and runs the agents — a question, and wait up to a minute for its answer. For anything across projects, or that Forge Brain is running. Say its answer in your own words, briefly. When it is off, or still working, the result says so.',
+          { question: z.string().describe('The question, in plain words, with what Steve asked') },
+          async (args) => {
+            // Loaded when used, like say_to_voice_agent above.
+            const { askBrain } = await import('../brain/host')
+            const answer = await askBrain(`[The voice agent asks, for Steve] ${args.question}`)
+            return text(answer.ok ? `Forge Brain says: ${answer.text}` : answer.late ? `STILL WORKING: ${answer.error}` : `FAILED: ${answer.error}`)
+          }
+        ),
+
+        tool(
+          'tell_brain',
+          'Hand Forge Brain a job to do and do not wait: it works on it, and reports back by itself through the voice agent when it is done. For work that takes a while or spans projects. Tell Steve in one line that the brain has it.',
+          { job: z.string().describe('The job, in plain words, with everything Steve said about it') },
+          async (args) => {
+            const { sendToBrain } = await import('../brain/host')
+            const sent = sendToBrain(`[A job from Steve, through the voice agent] ${args.job} — when it is done, tell him with say_to_voice_agent.`)
+            return text(sent.ok ? `OK: Forge Brain has it${sent.queued ? ' (queued behind what it is doing)' : ''}. It will report back.` : `FAILED: ${sent.error}`)
+          }
+        ),
+
         ...brainBrowserTools().map((t) => tool(t.name, t.description, t.shape, t.handler)),
         // open_agent_pane, type_into_pane, help_prompt, read_pane — generated
         // from shared/brain-tools.ts, the same specs every brain gets, plus the

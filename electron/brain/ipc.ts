@@ -1,11 +1,19 @@
 import { ipcMain, type BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc'
-import { isBrainEngine, type BrainConfirmAnswer, type BrainEngine, type BrainSendResult, type BrainStatus } from '@shared/brain'
+import {
+  isBrainEngine,
+  type BrainAskResult,
+  type BrainConfirmAnswer,
+  type BrainEngine,
+  type BrainSendResult,
+  type BrainStatus
+} from '@shared/brain'
 import type { ChatUpdate } from '@shared/chat'
 import { getSettings, setSettings } from '../store'
 import {
   answerConfirm,
   applyBrainSettings,
+  askBrain,
   brainStatus,
   disposeBrain,
   initBrain,
@@ -64,6 +72,9 @@ export function registerBrainHandlers(): void {
     setBrainEngine(isBrainEngine(engine) ? engine : getSettings().brainEngine)
   )
   ipcMain.handle(IPC.brainSend, (_e, text: unknown): BrainSendResult => sendToBrain(String(text ?? '')))
+  ipcMain.handle(IPC.brainAsk, (_e, text: unknown, timeoutMs: unknown): Promise<BrainAskResult> =>
+    askBrain(String(text ?? ''), typeof timeoutMs === 'number' ? timeoutMs : undefined)
+  )
   ipcMain.handle(IPC.brainConfirm, (_e, answer: BrainConfirmAnswer): boolean =>
     answerConfirm({ id: String(answer?.id ?? ''), allow: answer?.allow === true })
   )

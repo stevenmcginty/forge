@@ -28,6 +28,7 @@ import { collectLeaves } from '@/lib/splitTree'
 import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } from './config'
 import { Auth, isSignedOutError, type Session } from './lib/auth'
 import { ForgeClient, type Connection } from './lib/client'
+import { hearBrainSays } from './deck/voiceAgent'
 import {
   clearSnapshot,
   loadSnapshot,
@@ -784,6 +785,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // The whole picture replaces the last one; there is nothing to merge.
         setPicture((current) => (current ? { ...current, brain: status } : current))
       },
+      // Said by whichever voice conversation is live on this page (deck/voiceAgent.ts).
+      onBrainSays: (event) => hearBrainSays(event),
       onDesktop: (state, reason) => {
         // A reason is a courtesy, not a requirement: the band is drawn on the
         // state alone, so a desktop that sends 'recovering' with nothing to say
