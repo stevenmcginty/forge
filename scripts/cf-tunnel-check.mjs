@@ -196,7 +196,7 @@ async function main() {
 
   const args = cloudflaredArgs(8421)
   log(
-    JSON.stringify(args) === JSON.stringify(['tunnel', '--url', 'http://127.0.0.1:8421', '--no-autoupdate']),
+    JSON.stringify(args) === JSON.stringify(['tunnel', '--url', 'http://127.0.0.1:8421', '--no-autoupdate', '--protocol', 'http2']),
     'the command line is exactly tunnel --url http://127.0.0.1:<port> --no-autoupdate'
   )
   log(

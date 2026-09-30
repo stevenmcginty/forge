@@ -183,12 +183,16 @@ export const CONTROL_PROBE_URL = 'https://www.cloudflare.com/cdn-cgi/trace'
  * anyway, and says so in its log; passing the flag means Forge does not depend
  * on that staying true.)
  *
+ * `--protocol http2` keeps the tunnel on TCP. The default is QUIC over UDP, and
+ * on the everyday laptop its single edge link kept timing out ("no recent
+ * network activity") and cutting every open phone socket at once.
+ *
  * Loopback, always, and spelled `127.0.0.1` rather than `localhost` — the
  * listener in `electron/web-host.ts` binds that exact address, and a name that
  * resolves to `::1` first is a tunnel onto a port nothing is on.
  */
 export function cloudflaredArgs(port: number): string[] {
-  return ['tunnel', '--url', `http://127.0.0.1:${port}`, '--no-autoupdate']
+  return ['tunnel', '--url', `http://127.0.0.1:${port}`, '--no-autoupdate', '--protocol', 'http2']
 }
 
 /**

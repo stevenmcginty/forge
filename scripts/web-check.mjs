@@ -1283,7 +1283,7 @@ await waitFor(() => agents.length > 0, 4000, 'the cloudflared agent to be spawne
 const cfAgent = agents.at(-1)
 
 log(
-  JSON.stringify(cfAgent.args) === JSON.stringify(['tunnel', '--url', `http://127.0.0.1:${PORT}`, '--no-autoupdate']),
+  JSON.stringify(cfAgent.args) === JSON.stringify(['tunnel', '--url', `http://127.0.0.1:${PORT}`, '--no-autoupdate', '--protocol', 'http2']),
   `the agent forwards to Forge Web's own loopback port and nothing else (${cfAgent.args.join(' ')})`
 )
 log(
