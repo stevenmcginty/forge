@@ -83,8 +83,15 @@ const ECHO_MS = 3000
 const SUBMIT_MS = 5000
 /** Tries at each step of a send before the message is given up on. */
 const SEND_TRIES = 3
-/** Claude's spinner never stops mid-turn for this long: quiet this long ends a turn the transcript did not close. */
-const TURN_QUIET_MS = 8000
+/**
+ * Claude's turn closes on the transcript's `turn_duration` record. Backstops,
+ * for a turn whose end was never written: its reply recorded (`end_turn`) and
+ * the screen still this long; or, with no end recorded at all, the screen still
+ * this much longer. Long, because a model thinking hard can leave the screen
+ * still for many seconds mid-turn.
+ */
+const TURN_END_QUIET_MS = 5000
+const TURN_STALE_MS = 180_000
 /** The trust dialog is answered once its screen has been still this long, one key at a time this far apart. */
 const DIALOG_SETTLE_MS = 800
 const DIALOG_KEY_GAP_MS = 1500
@@ -154,6 +161,8 @@ interface Running {
   notice: string | null
   /** Claude: a turn is open in the transcript — a prompt, and no end recorded yet. */
   turnOpen: boolean
+  /** Claude: the open turn's reply has been recorded (`stop_reason: end_turn`). */
+  turnReplied: boolean
   /** Claude: prompts the transcript has recorded since this start. */
   prompts: number
   transcriptOffset: number
@@ -444,6 +453,7 @@ async function start(engine: BrainEngine): Promise<void> {
     sinceWrite: '',
     notice: null,
     turnOpen: false,
+    turnReplied: false,
     prompts: 0,
     // A resumed conversation's history is not news: only what is written from now on is read.
     transcriptOffset: transcriptSize(engine === 'claude' ? leaf.sessionId ?? null : null),
@@ -629,7 +639,7 @@ function tick(): void {
   }
   // Claude's turn is the transcript's to open and close; the screen only backs
   // it up, for a turn whose end was never written.
-  if (r.turnOpen && quietFor >= TURN_QUIET_MS) r.turnOpen = false
+  if (r.turnOpen && quietFor >= (r.turnReplied ? TURN_END_QUIET_MS : TURN_STALE_MS)) r.turnOpen = false
   if (r.turnOpen || quietFor < QUIET_MS) {
     if (state !== 'busy') setState('busy')
     return
@@ -761,7 +771,14 @@ function noteRecord(r: Running, line: string): void {
     if (prompt) {
       r.prompts += 1
       r.turnOpen = true
+      r.turnReplied = false
     }
+    return
+  }
+  if (record.type === 'assistant') {
+    const stop = (record.message as { stop_reason?: unknown } | undefined)?.stop_reason
+    // A tool call means more of the same turn; the end of the reply means only hooks are left.
+    r.turnReplied = stop === 'end_turn'
     return
   }
   if (record.type === 'system' && record.subtype === 'turn_duration') r.turnOpen = false
