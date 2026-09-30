@@ -1391,7 +1391,7 @@
 
 /*
  * Read aloud on the agent's bubble: a speaker at the time's weight, beside it.
- * The drawing is 22px but takes only the time's 14px line (the negative
+ * The drawing is 30px but takes only the time's 14px line (the negative
  * margins), and ::after reaches it to a 44px target — so the bubble keeps its
  * height and a thumb still finds it.
  */
@@ -1400,9 +1400,9 @@
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 24px;
-  height: 22px;
-  margin: -4px 0;
+  width: 34px;
+  height: 30px;
+  margin: -8px 0;
   padding: 0;
   border: 0;
   border-radius: 50%;

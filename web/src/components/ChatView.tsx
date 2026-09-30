@@ -873,7 +873,7 @@ function ReplyRow({
 
 /**
  * Read aloud, on the bubble: a speaker beside the time, a stop square in a
- * ring while this bubble is being read. Drawn at the time's size; its touch
+ * ring while this bubble is being read. Drawn larger than the time, on its line; its touch
  * target is 44px, reaching past the drawing without growing the bubble.
  */
 function ReadAloud({ reading, onToggle }: { reading: boolean; onToggle: () => void }): ReactNode {
@@ -888,12 +888,12 @@ function ReadAloud({ reading, onToggle }: { reading: boolean; onToggle: () => vo
       onClick={onToggle}
     >
       {reading ? (
-        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <svg width="30" height="30" viewBox="0 0 20 20" aria-hidden="true">
           <circle cx="10" cy="10" r="8.6" fill="none" stroke="currentColor" strokeWidth="1.6" />
           <rect x="6.5" y="6.5" width="7" height="7" rx="1.4" fill="currentColor" />
         </svg>
       ) : (
-        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="30" height="30" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M2.5 6h2.6L8.6 3v10L5.1 10H2.5z" />
           <path d="M11 5.6a3.4 3.4 0 0 1 0 4.8M12.9 3.8a6 6 0 0 1 0 8.4" />
         </svg>
