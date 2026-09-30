@@ -3,12 +3,13 @@ import { BRAIN_ENGINE_NAME, BRAIN_ENGINES, type BrainEngine, type BrainStatus } 
 import { useApp } from '@/state/AppState'
 import { BrainMark } from '../hub/BrainMark'
 import { BrainGlyph } from './BrainGlyph'
-import { pickBrainEngine, setBrainOpen, turnBrainOn } from './brainStore'
+import { pickBrainEngine, turnBrainOn } from './brainStore'
 
 /**
- * Forge Brain while it is off. Only ever seen because Steve opened it — off
- * never nags. The first time, it explains itself; after that it is one line
- * and the same Turn on.
+ * Forge Brain while it is off: the pop-over under the top bar's brain. Only
+ * ever seen because Steve pressed the brain — off never nags. The first time,
+ * it explains itself; after that it is one line and the same Turn on. Once it
+ * is on, `onOn` takes him on (to the map).
  */
 
 /** What each engine is, in a few words. */
@@ -86,7 +87,15 @@ export function EnginePicker({
   )
 }
 
-export function BrainIntro({ status }: { status: BrainStatus | null }): ReactNode {
+export function BrainIntro({
+  status,
+  onOn,
+  onClose
+}: {
+  status: BrainStatus | null
+  onOn: () => void
+  onClose: () => void
+}): ReactNode {
   const { state, actions } = useApp()
   const seen = state.settings.brainIntroSeen
   const [busy, setBusy] = useState(false)
@@ -106,6 +115,7 @@ export function BrainIntro({ status }: { status: BrainStatus | null }): ReactNod
     setBusy(false)
     markSeen()
     if (why) setError(why)
+    else onOn()
   }
 
   return (
@@ -126,7 +136,7 @@ export function BrainIntro({ status }: { status: BrainStatus | null }): ReactNod
         </p>
       ) : (
         <p className="brainintro__para brainintro__para--short">
-          Turn it on to chat with one agent that can reach every project and pane.
+          One agent that can reach every project and pane. Turn it on, then talk to it by picking Forge Brain as the voice agent.
         </p>
       )}
       <p className="brainintro__label">Who runs it</p>
@@ -151,7 +161,7 @@ export function BrainIntro({ status }: { status: BrainStatus | null }): ReactNod
           className="brainintro__later"
           onClick={() => {
             markSeen()
-            setBrainOpen(false)
+            onClose()
           }}
         >
           Not now

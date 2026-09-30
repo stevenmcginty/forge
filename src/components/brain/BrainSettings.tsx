@@ -1,16 +1,20 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { BRAIN_ENGINE_NAME } from '@shared/brain'
 import { useKeymap } from '@/hooks/useHub'
-import { useApp } from '@/state/AppState'
+import { useApp, type SettingsSection } from '@/state/AppState'
+import { openBrainMap } from '../brainview'
 import { Card, Row, Section, StateChip, Toggle, type ChipTone } from '../settings/parts'
 import { EnginePicker } from './BrainIntro'
-import { pickBrainEngine, setBrainOpen, startBrainFeed, turnBrainOff, turnBrainOn, useBrain } from './brainStore'
+import { pickBrainEngine, startBrainFeed, turnBrainOff, turnBrainOn, useBrain } from './brainStore'
 import './Brain.css'
 
 /**
- * Settings → Forge Brain: on or off, and who runs it. Everything else about
- * it is in its drop-down, under the mark in the top bar.
+ * Settings → Forge Brain: on or off, and who runs it. The brain in the top bar
+ * opens its map; talking to it is the voice agent box with "Forge Brain" picked.
  */
+
+/** This section's id (SettingsPage lists it). */
+export const BRAIN_SETTINGS: SettingsSection = 'brain'
 
 const WORD: Record<string, { tone: ChipTone; word: string }> = {
   off: { tone: 'off', word: 'Off' },
@@ -47,7 +51,7 @@ export function BrainSettings(): ReactNode {
   return (
     <Section
       title="Forge Brain"
-      blurb="One agent for the whole of Forge. It sees every project and pane, opens agents and hands them work, tells you when they finish, and changes settings when you ask. It lives under the brain in the top bar; Forge works just the same with it off."
+      blurb="One agent for the whole of Forge. It sees every project and pane, opens agents and hands them work, tells you when they finish, and changes settings when you ask. Talk to it by picking Forge Brain as the voice agent; the brain in the top bar shows its map. Forge works just the same with it off."
     >
       <Card
         title="On or off"
@@ -57,13 +61,17 @@ export function BrainSettings(): ReactNode {
         <Row label="Forge Brain" hint={on ? `Running on ${BRAIN_ENGINE_NAME[engine]}. Turning it off stops its terminal.` : 'Off until you turn it on.'}>
           <Toggle checked={on} disabled={busy || !status} label="Forge Brain" onChange={(next) => void flip(next)} />
         </Row>
-        <Row label="The chat" hint={combo ? `Or press ${combo} anywhere.` : 'Under the brain in the top bar.'}>
+        <Row
+          label="The map"
+          hint={`Every project and agent around the brain. The brain in the top bar opens it${combo ? `, or ${combo}` : ''}. To talk to it, pick Forge Brain as the voice agent.`}
+        >
           <button
             type="button"
             className="ghost-btn"
+            disabled={!on}
             onClick={() => {
               actions.closeSettings()
-              setBrainOpen(true)
+              openBrainMap()
             }}
           >
             Open

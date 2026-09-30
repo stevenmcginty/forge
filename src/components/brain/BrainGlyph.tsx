@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from 'react'
+import type { BrainStatus } from '@shared/brain'
 import { reducedMotion } from '@/lib/motion'
 
 /**
@@ -22,6 +23,12 @@ import { reducedMotion } from '@/lib/motion'
  */
 
 export type GlyphState = 'off' | 'starting' | 'idle' | 'busy' | 'asking' | 'error'
+
+/** The mark's state for a status: off unless it is turned on. */
+export function glyphStateOf(status: BrainStatus | null): GlyphState {
+  if (!status || !status.enabled) return 'off'
+  return status.state
+}
 
 const LEFT =
   'M16 8.6C14.9 7.3 12.6 7.3 11.6 8.8C9.6 8.8 8.2 10.4 8.6 12.3C7.2 13.2 7 15.4 8.2 16.5C7.4 18.2 8.3 20.1 10 20.5C10.4 22.3 12.4 23.3 14.1 22.6C14.6 23.4 15.4 23.7 16 23.3'

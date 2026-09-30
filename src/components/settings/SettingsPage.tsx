@@ -1,7 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useApp, type SettingsSection } from '@/state/AppState'
-import { BrainSettings } from '../brain/BrainSettings'
-import { BRAIN_SETTINGS } from '../brain/BrainPanel'
+import { BRAIN_SETTINGS, BrainSettings } from '../brain/BrainSettings'
 import { Icon, type IconName } from '../Icon'
 import { AccountSection } from './AccountSection'
 import { AlwaysOnSection } from './AlwaysOnSection'

@@ -1,86 +1,86 @@
-import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
 import { shellSheet, useShellSheet } from '@/lib/shellSlots'
-import { voiceSpeaker } from '@/lib/tts'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { openBrainMap } from '../brainview'
-import { useApp } from '@/state/AppState'
-import { BrainGlyph } from './BrainGlyph'
-import { BrainPanel, glyphStateOf } from './BrainPanel'
-import { replyTo, toRows } from './brainRows'
-import { peekSpeakPending, setBrainOpen, startBrainFeed, takeSpeakPending, toggleBrainOpen, useBrain } from './brainStore'
-import { useBrainVoice } from './brainVoice'
+import { BrainGlyph, glyphStateOf } from './BrainGlyph'
+import { BrainIntro } from './BrainIntro'
+import { brainSnapshot, startBrainFeed, useBrain } from './brainStore'
 import './Brain.css'
 
 /**
  * Forge Brain in the top bar: its mark, turning and taking in bolts while it
- * works, and the drop-down chat under it. Click, or the shortcut
- * (Ctrl+Shift+F, rebindable as "Forge Brain"), opens it; Esc or a click
- * anywhere else puts it away.
+ * works. Click it, or press the shortcut (Ctrl+Shift+F, rebindable as "Forge
+ * Brain"), and the map opens (components/brainview) — every project and agent
+ * around the brain, its questions answered on its card there.
+ *
+ * While it is off the same press opens a small pop-over from the icon instead
+ * (BrainIntro): the first time it explains itself, after that it is one line;
+ * Turn on takes him straight on to the map. Esc or a click elsewhere puts it
+ * away. Off never nags: nothing opens by itself.
+ *
+ * Talking to it is not here: that is the voice agent box, with Forge Brain
+ * picked as the voice agent.
  *
  * The badge says what needs saying, by shape: "!" when it is asking Steve (a
- * Yes / No card, or a question on its screen), "×" when it has stopped, and a
- * count of replies that came while it was shut. Off, it says nothing at all.
- *
- * It also reads aloud the answer to a message Steve spoke (the drop-down's
- * mic), once the answer is in — whether or not the drop-down is still open.
+ * Yes / No it is waiting on, or a question on its screen), "×" when it has
+ * stopped. Off, it says nothing at all.
  */
 
-const TOGGLE = 'toggle-brain'
+const COMMAND = 'toggle-brain'
 
 export function BrainButton(): ReactNode {
-  const snap = useBrain()
-  const { status, open, unread } = snap
+  const { status } = useBrain()
+  const [intro, setIntro] = useState(false)
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const wrapRef = useRef<HTMLSpanElement | null>(null)
-  const panelId = useId()
+  const popId = useId()
   const { commands } = useKeymap()
-  const combo = commands.find((c) => c.id === `ui.${TOGGLE}`)?.keys[0]
+  const combo = commands.find((c) => c.id === `ui.${COMMAND}`)?.keys[0]
 
   useEffect(() => startBrainFeed(), [])
-  useEffect(() => uiCommands.define({ id: TOGGLE, title: 'Forge Brain (chat)', group: 'Shell', defaultKey: 'Ctrl+Shift+F' }), [])
-  // Pressed twice within 400 ms: the expanded map (brainview) instead of the chat.
-  const lastPress = useRef(0)
-  useUiCommand(TOGGLE, () => {
-    const now = Date.now()
-    if (now - lastPress.current < 400) {
-      lastPress.current = 0
-      setBrainOpen(false)
+  // The id stays `toggle-brain` so a key Steve already rebound keeps working.
+  useEffect(() => uiCommands.define({ id: COMMAND, title: 'Forge Brain (the map)', group: 'Shell', defaultKey: 'Ctrl+Shift+F' }), [])
+
+  const press = (): void => {
+    if (brainSnapshot().status?.enabled) {
+      setIntro(false)
       openBrainMap()
       return
     }
-    lastPress.current = now
-    toggleBrainOpen()
-  })
+    setIntro((v) => !v)
+  }
+  useUiCommand(COMMAND, press)
 
-  // One pop-up at a time: opening the brain puts a sheet away, and a sheet
-  // opening puts the brain away.
+  // Turned on from somewhere else (Settings, the phone): nothing left to explain.
+  const on = Boolean(status?.enabled)
+  useEffect(() => {
+    if (on) setIntro(false)
+  }, [on])
+
+  // One pop-up at a time: the pop-over puts a sheet away, and a sheet puts it away.
   const sheet = useShellSheet()
   useEffect(() => {
-    if (open) shellSheet.set(null)
-  }, [open])
+    if (intro) shellSheet.set(null)
+  }, [intro])
   useEffect(() => {
-    if (sheet) setBrainOpen(false)
+    if (sheet) setIntro(false)
   }, [sheet])
 
-  // Esc, or a press anywhere that is not the drop-down or its button. Esc in
-  // the brain's own terminal is the terminal's (it interrupts the agent).
+  // Esc, or a press anywhere that is not the pop-over or its button.
   useEffect(() => {
-    if (!open) return undefined
+    if (!intro) return undefined
     const onDown = (e: PointerEvent): void => {
       const t = e.target as HTMLElement | null
       if (!t || wrapRef.current?.contains(t)) return
       if (t.closest('.popover')) return
-      setBrainOpen(false)
+      setIntro(false)
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
-      if ((e.target as HTMLElement | null)?.closest?.('.brainpanel__term')) return
-      // Dictated words counting down to send: Esc is their Undo (BrainComposer).
-      if (document.querySelector('.braincomp__review')) return
       e.preventDefault()
       e.stopPropagation()
-      setBrainOpen(false)
+      setIntro(false)
       btnRef.current?.focus()
     }
     window.addEventListener('pointerdown', onDown, true)
@@ -89,31 +89,25 @@ export function BrainButton(): ReactNode {
       window.removeEventListener('pointerdown', onDown, true)
       window.removeEventListener('keydown', onKey, true)
     }
-  }, [open])
+  }, [intro])
 
-  useSpokenReplies()
-
-  const on = Boolean(status?.enabled)
   const needs = on && status ? status.state === 'asking' || status.confirms.length > 0 : false
   const stopped = on && status?.state === 'error'
   const glyph = glyphStateOf(status)
-  const badge = needs ? 'needs' : stopped ? 'error' : on && unread > 0 && !open ? 'news' : null
 
   const words = !status
     ? 'Forge Brain'
     : !on
       ? 'Forge Brain — off. Click to see what it is'
       : needs
-        ? 'Forge Brain needs you'
+        ? 'Forge Brain needs you — open the map to answer'
         : stopped
           ? `Forge Brain stopped${status.error ? ` — ${status.error}` : ''}`
           : status.state === 'busy'
-            ? 'Forge Brain — working'
+            ? 'Forge Brain — working. Click for the map'
             : status.state === 'starting'
               ? 'Forge Brain — starting'
-              : unread > 0
-                ? `Forge Brain — ${unread} new ${unread === 1 ? 'reply' : 'replies'}`
-                : 'Forge Brain — ready'
+              : 'Forge Brain — ready. Click for the map'
 
   return (
     <span className="brainbtn-wrap" ref={wrapRef}>
@@ -122,51 +116,37 @@ export function BrainButton(): ReactNode {
         type="button"
         className="brainbtn"
         data-state={glyph}
-        data-open={open ? 'true' : undefined}
+        data-open={intro ? 'true' : undefined}
         aria-label={words}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
+        aria-haspopup={on ? undefined : 'dialog'}
+        aria-expanded={on ? undefined : intro}
+        aria-controls={intro ? popId : undefined}
         title={combo ? `${words} (${combo})` : words}
-        onClick={() => toggleBrainOpen()}
+        onClick={press}
       >
         <BrainGlyph state={glyph} />
-        {badge === 'needs' ? (
+        {needs ? (
           <span className="brainbtn__badge" data-kind="needs" aria-hidden="true">
             !
           </span>
-        ) : badge === 'error' ? (
+        ) : stopped ? (
           <span className="brainbtn__badge" data-kind="error" aria-hidden="true">
             ×
           </span>
-        ) : badge === 'news' ? (
-          <span className="brainbtn__badge" data-kind="news" aria-hidden="true">
-            {unread > 9 ? '9+' : unread}
-          </span>
         ) : null}
       </button>
-      {open ? <BrainPanel id={panelId} /> : null}
+      {intro && !on ? (
+        <div id={popId} className="brainpop" role="dialog" aria-label="Forge Brain" data-shell-overlay="">
+          <BrainIntro
+            status={status}
+            onOn={() => {
+              setIntro(false)
+              openBrainMap()
+            }}
+            onClose={() => setIntro(false)}
+          />
+        </div>
+      ) : null}
     </span>
   )
-}
-
-/**
- * The reply to a spoken message is spoken: once the brain is idle again and
- * the transcript has an answer after that prompt, it is read in Forge's voice.
- */
-function useSpokenReplies(): void {
-  const snap = useBrain()
-  const voice = useBrainVoice()
-  const { actions } = useApp()
-  const rows = useMemo(() => toRows(snap.feed.turns, []), [snap.feed.turns])
-  const idle = snap.status?.state === 'idle'
-
-  useEffect(() => {
-    const waiting = peekSpeakPending()
-    if (!waiting || !idle) return
-    const reply = replyTo(rows, waiting.text)
-    if (!reply) return
-    takeSpeakPending()
-    void voiceSpeaker.speakOnce(`brain:${reply.key}`, reply.text, voice, (msg) => actions.setNotice(msg))
-  }, [rows, idle, voice, actions])
 }
