@@ -51,8 +51,10 @@ import './Passkey.css'
 interface Recovery {
   title: string
   icon: IconName
-  /** What the person should do, in the browser's own words. */
+  /** What the person should do, in the browser's own words: one short plain sentence. */
   hint: string
+  /** The why, for whoever is debugging it — behind a "Details" toggle, never in the way. */
+  detail?: string
   /** The one button, when there is one worth offering. */
   action?: 'retry' | 'sign-out' | 'reload'
 }
@@ -67,14 +69,16 @@ function recovery(reason: WebRefusal, email: string, desktop: DesktopSide = {}):
   // Every hint below has one job, and it is *not* to restate the desktop's
   // sentence — that is already on screen, verbatim, directly above it. The hint
   // says the thing the desktop cannot know: which account this page is holding,
-  // whether a retry can possibly help, and what the button is about to do.
+  // whether a retry can possibly help, and what the button is about to do — in
+  // words somebody on a bus can act on. The mechanism goes in `detail`.
   const signedInAs = email ? `Signed in as ${email}. ` : ''
   switch (reason) {
     case 'bad-token':
       return {
-        title: 'That sign-in was not accepted',
+        title: 'Sign in again',
         icon: 'gear',
-        hint: `${signedInAs}This page already re-presented a freshly minted token once and was refused again, so the account itself needs signing in.`,
+        hint: `${signedInAs}Your PC did not accept this sign-in. Signing in again fixes it.`,
+        detail: 'The page presented a freshly refreshed token once and the desktop refused it again (bad-token).',
         action: 'sign-out'
       }
     case 'wrong-account':
@@ -84,55 +88,67 @@ function recovery(reason: WebRefusal, email: string, desktop: DesktopSide = {}):
         // Never a retry: a correct credential for the wrong desktop would loop
         // forever on a credential that is not going to stop being valid, which
         // is exactly what this value exists to prevent.
-        hint: `${signedInAs}Nothing is wrong with that credential — it is simply not the one this machine admits, so retrying would loop on it forever.`,
+        hint: `${signedInAs}Your PC uses a different email. Sign in with that one.`,
+        detail:
+          'The credential is valid, but it is not the account this desktop admits, so retrying would never help (wrong-account).',
         action: 'sign-out'
       }
     case 'not-approved':
       return {
-        title: 'This browser did not identify itself',
+        title: 'This browser could not be recognised',
         icon: 'restart',
         // The one thing the desktop cannot say, because it is a fact about this
         // page: the id is minted in browser storage and sent on every `hello`,
         // so a blank one is a page whose storage was unavailable rather than a
         // browser anybody has judged. Retrying would send the same blank id.
-        hint: 'Reloading mints a fresh id for this browser. If it says the same thing afterwards, this browser is refusing the page any storage to keep one in — private browsing, or blocked site data.',
+        hint: 'Reload the page. If this comes back, turn off private browsing or let this site save data.',
+        detail:
+          'The page keeps an id for this browser in site storage and sends it on every connection. It arrived blank, so the storage is blocked (not-approved).',
         action: 'reload'
       }
     case 'proto': {
       // A desktop new enough to say which protocol it speaks settles which half
       // is old, and the two halves have different cures: a reload fixes this
-      // page, and only a restart at the desk fixes the desktop — a Reload button
-      // there would fetch the same page and be refused the same way.
+      // page, and only an update at the desk fixes the desktop — a Reload
+      // button there would fetch the same page and be refused the same way.
+      // Never "restart Forge now": from a phone that strands the page for
+      // minutes while the tunnel is found again.
       const theirs = desktop.proto
-      const version = desktop.appVersion ? ` (it is on Forge ${desktop.appVersion})` : ''
+      const version = desktop.appVersion ? ` Your PC is on Forge ${desktop.appVersion}.` : ''
+      const wire = `This page speaks protocol ${WEB_PROTO}${typeof theirs === 'number' ? `, the desktop ${theirs}` : ''}.`
       if (typeof theirs === 'number' && theirs < WEB_PROTO) {
         return {
-          title: 'The desktop is older than this page',
+          title: 'Forge on your PC needs an update',
           icon: 'restart',
-          hint: `Restart Forge on the desktop${version} so it updates, then try again.`,
+          hint: 'Update Forge on your PC when you are back at it, then try again.',
+          detail: `${wire}${version}`,
           action: 'retry'
         }
       }
       if (typeof theirs === 'number' && theirs > WEB_PROTO) {
         return {
-          title: 'This page is older than the desktop',
+          title: 'This page is out of date',
           icon: 'restart',
-          hint: 'Reload to pick up the current page.',
+          hint: 'Reload to get the new version.',
+          detail: `${wire}${version}`,
           action: 'reload'
         }
       }
       return {
-        title: 'This page and that Forge speak different protocols',
+        title: 'This page and your PC are on different versions',
         icon: 'restart',
-        hint: 'Reload to pick up the current bundle. If it says the same thing afterwards, the desktop is the older half and needs updating.',
+        hint: 'Reload the page. If this comes back, update Forge on your PC when you are back at it.',
+        detail: `${wire}${version}`,
         action: 'reload'
       }
     }
     case 'busy':
       return {
-        title: 'The desktop cannot take this connection yet',
+        title: 'Your PC is not ready yet',
         icon: 'restart',
-        hint: 'It is up, but not ready — still starting, or holding too many sockets. This page will try again on its own.',
+        hint: 'It is starting up or busy. This page tries again by itself.',
+        detail:
+          'The desktop is up but refused new connections for now: still starting, too many open connections, or too many failed tries (busy).',
         action: 'retry'
       }
     // Both are drawn by `PinPrompt` rather than by `Refused`, because a question
@@ -143,9 +159,9 @@ function recovery(reason: WebRefusal, email: string, desktop: DesktopSide = {}):
     case 'pin-required':
     case 'pin-invalid':
       return {
-        title: 'This desktop wants its unlock PIN',
+        title: 'Your PC wants its unlock PIN',
         icon: 'key',
-        hint: `The ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set in Forge's settings on that PC. Try again to be asked for it.`,
+        hint: `The ${PIN_MIN_DIGITS}-to-${PIN_MAX_DIGITS} digit PIN set in Forge’s settings on your PC. Tap Try again to enter it.`,
         action: 'retry'
       }
   }
@@ -240,6 +256,21 @@ export function GateError({ children }: { children: ReactNode }): ReactNode {
   )
 }
 
+/**
+ * The technical why, folded away under a "Details" toggle: the screen above it
+ * says what happened and what to do in plain words, and this is for whoever is
+ * debugging it. A native `<details>`, so the triangle is the shape that says it
+ * opens, and it works with no script and any screen reader.
+ */
+export function GateDetails({ children }: { children: ReactNode }): ReactNode {
+  return (
+    <details className="gate__details gate__hint">
+      <summary>Details</summary>
+      <span className="mono">{children}</span>
+    </details>
+  )
+}
+
 /* -------------------------------------------------------------- the screens */
 
 /** How long a connect may take before the screen says it is still trying, and why it might be. */
@@ -249,20 +280,34 @@ export function Connecting({ note }: { attempt: number; note?: string }): ReactN
   const { state, actions } = useForge()
   const desktop = state.picture?.desktopName || state.cached?.desktopName || ''
   const [slow, setSlow] = useState(false)
+  const stage = state.stage.kind
 
-  // Counted from the moment this page started reaching for the socket — not
-  // per attempt, because "attempt 5" is the retry loop's business and "it has
-  // been a while" is the person's.
+  // Counted from the moment this screen went up — not per attempt, because
+  // "attempt 5" is the retry loop's business and "it has been a while" is the
+  // person's. Every one of these screens escalates, the noted ones too:
+  // "Looking for the desktop…" used to spin for ever with no way to push it.
   useEffect(() => {
     setSlow(false)
-    if (note) return
     const timer = window.setTimeout(() => setSlow(true), SLOW_MS)
     return () => window.clearTimeout(timer)
-  }, [note])
+  }, [note, stage])
 
   // No attempt counter and no "reconnecting": a dead port fails its first dial
   // inside half a second, so the retry number says nothing a person can use.
-  const line = note ?? (slow ? `Still trying… ${desktop || 'The desktop'} may be asleep.` : `Reaching ${desktop || 'the desktop'}…`)
+  const name = desktop || 'Your PC'
+  const slowLine =
+    stage === 'loading'
+      ? 'Still starting. Check your connection.'
+      : `Still trying. ${name} may be asleep, or Forge may be closed on it.`
+  const line = slow ? slowLine : (note ?? `Reaching ${desktop || 'your PC'}…`)
+
+  // The push that fits the stage: look the desktop up again, dial it now, or —
+  // before this page has even read its own settings — start the page over.
+  const again = (): void => {
+    if (stage === 'finding') actions.refind()
+    else if (stage === 'connected') actions.retry()
+    else window.location.reload()
+  }
 
   return (
     <GateFrame reason="connecting">
@@ -272,6 +317,11 @@ export function Connecting({ note }: { attempt: number; note?: string }): ReactN
         </p>
         <span className="pbar gate__progress" data-on="true" role="progressbar" aria-label="Connecting" />
       </GateLead>
+      {slow ? (
+        <button type="button" className="cta-btn gate__go" onClick={again} data-testid="connecting-again">
+          {stage === 'loading' ? 'Reload' : 'Look again'}
+        </button>
+      ) : null}
       <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
     </GateFrame>
   )
@@ -349,8 +399,9 @@ export function Refused({
         {message ? <p className="gate__body">{message}</p> : null}
         <p className="gate__hint">{plan.hint}</p>
         {retryAfterMs ? (
-          <p className="gate__hint">Worth trying again in about {Math.ceil(retryAfterMs / 1000)}s.</p>
+          <p className="gate__hint">Try again in about {Math.ceil(retryAfterMs / 1000)}s.</p>
         ) : null}
+        {plan.detail ? <GateDetails>{plan.detail}</GateDetails> : null}
       </GateLead>
       {plan.action === 'retry' ? (
         <button type="button" className="cta-btn gate__go" onClick={() => actions.retry()}>
@@ -630,11 +681,10 @@ export function Unreachable({ error }: { error: string }): ReactNode {
   const { state, actions } = useForge()
   return (
     <GateFrame reason="unreachable">
-      <GateLead icon="gear" title="Could not look up the desktop">
-        <p className="gate__body">{error}</p>
-        <p className="gate__hint">
-          Nothing here says the desktop is off — only that this page could not find out either way.
-        </p>
+      <GateLead icon="gear" title="Could not look up your PC">
+        {/* Not "your PC is off": this page could not find out either way. */}
+        <p className="gate__body">That does not mean your PC is off. Check your connection, then look again.</p>
+        {error ? <GateDetails>{error}</GateDetails> : null}
       </GateLead>
       <button type="button" className="cta-btn gate__go" onClick={() => actions.refind()}>
         Look again
@@ -661,14 +711,14 @@ export function hostSkew(record: WebHostRecord | null, now = Date.now()): WebHos
 export function VersionSkew({ record }: { record: WebHostRecord }): ReactNode {
   const { state, actions } = useForge()
   const plan = recovery('proto', state.session?.email ?? '', { proto: record.proto })
-  const name = record.name || 'The desktop'
+  const name = record.name || 'Your PC'
   return (
     <GateFrame reason="proto">
       <GateLead icon={plan.icon} title={plan.title}>
-        <p className="gate__body">
-          {name} is running Forge {record.app || '(unknown version)'}, which speaks a different protocol from this page.
-        </p>
-        <p className="gate__hint">{plan.hint}</p>
+        <p className="gate__body">{plan.hint}</p>
+        <GateDetails>
+          {name} is running Forge {record.app || '(unknown version)'}. {plan.detail}
+        </GateDetails>
       </GateLead>
       {plan.action === 'reload' ? (
         <button type="button" className="cta-btn gate__go" onClick={() => window.location.reload()}>
@@ -769,7 +819,7 @@ export function PasskeyOffer(): ReactNode {
               if (!outcome.ok) void prepareEnrolment(actions.request).then((next) => (prepared.current = next))
               if (outcome.ok) {
                 close()
-                actions.setNotice(`${biometricUnlockLabel()} is on for this phone.`)
+                actions.setNotice(`${biometricUnlockLabel()} is on for this phone.`, true)
                 return
               }
               if (!outcome.cancelled) setError(outcome.message)
@@ -788,12 +838,13 @@ export function PasskeyOffer(): ReactNode {
 export function Unconfigured({ error }: { error: string }): ReactNode {
   return (
     <GateFrame reason="unconfigured">
-      <GateLead icon="gear" title="This deployment is not configured">
-        <p className="gate__body">{error}</p>
-        <p className="gate__hint">
-          Forge Web reads its Firebase project from <span className="mono">/config.json</span> beside this bundle.
-          Deploy one and reload.
-        </p>
+      <GateLead icon="gear" title="This site is not set up">
+        <p className="gate__body">Tell whoever runs this site.</p>
+        {/* For whoever does run it: the page reads its Firebase project from
+            /config.json beside the bundle, and that is what is missing. */}
+        <GateDetails>
+          {error ? `${error} ` : ''}Forge Web reads its Firebase project from /config.json beside this bundle.
+        </GateDetails>
       </GateLead>
     </GateFrame>
   )

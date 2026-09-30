@@ -42,6 +42,13 @@ export interface Session {
   expiresAt: number
   uid: string
   email: string
+  /**
+   * This sign-in made the account: the email was new to Firebase, so
+   * `signIn` fell through to sign-up. Set on that one session and never read
+   * back from storage, so it lasts until the next sign-in or reload. The screen
+   * after it (Unpaired) says so, because a mistyped email lands exactly there.
+   */
+  created?: boolean
 }
 
 /** The error `idToken()` throws when the credentials are gone for good. */
@@ -87,6 +94,7 @@ export class Auth {
   async signIn(email: string, password: string): Promise<Session> {
     const body = { email, password, returnSecureToken: true }
     let result = await postJson(`${this.authBase()}/accounts:signInWithPassword?key=${this.config.apiKey}`, body)
+    let created = false
 
     if (!result.ok) {
       const code = errorCode(result.json)
@@ -98,6 +106,7 @@ export class Auth {
           throw new Error(friendly(code2))
         }
         result = signedUp
+        created = true
       } else {
         throw new Error(friendly(code))
       }
@@ -109,10 +118,11 @@ export class Auth {
       idToken: String(d.idToken ?? ''),
       expiresAt: Date.now() + (Number(d.expiresIn ?? 3600) * 1000 - EXPIRY_MARGIN_MS),
       uid: String(d.localId ?? ''),
-      email: String(d.email ?? email)
+      email: String(d.email ?? email),
+      ...(created ? { created: true } : {})
     }
     if (!session.refreshToken || !session.idToken || !session.uid) {
-      throw new Error('Firebase answered without a sign-in — try again')
+      throw new Error('Sign-in did not finish. Try again.')
     }
     this.session = session
     this.save()
@@ -229,7 +239,7 @@ async function postJson(url: string, body: unknown): Promise<{ ok: boolean; stat
       body: JSON.stringify(body)
     })
   } catch {
-    throw new Error("Can't reach Firebase — check your connection")
+    throw new Error("Can't reach the sign-in service. Check your connection.")
   }
   const text = await response.text()
   let json: unknown = null
@@ -261,6 +271,6 @@ function friendly(code: string): string {
   if (code.startsWith('WEAK_PASSWORD')) return 'Password needs to be at least 6 characters'
   if (code.startsWith('TOO_MANY_ATTEMPTS')) return 'Too many attempts — wait a few minutes'
   if (code.startsWith('USER_DISABLED')) return 'That account is disabled'
-  if (code.startsWith('OPERATION_NOT_ALLOWED')) return 'Email sign-in is switched off for this Firebase project'
+  if (code.startsWith('OPERATION_NOT_ALLOWED')) return 'Email sign-in is switched off for this site'
   return code || 'Sign-in failed'
 }

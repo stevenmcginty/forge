@@ -266,7 +266,13 @@ export interface ForgeActions {
    * that the handoff is finished — that lands minutes later as `handoff` pushes.
    */
   handoffStart: (paneId: string, target: HandoffTargetWire) => Promise<string | null>
-  setNotice: (message: string) => void
+  /**
+   * Show a sentence in the toast. It stays until tapped, or NOTICE_HOLD_MS —
+   * the page cannot tell a refusal from a confirmation, so it assumes the one
+   * that must not vanish unread. `passing` marks a confirmation ("done", "on
+   * it"), which clears itself after NOTICE_MS as every toast used to.
+   */
+  setNotice: (message: string, passing?: boolean) => void
   /** Clear the notice on screen now; the next in the queue, if any, takes its turn. */
   dismissNotice: () => void
   /**
@@ -370,14 +376,22 @@ function capTranscript(text: string): string {
 
 /* ---------------------------------------------------------------- notices */
 
-/** How long a shown notice stays on screen before its own fuse clears it. */
+/** How long a passing notice (a confirmation) stays on screen before its own fuse clears it. */
 const NOTICE_MS = 6000
+/**
+ * How long any other notice stays: long enough to be read by somebody who was
+ * not looking at the phone when it arrived. A tap puts either away sooner, and
+ * the fuse does not burn while the page is hidden.
+ */
+const NOTICE_HOLD_MS = 15_000
 /** How many may wait behind the one being shown before the oldest is dropped. */
 const NOTICE_PENDING_MAX = 3
 
 interface QueuedNotice {
   id: number
   text: string
+  /** Its fuse, lit when it takes the screen: NOTICE_MS or NOTICE_HOLD_MS. */
+  ms: number
 }
 
 /* ---------------------------------------------------------- notifications */
@@ -593,10 +607,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    * simply falls off, because by the time three sentences have waited their
    * turn, the first is almost certainly stale.
    */
-  const pushNotice = useCallback((message: string): void => {
+  const pushNotice = useCallback((message: string, passing?: boolean): void => {
     const text = message.trim()
     if (!text) return
-    setNotices((current) => [{ id: ++noticeSeq.current, text }, ...current.slice(0, NOTICE_PENDING_MAX)])
+    const ms = passing ? NOTICE_MS : NOTICE_HOLD_MS
+    setNotices((current) => [{ id: ++noticeSeq.current, text, ms }, ...current.slice(0, NOTICE_PENDING_MAX)])
   }, [])
 
   const configRef = useRef<WebClientConfig | null>(null)
@@ -1104,17 +1119,18 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    *
    * The effect is keyed on the notice being shown, so a newer sentence
    * arriving does not wind back the older one's clock — the older one simply
-   * steps out of the way and lights a fresh six seconds of its own when its
-   * turn comes round again.
+   * steps out of the way and lights a fresh fuse of its own when its turn
+   * comes round again. A hidden page (screen off, phone in a pocket) burns no
+   * fuse at all: the sentence is still there, whole, when somebody looks.
    */
   useEffect(() => {
     const shown = notices[0]
-    if (!shown) return
+    if (!shown || !pageVisible) return
     const timer = window.setTimeout(() => {
       setNotices((current) => current.filter((n) => n.id !== shown.id))
-    }, NOTICE_MS)
+    }, shown.ms)
     return () => clearTimeout(timer)
-  }, [notices])
+  }, [notices, pageVisible])
 
   /**
    * Track visibility so the clocks above can pause themselves off-screen.
@@ -1359,7 +1375,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // Said before the round trip, not after: the brief is minutes of
         // planning before anything lands in the pane, and the human needs to
         // hear "got it" the moment they let go of it.
-        pushNotice('Foreman is on it — reading the pane and planning the brief')
+        pushNotice('Foreman is on it — reading the pane and planning the brief', true)
         const result = await client.request({ kind: 'foreman-start', paneId, seed })
         if (result.kind === 'failed') {
           pushNotice(result.message)
@@ -1392,7 +1408,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // Said after the round trip, unlike Foreman's: the desktop answers as
         // soon as the pack is written, which is fast, and a notice before it
         // would be a promise made before anything had been asked of the agent.
-        pushNotice('Asked this pane to write a handoff pack')
+        pushNotice('Asked this pane to write a handoff pack', true)
         return null
       },
       onTranscript: (sessionId, listener) => {

@@ -142,6 +142,29 @@
   border-color: var(--danger-line);
 }
 
+.chat-mirror__notice p {
+  margin: 0;
+}
+
+/* Retry: a real 44px target, the arrow shape beside the word. */
+.chat-mirror__retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 0 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--bg-active);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 .chat-mirror__hint {
   flex: none;
   margin: 0;

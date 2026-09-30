@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Reac
 import { CHATBOTS } from '@shared/chatbots'
 import { CHAT_MIRROR_FEATURE, mapToPage, scaleToPage, type ChatStatus, type Size } from '@shared/chat-mirror'
 import type { ChatLeaf } from '@shared/types'
+import { Icon } from '@/components/Icon'
 import { focusChatComposer, sendChatInput, watchChat } from '../lib/client'
 import { useDeskFeature } from '../lib/features'
 import { useForge } from '../state'
@@ -23,6 +24,8 @@ import './ChatMirror.css'
 const TAP_SLOP_PX = 8
 /** A box has to hold its size this long before the desktop is asked to redraw at it. */
 const RESIZE_SETTLE_MS = 250
+/** How long "Opening…" may stand with no picture before the screen says so and offers a retry. */
+const OPEN_TIMEOUT_MS = 15_000
 
 type Shown = 'update' | 'reconnecting' | ChatStatus
 
@@ -65,6 +68,10 @@ export function ChatMirror({ leaf, onScreen }: { leaf: ChatLeaf; onScreen: boole
   const [error, setError] = useState('')
   const [pictured, setPictured] = useState(false)
   const [draft, setDraft] = useState('')
+  /** Bumped by Retry: a fresh watch — the desktop is told to stop and start again. */
+  const [again, setAgain] = useState(0)
+  /** Opening has run past OPEN_TIMEOUT_MS with no picture. */
+  const [stalled, setStalled] = useState(false)
 
   // The box, measured; a change is passed on once it has held still.
   useLayoutEffect(() => {
@@ -113,7 +120,22 @@ export function ChatMirror({ leaf, onScreen }: { leaf: ChatLeaf; onScreen: boole
         }
       }
     )
-  }, [watching, leaf.id, width, height])
+  }, [watching, leaf.id, width, height, again])
+
+  // "Opening…" is not allowed to stand for ever: past the timeout it says it
+  // is slow and offers Retry. Counted afresh on every watch.
+  useEffect(() => {
+    setStalled(false)
+    if (!watching || pictured || status === 'error') return undefined
+    const timer = window.setTimeout(() => setStalled(true), OPEN_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [watching, pictured, status, again])
+
+  const retry = (): void => {
+    setStatus('loading')
+    setError('')
+    setAgain((n) => n + 1)
+  }
 
   const shown: Shown = !supported ? 'update' : !live ? 'reconnecting' : status
 
@@ -153,15 +175,21 @@ export function ChatMirror({ leaf, onScreen }: { leaf: ChatLeaf; onScreen: boole
     setDraft('')
   }
 
+  // Remote-safe on purpose: never "restart Forge" — from a phone that strands
+  // the page for minutes while the tunnel is found again.
   const notice = !supported
-    ? "The Forge on the desktop is older than this page, so it cannot show chats here yet. Restart Forge on the desktop."
+    ? 'Forge on your PC is too old to show chats here. Update Forge on your PC when you are back.'
     : !live
-      ? 'The link to the desktop dropped. The chat comes back when it reconnects.'
+      ? 'The link to your PC dropped. The chat comes back when it reconnects.'
       : status === 'error'
-        ? error || `Can't reach ${bot.name} from the desktop.`
+        ? error || `Can't reach ${bot.name} from your PC.`
         : !pictured
-          ? `Opening ${bot.name} on the desktop…`
+          ? stalled
+            ? `${bot.name} is taking a long time to open on your PC.`
+            : `Opening ${bot.name} on your PC…`
           : ''
+  /** Retry is offered where a fresh watch can help: an error, or an open that stalled. */
+  const canRetry = supported && live && (status === 'error' || (stalled && !pictured))
 
   return (
     <div className="chat-mirror" data-state={shown}>
@@ -222,7 +250,19 @@ export function ChatMirror({ leaf, onScreen }: { leaf: ChatLeaf; onScreen: boole
         }}
       >
         <img ref={imgRef} className="chat-mirror__picture" alt={`${bot.name}, as the desktop shows it`} draggable={false} />
-        {notice ? <p className="chat-mirror__notice">{notice}</p> : null}
+        {notice ? (
+          // Its own pointer island: a press here is a press on Retry, never a
+          // tap or a scroll relayed to the chat page underneath.
+          <div className="chat-mirror__notice" onPointerDown={(e) => e.stopPropagation()}>
+            <p>{notice}</p>
+            {canRetry ? (
+              <button type="button" className="chat-mirror__retry" onClick={retry} data-testid="chat-mirror-retry">
+                <Icon name="refresh" size={16} />
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {error && status !== 'error' ? <p className="chat-mirror__hint">{error}</p> : null}

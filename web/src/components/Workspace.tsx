@@ -36,6 +36,12 @@ const Mirror = lazy(() => import('./Mirror').then((m) => ({ default: m.Mirror })
 const GitHubMode = lazy(() => import('./GitHubMode').then((m) => ({ default: m.GitHubMode })))
 
 /**
+ * The toast is a button now, and a button centres its text; the sentence reads
+ * from the start, with the close cross at the end.
+ */
+const NOTICE_LAYOUT: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start', cursor: 'pointer' }
+
+/**
  * The deck face (desktop browser only), split off so a phone never downloads
  * it. Fetched as this module loads on anything that is not a phone, so it is
  * normally in hand long before the connection lets the Workspace mount.
@@ -169,13 +175,43 @@ export function Workspace(): ReactNode {
    * The toast. At the desk it floats at the foot of the window as it always
    * has; on a phone it sits in the display, just above the answer card and the
    * composer — whatever height they are — so it never lands on Send. A tap
-   * puts it away, on either.
+   * puts it away, on either: a real button, so a keyboard and a screen reader
+   * can put it away too, with the close cross as the shape that says so
+   * (`title` never shows on a touch screen).
    */
   const notice = state.notice ? (
-    <div className="notice" role="status" title="Tap to dismiss" onClick={actions.dismissNotice}>
-      {state.notice}
-    </div>
+    <button
+      type="button"
+      className="notice"
+      aria-live="polite"
+      data-testid="notice"
+      onClick={actions.dismissNotice}
+      style={NOTICE_LAYOUT}
+    >
+      <span style={{ flex: '1 1 auto', minWidth: 0 }}>{state.notice}</span>
+      <Icon name="close" size={14} />
+    </button>
   ) : null
+  /**
+   * One strip at a time on a phone, by priority, rather than up to five
+   * stacked over the terminal: admin prompt (a two-minute window), then asleep,
+   * then the dropped link, then the desktop's window rebuilding, then a new
+   * deploy. Each gate below is the strip's own `return null` test, so the one
+   * chosen is always one that draws. The desk keeps its stack.
+   */
+  const strip: 'remote-yes' | 'offline' | 'reconnecting' | 'recovering' | 'update' | null =
+    state.stage.kind === 'connected' && state.remoteYes.enabled && state.remoteYes.uac
+      ? 'remote-yes'
+      : offline
+        ? 'offline'
+        : state.stage.kind === 'connected' && state.connection.state !== 'live'
+          ? 'reconnecting'
+          : state.stage.kind === 'connected' && state.desktopRecovering
+            ? 'recovering'
+            : update.available
+              ? 'update'
+              : null
+  const stripShown = (which: NonNullable<typeof strip>): boolean => !mobile || strip === which
   const gridShown = !(offline && state.offlineMode === 'github')
 
   // Nothing here listens for a window resize, on purpose: a window resize
@@ -219,9 +255,9 @@ export function Workspace(): ReactNode {
         two-minute window on a machine that is doing nothing until somebody
         answers it, and the person holding this phone may be on a bus.
       */}
-      <RemoteYesBanner />
-      <OfflineBanner />
-      <ReconnectingBanner />
+      {stripShown('remote-yes') ? <RemoteYesBanner /> : null}
+      {stripShown('offline') ? <OfflineBanner /> : null}
+      {stripShown('reconnecting') ? <ReconnectingBanner /> : null}
       {/*
         Above the reconnect strip in the source and below it on screen, and the
         ordering is a judgement about which sentence is more useful when both
@@ -229,13 +265,13 @@ export function Workspace(): ReactNode {
         through — so it keeps the top. This one only ever matters when the link
         is up, which is exactly why it is easy to miss without it.
       */}
-      <RecoveringBanner />
+      {stripShown('recovering') ? <RecoveringBanner /> : null}
       {/*
         Last of the three strips, deliberately: a deploy you have not reloaded
         into is the least urgent thing on a page that may also be asleep or
         mid-redial, and the strips stack in that order.
       */}
-      <UpdateBanner update={update} />
+      {stripShown('update') ? <UpdateBanner update={update} /> : null}
       {deck ? (
         <main className="dk-stage">
           {/* GitHub mode swaps in for the stage and nothing else, as it does below. */}
