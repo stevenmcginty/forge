@@ -9,6 +9,12 @@
  *   place. The only boxes left are the ones that hold code and tables.
  * - Copy, folds and the jump pill are all at least 44px tall for a thumb.
  * - Colours come from tokens, so Volt and Paper both hold.
+ *
+ * On the phone (`data-bubbles`, the last part of this sheet) it reads like
+ * WhatsApp instead: both sides in bubbles, the time and ticks in the corner,
+ * a long-press menu in place of Copy. The bubble colours are tokens here, with
+ * a theme's own `--theme-bubble-*` (lib/phone-themes.ts: WhatsApp) taking
+ * over when it sets them.
  */
 
 .chatview {
@@ -20,9 +26,26 @@
   --chat-row-gap: 28px;
   --chat-piece-gap: var(--s-5);
   --chat-read: 15px;
+  /* bubbles: every theme derives its own; WhatsApp hands over its exact ones */
+  --bubble-in: var(--theme-bubble-in, color-mix(in srgb, var(--text-primary) 8%, var(--bg-panel)));
+  --bubble-out: var(--theme-bubble-out, color-mix(in srgb, var(--chat-accent) 17%, var(--bg-panel)));
+  --bubble-ink: var(--theme-bubble-ink, var(--text-primary));
+  --bubble-meta: var(--theme-bubble-meta, var(--text-muted));
+  --bubble-meta-out: var(--theme-bubble-meta-out, var(--text-muted));
+  --bubble-edge: var(--theme-bubble-edge, transparent);
+  --bubble-tick: var(--theme-tick, var(--info));
+  --bubble-name: color-mix(in srgb, var(--chat-accent) 78%, var(--bubble-ink));
   background: var(--bg-base);
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* Light themes: white bubbles lifted off the page by a hairline shadow. */
+:root[data-appearance='light'] .chatview {
+  --bubble-in: var(--theme-bubble-in, #ffffff);
+  --bubble-out: var(--theme-bubble-out, color-mix(in srgb, var(--chat-accent) 13%, #ffffff));
+  --bubble-edge: var(--theme-bubble-edge, color-mix(in srgb, var(--text-primary) 18%, transparent));
+  --bubble-name: color-mix(in srgb, var(--chat-accent) 50%, var(--bubble-ink));
 }
 
 /* The phone: reading size, and a little less air between rows. */
@@ -829,6 +852,12 @@
   font-size: 14.5px;
 }
 
+.chatview__busy-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
 .chatview__busy-label {
   font-weight: 500;
   color: var(--text-secondary);
@@ -1023,17 +1052,443 @@
   .chatview__turn,
   .chatview__busy-turn,
   .chatview__empty-sparkle,
-  .chatview__busy-dots span {
+  .chatview__busy-dots span,
+  .chatview__menu {
     animation: none;
   }
   .chatview__busy-dots span {
     opacity: 0.6;
+  }
+  .chatview__toast,
+  .chatview__turn {
+    transition: none;
   }
 }
 
 :root[data-reduced-motion='true'] .chatview__turn,
 :root[data-reduced-motion='true'] .chatview__busy-turn,
 :root[data-reduced-motion='true'] .chatview__empty-sparkle,
-:root[data-reduced-motion='true'] .chatview__busy-dots span {
+:root[data-reduced-motion='true'] .chatview__busy-dots span,
+:root[data-reduced-motion='true'] .chatview__menu {
   animation: none;
+}
+
+:root[data-reduced-motion='true'] .chatview__busy-dots span {
+  opacity: 0.6;
+}
+
+:root[data-reduced-motion='true'] .chatview__toast,
+:root[data-reduced-motion='true'] .chatview__turn {
+  transition: none;
+}
+
+/* ------------------------------------------------ ticks, time, the menu
+ *
+ * Shared by both faces: the tick shapes (one: sent, two: in the transcript),
+ * the long-press menu and the toast it leaves.
+ */
+
+.chatview__ticks {
+  display: inline-flex;
+  flex: none;
+  color: var(--bubble-meta-out);
+}
+
+.chatview__ticks[data-landed='true'] {
+  color: var(--bubble-tick);
+}
+
+.chatview__under .chatview__ticks {
+  min-height: 24px;
+  align-items: center;
+  color: var(--text-dim);
+}
+
+.chatview__menu-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chatview__menu {
+  position: absolute;
+  min-width: 212px;
+  padding: 6px 0;
+  background: var(--bg-panel-raised);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px var(--line-hairline),
+    0 10px 30px color-mix(in srgb, #000000 34%, transparent);
+  transform-origin: top left;
+  animation: chatview-menu-in var(--dur-fast) var(--ease-out);
+}
+
+.chatview__menu[data-side='right'] {
+  transform-origin: top right;
+}
+
+.chatview__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 22px 0 18px;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--text-primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chatview__menu-item svg {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.chatview__menu-item:hover,
+.chatview__menu-item:active {
+  background: var(--bg-hover);
+}
+
+.chatview__menu-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* "Copied": the phone's own kind of toast, ink on its inverse. */
+.chatview__toast {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 18px 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--bg-base);
+  background: var(--text-primary);
+  border-radius: 999px;
+  transform: translate(-50%, 8px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-out);
+}
+
+.chatview__toast:empty {
+  padding: 0;
+  min-height: 0;
+}
+
+.chatview__toast[data-show='true'] {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+
+@keyframes chatview-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ============================================================ the phone
+ *
+ * WhatsApp's grammar: the agent's bubbles on the left, yours on the right,
+ * a tail on the first after a change of speaker, the time (and on yours the
+ * ticks) tucked into the bubble's corner. Rows run edge to edge so a held
+ * bubble's row can be tinted the way WhatsApp selects a message.
+ */
+
+.chatview[data-bubbles] .chatview__column {
+  --chat-gutter: 0px;
+  --chat-row-gap: 10px;
+  --chat-piece-gap: 10px;
+  /* screen edge to the tail's tip, and the gap kept on the far side */
+  --bubble-side: 8px;
+  --bubble-far: 40px;
+  --bubble-tail: 8px;
+}
+
+.chatview[data-bubbles] .chatview__turn {
+  padding: 1px var(--bubble-far) 1px calc(var(--bubble-side) + var(--bubble-tail));
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.chatview[data-bubbles] .chatview__turn[data-role='user'] {
+  justify-content: flex-end;
+  padding: 1px calc(var(--bubble-side) + var(--bubble-tail)) 1px max(var(--bubble-far), 14%);
+}
+
+/* The same speaker again: close up, no tail. */
+.chatview[data-bubbles] .chatview__turn:not([data-tail]) {
+  margin-top: calc(3px - var(--chat-row-gap));
+}
+
+/* Held for the menu: the whole row, tinted, as WhatsApp marks a selected message. */
+.chatview[data-bubbles] .chatview__turn[data-held] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.chatview[data-bubbles] .chatview__msg {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px 8px 11px;
+  color: var(--bubble-ink);
+  background: var(--bubble-in);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: 0 1px 0.5px var(--bubble-edge);
+  outline: none;
+}
+
+.chatview[data-bubbles] .chatview__msg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chatview[data-bubbles] .chatview__bubble {
+  background: var(--bubble-out);
+}
+
+/* The agent's bubble fits its words, up to the row. */
+.chatview[data-bubbles] .chatview__reply {
+  width: fit-content;
+  gap: var(--chat-piece-gap);
+}
+
+/* The tail: a corner pulled out to the side the bubble speaks from. */
+.chatview[data-bubbles] .chatview__turn[data-tail] > .chatview__msg {
+  border-top-left-radius: 0;
+}
+
+.chatview[data-bubbles] .chatview__turn[data-role='user'][data-tail] > .chatview__msg {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 0;
+}
+
+.chatview[data-bubbles] .chatview__turn[data-tail] > .chatview__msg::before,
+.chatview[data-bubbles] .chatview__busy-turn[data-tail] > .chatview__busy-bubble::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--bubble-tail));
+  width: var(--bubble-tail);
+  height: 13px;
+  background: inherit;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.chatview[data-bubbles] .chatview__turn[data-role='user'][data-tail] > .chatview__msg::before {
+  left: auto;
+  right: calc(-1 * var(--bubble-tail));
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+/*
+ * A thumb held on a bubble opens its menu, so the phone's own text selection
+ * must not start under it. Code keeps its Copy button; the menu copies the rest.
+ */
+@media (pointer: coarse) {
+  .chatview[data-bubbles] .chatview__msg,
+  .chatview[data-bubbles] .chatview__msg * {
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+
+/* --- inside the bubble */
+
+.chatview[data-bubbles] .chatview__prompt,
+.chatview[data-bubbles] .chatview__prose {
+  line-height: 1.45;
+  color: var(--bubble-ink);
+}
+
+.chatview[data-bubbles] .chatview__prose .md__h {
+  color: var(--bubble-ink);
+}
+
+.chatview[data-bubbles] .chatview__speaker {
+  min-height: 0;
+  margin-bottom: -4px;
+}
+
+.chatview[data-bubbles] .chatview__speaker-dot {
+  display: none;
+}
+
+.chatview[data-bubbles] .chatview__speaker-name {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--bubble-name);
+}
+
+/* The time and ticks: over the corner of your bubble, on their own line under the agent's. */
+.chatview__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--bubble-meta);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chatview[data-bubbles] .chatview__bubble .chatview__meta {
+  position: absolute;
+  right: 9px;
+  bottom: 7px;
+  color: var(--bubble-meta-out);
+}
+
+/* Room on the last line of your words for the meta, so the words never run under it. */
+.chatview__meta-room {
+  display: inline-block;
+  width: calc(var(--meta-ch, 5) * 0.56em + var(--meta-ticks, 0) * 22px + 12px);
+  height: 1px;
+  vertical-align: baseline;
+}
+
+.chatview[data-bubbles] .chatview__meta-line {
+  display: flex;
+  justify-content: flex-end;
+  margin: calc(-1 * var(--chat-piece-gap) + 2px) -1px -2px 0;
+}
+
+.chatview__reading {
+  display: inline-flex;
+  color: var(--bubble-tick);
+}
+
+/* Folds sit inside the agent's bubble between hairlines of its own ink. */
+.chatview[data-bubbles] .chatview__fold {
+  border-color: color-mix(in srgb, var(--bubble-ink) 12%, transparent);
+}
+
+.chatview[data-bubbles] .chatview__fold-label {
+  color: var(--bubble-ink);
+}
+
+.chatview[data-bubbles] .chatview__fold-gist,
+.chatview[data-bubbles] .chatview__tool-gist,
+.chatview[data-bubbles] .chatview__tool-gist-full,
+.chatview[data-bubbles] .chatview__tool-note,
+.chatview[data-bubbles] .chatview__fold-label[data-mono='true'],
+.chatview[data-bubbles] .chatview__tool-name {
+  font-size: 13px;
+}
+
+.chatview[data-bubbles] .chatview__fold-gist,
+.chatview[data-bubbles] .chatview__tool-gist {
+  color: var(--bubble-meta);
+}
+
+.chatview[data-bubbles] .chatview__tool-flag {
+  height: 22px;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Tracked caps under 12px read badly at arm's length: sentence case, 13-14px. */
+.chatview[data-bubbles] .chatview__prose .md__lang {
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.chatview[data-bubbles] .chatview__prose .md__table th {
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.chatview[data-bubbles] .chatview__prose .md__copy-btn {
+  font-size: 14px;
+}
+
+/* --- working: a typing bubble; waiting: its pill, from the same edge */
+
+.chatview[data-bubbles] .chatview__busy-turn {
+  margin-top: 0;
+  padding: 0 var(--bubble-far) 0 calc(var(--bubble-side) + var(--bubble-tail));
+}
+
+.chatview[data-bubbles] .chatview__busy-turn:not([data-waiting]) > .chatview__busy-bubble {
+  position: relative;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 40px;
+  padding: 8px 14px 9px 12px;
+  background: var(--bubble-in);
+  border-radius: 12px;
+  box-shadow: 0 1px 0.5px var(--bubble-edge);
+  font-size: 15px;
+}
+
+.chatview[data-bubbles] .chatview__busy-turn[data-tail] > .chatview__busy-bubble {
+  border-top-left-radius: 0;
+}
+
+.chatview[data-bubbles] .chatview__busy-label {
+  color: var(--bubble-meta);
+}
+
+.chatview[data-bubbles] .chatview__busy-dots span {
+  background: var(--bubble-meta);
+}
+
+/* --- the cut and the quota: WhatsApp's centred system notes */
+
+.chatview[data-bubbles] .chatview__cut,
+.chatview[data-bubbles] .chatview__quota {
+  justify-content: center;
+  padding: 0 var(--p-4, 16px);
+}
+
+.chatview[data-bubbles] .chatview__cut::before,
+.chatview[data-bubbles] .chatview__cut::after,
+.chatview[data-bubbles] .chatview__quota::before,
+.chatview[data-bubbles] .chatview__quota::after {
+  display: none;
+}
+
+.chatview[data-bubbles] .chatview__cut-text,
+.chatview[data-bubbles] .chatview__quota-text {
+  max-width: 100%;
+  padding: 6px 12px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--bubble-meta);
+  background: var(--bubble-in);
+  border-radius: 8px;
+  box-shadow: 0 1px 0.5px var(--bubble-edge);
 }

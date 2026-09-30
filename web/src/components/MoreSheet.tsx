@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { WEB_FEATURE_PASSKEY, type WebPasskeyInfo } from '@shared/web'
 import { Icon } from '@/components/Icon'
-import { DECK_THEMES } from '../deck/theme'
+import { phoneThemeCore } from '../deck/theme'
 import { useDeskFacts } from '../lib/features'
 import {
   biometricName,
@@ -75,7 +75,7 @@ export function MoreSheet({
   const [scale, setScale] = useTextScale()
   const unlock = usePasskeyRow(open)
   const theme = useThemeChoice()
-  const themeCore = theme ? (DECK_THEMES.find((core) => core.id === theme.themeId) ?? null) : null
+  const themeCore = theme ? phoneThemeCore(theme.themeId) : null
 
   // Every opening starts on the list, reading the stored preference afresh —
   // the composer may have changed nothing, but another tab may have.

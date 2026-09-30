@@ -36,6 +36,7 @@ import '@/components/rail/GitSection.css'
 import './styles.css'
 
 import { App } from './App'
+import { paintStoredTheme } from './deck/theme'
 import { ChatPreview } from './components/ChatPreview'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Preview } from './components/Preview'
@@ -57,6 +58,13 @@ if (!host) throw new Error('index.html has no #root')
  * Lives for the tab; nothing unmounts it.
  */
 watchAppViewport()
+
+/*
+ * The stored theme, on the root before anything renders: the sign-in, PIN and
+ * Connecting screens come up in it rather than in Volt and then flipping, and
+ * the Android status bar (`theme-color`) matches from the first frame.
+ */
+paintStoredTheme()
 
 /*
  * Deliberately no <StrictMode>, for the same reason src/main.tsx gives: its

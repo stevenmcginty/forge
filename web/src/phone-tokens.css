@@ -110,6 +110,19 @@
   --p-agent-core: #fbffe8;
 }
 
+/*
+ * The text floor. The desktop's small sizes (src/theme/tokens.css: 10.5 /
+ * 11.5 / 12.5px, made for a mouse at 60cm) leak onto the phone wherever a
+ * shared sheet reads them — the answer card's eyebrow, clocks, counts. On
+ * the phone nothing goes under 13px, and the "md" step that carries words is
+ * the 14px label size.
+ */
+.app[data-mobile] {
+  --t-xs: 13px;
+  --t-sm: 13px;
+  --t-md: 14px;
+}
+
 :root[data-appearance='light'] .app[data-mobile],
 :root[data-appearance='light'] .bsheet-layer {
   --p-dict: #5a32d8;

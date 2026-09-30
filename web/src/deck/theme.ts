@@ -1,46 +1,94 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ThemeCore } from '@shared/types'
 import { BUILTIN_THEMES, DEFAULT_THEME_ID, applyTheme, findTheme, resolveTheme } from '@/theme/themes'
 import { rethemeTerminals } from '../lib/term'
+import {
+  PHONE_ONLY_THEMES,
+  followsSystem,
+  isPhoneOnlyTheme,
+  phoneOnlyCore,
+  resolvePhoneOnly,
+  systemDark
+} from '../lib/phone-themes'
 
 /**
- * The one setting the desktop-browser face has: which of the deck's themes it
- * wears. Read straight from src/theme/themes.ts — the same six cores and the
- * same resolver the desktop uses — so a theme added or retuned on the deck is
- * here on the next build without anyone copying a colour.
+ * The theme this browser wears. Read straight from src/theme/themes.ts — the
+ * same six cores and the same resolver the desktop uses — so a theme added or
+ * retuned on the deck is here on the next build without anyone copying a
+ * colour. The phone's Theme list adds its own (lib/phone-themes.ts: WhatsApp),
+ * which the deck's picker never lists.
  *
  * Remembered per browser (localStorage), never sent to the desktop: this is
  * how *this* window looks, not a setting of that machine.
  *
- * Only ever applied while the deck face is up. The phone face paints from
- * tokens.css exactly as it always has, so when a window crosses into the phone
- * face (a touch laptop folded small) every inline token this wrote is taken
- * back off the root.
+ * Painted before React's first render (`paintStoredTheme`, from main.tsx), so
+ * the sign-in, PIN and Connecting screens wear it too, and kept on the root by
+ * `useDeckTheme` from then on. The Android status bar follows through
+ * `<meta name="theme-color">`.
  */
 
 const KEY = 'forge-web-theme'
 
+/** The deck's picker: the desktop's six, nothing phone-only. */
 export const DECK_THEMES: ThemeCore[] = BUILTIN_THEMES
+
+/** The phone's Theme list: the six, then WhatsApp. */
+export const PHONE_THEMES: ThemeCore[] = [...BUILTIN_THEMES, ...PHONE_ONLY_THEMES]
+
+function known(id: string): boolean {
+  return BUILTIN_THEMES.some((t) => t.id === id) || isPhoneOnlyTheme(id)
+}
+
+/**
+ * A theme's core for a label or a swatch: a system-following theme answers
+ * with the half it wears right now. Null for an id nobody knows.
+ */
+export function phoneThemeCore(id: string): ThemeCore | null {
+  return phoneOnlyCore(id) ?? BUILTIN_THEMES.find((t) => t.id === id) ?? null
+}
 
 function stored(): string {
   try {
     const id = window.localStorage.getItem(KEY)
-    if (id && BUILTIN_THEMES.some((t) => t.id === id)) return id
+    if (id && known(id)) return id
   } catch {
     /* storage refused (private window): the default is still a theme */
   }
   return DEFAULT_THEME_ID
 }
 
-/** What this module last wrote onto the root, so it can be taken off again. */
-let applied: { id: string; tokens: string[] } | null = null
+/** What this module last wrote onto the root, so it can be changed or taken off again. */
+let applied: { key: string; tokens: string[] } | null = null
+
+/** The page's own chrome colours, as index.html writes them before any theme. */
+const PAGE_THEME_COLOR = '#0b0c0e'
+
+function setMeta(name: string, content: string): void {
+  const meta = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
+  if (meta && meta.content !== content) meta.content = content
+}
 
 function put(id: string): void {
-  if (applied?.id === id) return
-  const core = findTheme(id, [])
-  const tokens = applyTheme(core)
+  const phoneOnly = phoneOnlyCore(id)
+  const core = phoneOnly ?? findTheme(id, [])
+  const key = `${core.id}:${core.appearance}`
+  if (applied?.key === key) return
+  const root = document.documentElement
+  // The themes.ts path for the derived set, so the root reads exactly as the
+  // desktop's would; a phone-only theme's own values go over the top.
+  const tokens: Record<string, string> = phoneOnly ? resolvePhoneOnly(phoneOnly) : applyTheme(core)
+  if (phoneOnly) {
+    applyTheme(phoneOnly)
+    for (const [name, value] of Object.entries(tokens)) root.style.setProperty(`--${name}`, value)
+  }
+  // A token the last theme wrote that this one does not (WhatsApp's bubble
+  // colours) comes off, so the next theme falls back to its own.
+  const names = Object.keys(tokens)
+  for (const name of applied?.tokens ?? []) if (!(name in tokens)) root.style.removeProperty(`--${name}`)
+  setMeta('theme-color', tokens['bg-base'] ?? core.bg)
+  setMeta('color-scheme', core.appearance)
   const had = applied !== null
-  applied = { id: core.id, tokens: Object.keys(tokens) }
+  applied = { key, tokens: names }
   // Terminals cache their palette off the tokens; a change after they exist
   // has to be handed to them. The first apply happens before any mounts.
   if (had) rethemeTerminals()
@@ -52,8 +100,22 @@ function takeOff(): void {
   for (const name of applied.tokens) root.style.removeProperty(`--${name}`)
   delete root.dataset['theme']
   delete root.dataset['appearance']
+  setMeta('theme-color', PAGE_THEME_COLOR)
+  setMeta('color-scheme', 'dark')
   applied = null
   rethemeTerminals()
+}
+
+/**
+ * The stored theme, on the root before React renders anything: main.tsx calls
+ * this first, so no screen is ever drawn in Volt and then flipped.
+ */
+export function paintStoredTheme(): void {
+  try {
+    put(stored())
+  } catch {
+    /* a theme is decoration: the page still comes up in tokens.css's Volt */
+  }
 }
 
 /**
@@ -64,11 +126,22 @@ function takeOff(): void {
  */
 export function useDeckTheme(on: boolean): { themeId: string; setTheme: (id: string) => void } {
   const [themeId, setThemeId] = useState(stored)
+  // A theme that follows the phone re-wears itself when the phone flips.
+  const [, setScheme] = useState(systemDark)
+  const follows = on && followsSystem(themeId)
+  useEffect(() => {
+    if (!follows || !window.matchMedia) return undefined
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (): void => setScheme(systemDark())
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [follows])
+
   if (on) put(themeId)
   else takeOff()
 
   const setTheme = useCallback((id: string) => {
-    if (!BUILTIN_THEMES.some((t) => t.id === id)) return
+    if (!known(id)) return
     try {
       window.localStorage.setItem(KEY, id)
     } catch {
@@ -82,6 +155,6 @@ export function useDeckTheme(on: boolean): { themeId: string; setTheme: (id: str
 
 /** The three colours a swatch needs, resolved the way the theme itself resolves them. */
 export function swatchOf(core: ThemeCore): { bg: string; panel: string; accent: string } {
-  const t = resolveTheme(core)
+  const t = isPhoneOnlyTheme(core.id) ? resolvePhoneOnly(core) : resolveTheme(core)
   return { bg: t['bg-base'] ?? core.bg, panel: t['bg-panel'] ?? core.panel, accent: core.accent }
 }

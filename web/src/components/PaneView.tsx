@@ -12,11 +12,11 @@ import { allFilesFromDataTransfer, isImageFile, uploadFileChunks } from '../lib/
 import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { publishScreenPane, useComposerFocus, withdrawScreenPane, type ScreenPane } from '../lib/pane-screen'
-import { publishPaneReply, publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
+import { announcePaneSent } from '../lib/pane-sent'
+import { publishPaneStatus, publishPaneView, registerPaneViewSetter, type PaneFace } from '../lib/pane-status'
 import type { Transcript } from '@/lib/rich'
 import { mountTerm, type TermHost } from '../lib/term'
 import { screenTurns } from '../lib/screen-turns'
-import { replyText } from '../lib/speak'
 import { getClaudeView, setClaudeView } from '../lib/view-pref'
 import { AgentStateChip, OutputPulse } from '../deck/agents'
 import { useForge, useProfiles, useWorkspace } from '../state'
@@ -42,6 +42,12 @@ const TEXT_SIZE_SETTLE_MS = 300
 
 /** How far a finger may wander and still be a tap on a pane, not the start of a scroll. */
 const TAP_SLOP_PX = 10
+
+/** Send again's beat between the words and Enter: SessionComposer's SETTLE_BEFORE_ENTER_MS. */
+const SEND_AGAIN_ENTER_MS = 120
+
+/** Foreman is typing into the pane (SessionComposer's set): raw words from Send again would land in its work. */
+const FOREMAN_DRIVING: ReadonlySet<string> = new Set(['starting', 'driving', 'waiting'])
 
 /**
  * Put text on the clipboard. The async API where the page may use it; the old
@@ -508,7 +514,6 @@ function PaneViewInner({
     () => () => {
       publishPaneStatus(leaf.id, undefined)
       publishPaneView(leaf.id, undefined)
-      publishPaneReply(leaf.id, undefined)
     },
     [leaf.id]
   )
@@ -620,22 +625,36 @@ function PaneViewInner({
   }, [chatFeed.turns, transcript.blocks])
 
   /**
-   * The latest reply, for the status strip's "Read aloud" button — the same
-   * route as the status above, published here because the turns only exist
-   * from this point down. Cleared by the unmount cleanup with the others.
+   * Working, in the chat, is the same fact the status row shows (its
+   * `useAgentState` reads this pane's published `transcript.status`): the
+   * chat used to also guess it from the last turn — a prompt, or thinking
+   * with no words — and said "Thinking 42s" after an interrupt while the row
+   * below said Ready. The gap between a send and the pane showing busy is the
+   * sent bubble's single tick now.
    */
-  const reply = useMemo(() => replyText(effectiveTurns), [effectiveTurns])
-  useEffect(() => {
-    publishPaneReply(leaf.id, reply || undefined)
-  }, [leaf.id, reply])
+  const isChatBusy = Boolean(live && alive && transcript.status.busy)
+  const chatActivity = transcript.status.activity || undefined
 
-  const lastTurn = effectiveTurns.length > 0 ? effectiveTurns[effectiveTurns.length - 1] : null
-  const lastTurnIsUser = lastTurn?.role === 'user'
-  const lastTurnIsThinkingOnly =
-    lastTurn?.role === 'assistant' && !lastTurn.blocks.some((b) => b.kind === 'text')
-  const isAwaiting = Boolean(live && alive && (lastTurnIsUser || lastTurnIsThinkingOnly))
-  const isChatBusy = Boolean(live && (transcript.status.busy || isAwaiting))
-  const chatActivity = transcript.status.activity || (isAwaiting ? 'Thinking' : undefined)
+  /**
+   * "Send again" off a bubble in Chat: the composer's own route for words —
+   * the text (bracketed when it has lines), a claim answered so the words are
+   * in, a beat, then Enter as its own keystroke (SessionComposer `sendText`) —
+   * and the same "sent" cue, with the words, so the bubble shows at once.
+   */
+  const sendAgain = useCallback(
+    async (text: string) => {
+      const actions = actionsRef.current
+      actions.write(leaf.id, text.includes('\n') ? `\x1b[200~${text}\x1b[201~` : text)
+      await actions.request({ kind: 'claim', sessionId: leaf.id })
+      await new Promise<void>((resolve) => window.setTimeout(resolve, SEND_AGAIN_ENTER_MS))
+      actions.write(leaf.id, '\r')
+      announcePaneSent(leaf.id, text)
+      actions.claim(leaf.id)
+    },
+    [leaf.id]
+  )
+  const foremanDriving = Boolean(foreman && FOREMAN_DRIVING.has(foreman.status))
+  const canSendAgain = live && alive && !foremanDriving
 
   /**
    * Screen-read turns have no file to say what the agent is doing or how much
@@ -1280,6 +1299,8 @@ function PaneViewInner({
               quota={screenRead ? transcript.status.quota : undefined}
               agentName={profile?.name}
               asking={asking && live}
+              paneId={leaf.id}
+              onSendAgain={canSendAgain ? (text) => void sendAgain(text) : undefined}
             />
             {chatRefusal && effectiveTurns.length === 0 ? (
               <div className="pane__chat-note" role="note">

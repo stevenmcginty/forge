@@ -28,6 +28,18 @@
   border-radius: var(--p-r-pill);
 }
 
+/* A theme that follows the phone: its dark half over its light, on the diagonal. */
+.ptheme__half {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.ptheme__swatch[data-split='true'] .ptheme__accent {
+  top: 16%;
+  left: 16%;
+}
+
 .ptheme[data-current='true'] .bsrow__label {
   font-weight: 650;
 }
