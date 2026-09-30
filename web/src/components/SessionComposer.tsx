@@ -352,7 +352,7 @@ export function SessionComposer({
           await actions.request({ kind: 'claim', sessionId: paneId })
           await pause(SETTLE_BEFORE_ENTER_MS)
           actions.write(paneId, '\r')
-          announcePaneSent(paneId)
+          announcePaneSent(paneId, text)
         }
         takePane()
       } finally {
