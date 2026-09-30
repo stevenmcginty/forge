@@ -59,6 +59,13 @@ export interface ManifestSnapshot {
    */
   skills?: ManifestSkill[]
   tabs: ManifestTab[]
+  /**
+   * The terminals of every project not on screen. Only Forge Brain's
+   * get_app_state fills it in (src/lib/agenttools.ts): the manifest brains are
+   * sent their snapshot every turn, and this would grow that bill for panes
+   * they cannot reach. `panes: null` = none open there.
+   */
+  otherProjects?: Array<{ name: string; panes: Array<Pick<ManifestPane, 'name' | 'profileName' | 'status'>> | null }>
   paneCount: number
   maxSessions: number
   maxPanesPerTab: number
@@ -296,6 +303,14 @@ export function buildStateSection(s: ManifestSnapshot): string {
     for (const tab of s.tabs) for (const pane of tab.panes) lines.push(`- ${paneLine(pane)}`)
     lines.push('Each terminal has one name, the one on its tab. Use it verbatim as the send_prompt target.')
     lines.push('Numbers are not on screen: call terminals by name, never "terminal 2" or "tab 2".')
+  }
+  if (s.otherProjects?.length) {
+    // One line per project, its terminals run together: compact on purpose.
+    lines.push('terminals in the other projects (name · agent · state) — pass `project` to reach them:')
+    for (const p of s.otherProjects) {
+      const panes = p.panes?.map((pane) => [pane.name, pane.profileName, pane.status].join(' · ')).join('; ')
+      lines.push(`- ${p.name}: ${panes || 'none open'}`)
+    }
   }
   lines.push(
     `view: projects rail ${s.view.railCollapsed ? 'collapsed' : 'open'}, ` +
