@@ -143,14 +143,18 @@
 }
 
 /*
- * The card: low and to the right, where a right thumb rests, sized to the
- * drum rather than to the screen. A strip of the app stays in view on the
- * left: context, and somewhere to tap out.
+ * The card: to the right and centred up and down (Steve: "it needs to be in
+ * the middle"), sized to the drum rather than to the screen. Centred by
+ * margins, not a transform: the swipe-to-close drag writes the transform. A
+ * strip of the app stays in view on the left: context, and somewhere to tap out.
  */
 .pdraw {
   position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + var(--p-4));
   right: calc(env(safe-area-inset-right, 0px) + var(--p-2));
   bottom: calc(env(safe-area-inset-bottom, 0px) + var(--p-4));
+  height: fit-content;
+  margin-block: auto;
   display: flex;
   flex-direction: column;
   width: min(344px, calc(100% - 52px - env(safe-area-inset-right, 0px)));
