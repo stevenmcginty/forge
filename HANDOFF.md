@@ -1,5 +1,19 @@
 # Handoff
 
+## Forge mobile browser: WhatsApp chat + theme, second deep dive fixes (2026-09-30, pushed 7e0e8ca..5ab8f23; web only, no Forge restart)
+
+- **Names (Steve):** Forge desktop (Electron), Forge mobile browser (Forge Web phone face), Forge browser (Forge Web deck). "Mobile app" means Forge mobile browser, not the APK.
+- **Asked:** deep dive of the phone UI, then "just work on what needs changing". Steve's own wishes: chat like WhatsApp, and a WhatsApp colour theme. Keep the Listen capsule as it is; icons, not words. Decisions: A2 (WhatsApp theme is in the Theme list only, not the default), B1 (long-press a bubble for Copy / Read aloud / Send again).
+- **Built (gaffer foreman + crew, each job judged, typecheck 0, lint:hooks 0, scratch build 0):**
+  - W1 `4c803f0`: WhatsApp bubbles (left/right, time, one tick pending, two ticks landed), long-press menu, the "Copy" line under each message is gone, Chat has no clock of its own (status row is the one clock), WhatsApp theme (follows phone dark/light; phone-only, not in desktop or deck), theme applied before React draws + `theme-color`, 14 px text floor under `.app[data-mobile]`. `MoreSheet.tsx` touched for `phoneThemeCore`. `index.html` unchanged (CSP blocks an inline script), so the blank page before JS is still Volt dark.
+  - W2 `5bd571a` + W6 `5ab8f23`: Stop for every agent (parsed busy OR `state.busy`); mic always stays, a 44 px round Stop sits left of it while busy ("+" gives up its slot then); second Stop press after 3 s, never Ctrl+C; dictation over a typed draft is not auto-sent; a failed recording is kept with ↻ retry; words from a pane switch go to the old pane's draft.
+  - W3 `f232624`: answer card shows the diff / plan lines from the screen above the question (6 lines, expand), ~40dvh cap, no double send, option descriptions, eyebrow sentence case. The "??" cause was not reproduced; only a doubled trailing "?" is folded.
+  - W4 `8b09e32`: AgentBadge logos on phone tabs + state shapes (! / clock / tick), Done-unseen until the pane is opened (needs ≥ 8 s of work), split-tab "!" chip, shell panes get state, Read aloud button gone from the status row, bigger ⋯, reconnecting has its own shape, Paper fixes for the pane header / perm pill / active chip.
+  - W5 `7e0e8ca`: plain-word gates and refusals, "New account made for …" notice after a sign-up (correct credentials unchanged), "Look again" on a slow find, chat mirror Retry + 15 s timeout + remote-safe copy, error toasts stay 15 s or until tapped (confirmations 6 s), one banner at a time by priority (phone only).
+  - `795ab0e`: `announcePaneSent(paneId, text?, by)` carries the text so the pending bubble shows at once.
+- **Not seen on a real phone:** long-press on Android, TalkBack, a real typed/voice send (one bubble per send), the voice retry paths, the mic "stop" while busy. Steve tests live.
+- **Parked (Steve chose not now):** All-agents list, voice on chat tabs, code clean-up (dead TopBar third branch, Rail/SplitView branch, Panes.tsx, two sheet engines, two Composer form trees). Audit reports were in the session scratchpad `web-phone-audit/` (gone with the session).
+
 ## Browser: pane-edge comet and voice keys; phone comet timing (2026-09-29, pushed 8233699, 19dbc46 + fix)
 
 - **Phone comet timing:** Forge Web reaches the phone/browser only through a push (CI "Forge Web", ~40 s); edits in this checkout do NOT show. Settled at 2.0 s (agent 2.8 s) on the desk's lap curve (`web/src/phone-cues.css`; `SAFETY_MS` 3600 in `web/src/lib/pane-sent.ts`). Steve tried 0.9 s ("a little fast"), 3 s + a front-loaded curve ("way too fast"), 6 s ("way too slow"). Desktop app comet is 2.2 s, two laps (`src/components/DictationCue.css`).
