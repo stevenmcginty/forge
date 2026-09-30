@@ -1655,6 +1655,8 @@ export interface WebPushPayload {
   /** The extracted question line, when asking. */
   prompt?: string
   desktopName: string
+  /** When the desktop sent it (epoch ms), so a late-delivered push can tell its age. */
+  at?: number
 }
 
 /* ------------------------------------------------------------ server frames */

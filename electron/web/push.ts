@@ -54,13 +54,21 @@ function storeFile(): string {
 const PUSH_TTL_SECONDS = 600
 
 /**
- * At most one push per pane per this long.
+ * At most one push per pane per this long — the flap guard, and the only thing
+ * that holds a push back. See `shouldPush`.
  *
  * A pane can cross the attention line several times in a few seconds — an agent
  * prints, settles on a question, prints again, settles again — and every
  * crossing is real. Only the first is worth a buzz.
  */
-const PUSH_THROTTLE_MS = 30_000
+export const PUSH_THROTTLE_MS = 30_000
+
+/**
+ * How long to wait before the one retry a send gets. Long enough for a reset
+ * connection to be dialled again, short enough that the buzz still arrives
+ * while the question is the question. See `deliver`.
+ */
+export const PUSH_RETRY_MS = 1_500
 
 /** How often one endpoint's failures may be written to the log. */
 const COMPLAIN_EVERY_MS = 60_000
@@ -99,8 +107,8 @@ interface PushStore {
  */
 let store: PushStore | null = null
 
-/** sessionId → when it last pushed, and what it said. See `notify`. */
-const lastPush = new Map<string, { at: number; key: string }>()
+/** sessionId → when it last sent a push, and which state it was about. See `shouldPush`. */
+const lastPush = new Map<string, LastPush>()
 
 /** endpoint → when its last failure was logged. See `complain`. */
 const complained = new Map<string, number>()
@@ -300,24 +308,139 @@ export function list(): StoredSubscription[] {
   }
 }
 
+/** The last push a pane actually sent — kept per pane by `notify`. */
+export interface LastPush {
+  at: number
+  state: WebPushPayload['state']
+}
+
 /**
- * Send one payload to every subscription.
+ * Should this pane's news become a push at all?
  *
- * Two gates before anything goes out, both keyed on the pane rather than on the
- * subscription, because the thing being rate-limited is *the news*: a pane that
- * has already buzzed a phone in the last PUSH_THROTTLE_MS does not buzz it
- * again, and a pane repeating exactly what it last said — same state, same
- * question line, which is what a settle-print-settle cycle produces — says
- * nothing at all. Both are deliberately generous. The alternative to a missed
- * notification is a person who has switched notifications off.
+ * One rule, keyed on the pane rather than on the subscription because the thing
+ * being rate-limited is *the news*: nothing goes out within PUSH_THROTTLE_MS of
+ * the last push this pane sent, which is what a settle-print-settle flap
+ * produces. With one exception — a question arriving hard on the heels of a
+ * "done" still goes, because a pane that finished and then asked something has
+ * new news, and a question is the one kind somebody has to act on.
+ *
+ * What is deliberately *not* here any more is "the same thing as last time".
+ * That used to suppress a pane repeating its last state and question line, and
+ * it suppressed it forever: Claude Code asks "Do you want to proceed?" many
+ * times a session, and after the first one the phone never buzzed again. The
+ * same question a minute later is a new question — somebody answered the last
+ * one. Deliberately generous: the alternative to a missed notification is a
+ * person who has stopped trusting the notifications.
+ */
+export function shouldPush(last: LastPush | undefined, next: WebPushPayload['state'], now: number): boolean {
+  if (!last) return true
+  if (next === 'asking' && last.state === 'done') return true
+  return now - last.at >= PUSH_THROTTLE_MS
+}
+
+/** What the browsers say they are showing, as the host sees it when the news arrives. */
+export interface PushSeen {
+  /** The `hello` deviceIds of every browser that says Forge Web is on its screen. */
+  visibleDevices: ReadonlySet<string>
+  /** Whether any browser at all says so. */
+  anyVisible: boolean
+}
+
+/**
+ * Which subscriptions should buzz, device by device.
+ *
+ * A browser that is showing Forge Web right now already has the in-app cue —
+ * the `attention` frame lands on the page it is looking at — so a push to it is
+ * a second copy of the same news. Every *other* device buzzes. This used to be
+ * one global question ("is anybody looking?"), which meant a Forge Web tab left
+ * open on the desktop's own monitor silenced the phone in somebody's pocket.
+ *
+ * A subscription with no deviceId (one from before subscriptions carried it)
+ * cannot be matched to a socket, so it keeps the old global rule: it is skipped
+ * whenever any browser at all is on screen.
+ */
+export function pickTargets<T extends { deviceId: string }>(
+  subs: readonly T[],
+  seen: PushSeen
+): { targets: T[]; onScreen: number } {
+  const targets: T[] = []
+  let onScreen = 0
+  for (const sub of subs) {
+    const skip = sub.deviceId ? seen.visibleDevices.has(sub.deviceId) : seen.anyVisible
+    if (skip) onScreen++
+    else targets.push(sub)
+  }
+  return { targets, onScreen }
+}
+
+/** How one subscription's send ended. */
+export type PushOutcome = { kind: 'sent' } | { kind: 'dead' } | { kind: 'failed'; err: unknown }
+
+/**
+ * One send, with one retry for the failures that are about the moment.
+ *
+ * The desktop's log has shown sends dying with `read ECONNRESET`, `socket hang
+ * up` and "socket disconnected before secure TLS connection was established" —
+ * the connection to the push service dropping, not the push service refusing.
+ * Those carry no HTTP status at all, and they, 5xx and 429 get one more go
+ * after PUSH_RETRY_MS. 404/410 is the push service saying the subscription is
+ * gone for good (`dead`, which `notify` drops from the store); any other status
+ * is a refusal a retry would only repeat. Never throws. `send` and `wait` are
+ * parameters so the check can drive this without a network or a clock.
+ */
+export async function deliver(
+  send: () => Promise<unknown>,
+  wait: (ms: number) => Promise<void> = sleep
+): Promise<PushOutcome> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await send()
+      return { kind: 'sent' }
+    } catch (err) {
+      // `WebPushError` carries the push service's status code; a network
+      // failure is a plain Error with none.
+      const status = statusOf(err)
+      if (status === 404 || status === 410) return { kind: 'dead' }
+      const transient = status === null || status === 429 || status >= 500
+      if (attempt === 0 && transient) {
+        try {
+          await wait(PUSH_RETRY_MS)
+        } catch {
+          /* a wait that fails is still a wait over */
+        }
+        continue
+      }
+      return { kind: 'failed', err }
+    }
+  }
+}
+
+function statusOf(err: unknown): number | null {
+  const raw = Number((err as { statusCode?: unknown } | null)?.statusCode)
+  return Number.isFinite(raw) && raw > 0 ? raw : null
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Send one payload to every subscription that should hear it.
+ *
+ * `shouldPush` decides whether the pane's news goes out at all, and
+ * `pickTargets` decides who hears it, from `seen` — what the browsers say they
+ * are showing. The pane's last push is recorded only when some subscription was
+ * actually targeted: news held back because every device was already showing
+ * Forge is news nobody was buzzed about, and it must not hold back the next.
  *
  * The sends themselves are concurrent and independently settled: one dead
  * endpoint must not stop the phone that is actually in somebody's hand from
- * being told. 404 and 410 are the push service saying the subscription is gone
- * for good, and those are the only failures that change the store; everything
- * else is transient by assumption and the subscription is kept.
+ * being told. Each gets `deliver`'s one retry. 404 and 410 are the only
+ * failures that change the store; everything else is transient by assumption
+ * and the subscription is kept. One line in the log says what happened, so
+ * "did the push go out?" has an answer.
  */
-export async function notify(payload: WebPushPayload): Promise<void> {
+export async function notify(payload: WebPushPayload, seen: PushSeen): Promise<void> {
   let state: PushStore
   try {
     state = loaded()
@@ -326,11 +449,11 @@ export async function notify(payload: WebPushPayload): Promise<void> {
   }
   if (state.subscriptions.length === 0) return
 
-  const key = `${payload.state} ${payload.prompt ?? ''}`
   const now = Date.now()
-  const last = lastPush.get(payload.sessionId)
-  if (last && (last.key === key || now - last.at < PUSH_THROTTLE_MS)) return
-  lastPush.set(payload.sessionId, { at: now, key })
+  if (!shouldPush(lastPush.get(payload.sessionId), payload.state, now)) return
+  const { targets, onScreen } = pickTargets(state.subscriptions, seen)
+  if (targets.length === 0) return
+  lastPush.set(payload.sessionId, { at: now, state: payload.state })
 
   const body = JSON.stringify(payload)
   const options = {
@@ -344,22 +467,25 @@ export async function notify(payload: WebPushPayload): Promise<void> {
   }
 
   const dead: string[] = []
+  let sent = 0
+  let failed = 0
   await Promise.allSettled(
-    state.subscriptions.map(async (sub) => {
-      try {
-        await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, body, options)
-      } catch (err) {
-        // `WebPushError` carries the push service's status code. 404/410 is the
-        // one answer that is about the *subscription* rather than the moment.
-        const status = Number((err as { statusCode?: unknown })?.statusCode)
-        if (status === 404 || status === 410) {
-          dead.push(sub.endpoint)
-          return
-        }
-        complain(sub.endpoint, err)
+    targets.map(async (sub) => {
+      const outcome = await deliver(() =>
+        webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, body, options)
+      )
+      if (outcome.kind === 'sent') sent++
+      else if (outcome.kind === 'dead') dead.push(sub.endpoint)
+      else {
+        failed++
+        complain(sub.endpoint, outcome.err)
       }
     })
   )
+
+  // The pane's title and counts only — never an endpoint or a key.
+  const gone = dead.length > 0 ? `, gone ${dead.length}` : ''
+  console.log(`[web-push] ${payload.state} "${payload.title}": sent ${sent}, on screen ${onScreen}, failed ${failed}${gone}`)
 
   if (dead.length > 0) {
     state.subscriptions = state.subscriptions.filter((s) => !dead.includes(s.endpoint))
