@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { useApp, type SettingsSection } from '@/state/AppState'
+import { BrainSettings } from '../brain/BrainSettings'
+import { BRAIN_SETTINGS } from '../brain/BrainPanel'
 import { Icon, type IconName } from '../Icon'
 import { AccountSection } from './AccountSection'
 import { AlwaysOnSection } from './AlwaysOnSection'
@@ -31,7 +33,7 @@ import './SettingsPage.css'
  */
 
 /**
- * Nine groups in the sidebar, in plain words, with Voice & Agent first. Each
+ * Ten groups in the sidebar, in plain words, with Voice & Agent first. Each
  * group is one scrolling page of one or more parts, and every old section id
  * is a part — so `openSettings('models')` (the voice agent, the hub's "add a
  * key" links, onboarding) still lands on the right card, the Keys part of
@@ -60,6 +62,13 @@ const GROUPS: Group[] = [
     icon: 'voice',
     blurb: 'the main agent, dictation, its voice',
     parts: [{ id: 'voice', label: 'Voice & Agent', Body: VoiceSection }]
+  },
+  {
+    id: BRAIN_SETTINGS,
+    label: 'Forge Brain',
+    icon: 'sparkle',
+    blurb: 'one agent for all of Forge',
+    parts: [{ id: BRAIN_SETTINGS, label: 'Forge Brain', Body: BrainSettings }]
   },
   {
     id: 'agents',
