@@ -135,7 +135,8 @@ export function AnswerCard({
   digits,
   live,
   onWrite,
-  onShowTerminal
+  onShowTerminal,
+  digitKeys = false
 }: {
   paneId: string
   /** Who is asking — "Claude Code". */
@@ -150,6 +151,11 @@ export function AnswerCard({
   onWrite: (data: string) => void
   /** Absent when the terminal is already the face on screen. */
   onShowTerminal?: () => void
+  /**
+   * A keyboard's 1–9 pick the numbered answer while the card shows (the deck).
+   * Never a digit typed into a text box or a terminal: those are words.
+   */
+  digitKeys?: boolean
 }): ReactNode {
   // The screen is read when the card appears and once more a beat later: the
   // push that raised the question can land before this browser's copy of the
@@ -199,6 +205,25 @@ export function AnswerCard({
 
   /** The keys that land on option `index` (0-based) of the parsed menu. */
   const keysFor = (index: number): string[] => answerKeys(ask, index, digits)
+
+  // The newest pick for the key listener, which is attached once.
+  const pickDigit = useRef<(n: number) => boolean>(() => false)
+  pickDigit.current = (n) => {
+    const index = ask.options.findIndex((option) => option.n === n)
+    if (index < 0) return false
+    void choose(`n${n}`, keysFor(index))
+    return true
+  }
+  useEffect(() => {
+    if (!digitKeys) return undefined
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented || e.repeat || e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return
+      if (!/^[1-9]$/.test(e.key) || typesWords(e.target) || typesWords(document.activeElement)) return
+      if (pickDigit.current(Number(e.key))) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [digitKeys])
 
   const question = ask.question || prompt.trim() || `${agentName} needs an answer.`
   const disabled = sent !== null || !live
@@ -283,11 +308,34 @@ export function AnswerCard({
           </button>
         ) : null}
         <span className="answer__hint">
-          {!buttons ? 'Type or say your reply' : prose ? 'or type / say your reply' : 'or say your answer'}
+          {!buttons
+            ? 'Type or say your reply'
+            : digitKeys && ask.options.length
+              ? `${pressHint(ask)}, ${prose ? 'or type / say your reply' : 'or say your answer'}`
+              : prose
+                ? 'or type / say your reply'
+                : 'or say your answer'}
         </span>
       </div>
     </section>
   )
+}
+
+/** "Press 1–3": the digits that answer, first to last. */
+function pressHint(ask: ParsedAsk): string {
+  const first = ask.options[0]!.n
+  const last = ask.options[ask.options.length - 1]!.n
+  return first === last ? `Press ${first}` : `Press ${first}–${last}`
+}
+
+/**
+ * Where a keystroke is words, not a pick: a text box, a terminal (xterm's own
+ * textarea), anything editable, or an open dialog or menu.
+ */
+function typesWords(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  if (target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .xterm')) return true
+  return Boolean(target.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
 }
 
 /** The tapped row's mark: a shape, so "this one went" never rests on the dimming alone. */

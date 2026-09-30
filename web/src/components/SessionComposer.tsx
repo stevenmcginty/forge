@@ -956,12 +956,13 @@ export function SessionComposer({
 
   /*
    * The phone's round Stop sits just left of the mic while an agent works — any
-   * agent the desktop reads busy, not only one whose screen is parsed. A shell
-   * keeps the key row's Ctrl and Esc instead. Not while
+   * agent the desktop reads busy, not only one whose screen is parsed. The
+   * deck's bar has the same Stop, a pill beside its mic. A shell keeps the key
+   * row's Ctrl and Esc instead. Not while
    * the pane is asking: the answer card is how that gets answered, and Esc
    * there is "No".
    */
-  const canStop = mobile && isAgent && canType && busy && !asking
+  const canStop = (mobile || face === 'deck') && isAgent && canType && busy && !asking
 
   /*
    * A pane whose process has gone: it can be started again in the same place
@@ -1080,7 +1081,7 @@ export function SessionComposer({
           chip={chip}
         />
       ) : null}
-      {mobile && asking && paneId ? (
+      {(mobile || face === 'deck') && asking && paneId ? (
         <AnswerCard
           // A new question is a new card: the sent state belongs to the old one.
           key={`${paneId}\n${prompt}`}
@@ -1091,6 +1092,7 @@ export function SessionComposer({
           live={canType}
           onWrite={sendRaw}
           onShowTerminal={activeView !== 'term' ? () => requestPaneView(paneId, 'term') : undefined}
+          digitKeys={face === 'deck'}
         />
       ) : null}
       {dead ? (

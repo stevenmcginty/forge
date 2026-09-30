@@ -100,7 +100,7 @@ export function usePhonePaneState(paneId: string | null): PhonePaneState {
 const DONE_MIN_WORK_MS = 8000
 /** How long a finished pane says Done once you are looking at it. */
 const SEEN_HOLD_MS = 6000
-const DONE_UNSEEN_TITLE = 'Finished while you were not looking'
+export const DONE_UNSEEN_TITLE = 'Finished while you were not looking'
 
 const NO_PANES: readonly string[] = []
 /** When each pane was first seen working, by the busy frames. */
@@ -168,8 +168,9 @@ function observeDone(busy: ReadonlySet<string>, live: boolean, onScreen: string 
 }
 
 /**
- * Keeps the "done, unseen" marks. Mounted once, where the phone knows which
- * pane is on screen (the tab strip): `onScreen` is the active tab's pane.
+ * Keeps the "done, unseen" marks. Mounted once per face, where it knows which
+ * pane is on screen: the phone's tab strip, the deck's dock (deck/agents.tsx
+ * `useTrackDeckDone`, the focused pane). `onScreen` is the active tab's pane.
  */
 export function useTrackDone(onScreen: string | null): void {
   const forge = useForgeOptional()?.state ?? null

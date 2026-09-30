@@ -4,6 +4,7 @@ import { resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import type { AgentProfile, PaneLeaf, TerminalTab } from '@shared/types'
 import { paneNameInTab } from '@shared/workspace'
+import { DONE_UNSEEN_TITLE, useDoneUnseen, useTrackDone } from '../lib/pane-state'
 import { usePaneDone, usePaneStatus } from '../lib/pane-status'
 import { useForge, useForgeOptional, useProfiles, useWorkspace } from '../state'
 
@@ -109,6 +110,30 @@ export function useAgentState(paneId: string | null): { state: DeckAgentState; w
   return say('idle')
 }
 
+const NO_PANES: readonly string[] = []
+
+/**
+ * The deck's reading of a pane: `useAgentState`, plus the phone's "done,
+ * unseen" rule (lib/pane-state.ts) — a pane that finished a long stretch while
+ * it was not the focused one, or while this page was hidden, keeps its Done
+ * tick until it has been focused, where the six-second Done alone would pass
+ * unseen. The same word, shape and title the phone's status line gives it.
+ */
+export function useDeckAgentState(paneId: string | null): { state: DeckAgentState; word: string; detail: string } {
+  const agent = useAgentState(paneId)
+  const unseen = useDoneUnseen(paneId ? [paneId] : NO_PANES)
+  return unseen && agent.state === 'idle' ? { state: 'done', word: STATE_WORD.done, detail: DONE_UNSEEN_TITLE } : agent
+}
+
+/**
+ * Keeps the deck's "done, unseen" marks, with the focused pane — the one the
+ * bar talks to — as the pane on screen. Mounted once, in the dock.
+ */
+export function useTrackDeckDone(): void {
+  const { current } = useDeckAgents()
+  useTrackDone(current?.leaf.id ?? null)
+}
+
 /**
  * The shapes, drawn as the desktop's StateGlyph draws them: filled dot, diamond,
  * tick, ring, bar — distinct in outline alone. The two link states are this
@@ -154,7 +179,7 @@ export function AgentStateGlyph({ state }: { state: DeckAgentState }): ReactNode
 
 /** The chip: shape, word, and — for a working agent — what it is doing, in its title. */
 export function AgentStateChip({ paneId, compact = false }: { paneId: string; compact?: boolean }): ReactNode {
-  const { state, word, detail } = useAgentState(paneId)
+  const { state, word, detail } = useDeckAgentState(paneId)
   return (
     <span className="dk-schip" data-state={state} data-compact={compact ? 'true' : undefined} title={detail}>
       <AgentStateGlyph state={state} />

@@ -50,7 +50,7 @@ import { FACES } from '../components/StatusLine'
 import { requestPaneView, usePaneView } from '../lib/pane-status'
 import { getClaudeView } from '../lib/view-pref'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
-import { AgentStateChip, bringForward, deckAgent, OutputPulse, type DeckAgent } from './agents'
+import { AgentStateChip, bringForward, deckAgent, OutputPulse, useTrackDeckDone, type DeckAgent } from './agents'
 import { composerField, composerOpen } from './composer'
 import { useDeckDictation } from './dictation'
 import type { BarPlace, DeckView } from './view'
@@ -548,6 +548,8 @@ export function DeckDock({ place }: { place: BarPlace }): ReactNode {
   const composing = !!project && hasTab && !githubMode
   const dockRef = useRef<HTMLDivElement | null>(null)
   useDockClearance(dockRef, place === 'bottom')
+  // Done waits for you: a pane that finished while not focused keeps its tick.
+  useTrackDeckDone()
 
   if (place === 'top') return composing ? <FloatingComposer /> : null
 
@@ -617,6 +619,11 @@ const SENT_GRACE_MS = 8000
 function FloatingComposer(): ReactNode {
   const open = composerOpen.use()
   const dictation = useDeckDictation()
+  const { state } = useForge()
+  const workspace = useWorkspace()
+  const front = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0]
+  /** The pane the words go to is asking: its answer card rides in here, so the card is up. */
+  const asking = Boolean(front?.activePaneId && state.asking.has(front.activePaneId))
   const [hasDraft, setHasDraft] = useState(false)
   const sentAt = useRef(0)
   const ref = useRef<HTMLDivElement | null>(null)
@@ -646,7 +653,7 @@ function FloatingComposer(): ReactNode {
   }, [dictation])
 
   const busy = dictation !== 'idle'
-  const shown = open || hasDraft
+  const shown = open || hasDraft || asking
 
   // A click elsewhere puts an empty, idle box away — not one holding words.
   useEffect(() => {

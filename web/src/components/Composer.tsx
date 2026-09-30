@@ -1087,19 +1087,30 @@ export function Composer({
               <Key label="Enter" onClick={() => onRaw('\r')} disabled={disabled} title="Enter" />
             ) : null}
           </div>
+          {/* The deck's bar: a pill beside the mic, never in its place, so a
+              follow-up can still be dictated. Stopping takes no press until,
+              a few seconds on with the agent still working, it offers one
+              more Esc — the phone's rule, said here in words. */}
           {micPrimary && phase !== 'idle' ? null : stopMode ? (
             <button
               type="button"
               className="composer__send"
               data-draft="false"
-              data-stop={stopping ? 'stopping' : 'true'}
-              disabled={!ready}
+              data-stop={stopAgain ? 'again' : stopping ? 'stopping' : 'true'}
+              disabled={!ready || (stopping && !stopAgain)}
               onClick={onStop}
-              aria-label={stopping ? 'Stopping' : 'Stop'}
-              title={stopping ? 'Stopping… — tap to send Esc again' : 'Stop — interrupt the agent (Esc)'}
+              aria-label={stopAgain ? 'Stop again' : stopping ? 'Stopping' : 'Stop'}
+              title={
+                stopAgain
+                  ? 'Still working — click to send Esc again'
+                  : stopping
+                    ? 'Stopping…'
+                    : 'Stop — interrupt the agent (Esc)'
+              }
             >
+              {stopping ? <span className="composer__stop-ring" aria-hidden="true" /> : null}
               <span className="composer__stop-square" aria-hidden="true" />
-              <span>{stopping ? 'Stopping…' : 'Stop'}</span>
+              <span>{stopAgain ? 'Stop again' : stopping ? 'Stopping…' : 'Stop'}</span>
             </button>
           ) : micPrimary ? null : (
             <button

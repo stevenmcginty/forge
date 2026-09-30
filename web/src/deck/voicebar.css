@@ -160,10 +160,87 @@
   border-color: var(--glass-line-strong);
 }
 
+/*
+ * Stop, while the agent the bar aims at works: a pill just left of the mic,
+ * which stays — a follow-up can still be dictated. Every state a shape and a
+ * word: a square and STOP; a turning ring and STOPPING… (no press taken); a
+ * still ring and STOP AGAIN once, a few seconds on, one more Esc is offered.
+ */
 .app[data-face='deck'] .dk-composer .composer__send[data-stop] {
+  grid-area: stop;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   width: auto;
-  padding: 0 14px;
+  padding: 0 14px 0 11px;
+  gap: 7px;
   font-size: 11px;
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid var(--glass-line-strong);
+}
+
+/* Full ink, over the empty box's quieter Enter rule: Stop is the live act. */
+.app[data-face='deck'] .dk-composer .composer__send[data-stop]:not(:disabled) {
+  color: var(--vb-ink);
+  border-color: var(--glass-line-strong);
+}
+
+.app[data-face='deck'] .dk-composer .composer__send[data-stop]:not(:disabled):hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.app[data-face='deck'] .dk-composer .composer__send[data-stop]:disabled {
+  opacity: 1;
+  color: var(--vb-ink-2);
+  cursor: default;
+}
+
+.app[data-face='deck'] .dk-composer .composer__send[data-stop] .composer__stop-square {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.app[data-face='deck'] .dk-composer .composer__send[data-stop] .composer__stop-ring {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--r-full);
+  border: 2px solid var(--glass-line-strong);
+  border-top-color: currentColor;
+  animation: vb-turn 1.1s linear infinite;
+}
+
+/* The ring takes the square's place: the shape says which state it is. */
+.app[data-face='deck'] .dk-composer .composer__send[data-stop]:not([data-stop='true']) .composer__stop-square {
+  display: none;
+}
+
+.app[data-face='deck'] .dk-composer .composer__send[data-stop='again'] .composer__stop-ring {
+  border-color: currentColor;
+  animation: none;
+}
+
+/* The bar makes room for Stop between attach and the mic. */
+.app[data-face='deck'] .dk-composer .composer__card:has(> .composer__tools > .composer__send[data-stop]) {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas:
+    'files files files files files'
+    'sub sub sub sub sub'
+    'lead field attach stop send';
+}
+
+.app[data-face='deck'] .dk-composer .composer__card:has(> .dk-apick-slot):has(> .composer__tools > .composer__send[data-stop]) {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-areas:
+    'files files files files files files'
+    'sub sub sub sub sub sub'
+    'lead field pick attach stop send'
+    'strip strip strip strip strip strip';
 }
 
 .app[data-face='deck'] .dk-composer :is(.composer__icon, .composer__send):focus-visible {
@@ -1667,4 +1744,16 @@
     .dk-micword
   ) {
   animation: none !important;
+}
+
+/* Stopping's ring slows rather than stops: the word says it too, but the turn
+   is what tells it from the still ring of Stop again. */
+@media (prefers-reduced-motion: reduce) {
+  .app[data-face='deck'] .dk-composer .composer__send[data-stop='stopping'] .composer__stop-ring {
+    animation-duration: 3s;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-face='deck'] .dk-composer .composer__send[data-stop='stopping'] .composer__stop-ring {
+  animation-duration: 3s;
 }
