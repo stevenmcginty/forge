@@ -1,3 +1,5 @@
+import { isBrainProject } from './brain'
+
 /**
  * Order for every project picker (desktop sheet, Forge Web, the phone list).
  *
@@ -39,9 +41,14 @@ export function projectPickerBucket(tier: number): 'live' | 'pinned' | 'rest' {
 /**
  * Lower tier first. The same tier keeps the saved order, so a drag inside one
  * group still sticks and two quiet folders do not swap on their own.
+ *
+ * Forge Brain's hidden project is never drawn in a picker. Main already keeps
+ * it out of every list it hands out (electron/store.ts `getProjects`); this is
+ * the belt to that brace.
  */
 export function sortProjectsForPicker<T>(projects: readonly T[], facts: (project: T) => PickerFacts): T[] {
   return projects
+    .filter((project) => !isBrainProject(project))
     .map((project, index) => ({ project, index, tier: projectPickerTier(facts(project)) }))
     .sort((a, b) => a.tier - b.tier || a.index - b.index)
     .map((row) => row.project)

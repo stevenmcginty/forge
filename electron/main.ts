@@ -75,6 +75,7 @@ import {
 } from './browser-panes/ipc'
 import { disposeChatPanes, pruneChatViews, registerChatPanes, setChatWindow } from './chat-panes/ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
+import { disposeBrainIpc, registerBrainHandlers, setBrainTarget } from './brain/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import {
   applyMobileSettings,
@@ -484,6 +485,7 @@ function createWindow(): void {
     // after the window that could switch it off has gone is the one state this
     // feature must never be in.
     setForemanTarget(null)
+    setBrainTarget(null)
     // Takes the overlay down with it. A topmost pill wired to a renderer that
     // no longer exists would be a dead button floating over every other app,
     // and — because it is skipTaskbar — one with no obvious way to close it.
@@ -537,6 +539,7 @@ function createWindow(): void {
   watchFocusForSourceUpdate(mainWindow)
   setVoiceAgentTarget(mainWindow)
   setForemanTarget(mainWindow)
+  setBrainTarget(mainWindow)
   setBrowserWindow(mainWindow)
   setChatWindow(mainWindow)
   // The main window is the overlay's *host*: it holds the one voice agent, so
@@ -858,7 +861,12 @@ const MAIN_OWNED_SETTINGS = [
   'remoteYesEnabled',
   'remoteYesPassword',
   'remoteYesAddress',
-  'remoteYesRustdeskId'
+  'remoteYesRustdeskId',
+  // Forge Brain's switch and engine change only through window.forge.brain and
+  // Forge Web's brain ops (electron/brain/ipc.ts), which also start and stop
+  // the pane. A stale renderer copy posted back must not turn it off.
+  'brainEnabled',
+  'brainEngine'
 ] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
@@ -1488,6 +1496,9 @@ void app
       // `claude` login until a pane is actually toggled on — see
       // electron/foreman/host.ts.
       registerForemanHandlers()
+      // Forge Brain: handlers, and its pane only when settings say it is on —
+      // off (the default) starts nothing. See electron/brain/host.ts.
+      registerBrainHandlers()
       // Off by default: this reads settings, sees `companionEnabled: false`, and
       // returns without touching the network or a credential.
       registerCompanionHandlers()
@@ -1628,6 +1639,9 @@ app.on('before-quit', () => {
   }
   safely('stopHeartbeat', stopHeartbeat)
   safely('disposePresence', disposePresence)
+  // Before the PTY host: the brain lets go of its link and timers; the PTY
+  // host's own disposal then kills its pane with every other.
+  safely('disposeBrain', disposeBrainIpc)
   safely('disposePtyHost', disposePtyHost)
   safely('disposeShotsWatcher', disposeShotsWatcher)
   safely('disposeHub', disposeHub)

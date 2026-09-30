@@ -10,6 +10,7 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
+import { isBrainEngine, isBrainProject } from '@shared/brain'
 import { defaultVoiceMenu, isAgentBrainId, migrateAgentBrain, migrateCodexClaudeModel, normaliseVoiceMenu } from '@shared/agent-brain'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
@@ -315,6 +316,10 @@ function defaultSettings(): Settings {
     dictateAutoSend: false,
     // Forge-launched Claude panes cannot reach Claude-in-Chrome / Playwright.
     agentsForgeBrowserOnly: true,
+    // Forge Brain: off until Steve turns it on; Claude when he does.
+    brainEnabled: false,
+    brainEngine: 'claude',
+    brainIntroSeen: false,
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -894,6 +899,11 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
         : DEFAULT_SETTINGS.agentIdleTimeoutMs,
     dictateAutoSend: s.dictateAutoSend === true,
     agentsForgeBrowserOnly: s.agentsForgeBrowserOnly === undefined ? DEFAULT_SETTINGS.agentsForgeBrowserOnly : Boolean(s.agentsForgeBrowserOnly),
+    // Strictly `true`: a settings.json from before the brain existed has no
+    // field, and every existing user stays off until they turn it on.
+    brainEnabled: s.brainEnabled === true,
+    brainEngine: isBrainEngine(s.brainEngine) ? s.brainEngine : DEFAULT_SETTINGS.brainEngine,
+    brainIntroSeen: s.brainIntroSeen === true,
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()
@@ -1214,7 +1224,8 @@ export function setSettings(patch: Partial<Settings>): Settings {
   return settingsCache
 }
 
-export function getProjects(): Project[] {
+/** Every project on disk, Forge Brain's hidden one included. */
+export function getAllProjects(): Project[] {
   if (!projectsCache) {
     const raw = readJson<Project[]>('projects.json', [])
     projectsCache = Array.isArray(raw) ? raw.filter((p) => p && p.id && p.path) : []
@@ -1222,7 +1233,41 @@ export function getProjects(): Project[] {
   return projectsCache
 }
 
+/**
+ * The projects Steve has — every list, rail, picker and Forge Web frame is
+ * built from this. Forge Brain's hidden project (`kind: 'brain'`) is left out
+ * here, at the source, so nothing downstream has to remember to filter it.
+ * Main code that must find the brain's pane too uses `getAllProjects`.
+ */
+export function getProjects(): Project[] {
+  return getAllProjects().filter((p) => !isBrainProject(p))
+}
+
+/** Forge Brain's hidden project, or null when it has never been made. */
+export function getBrainProject(): Project | null {
+  return getAllProjects().find((p) => isBrainProject(p)) ?? null
+}
+
+/** Save (or with null, drop) Forge Brain's hidden project. Every visible project is kept as it is. */
+export function setBrainProject(project: Project | null): void {
+  const visible = getProjects()
+  writeProjects(project ? [...visible, { ...project, kind: 'brain' }] : visible)
+}
+
+/**
+ * Save the visible project list — the renderer's whole list, which never holds
+ * the brain's project. The hidden one is carried over from what is on disk, and
+ * its layout is not a layout "for a project that no longer exists". Returns the
+ * visible list, so the renderer is never handed the hidden one.
+ */
 export function setProjects(projects: Project[]): Project[] {
+  const visible = projects.filter((p) => !isBrainProject(p))
+  const hidden = getAllProjects().filter((p) => isBrainProject(p))
+  writeProjects([...visible, ...hidden])
+  return visible
+}
+
+function writeProjects(projects: Project[]): void {
   projectsCache = projects
   writeJson('projects.json', projects)
   // Drop layout files for projects that no longer exist.
@@ -1236,7 +1281,6 @@ export function setProjects(projects: Project[]): Project[] {
   } catch {
     /* best effort */
   }
-  return projects
 }
 
 function layoutFile(projectId: string): string {

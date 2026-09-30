@@ -24,6 +24,7 @@ import { gitRemoteOrigin, stripRemoteCredentials } from './git-remote'
 import { canvasEnvFor } from './hub-ipc'
 import { browserPaneEnv } from './browser-panes/env'
 import { layoutEngine } from './layout-engine'
+import { applyBrainMcp, brainCreateRequest, brainEnv } from './brain/launch'
 import type { ChatRelayTarget } from './chat-relay'
 
 /**
@@ -867,234 +868,249 @@ function missingZaiKeyNotice(): string {
   ].join('')
 }
 
-export function registerPtyHandlers(): void {
-  ipcMain.handle(IPC.ptyCreate, (_e, req: CreateSessionRequest): CreateSessionResult => {
-    // The one place every pane's launch command passes through, and therefore
-    // where all three bootstrap transforms live. Order matters: Remote Control
-    // adds `--remote-control '<name>'`, then the session flag names the
-    // conversation, then the bridge appends `--mcp-config`, whose value is
-    // variadic and so has to stay last.
-    const projectName = String(req?.projectName ?? '')
-    const paneTitle = String(req?.paneTitle ?? '')
-    const cwd = String(req?.cwd ?? '')
-    const plan = applyClaudeSession(
-      applyRemoteControl(req?.bootstrapCommand ?? '', {
-        projectName,
-        paneTitle,
-        ...(req?.remoteControl === false ? { remoteControl: false as const } : {})
-      }),
-      {
-        sessionId: typeof req?.sessionId === 'string' ? req.sessionId : undefined,
-        cwd
-      }
-    )
-    // Two transforms, in this order: `--mcp-config` is variadic and has to stay
-    // last on Claude's command line, and only Codex ever matches the second one.
-    // "Agents use Forge's browser only" goes first: --disallowedTools is
-    // variadic too, and --mcp-config has to stay last.
-    const bootstrapCommand = applyShareBridge(
-      applyMcpBridge(applyForgeBrowserOnly(plan.command, getSettings().agentsForgeBrowserOnly !== false))
-    )
-    const settings = getSettings()
-
-    // The pane is about to type a command into a shell. If the program behind
-    // it is not on this machine, typing it produces PowerShell's "not
-    // recognized" — so it is not typed, and the pane says why instead.
-    // `checkableExe` returns null for anything PATH cannot settle (a quoted
-    // path, a pipeline), and those launch exactly as before.
-    const exe = checkableExe(bootstrapCommand)
-    const missingExe = exe !== null && whichCommand(exe) === null ? exe : null
-    // A CLI Forge has a catalogue row for gets its install command quoted in
-    // the notice; one it has never heard of gets the rest of the notice anyway.
-    const tool = missingExe ? toolSpecForCommand(bootstrapCommand, getSettings().customTools) : null
-    const notice = missingExe ? missingCommandNotice(missingExe, tool ? installCommandFor(tool) : null) : null
-
-    // Gemini CLI's individual-account OAuth route now returns UNSUPPORTED_CLIENT.
-    // If Forge has a Gemini API key, pass it only to Gemini panes and select the
-    // current stable Flash model. Other panes never receive the key.
-    // A still-encoded key (no secrets codec in this process) is left out, like
-    // no key, rather than handing the pane ciphertext — see bridge/mcp-config.ts.
-    const geminiKey = settings.geminiKey.trim()
-    if (exe?.toLowerCase() === 'gemini' && geminiKey.startsWith('enc:')) {
-      console.error('[pty] the Gemini key is still encrypted (no secrets codec in this process); GEMINI_API_KEY left out')
-    }
-    const geminiEnv =
-      exe?.toLowerCase() === 'gemini' && geminiKey && !geminiKey.startsWith('enc:')
-        ? { GEMINI_API_KEY: geminiKey, GEMINI_MODEL: GEMINI_CLI_MODEL }
-        : undefined
-
-    // GLM 5.3 is Claude Code on Z.ai's Coding Plan gateway. Injected after
-    // ENV_DENYLIST (buildEnv applies extra last), and only for this command —
-    // a regular Claude pane never sees the token or the base URL, so it keeps
-    // the claude.ai login. ~/.claude/settings.json is not touched.
-    const glm = isGlmClaudeCommand(bootstrapCommand)
-    const zaiKey = settings.zaiKey.trim()
-    const glmEnv =
-      glm && zaiKey
-        ? {
-            ANTHROPIC_AUTH_TOKEN: zaiKey,
-            ANTHROPIC_BASE_URL: ZAI_ANTHROPIC_BASE_URL,
-            ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7',
-            ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3[1m]',
-            ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3[1m]',
-            CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
-            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-            API_TIMEOUT_MS: '3000000'
-          }
-        : undefined
-    const glmNotice = glm && !zaiKey && !notice ? missingZaiKeyNotice() : null
-
-    // Where this project pushes, in every pane — Claude, Antigravity, Codex, or
-    // a bare PowerShell, because any of them can read an environment variable
-    // and none of them should have to be told. It is how the second agent
-    // learns where the first one pushed. The project's own answer wins; a pane
-    // whose renderer has none (or whose project predates the field) falls back
-    // to asking git in the pane's own cwd, so a remote created five minutes ago
-    // still shows up. Nothing is set when there is no repo at all.
-    // Stripped even when the renderer supplied it: a URL typed into project
-    // settings before this rule existed can still be carrying a PAT, and the
-    // pane environment is the one copy every agent in the project can read.
-    const repoUrl = stripRemoteCredentials(String(req?.repoUrl ?? '').trim()) || gitRemoteOrigin(cwd) || ''
-
-    /*
-     * The shared scratchpad's two variables. `FORGE_SHARE_AGENT` is the pane's
-     * name, and it goes to every pane rather than only the ones that get the MCP
-     * tools: an agent that writes `.forge/share/slot-2.md` with its own Write
-     * tool can read this and sign its work, and writing the file is the path
-     * every vendor has. `OPENCODE_CONFIG_CONTENT` is how OpenCode is told about
-     * the share server at all — verified to merge with the user's own config
-     * rather than replace it. See electron/bridge/share-mcp.ts.
-     */
-    const shareEnv = shareEnvFor(bootstrapCommand, paneTitle || projectName)
-
-    /*
-     * And the link's two. `FORGE_SHARE_LINK` is the path of the pipe main is
-     * listening on, which is what turns `pane_send`/`pane_read` from an error
-     * message into a feature; it goes to every pane for the same reason
-     * `FORGE_SHARE_AGENT` does — the pane's environment is what the MCP server
-     * the CLI spawns inherits, and Forge does not know in advance which panes
-     * will end up with an agent in them. `FORGE_SHARE_DIR` saves the server a
-     * walk up from its own cwd, and is set only when the scratchpad is actually
-     * open for this project. See electron/share-link.ts.
-     */
-    const linkPath = getLink().listen()
-    const shareDir = shareDirFor(cwd)
-
-    /*
-     * The canvas board's folder for this pane's project (`FORGE_CANVAS_DIR`).
-     * Any CLI can save an image, clip or note there and it shows up on the
-     * board; the forge-bridge MCP server the CLI spawns inherits it too, which
-     * is how make_image/show_on_canvas know where to post. A path under the data
-     * dir, not the data dir itself, and nothing reads it to pick a profile — so
-     * it is not identity-bearing the way FORGE_DATA_DIR is (see ENV_DENYLIST).
-     */
-    const canvasEnv = canvasEnvFor(cwd, projectName)
-
-    const env = {
-      ...(geminiEnv ?? {}),
-      ...(glmEnv ?? {}),
-      ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {}),
-      ...shareEnv,
-      ...(linkPath ? { [SHARE_LINK_ENV]: linkPath } : {}),
-      ...(shareDir ? { [SHARE_DIR_ENV]: shareDir } : {}),
-      ...canvasEnv,
-      ...browserPaneEnv(String(req?.id ?? ''), bootstrapCommand)
-    }
-
-    const blocked = notice ?? glmNotice
-    const spec = {
-      id: String(req?.id ?? ''),
-      cwd,
-      cols: Number(req?.cols ?? 80),
-      rows: Number(req?.rows ?? 24),
-      ...(Object.keys(env).length > 0 ? { env } : {}),
-      bootstrapCommand: blocked ? '' : bootstrapCommand,
-      ...(blocked ? { bootstrapNotice: blocked } : {})
-    }
-
-    // Remembered for the quit confirmation, which needs to say what is running
-    // and which of it will still be there tomorrow. Recorded before create() so
-    // a failed spawn's entry is cleaned up by the exit path either way.
-    live.set(spec.id, {
-      id: spec.id,
+/**
+ * Create (or re-adopt) one pane's PTY session — the whole of `pty:create`.
+ *
+ * Exported for Forge Brain (electron/brain/host.ts), whose pane main starts
+ * itself: it lives in a hidden project the renderer never mounts. A request for
+ * the brain's pane id, from anywhere, is launched the brain's way
+ * (electron/brain/launch.ts) whatever the caller asked for.
+ */
+export function createPaneSession(request: CreateSessionRequest): CreateSessionResult {
+  const req = brainCreateRequest(request)
+  // The one place every pane's launch command passes through, and therefore
+  // where all three bootstrap transforms live. Order matters: Remote Control
+  // adds `--remote-control '<name>'`, then the session flag names the
+  // conversation, then the bridge appends `--mcp-config`, whose value is
+  // variadic and so has to stay last.
+  const projectName = String(req?.projectName ?? '')
+  const paneTitle = String(req?.paneTitle ?? '')
+  const cwd = String(req?.cwd ?? '')
+  const plan = applyClaudeSession(
+    applyRemoteControl(req?.bootstrapCommand ?? '', {
       projectName,
       paneTitle,
-      name: names.get(spec.id)?.name || paneTitle,
-      // A pane whose agent is not installed is a plain shell, and the quit
-      // confirmation must not claim an agent is running in it.
-      agent: Boolean(plan.command.trim()) && !notice,
-      resumes: plan.managed && !notice
-    })
-
-    // A session can already exist when the renderer reloads (dev HMR) or after
-    // a renderer crash. Re-adopt it, resize it to the new geometry, and replay
-    // what it printed so the pane isn't a blank window onto a live shell.
-    const existed = getManager().has(spec.id)
-    const result = getManager().create(spec)
-    if (!result.ok) {
-      console.error(`[pty] create ${spec.id} failed: ${result.error}`)
-      return result
+      ...(req?.remoteControl === false ? { remoteControl: false as const } : {})
+    }),
+    {
+      sessionId: typeof req?.sessionId === 'string' ? req.sessionId : undefined,
+      cwd
     }
+  )
+  // Two transforms, in this order: `--mcp-config` is variadic and has to stay
+  // last on Claude's command line, and only Codex ever matches the second one.
+  // "Agents use Forge's browser only" goes first: --disallowedTools is
+  // variadic too, and --mcp-config has to stay last.
+  // Forge Brain's own tools go last of all, on its pane only: another path on
+  // Claude's variadic `--mcp-config` (electron/brain/launch.ts).
+  const bootstrapCommand = applyBrainMcp(
+    String(req?.id ?? ''),
+    applyShareBridge(applyMcpBridge(applyForgeBrowserOnly(plan.command, getSettings().agentsForgeBrowserOnly !== false)))
+  )
+  const settings = getSettings()
 
-    // Addressable by another agent from this moment. Registered after the spawn
-    // succeeded, so a pane that failed to start is never a pane somebody can be
-    // told to talk to. Re-registering a re-adopted session is deliberate and
-    // harmless: it refreshes the title without resetting the quiet clock.
-    getLink().register({
-      id: spec.id,
-      title: paneTitle || projectName,
-      agent: commandExe(bootstrapCommand),
-      cwd,
-      projectName
-    })
-    // Registered under the launch title first, so the link remembers the name
-    // FORGE_SHARE_AGENT carries; then known by its one name, if the renderer
-    // has already said it.
-    const named = names.get(spec.id)
-    if (named) getLink().rename(spec.id, named.name, named.kind)
+  // The pane is about to type a command into a shell. If the program behind
+  // it is not on this machine, typing it produces PowerShell's "not
+  // recognized" — so it is not typed, and the pane says why instead.
+  // `checkableExe` returns null for anything PATH cannot settle (a quoted
+  // path, a pipeline), and those launch exactly as before.
+  const exe = checkableExe(bootstrapCommand)
+  const missingExe = exe !== null && whichCommand(exe) === null ? exe : null
+  // A CLI Forge has a catalogue row for gets its install command quoted in
+  // the notice; one it has never heard of gets the rest of the notice anyway.
+  const tool = missingExe ? toolSpecForCommand(bootstrapCommand, getSettings().customTools) : null
+  const notice = missingExe ? missingCommandNotice(missingExe, tool ? installCommandFor(tool) : null) : null
 
-    // A pane is born to whoever opened it, and every pane is opened here — the
-    // renderer owns the split tree, so a tab a browser asks for is still created
-    // by this desk. It changes hands the moment somebody types somewhere else.
-    // Only a genuinely new one, though: re-adoption below is this renderer
-    // *reconnecting* to a shell that was already running, which is arriving
-    // rather than opening, and arriving must not take a grid off a phone
-    // somebody has been working on.
-    if (!existed) owners.created(spec.id, DESK_VIEWER)
+  // Gemini CLI's individual-account OAuth route now returns UNSUPPORTED_CLIENT.
+  // If Forge has a Gemini API key, pass it only to Gemini panes and select the
+  // current stable Flash model. Other panes never receive the key.
+  // A still-encoded key (no secrets codec in this process) is left out, like
+  // no key, rather than handing the pane ciphertext — see bridge/mcp-config.ts.
+  const geminiKey = settings.geminiKey.trim()
+  if (exe?.toLowerCase() === 'gemini' && geminiKey.startsWith('enc:')) {
+    console.error('[pty] the Gemini key is still encrypted (no secrets codec in this process); GEMINI_API_KEY left out')
+  }
+  const geminiEnv =
+    exe?.toLowerCase() === 'gemini' && geminiKey && !geminiKey.startsWith('enc:')
+      ? { GEMINI_API_KEY: geminiKey, GEMINI_MODEL: GEMINI_CLI_MODEL }
+      : undefined
 
-    // Announced for both branches below: a re-adopted session is new to
-    // anything that was not watching when it first started.
-    toSinks((sink) => sink.onSpawn?.(spec.id))
+  // GLM 5.3 is Claude Code on Z.ai's Coding Plan gateway. Injected after
+  // ENV_DENYLIST (buildEnv applies extra last), and only for this command —
+  // a regular Claude pane never sees the token or the base URL, so it keeps
+  // the claude.ai login. ~/.claude/settings.json is not touched.
+  const glm = isGlmClaudeCommand(bootstrapCommand)
+  const zaiKey = settings.zaiKey.trim()
+  const glmEnv =
+    glm && zaiKey
+      ? {
+          ANTHROPIC_AUTH_TOKEN: zaiKey,
+          ANTHROPIC_BASE_URL: ZAI_ANTHROPIC_BASE_URL,
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.7',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3[1m]',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3[1m]',
+          CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000',
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          API_TIMEOUT_MS: '3000000'
+        }
+      : undefined
+  const glmNotice = glm && !zaiKey && !notice ? missingZaiKeyNotice() : null
 
-    // The width the buffer below is being recorded at, from the manager rather
-    // than from the request: `create` clamps, and a seed that disagreed with the
-    // real grid would make the very next resize look like a width change and
-    // throw away a screen nothing had moved. A re-adopted session keeps whatever
-    // it was already running at.
-    const spawned = sessionGrid(spec.id)
-    if (spawned) widths.set(spec.id, spawned.cols)
+  // Where this project pushes, in every pane — Claude, Antigravity, Codex, or
+  // a bare PowerShell, because any of them can read an environment variable
+  // and none of them should have to be told. It is how the second agent
+  // learns where the first one pushed. The project's own answer wins; a pane
+  // whose renderer has none (or whose project predates the field) falls back
+  // to asking git in the pane's own cwd, so a remote created five minutes ago
+  // still shows up. Nothing is set when there is no repo at all.
+  // Stripped even when the renderer supplied it: a URL typed into project
+  // settings before this rule existed can still be carrying a PAT, and the
+  // pane environment is the one copy every agent in the project can read.
+  const repoUrl = stripRemoteCredentials(String(req?.repoUrl ?? '').trim()) || gitRemoteOrigin(cwd) || ''
 
-    if (existed) {
-      // A wish, like every other size this desk asks for: granted when nothing
-      // remote is holding this pane, stored when something is.
-      owners.noteWish(spec.id, DESK_VIEWER, spec.cols, spec.rows)
-      // Through getReplay rather than the raw map: the questions in it have to
-      // come out, or the reload answers them into a program that has long since
-      // stopped listening and reads the answers as typing.
-      const buffered = getReplay(spec.id)
-      // After getReplay, which flushes: every byte in the log has been sent.
-      const segments = deskReplay(spec.id)
-      if (buffered || segments) {
-        setImmediate(() => send(IPC.ptyData, { id: spec.id, data: buffered, ...(segments ? { segments } : {}) }))
-      }
-      return { ...result, restored: true }
-    }
+  /*
+   * The shared scratchpad's two variables. `FORGE_SHARE_AGENT` is the pane's
+   * name, and it goes to every pane rather than only the ones that get the MCP
+   * tools: an agent that writes `.forge/share/slot-2.md` with its own Write
+   * tool can read this and sign its work, and writing the file is the path
+   * every vendor has. `OPENCODE_CONFIG_CONTENT` is how OpenCode is told about
+   * the share server at all — verified to merge with the user's own config
+   * rather than replace it. See electron/bridge/share-mcp.ts.
+   */
+  const shareEnv = shareEnvFor(bootstrapCommand, paneTitle || projectName)
 
-    replay.delete(spec.id)
-    deskLog.delete(spec.id)
-    deskBytes.delete(spec.id)
-    return result
+  /*
+   * And the link's two. `FORGE_SHARE_LINK` is the path of the pipe main is
+   * listening on, which is what turns `pane_send`/`pane_read` from an error
+   * message into a feature; it goes to every pane for the same reason
+   * `FORGE_SHARE_AGENT` does — the pane's environment is what the MCP server
+   * the CLI spawns inherits, and Forge does not know in advance which panes
+   * will end up with an agent in them. `FORGE_SHARE_DIR` saves the server a
+   * walk up from its own cwd, and is set only when the scratchpad is actually
+   * open for this project. See electron/share-link.ts.
+   */
+  const linkPath = getLink().listen()
+  const shareDir = shareDirFor(cwd)
+
+  /*
+   * The canvas board's folder for this pane's project (`FORGE_CANVAS_DIR`).
+   * Any CLI can save an image, clip or note there and it shows up on the
+   * board; the forge-bridge MCP server the CLI spawns inherits it too, which
+   * is how make_image/show_on_canvas know where to post. A path under the data
+   * dir, not the data dir itself, and nothing reads it to pick a profile — so
+   * it is not identity-bearing the way FORGE_DATA_DIR is (see ENV_DENYLIST).
+   */
+  const canvasEnv = canvasEnvFor(cwd, projectName)
+
+  const env = {
+    ...(geminiEnv ?? {}),
+    ...(glmEnv ?? {}),
+    ...(repoUrl ? { FORGE_REPO_URL: repoUrl } : {}),
+    ...shareEnv,
+    ...(linkPath ? { [SHARE_LINK_ENV]: linkPath } : {}),
+    ...(shareDir ? { [SHARE_DIR_ENV]: shareDir } : {}),
+    ...canvasEnv,
+    ...browserPaneEnv(String(req?.id ?? ''), bootstrapCommand),
+    ...brainEnv(String(req?.id ?? ''))
+  }
+
+  const blocked = notice ?? glmNotice
+  const spec = {
+    id: String(req?.id ?? ''),
+    cwd,
+    cols: Number(req?.cols ?? 80),
+    rows: Number(req?.rows ?? 24),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+    bootstrapCommand: blocked ? '' : bootstrapCommand,
+    ...(blocked ? { bootstrapNotice: blocked } : {})
+  }
+
+  // Remembered for the quit confirmation, which needs to say what is running
+  // and which of it will still be there tomorrow. Recorded before create() so
+  // a failed spawn's entry is cleaned up by the exit path either way.
+  live.set(spec.id, {
+    id: spec.id,
+    projectName,
+    paneTitle,
+    name: names.get(spec.id)?.name || paneTitle,
+    // A pane whose agent is not installed is a plain shell, and the quit
+    // confirmation must not claim an agent is running in it.
+    agent: Boolean(plan.command.trim()) && !notice,
+    resumes: plan.managed && !notice
   })
+
+  // A session can already exist when the renderer reloads (dev HMR) or after
+  // a renderer crash. Re-adopt it, resize it to the new geometry, and replay
+  // what it printed so the pane isn't a blank window onto a live shell.
+  const existed = getManager().has(spec.id)
+  const result = getManager().create(spec)
+  if (!result.ok) {
+    console.error(`[pty] create ${spec.id} failed: ${result.error}`)
+    return result
+  }
+
+  // Addressable by another agent from this moment. Registered after the spawn
+  // succeeded, so a pane that failed to start is never a pane somebody can be
+  // told to talk to. Re-registering a re-adopted session is deliberate and
+  // harmless: it refreshes the title without resetting the quiet clock.
+  getLink().register({
+    id: spec.id,
+    title: paneTitle || projectName,
+    agent: commandExe(bootstrapCommand),
+    cwd,
+    projectName
+  })
+  // Registered under the launch title first, so the link remembers the name
+  // FORGE_SHARE_AGENT carries; then known by its one name, if the renderer
+  // has already said it.
+  const named = names.get(spec.id)
+  if (named) getLink().rename(spec.id, named.name, named.kind)
+
+  // A pane is born to whoever opened it, and every pane is opened here — the
+  // renderer owns the split tree, so a tab a browser asks for is still created
+  // by this desk. It changes hands the moment somebody types somewhere else.
+  // Only a genuinely new one, though: re-adoption below is this renderer
+  // *reconnecting* to a shell that was already running, which is arriving
+  // rather than opening, and arriving must not take a grid off a phone
+  // somebody has been working on.
+  if (!existed) owners.created(spec.id, DESK_VIEWER)
+
+  // Announced for both branches below: a re-adopted session is new to
+  // anything that was not watching when it first started.
+  toSinks((sink) => sink.onSpawn?.(spec.id))
+
+  // The width the buffer below is being recorded at, from the manager rather
+  // than from the request: `create` clamps, and a seed that disagreed with the
+  // real grid would make the very next resize look like a width change and
+  // throw away a screen nothing had moved. A re-adopted session keeps whatever
+  // it was already running at.
+  const spawned = sessionGrid(spec.id)
+  if (spawned) widths.set(spec.id, spawned.cols)
+
+  if (existed) {
+    // A wish, like every other size this desk asks for: granted when nothing
+    // remote is holding this pane, stored when something is.
+    owners.noteWish(spec.id, DESK_VIEWER, spec.cols, spec.rows)
+    // Through getReplay rather than the raw map: the questions in it have to
+    // come out, or the reload answers them into a program that has long since
+    // stopped listening and reads the answers as typing.
+    const buffered = getReplay(spec.id)
+    // After getReplay, which flushes: every byte in the log has been sent.
+    const segments = deskReplay(spec.id)
+    if (buffered || segments) {
+      setImmediate(() => send(IPC.ptyData, { id: spec.id, data: buffered, ...(segments ? { segments } : {}) }))
+    }
+    return { ...result, restored: true }
+  }
+
+  replay.delete(spec.id)
+  deskLog.delete(spec.id)
+  deskBytes.delete(spec.id)
+  return result
+}
+
+export function registerPtyHandlers(): void {
+  ipcMain.handle(IPC.ptyCreate, (_e, req: CreateSessionRequest): CreateSessionResult => createPaneSession(req))
 
   ipcMain.on(IPC.ptyWrite, (_e, id: string, data: string, claim?: boolean) => {
     // Typing at the desk takes the pane back, instantly and with no ceremony —
