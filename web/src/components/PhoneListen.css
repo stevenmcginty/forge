@@ -5,10 +5,12 @@
  * of the row; the dictation mic is the round lime disc at the back. The
  * capsule holds two buttons, each a full touch target: the mic with its
  * equalizer (dots at rest, moving bars while a conversation runs), then the
- * agent's mark and a chevron that opens the picker. At rest it is a matte
- * pill with a hairline; while a conversation is open the mic half is filled
- * with ink — the phone's "on" (the armed Ctrl key says it the same way);
- * failed, or unable to start, its rim is dashed.
+ * agent's mark and a chevron that opens the picker. The switch's glyph is the
+ * state, one silhouette per phase (PhoneListen.tsx ListenGlyph). At rest it is
+ * a matte pill with a hairline; while a conversation is open the mic half is
+ * filled with ink — the phone's "on" (the armed Ctrl key says it the same way)
+ * — and the rim is solid; on his turn a halo breathes round it; failed, or
+ * unable to start, its rim is dashed.
  *
  * The voice line sits on the box's own face, the box's size exactly, so a
  * conversation never grows the dock and never resizes a terminal.
@@ -48,11 +50,25 @@
   box-shadow: inset 0 0 0 1.5px var(--p-agent);
 }
 
-/* Actively hearing speech */
+/* His turn: a halo round the pill, breathing — the one state that asks something of him. */
 .app[data-mobile] .plisten-unit[data-recording='true'] {
   box-shadow:
     inset 0 0 0 1.5px var(--p-agent),
-    0 0 0 2px color-mix(in srgb, var(--p-agent) 22%, transparent);
+    0 0 0 3px color-mix(in srgb, var(--p-agent) 30%, transparent);
+  animation: plisten-turn 1.6s var(--p-glide) infinite alternate;
+}
+
+@keyframes plisten-turn {
+  from {
+    box-shadow:
+      inset 0 0 0 1.5px var(--p-agent),
+      0 0 0 1px color-mix(in srgb, var(--p-agent) 18%, transparent);
+  }
+  to {
+    box-shadow:
+      inset 0 0 0 1.5px var(--p-agent),
+      0 0 0 4px color-mix(in srgb, var(--p-agent) 34%, transparent);
+  }
 }
 
 /* Failed, or it cannot start here: a dashed rim. */
@@ -108,8 +124,8 @@
 /* ------------------------------------------------ microphone button */
 
 .app[data-mobile] .plisten__btn {
-  gap: 5px;
-  padding: 0 7px 0 9px;
+  gap: 4px;
+  padding: 0 6px 0 8px;
   color: var(--p-ink-2);
 }
 
@@ -141,15 +157,98 @@
   flex: none;
 }
 
-.app[data-mobile] .plisten__mic-icon {
+/*
+ * The state's glyph: strokes and fills in the switch's own ink, so it is cut
+ * out of the ink fill while on. Remounted per phase, it pops in, which says
+ * "changed" even at the edge of sight.
+ */
+.app[data-mobile] .plisten__glyph {
+  display: block;
   flex: none;
-  transition:
-    transform var(--p-dur-fast) var(--p-ease),
-    color var(--p-dur-fast) var(--p-ease);
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: plisten-glyph-in 180ms var(--p-ease);
 }
 
-.app[data-mobile] .plisten__btn[data-on='true'] .plisten__mic-icon {
-  transform: scale(1.06);
+@keyframes plisten-glyph-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+.app[data-mobile] .plisten__glyph .plisten__glyph-solid,
+.app[data-mobile] .plisten__glyph-dots {
+  fill: currentColor;
+}
+
+.app[data-mobile] .plisten__glyph-dots {
+  stroke: none;
+}
+
+/* Connecting: a ring with a gap, turning. */
+.app[data-mobile] .plisten__glyph-ring {
+  stroke-width: 2.2;
+  stroke-dasharray: 32 12;
+  transform-origin: 10px 10px;
+  animation: plisten-spin 0.9s linear infinite;
+}
+
+@keyframes plisten-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Thinking: three dots rising in turn, as a chat's "typing". */
+.app[data-mobile] .plisten__glyph-dots circle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: plisten-dot 1.1s var(--p-ease) infinite;
+}
+
+.app[data-mobile] .plisten__glyph-dots circle:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.app[data-mobile] .plisten__glyph-dots circle:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes plisten-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.45;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* Speaking: the waves going out from the speaker, inner then outer. */
+.app[data-mobile] .plisten__glyph-waves path {
+  animation: plisten-wave 1.2s var(--p-ease) infinite;
+}
+
+.app[data-mobile] .plisten__glyph-waves path:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+@keyframes plisten-wave {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.3;
+  }
 }
 
 /* ------------------------------------------- synthesizer indicator */
@@ -502,14 +601,25 @@
 
 /* --------------------------------------------------------------- motion */
 
+/* Motion off: every glyph stands still on its own shape; the halo holds at full. */
 @media (prefers-reduced-motion: reduce) {
   .app[data-mobile] .plisten-line,
-  .app[data-mobile] .plisten-line[data-tone='live'][data-lead='live']::before {
+  .app[data-mobile] .plisten-line[data-tone='live'][data-lead='live']::before,
+  .app[data-mobile] .plisten-unit[data-recording='true'],
+  .app[data-mobile] .plisten__glyph,
+  .app[data-mobile] .plisten__glyph-ring,
+  .app[data-mobile] .plisten__glyph-dots circle,
+  .app[data-mobile] .plisten__glyph-waves path {
     animation: none;
   }
 }
 
 :root[data-reduced-motion='true'] .app[data-mobile] .plisten-line,
-:root[data-reduced-motion='true'] .app[data-mobile] .plisten-line[data-tone='live'][data-lead='live']::before {
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten-line[data-tone='live'][data-lead='live']::before,
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten-unit[data-recording='true'],
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten__glyph,
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten__glyph-ring,
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten__glyph-dots circle,
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten__glyph-waves path {
   animation: none;
 }

@@ -62,3 +62,21 @@
   flex: 1;
   min-height: 0;
 }
+
+/* `&sheet=listen`: every Listen phase in a grid, on the phone's tokens. */
+.chatpreview__listen {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s-6) var(--s-5);
+  align-content: start;
+  flex: 1;
+  padding: var(--s-7) var(--s-5);
+  background: var(--bg-base);
+}
+
+.chatpreview__listen-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+}

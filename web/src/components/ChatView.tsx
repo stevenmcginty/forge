@@ -31,6 +31,8 @@ import './ChatView.css'
  * - The person's bubbles carry ticks by shape: one tick is sent (shown at once
  *   from `announcePaneSent`, before the transcript has it), two ticks is in
  *   the transcript.
+ * - The agent's bubbles carry a speaker beside the time: one tap reads that
+ *   bubble aloud, and while it reads the speaker is a stop square.
  * - Long-press a bubble (~450 ms) for Copy, Read aloud and, on your own,
  *   Send again. Right-click does the same with a mouse.
  * - Each run of tool calls folds into one quiet row inside the bubble.
@@ -276,6 +278,15 @@ export function ChatView({
   // Read aloud is keyed per bubble, under this pane, so the one being read can say so.
   const speakPrefix = `${paneId ?? 'chat'}#`
   const readingKey = speaking?.startsWith(speakPrefix) ? speaking.slice(speakPrefix.length) : null
+  // Synchronous from the tap on purpose: a phone only lets speech start inside the gesture.
+  const toggleRead = useCallback(
+    (key: string, text: string) => {
+      if (readingKey === key) stopSpeaking()
+      else speakReply(speakPrefix + key, text)
+    },
+    [readingKey, speakPrefix]
+  )
+  const canSpeak = speechSupported()
 
   /* ---------------------------------------------------------- scrolling */
 
@@ -405,6 +416,7 @@ export function ChatView({
                     agentName={agentName}
                     bubbles={bubbles}
                     reading={readingKey === row.key}
+                    onRead={canSpeak ? toggleRead : undefined}
                   />
                 )
               )}
@@ -462,10 +474,9 @@ export function ChatView({
             else void done.then(() => setToast('Copied')).catch(() => setToast('Could not copy'))
           }}
           onRead={
-            speechSupported()
+            canSpeak
               ? () => {
-                  if (readingKey === held.key) stopSpeaking()
-                  else speakReply(speakPrefix + held.key, held.text)
+                  toggleRead(held.key, held.text)
                   closeMenu(false)
                 }
               : undefined
@@ -805,12 +816,15 @@ function ReplyRow({
   row,
   agentName,
   bubbles,
-  reading
+  reading,
+  onRead
 }: {
   row: Extract<Row, { kind: 'reply' }>
   agentName?: string
   bubbles: boolean
   reading: boolean
+  /** Read this bubble aloud, or stop it (keyed by the row). Absent: this browser has no voice. */
+  onRead?: (key: string, text: string) => void
 }): ReactNode {
   const text = row.segments
     .filter((s): s is Extract<Segment, { kind: 'text' }> => s.kind === 'text')
@@ -847,10 +861,44 @@ function ReplyRow({
         <Speaker agentName={agentName} />
         {pieces}
         <div className="chatview__meta-line">
-          <Meta time={timeOf(row.at, row.lastClock)} reading={reading} />
+          {onRead && text ? (
+            <ReadAloud reading={reading} onToggle={() => onRead(row.key, text)} />
+          ) : null}
+          <Meta time={timeOf(row.at, row.lastClock)} reading={reading && !(onRead && text)} />
         </div>
       </div>
     </li>
+  )
+}
+
+/**
+ * Read aloud, on the bubble: a speaker beside the time, a stop square in a
+ * ring while this bubble is being read. Drawn at the time's size; its touch
+ * target is 44px, reaching past the drawing without growing the bubble.
+ */
+function ReadAloud({ reading, onToggle }: { reading: boolean; onToggle: () => void }): ReactNode {
+  return (
+    <button
+      type="button"
+      className="chatview__read"
+      data-reading={reading ? 'true' : undefined}
+      aria-pressed={reading}
+      aria-label={reading ? 'Stop reading aloud' : 'Read aloud'}
+      title={reading ? 'Stop reading' : 'Read aloud'}
+      onClick={onToggle}
+    >
+      {reading ? (
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="10" cy="10" r="8.6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <rect x="6.5" y="6.5" width="7" height="7" rx="1.4" fill="currentColor" />
+        </svg>
+      ) : (
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2.5 6h2.6L8.6 3v10L5.1 10H2.5z" />
+          <path d="M11 5.6a3.4 3.4 0 0 1 0 4.8M12.9 3.8a6 6 0 0 1 0 8.4" />
+        </svg>
+      )}
+    </button>
   )
 }
 

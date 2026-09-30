@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
 import type { WebVoiceProvider } from '@shared/web'
 import { Icon } from '@/components/Icon'
 import { SynthesizerIndicator } from '@/components/hub/SynthesizerIndicator'
@@ -157,6 +157,7 @@ export function PhoneListen(): ReactNode {
   const live = useLive()
   const { actions } = useForge()
   const open = usePickerOpen()
+  useYourTurnBuzz(lookOf(voice))
   return (
     <>
       <ListenUnit
@@ -184,16 +185,40 @@ export function PhoneListen(): ReactNode {
   )
 }
 
+/** A turn of the agent's that hands the floor back: the next "listening" is his cue to talk. */
+const AGENT_TURN: ReadonlySet<HubLook> = new Set(['connecting', 'thinking', 'speaking'])
+
+/**
+ * A short buzz the moment it becomes his turn to talk — the agent has
+ * finished speaking or thinking, or the conversation has just opened — so a
+ * phone in a pocket or at arm's length says so without a look.
+ */
+function useYourTurnBuzz(look: HubLook): void {
+  const last = useRef(look)
+  useEffect(() => {
+    const was = last.current
+    last.current = look
+    if (look !== 'listening' || !AGENT_TURN.has(was)) return
+    try {
+      navigator.vibrate?.(15)
+    } catch {
+      /* no motor, or not allowed: the glyph still says it */
+    }
+  }, [look])
+}
+
 /**
  * The capsule: two buttons, each a full touch target, in one pill.
  *
- * Left: the mic, a switch — tap to talk, tap again to stop — with the
- * equalizer beside it (dots at rest, bars that move with the voice). Right:
- * the agent's mark and a chevron, which opens the picker. Its state is a fill
- * and a shape, never a hue alone: the mic half filled with ink while a
- * conversation is open, a dashed rim when it failed or cannot start; the
- * words are on the voice line and in the switch's name. A switch that cannot
- * start stays tappable (aria-disabled), so the tap can say why.
+ * Left: a switch — tap to talk, tap again to stop — whose glyph IS the state,
+ * one silhouette each, readable at arm's length and without colour: an outline
+ * mic (off), a turning ring (connecting), a solid mic (your turn), three dots
+ * (thinking), a speaker with waves (its turn), a slashed mic (held), a warning
+ * triangle (failed). Beside it the equalizer moves with whoever is talking.
+ * Right: the agent's mark and a chevron, which opens the picker. The rim says
+ * it a second way: a hairline at rest, solid while on, a halo on your turn,
+ * dashed when it failed or cannot start. A switch that cannot start stays
+ * tappable (aria-disabled), so the tap can say why.
  */
 export function ListenUnit({
   voice,
@@ -261,12 +286,12 @@ export function ListenUnit({
         onClick={handleToggle}
       >
         <span className="plisten__mic-wrap" aria-hidden="true">
-          <Icon name="mic" size={15} className="plisten__mic-icon" />
+          <ListenGlyph key={look} look={look} />
         </span>
         <SynthesizerIndicator
           look={look}
           readLevels={readWebVoiceLevels}
-          width={24}
+          width={22}
           height={14}
           className="plisten__synth"
         />
@@ -285,6 +310,64 @@ export function ListenUnit({
         <Icon name="chevronDown" size={10} className="plisten__chev" />
       </button>
     </span>
+  )
+}
+
+/**
+ * The state, as one 20px silhouette — drawn so no two share an outline: a mic
+ * (hollow, solid or slashed), a ring with a gap, three dots, a speaker, a
+ * triangle. The motion (the ring turning, the dots rising, the waves going
+ * out) is extra; with reduced motion each still stands on its shape.
+ */
+function ListenGlyph({ look }: { look: HubLook }): ReactNode {
+  const cut = useId()
+  const mic = (
+    <>
+      <rect x="7" y="2.2" width="6" height="10.6" rx="3" />
+      <path d="M4.3 9.4a5.7 5.7 0 0 0 11.4 0M10 15.1v2.9" fill="none" />
+    </>
+  )
+  return (
+    <svg className="plisten__glyph" data-look={look} width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+      {look === 'offline' ? <g fill="none">{mic}</g> : null}
+      {look === 'listening' ? <g className="plisten__glyph-solid">{mic}</g> : null}
+      {look === 'muted' ? (
+        <>
+          <mask id={cut}>
+            <rect width="20" height="20" fill="#fff" />
+            <path d="M3 3 17 17" stroke="#000" strokeWidth="5" />
+          </mask>
+          <g fill="none" mask={`url(#${cut})`}>
+            {mic}
+          </g>
+          <path d="M3.4 3.4 16.6 16.6" />
+        </>
+      ) : null}
+      {look === 'connecting' ? <circle className="plisten__glyph-ring" cx="10" cy="10" r="7" fill="none" /> : null}
+      {look === 'thinking' ? (
+        <g className="plisten__glyph-dots">
+          <circle cx="4" cy="10" r="2.1" />
+          <circle cx="10" cy="10" r="2.1" />
+          <circle cx="16" cy="10" r="2.1" />
+        </g>
+      ) : null}
+      {look === 'speaking' ? (
+        <>
+          <path className="plisten__glyph-solid" d="M2.6 7.6h2.9L9.6 4.2v11.6l-4.1-3.4H2.6Z" />
+          <g className="plisten__glyph-waves" fill="none">
+            <path d="M12.7 7.3a3.8 3.8 0 0 1 0 5.4" />
+            <path d="M15.3 4.8a7.3 7.3 0 0 1 0 10.4" />
+          </g>
+        </>
+      ) : null}
+      {look === 'error' ? (
+        <>
+          <path d="M10 2.6 18.3 17H1.7Z" fill="none" />
+          <path d="M10 7.9v4.2" />
+          <circle className="plisten__glyph-solid" cx="10" cy="14.6" r="0.6" />
+        </>
+      ) : null}
+    </svg>
   )
 }
 

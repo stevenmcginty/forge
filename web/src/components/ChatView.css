@@ -1384,6 +1384,63 @@
   color: var(--bubble-tick);
 }
 
+.chatview[data-bubbles] .chatview__meta-line {
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * Read aloud on the agent's bubble: a speaker at the time's weight, beside it.
+ * The drawing is 22px but takes only the time's 14px line (the negative
+ * margins), and ::after reaches it to a 44px target — so the bubble keeps its
+ * height and a thumb still finds it.
+ */
+.chatview__read {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 22px;
+  margin: -4px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--bubble-meta);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.chatview__read::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.chatview__read:active {
+  background: color-mix(in srgb, var(--bubble-ink) 12%, transparent);
+}
+
+.chatview__read:focus-visible {
+  outline: 2px solid var(--bubble-ink);
+  outline-offset: 1px;
+}
+
+/* Reading: the stop square in a ring, in the ticks' colour — the shape says it, the colour agrees. */
+.chatview__read[data-reading='true'] {
+  color: var(--bubble-tick);
+}
+
 /* Folds sit inside the agent's bubble between hairlines of its own ink. */
 .chatview[data-bubbles] .chatview__fold {
   border-color: color-mix(in srgb, var(--bubble-ink) 12%, transparent);
