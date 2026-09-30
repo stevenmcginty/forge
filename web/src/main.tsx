@@ -39,6 +39,7 @@ import { App } from './App'
 import { paintStoredTheme } from './deck/theme'
 import { ChatPreview } from './components/ChatPreview'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { PowerDrawPreview } from './components/PowerDrawPreview'
 import { Preview } from './components/Preview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
@@ -93,6 +94,8 @@ createRoot(host).render(
       <Preview />
     ) : preview === 'chat' ? (
       <ChatPreview />
+    ) : preview === 'powerdraw' ? (
+      <PowerDrawPreview />
     ) : (
       <ForgeProvider>
         <RepoProvider>

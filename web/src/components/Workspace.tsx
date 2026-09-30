@@ -11,6 +11,7 @@ import { AgentChooser } from './AgentChooser'
 import { MobilePanes } from './MobilePanes'
 import { useTextScale } from './MoreSheet'
 import { OfflineBanner } from './OfflineBanner'
+import { PowerDraw } from './PowerDraw'
 import { ProjectSheet } from './ProjectSheet'
 import { Rail } from './Rail'
 import { SessionComposer } from './SessionComposer'
@@ -105,12 +106,17 @@ export function Workspace(): ReactNode {
   const [deckView, setDeckView] = useDeckView()
   const [barPlace, setBarPlace] = useBarPlace()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  /** PowerDraw, the phone's one-hand project drum on the right edge. */
+  const [drumOpen, setDrumOpen] = useState(false)
   // Collapsed by the click, or collapsed by the window. One flag either way, so
   // the rail has one set of markup rather than a full row squeezed into 56px.
   // The drawer is the exception: it is the full rail or nothing.
   const collapsed = mobile ? false : railCollapsed || narrow
   // Picking a project is why the drawer was opened; the pick closes it.
-  useEffect(() => setDrawerOpen(false), [state.projectId])
+  useEffect(() => {
+    setDrawerOpen(false)
+    setDrumOpen(false)
+  }, [state.projectId])
   const newTabRef = useRef<HTMLButtonElement | null>(null)
   const [chooserOpen, setChooserOpen] = useState(false)
   /**
@@ -128,6 +134,8 @@ export function Workspace(): ReactNode {
     [actions, currentProjectId]
   )
   const closeDrawer = useCallback(() => setDrawerOpen(false), [])
+  const openDrum = useCallback(() => setDrumOpen(true), [])
+  const closeDrum = useCallback(() => setDrumOpen(false), [])
   const offline = state.stage.kind === 'offline'
   const live = !offline && state.connection.state === 'live'
   /**
@@ -428,6 +436,9 @@ export function Workspace(): ReactNode {
       ) : null}
 
       {mobile ? <ProjectSheet open={drawerOpen} onClose={closeDrawer} onNewAgent={newAgentIn} /> : null}
+      {mobile ? (
+        <PowerDraw open={drumOpen} onOpen={openDrum} onClose={closeDrum} hidden={drawerOpen || watching} />
+      ) : null}
 
       <AgentChooser
         anchor={newTabRef.current}
