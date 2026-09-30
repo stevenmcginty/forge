@@ -622,8 +622,9 @@ export function Composer({
   /*
    * The phone: one row — the box with "+" at its front, and the 56px disc at
    * the bottom right, under the thumb. The disc is the mic while there is
-   * nothing to send and Send the moment there is; while an agent works and
-   * the box is empty it is Stop, the same size, so the box keeps its width.
+   * nothing to send and Send the moment there is — and stays so while an agent
+   * works, so a follow-up can still be dictated. Stop is a smaller round button
+   * just left of the disc; "+" gives it its room, so the box keeps its width.
    * A dictation takes the box over in place
    * (Cancel, what it hears, the clock) and never makes it taller, because a
    * taller dock is a shorter terminal and a real PTY resize. The key row sits
@@ -631,8 +632,8 @@ export function Composer({
    */
   if (mobile) {
     const live = voiceControls !== undefined && (phase === 'recording' || phase === 'transcribing')
-    /** Stop takes the disc's place: only with nothing to send and no dictation running. */
-    const phoneStop = stopMode && phase === 'idle'
+    /** Stop beside the disc while an agent works — not while a dictation runs or reviews. */
+    const phoneStop = onStop !== undefined && phase === 'idle'
     const pick = (input: HTMLInputElement | null): void => {
       setOpenPick(null)
       input?.click()
@@ -683,7 +684,7 @@ export function Composer({
             onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))}
           />
         ) : null}
-        <div className="composer__row">
+        <div className="composer__row" data-stop={phoneStop ? 'true' : undefined}>
           {listen}
           {onShowChat ? (
             <button
@@ -697,7 +698,7 @@ export function Composer({
               <span>Chat</span>
             </button>
           ) : null}
-          <div className="composer__field" data-phase={phase}>
+          <div className="composer__field" data-phase={phase} data-lead={phoneStop && !onVoiceRetry ? 'none' : undefined}>
             {live ? (
               <button
                 type="button"
@@ -742,7 +743,9 @@ export function Composer({
               >
                 <Icon name="refresh" size={20} />
               </button>
-            ) : (
+            ) : phoneStop ? null : (
+              // While the agent works "+" gives its room to Stop; a pasted
+              // image still attaches, and "+" is back when the agent is done.
               <button
                 ref={attachRef}
                 type="button"
@@ -795,16 +798,14 @@ export function Composer({
             ) : null}
             {phase === 'idle' && !hasDraft ? listenLine : null}
           </div>
-          {/* Stop: the disc's own place and size while the agent works and
-              the box is empty, never a pill that takes the box's width. A
-              square says Stop; a spinning ring says Stopping; a still ring, a
-              few seconds on with the agent still working, says one more press
-              sends Esc again. Words in the box make the disc Send, as ever. */}
+          {/* Stop: a round button just left of the disc, smaller than it, never
+              a pill that takes the box's width. A square says Stop; a
+              spinning ring says Stopping; a still ring, a few seconds on with
+              the agent still working, says one more press sends Esc again. */}
           {phoneStop ? (
             <button
               type="button"
-              className="composer__send"
-              data-draft="false"
+              className="composer__stop"
               data-stop={stopAgain ? 'again' : stopping ? 'stopping' : 'true'}
               disabled={!ready || (stopping && !stopAgain)}
               onClick={onStop}
@@ -820,7 +821,8 @@ export function Composer({
               {stopping ? <span className="composer__stop-ring" aria-hidden="true" /> : null}
               <span className="composer__stop-square" aria-hidden="true" />
             </button>
-          ) : micPrimary ? null : (
+          ) : null}
+          {micPrimary ? null : (
             <button
               type="submit"
               className="composer__send"
@@ -841,7 +843,7 @@ export function Composer({
           )}
           {/* Its own slot, always last: the element survives every state a
               dictation passes through, so a hold keeps its pointer. */}
-          {micPrimary && !phoneStop ? mic : null}
+          {micPrimary ? mic : null}
         </div>
         <BottomSheet open={openPick === 'attach'} onClose={() => setOpenPick(null)} label="Attach" testId="attach-sheet">
           <SheetRow

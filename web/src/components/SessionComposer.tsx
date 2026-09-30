@@ -431,7 +431,7 @@ export function SessionComposer({
       if (command.kind === 'stop') {
         now.sendRaw(ESC)
         setStopPhase('stopping')
-        actions.setNotice(`${said} — stopped`)
+        actions.setNotice(`${said} — stopped`, true)
         return
       }
       if (command.kind === 'tab') {
@@ -443,7 +443,7 @@ export function SessionComposer({
         }
         const next = tabs[(at + command.step + tabs.length) % tabs.length]!
         void actions.layout({ op: 'select-tab', tabId: next.id })
-        actions.setNotice(`${said} — ${next.title || 'next tab'}`)
+        actions.setNotice(`${said} — ${next.title || 'next tab'}`, true)
         return
       }
       const ask = readPaneAsk(now.paneId ?? '', now.prompt)
@@ -453,7 +453,7 @@ export function SessionComposer({
         return
       }
       void sendAnswerKeys(pick.keys, now.sendRaw)
-      actions.setNotice(`${said} — chose ${pick.label}`)
+      actions.setNotice(`${said} — chose ${pick.label}`, true)
     },
     [actions]
   )
@@ -665,7 +665,7 @@ export function SessionComposer({
     const run = voiceRun.current
     try {
       const started = await startRecording(() => {
-        actions.setNotice('Ten minutes is the most one recording takes — sending what was said.')
+        actions.setNotice('Ten minutes is the most one recording takes — sending what was said.', true)
         void finishVoiceRef.current()
       }, { sessionId: pane, request: actions.request })
       starting.current = false
@@ -955,7 +955,7 @@ export function SessionComposer({
   const nextView: PaneFace = isAgent ? (activeView === 'chat' ? 'feed' : activeView === 'feed' ? 'term' : 'chat') : 'term'
 
   /*
-   * The phone's round Stop takes the disc's place while an agent works — any
+   * The phone's round Stop sits just left of the mic while an agent works — any
    * agent the desktop reads busy, not only one whose screen is parsed. A shell
    * keeps the key row's Ctrl and Esc instead. Not while
    * the pane is asking: the answer card is how that gets answered, and Esc

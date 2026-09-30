@@ -185,7 +185,7 @@ export function FolderPicker({
     const already = projects.find((p) => p.path.toLowerCase() === path.toLowerCase())
     if (already) {
       actions.selectProject(already.id)
-      actions.setNotice(`${already.name} is already in the rail.`)
+      actions.setNotice(`${already.name} is already in the rail.`, true)
       onClose()
       onAdded?.({ projectId: already.id })
       return
@@ -201,7 +201,7 @@ export function FolderPicker({
         // `shortPath`, the same helper the rail names a project with, because a
         // full Windows path is three wrapped lines of toast on a phone and the
         // last two segments are the part anybody reads.
-        actions.setNotice(`Added ${shortPath(path)} on the desktop.`)
+        actions.setNotice(`Added ${shortPath(path)} on the desktop.`, true)
         onClose()
         onAdded?.({ path })
         return
@@ -222,7 +222,7 @@ export function FolderPicker({
       if (result.kind === 'ok') {
         // Created *and* on the rail — the desktop does both as one act, and the
         // `projects` push is what redraws this page.
-        actions.setNotice(`Created ${leaf} on the desktop.`)
+        actions.setNotice(`Created ${leaf} on the desktop.`, true)
         onClose()
         onAdded?.({ name: leaf })
         return

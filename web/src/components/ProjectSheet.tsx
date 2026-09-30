@@ -597,7 +597,7 @@ function ProjectMenu({
       busyRef.current = false
       setBusy(false)
       if (result.kind === 'ok') {
-        actions.setNotice(`Removed ${preview?.name ?? p.name} from Forge. The folder is still on the desktop.`)
+        actions.setNotice(`Removed ${preview?.name ?? p.name} from Forge. The folder is still on the desktop.`, true)
         onRemoved(p.id)
         return
       }
