@@ -21,6 +21,7 @@ import {
 import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
+import type { BrainStatus } from '@shared/brain'
 import type { AgentProfile, GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 import type { HandoffTargetWire } from '@shared/handoffview'
 import { collectLeaves } from '@/lib/splitTree'
@@ -60,6 +61,9 @@ const REMOTE_YES_OFF: RemoteYesInfo = { enabled: false, uac: false, address: '',
  * and that is local because the protocol has no field for it (see `selectProject`).
  */
 
+/** Forge Brain's four ops on the wire (shared/web.ts). */
+export type WebBrainRequest = Extract<WebRequest, { kind: 'brain-enable' | 'brain-engine' | 'brain-send' | 'brain-confirm' }>
+
 /** The opening picture, kept current by the push frames. */
 export interface Picture {
   desktopName: string
@@ -87,6 +91,12 @@ export interface Picture {
    * the same name on `WebHelloOkFrame`.
    */
   handoff: Record<string, HandoffRecord[]>
+  /**
+   * Forge Brain as the desktop last said (shared/brain.ts). From `hello-ok`
+   * and kept current by the `brain` push. Null from an older desktop, which
+   * has no brain: then no surface draws one.
+   */
+  brain: BrainStatus | null
 }
 
 /* ------------------------------------------------------- insert into draft
@@ -266,6 +276,13 @@ export interface ForgeActions {
    * that the handoff is finished — that lands minutes later as `handoff` pushes.
    */
   handoffStart: (paneId: string, target: HandoffTargetWire) => Promise<string | null>
+  /**
+   * One of Forge Brain's ops (shared/web.ts: brain-enable, brain-engine,
+   * brain-send, brain-confirm). Resolves null when the desktop took it, or with
+   * its sentence. Says nothing itself: the brain's own surface shows the
+   * sentence where it was asked. What the op changed arrives as a `brain` push.
+   */
+  brain: (op: WebBrainRequest) => Promise<string | null>
   /**
    * Show a sentence in the toast. It stays until tapped, or NOTICE_HOLD_MS —
    * the page cannot tell a refusal from a confirmation, so it assumes the one
@@ -707,7 +724,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           foreman: Object.fromEntries((frame.foreman ?? []).map((s) => [s.paneId, s])),
           // The same snapshot rule: absent (an older desktop) reads as no
           // handoffs anywhere, which is the only safe reading.
-          handoff: Object.fromEntries((frame.handoff ?? []).map((h) => [h.projectId, h.records]))
+          handoff: Object.fromEntries((frame.handoff ?? []).map((h) => [h.projectId, h.records])),
+          // Absent (an older desktop) is no brain at all, not a brain that is off.
+          brain: frame.brain ?? null
         })
         // Written down and held, from the one object rather than by reading back
         // what was just written: `rememberPicture` hands over what it stored.
@@ -760,6 +779,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setPicture((current) =>
           current ? { ...current, handoff: { ...current.handoff, [projectId]: records } } : current
         )
+      },
+      onBrain: (status) => {
+        // The whole picture replaces the last one; there is nothing to merge.
+        setPicture((current) => (current ? { ...current, brain: status } : current))
       },
       onDesktop: (state, reason) => {
         // A reason is a courtesy, not a requirement: the band is drawn on the
@@ -1410,6 +1433,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // would be a promise made before anything had been asked of the agent.
         pushNotice('Asked this pane to write a handoff pack', true)
         return null
+      },
+      brain: async (op) => {
+        const result = await client.request(op)
+        return result.kind === 'failed' ? result.message : null
       },
       onTranscript: (sessionId, listener) => {
         const map = transcriptListeners.current

@@ -7,6 +7,7 @@ import { collectLeaves } from '@/lib/splitTree'
 import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import type { TerminalTab } from '@shared/types'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
+import { BrainButton } from './Brain'
 import { ConnectionSheet, LinkDot, linkStateOf, linkWord, useTrackLastHeard } from './ConnectionSheet'
 import { HandoffMenu } from './HandoffMenu'
 import { MoreSheet } from './MoreSheet'
@@ -313,6 +314,7 @@ export function TopBar({
 
           <div className="ptop__right">
             {offline ? null : <WaitingPill />}
+            <BrainButton face="phone" />
             <button
               type="button"
               className="ptop__btn ptop__link"
