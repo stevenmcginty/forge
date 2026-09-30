@@ -1,5 +1,16 @@
 # Handoff
 
+## Forge Brain (2026-09-30, IN PROGRESS on branch `forge-brain`, worktree `C:\Users\steve\Desktop\forge-brain`; not merged, Forge not restarted)
+
+- **Asked (Steve):** one optional brain that powers Forge, above all projects. Desktop: a brain icon in the top bar (a turning brain with bolts flying in); click or shortcut drops down a WhatsApp-style chat (type, dictate, natural voice back) with a Chat | CLI toggle. Voice bar fixed at the bottom. Swappable engine (Claude, Codex/GPT, Gemini, a free local model). It sees every project, starts agents anywhere, changes settings, says when it can't. Voice agents stay separate but can ask/tell it; the voice agent picker gets "Forge Brain". Forge mobile browser and Forge browser get the same icon and chat. Off until turned on; first open explains it. Later: "Hey Forge" wake word.
+- **Design (gaffer):** the brain is a real CLI agent pane in a hidden home project (`<data dir>\brain`, `BRAIN.md`), given Forge's tools through `bridge/brain-mcp.mjs`; so the web's existing Chat/terminal views work on it. Risky actions (settings, close tab, create project, answering an agent) go through a confirm gate in code. Report-back: attention events gain projectId and become short notes typed into the brain pane.
+- **Jobs (one foreman):** B1 core → B2 cross-project tools + confirm gate and B3 desktop face → B4 web face and B5 voice. Built in the worktree because editing `src/` in the live checkout hot-reloads Steve's renderer, which his phone depends on. Merge to master + Forge restart only with Steve's OK. The worktree's `node_modules` is a junction: `rmdir` it before removing the worktree.
+- Research notes (session scratchpad, gone with the session): brain-scope.md, brain-map.md.
+
+## Forge browser gets the phone work (2026-09-30, pushed eb861f7, 42f8d14)
+
+- D2 `eb861f7`: Stop for every agent in the deck bar, the answer card above the bar (keys 1-9 when focus is not in a text box), Done-until-focused on tiles and AgentsMenu. D1 `42f8d14`: WhatsApp bubbles on the deck (centred column, right-click or ⋯ for Copy / Read aloud / Send again, speaker by the time), WhatsApp theme in the deck picker. Phone face byte-identical. Not seen on a live deck with a real busy/asking agent.
+
 ## Forge mobile browser: WhatsApp chat + theme, second deep dive fixes (2026-09-30, pushed 7e0e8ca..5ab8f23; web only, no Forge restart)
 
 - **Names (Steve):** Forge desktop (Electron), Forge mobile browser (Forge Web phone face), Forge browser (Forge Web deck). "Mobile app" means Forge mobile browser, not the APK.
