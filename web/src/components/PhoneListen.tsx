@@ -370,7 +370,7 @@ function ListenGlyph({ look }: { look: HubLook }): ReactNode {
   )
 }
 
-/** Forge Brain's two lobes and their seam (web/src/components/BrainGlyph.tsx), on the 14px grid. */
+/** Forge Brain's two lobes and their seam (the desktop's src/components/brain/BrainGlyph.tsx), on the 14px grid. */
 const BRAIN_MARK =
   'M7 1.86C6.23 0.95 4.62 0.95 3.92 2C2.52 2 1.54 3.12 1.82 4.45C0.84 5.08 0.7 6.62 1.54 7.39C0.98 8.57 1.61 9.91 2.8 10.19C3.08 11.45 4.48 12.14 5.67 11.66C6.02 12.21 6.58 12.43 7 12.14M7 1.86C7.77 0.95 9.38 0.95 10.08 2C11.48 2 12.46 3.12 12.18 4.45C13.16 5.08 13.3 6.62 12.46 7.39C13.02 8.57 12.39 9.91 11.2 10.19C10.92 11.45 9.52 12.14 8.33 11.66C7.98 12.21 7.42 12.43 7 12.14V1.86'
 

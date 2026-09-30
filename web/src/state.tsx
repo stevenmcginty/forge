@@ -62,9 +62,6 @@ const REMOTE_YES_OFF: RemoteYesInfo = { enabled: false, uac: false, address: '',
  * and that is local because the protocol has no field for it (see `selectProject`).
  */
 
-/** Forge Brain's four ops on the wire (shared/web.ts). */
-export type WebBrainRequest = Extract<WebRequest, { kind: 'brain-enable' | 'brain-engine' | 'brain-send' | 'brain-confirm' }>
-
 /** The opening picture, kept current by the push frames. */
 export interface Picture {
   desktopName: string
@@ -277,13 +274,6 @@ export interface ForgeActions {
    * that the handoff is finished — that lands minutes later as `handoff` pushes.
    */
   handoffStart: (paneId: string, target: HandoffTargetWire) => Promise<string | null>
-  /**
-   * One of Forge Brain's ops (shared/web.ts: brain-enable, brain-engine,
-   * brain-send, brain-confirm). Resolves null when the desktop took it, or with
-   * its sentence. Says nothing itself: the brain's own surface shows the
-   * sentence where it was asked. What the op changed arrives as a `brain` push.
-   */
-  brain: (op: WebBrainRequest) => Promise<string | null>
   /**
    * Show a sentence in the toast. It stays until tapped, or NOTICE_HOLD_MS —
    * the page cannot tell a refusal from a confirmation, so it assumes the one
@@ -1436,10 +1426,6 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // would be a promise made before anything had been asked of the agent.
         pushNotice('Asked this pane to write a handoff pack', true)
         return null
-      },
-      brain: async (op) => {
-        const result = await client.request(op)
-        return result.kind === 'failed' ? result.message : null
       },
       onTranscript: (sessionId, listener) => {
         const map = transcriptListeners.current

@@ -1,7 +1,6 @@
 import { useRef, useState, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
 import { AgentChooser } from '../components/AgentChooser'
-import { BrainButton } from '../components/Brain'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
 import { phoneOnlyPair } from '../lib/phone-themes'
 import { useActiveProject, useForge } from '../state'
@@ -115,7 +114,6 @@ export function DeckTopBar({
       <div className="dk-bar__centre">{place === 'top' ? <VoiceBar place="top" /> : null}</div>
 
       <div className="dk-bar__right">
-        <BrainButton face="deck" />
         <span className="dk-tools" role="group" aria-label="Pane tools">
           <SkillsButton />
           <CommandsButton />
