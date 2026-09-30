@@ -3,6 +3,7 @@ import { useKeymap } from '@/hooks/useHub'
 import { shellSheet, useShellSheet } from '@/lib/shellSlots'
 import { voiceSpeaker } from '@/lib/tts'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
+import { openBrainMap } from '../brainview'
 import { useApp } from '@/state/AppState'
 import { BrainGlyph } from './BrainGlyph'
 import { BrainPanel, glyphStateOf } from './BrainPanel'
@@ -38,7 +39,19 @@ export function BrainButton(): ReactNode {
 
   useEffect(() => startBrainFeed(), [])
   useEffect(() => uiCommands.define({ id: TOGGLE, title: 'Forge Brain (chat)', group: 'Shell', defaultKey: 'Ctrl+Shift+F' }), [])
-  useUiCommand(TOGGLE, () => toggleBrainOpen())
+  // Pressed twice within 400 ms: the expanded map (brainview) instead of the chat.
+  const lastPress = useRef(0)
+  useUiCommand(TOGGLE, () => {
+    const now = Date.now()
+    if (now - lastPress.current < 400) {
+      lastPress.current = 0
+      setBrainOpen(false)
+      openBrainMap()
+      return
+    }
+    lastPress.current = now
+    toggleBrainOpen()
+  })
 
   // One pop-up at a time: opening the brain puts a sheet away, and a sheet
   // opening puts the brain away.

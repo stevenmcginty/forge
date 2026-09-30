@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { DictationCueHost } from '@/components/DictationCue'
 import { AccountPrompt } from '@/components/AccountPrompt'
+import { BrainMapHost } from '@/components/brainview'
 import { Onboarding } from '@/components/Onboarding'
 import { WhatsNew } from '@/components/WhatsNew'
 import { TerminalGrid } from '@/components/TerminalGrid'
@@ -199,6 +200,8 @@ export function App(): ReactNode {
       <DeckToast />
       {/* The Dictate key's dictation, lit where its words land (the pane, the bar, or a band). */}
       <DictationCueHost />
+      {/* Forge Brain's expanded map (src/components/brainview): nothing until opened. */}
+      <BrainMapHost />
       <SettingsPopup />
       {/*
         The voice hub's UI: the dock's voice pill, the Board surface,

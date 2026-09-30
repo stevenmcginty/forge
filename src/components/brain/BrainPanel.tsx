@@ -3,6 +3,7 @@ import { BRAIN_ENGINE_NAME, BRAIN_PROJECT_NAME, type BrainConfirmRequest, type B
 import { terminalHost } from '@/lib/terminals'
 import { useApp, type SettingsSection } from '@/state/AppState'
 import { Icon } from '../Icon'
+import { openBrainMap } from '../brainview'
 import { BrainChat } from './BrainChat'
 import { BrainComposer } from './BrainComposer'
 import { BrainGlyph, type GlyphState } from './BrainGlyph'
@@ -67,7 +68,11 @@ export function BrainPanel({ id }: { id: string }): ReactNode {
         </span>
         {on ? <TabSwitch tab={tab} /> : null}
         {/* The foreman's Expand control (brainview's openBrainMap) goes in this slot. */}
-        <span className="brainpanel__slot" data-brain-slot="expand" />
+        <span className="brainpanel__slot" data-brain-slot="expand">
+          <button type="button" className="brainpanel__close" aria-label="Expand: the map of every agent" title="Expand: every agent (shortcut twice)" onClick={() => { setBrainOpen(false); openBrainMap() }}>
+            <Icon name="expand" size={13} />
+          </button>
+        </span>
         <button type="button" className="brainpanel__close" aria-label="Close Forge Brain" title="Close (Esc)" onClick={() => setBrainOpen(false)}>
           <Icon name="close" size={13} />
         </button>
