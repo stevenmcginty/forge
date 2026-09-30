@@ -186,6 +186,8 @@ export class MapEngine {
   private parallax = { x: 0, y: 0 }
   private swayPhase = 0
   private swaySpeed = 1
+  /** The share of the sway the layout allows (Layout.sway), eased so a relayout never jolts the camera. */
+  private swayScale = 1
   private raf = 0
   private sampleTimer = 0
   private last = 0
@@ -564,8 +566,10 @@ export class MapEngine {
       this.swayPhase += dt * this.swaySpeed * ((Math.PI * 2) / 36)
       this.parallax.x += (this.pointer.x - this.parallax.x) * Math.min(1, dt * 2)
       this.parallax.y += (this.pointer.y - this.parallax.y) * Math.min(1, dt * 2)
-      this.cam.yaw = Math.sin(this.swayPhase) * 0.06 + this.parallax.x * 0.035
-      this.cam.elevation = ELEVATION - this.parallax.y * 0.025
+      // Scaled by what the layout can take, so no label sways onto the legend.
+      this.swayScale += ((this.layout?.sway ?? 1) - this.swayScale) * Math.min(1, dt * 2)
+      this.cam.yaw = (Math.sin(this.swayPhase) * 0.06 + this.parallax.x * 0.035) * this.swayScale
+      this.cam.elevation = ELEVATION - this.parallax.y * 0.025 * this.swayScale
     }
     const focusTarget = this.reveal ? 1 : 0
     this.focus = this.motion && dt > 0 ? this.focus + (focusTarget - this.focus) * Math.min(1, dt * 8) : focusTarget

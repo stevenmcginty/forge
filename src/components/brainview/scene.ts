@@ -115,6 +115,8 @@ export interface Layout {
   /** Folded agents' boxes when their project is opened out. */
   bloomBoxes: Map<string, PlacedBox[]>
   overlaps: number
+  /** How much of the camera sway it can take without a label swinging off the stage, 0..1. */
+  sway: number
 }
 
 /* -------------------------------------------------------------- the camera */
@@ -245,13 +247,49 @@ export function layoutMap(input: LayoutInput): Layout {
   let best: Layout | null = null
   for (const mode of MODES) {
     const l = solve(input, mode)
-    if (l.overlaps === 0) return l
     if (!best || l.overlaps < best.overlaps) best = l
+    if (l.overlaps === 0) break
   }
-  return best!
+  const l = best!
+  l.sway = swayRoom(
+    l.boxes.map((b) => b.box),
+    l.cx,
+    l.cy,
+    input.elevation,
+    input.top + EDGE,
+    input.height - input.bottom - EDGE,
+    input.width
+  )
+  return l
 }
 
 const overlap = (a: Rect, b: Rect): boolean => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1
+
+/** The engine's camera sway at its widest (engine.ts: yaw sin·0.06 + pointer·0.035, elevation pointer·0.025). */
+const SWAY_YAW = 0.06 + 0.035
+const SWAY_EL = 0.025
+
+/**
+ * How much of the camera sway a layout can take, 0..1. The layout is solved at
+ * rest, but a node far out to the side swings up and down the screen by tens
+ * of px as the camera turns (yaw turns sideways distance into depth); one near
+ * a bottom corner swung onto the legend. So the sway shrinks until the box
+ * with the least room stays on the stage at the widest swing. Folded agents'
+ * bloom spots are left out: the sway settles while you point at a project.
+ */
+function swayRoom(boxes: Rect[], cx: number, cy: number, elevation: number, T: number, Bt: number, W: number): number {
+  const se = Math.sin(elevation)
+  let k = 1
+  for (const b of boxes) {
+    const side = Math.max(Math.abs(b.x0 - cx), Math.abs(b.x1 - cx))
+    const depth = Math.max(Math.abs(b.y0 - cy), Math.abs(b.y1 - cy))
+    const dy = (side * Math.sin(SWAY_YAW) * se + (depth * SWAY_EL) / Math.tan(elevation)) * 1.1
+    const dx = (depth / Math.max(0.2, se)) * Math.sin(SWAY_YAW) * 1.1
+    if (dy > 0) k = Math.min(k, Math.min(b.y0 - T, Bt - b.y1) / dy)
+    if (dx > 0) k = Math.min(k, Math.min(b.x0 - EDGE, W - EDGE - b.x1) / dx)
+  }
+  return Math.max(0, Math.min(1, k))
+}
 
 /** Box support: how far a box around a point reaches in direction (dx, dy). */
 function reach(dx: number, dy: number, left: number, right: number, up: number, down: number): number {
@@ -543,7 +581,8 @@ function solve(input: LayoutInput, mode: Mode): Layout {
       arc,
       boxes,
       bloomBoxes: new Map(),
-      overlaps
+      overlaps,
+      sway: 1
     }
     result = layout
     const fitting = Math.abs(fx - 1) > 0.015 || Math.abs(fz - 1) > 0.015 || Math.abs(shift) > 2
