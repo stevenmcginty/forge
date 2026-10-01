@@ -421,6 +421,67 @@ export function normaliseBrowserUrl(raw: string): { url: string; error: string }
   return { url: `https://${target}`, error: '' }
 }
 
+/** The part of Electron's window-open HandlerDetails the pop-up rule reads. */
+export interface WindowOpenRequest {
+  url: string
+  frameName: string
+  features: string
+  disposition: string
+}
+
+/**
+ * Hosts (and path prefixes) whose pages are sign-in flows: opened in a new
+ * tab, they still need a real pop-up that keeps window.opener, so they can
+ * post the result back to the page that asked.
+ */
+const SIGN_IN_PAGES: { host: string; sub: boolean; path: string }[] = [
+  { host: 'accounts.google.com', sub: false, path: '/' },
+  { host: 'googleapis.com', sub: true, path: '/' },
+  { host: 'google.com', sub: true, path: '/o/oauth2' },
+  { host: 'login.microsoftonline.com', sub: false, path: '/' },
+  { host: 'login.live.com', sub: false, path: '/' },
+  { host: 'appleid.apple.com', sub: false, path: '/' },
+  { host: 'github.com', sub: false, path: '/login' },
+  { host: 'firebaseapp.com', sub: true, path: '/__/auth/' }
+]
+
+function isSignInPage(url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return false
+  }
+  const host = u.hostname.toLowerCase()
+  return SIGN_IN_PAGES.some(
+    (p) => (host === p.host || (p.sub && host.endsWith(`.${p.host}`))) && u.pathname.startsWith(p.path)
+  )
+}
+
+/**
+ * What a browser tab does with a `window.open` or a new-tab link. A pop-up a
+ * script made — a size or other features, a named window, a blank page it
+ * will fill in, or a sign-in page — gets a real window: "Sign in with Google"
+ * and friends only work when window.open returns one. Any other web address
+ * (a plain target=_blank link) opens in the same tab. Nothing but http(s) and
+ * a blank page is opened at all.
+ */
+export function windowOpenAction(req: WindowOpenRequest): 'popup' | 'same-tab' | 'deny' {
+  const url = String(req.url ?? '').trim()
+  if (url === '' || url === 'about:blank') return 'popup'
+  if (!/^https?:\/\//i.test(url)) return 'deny'
+  const name = String(req.frameName ?? '')
+  if (
+    req.disposition === 'new-window' ||
+    String(req.features ?? '').trim() !== '' ||
+    (name !== '' && name !== '_blank' && name !== '_self') ||
+    isSignInPage(url)
+  ) {
+    return 'popup'
+  }
+  return 'same-tab'
+}
+
 /**
  * What Steve's own address bar and the board's "Browser" button may open: any
  * web address normaliseBrowserUrl takes, plus a canvas artifact. The agents'

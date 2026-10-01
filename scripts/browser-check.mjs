@@ -7,6 +7,8 @@
  *   2. refs          formatRead numbers from 1, caps the list, and badRef refuses junk.
  *   2b. overlays     the page hides under every pop-up that overlaps it (overlays.ts), and
  *                    main names keys exactly as the keymap does (browserKeyCombo).
+ *   2c. pop-ups      windowOpenAction: a script's pop-up (blank, sized, named, sign-in page)
+ *                    is a real window, a plain new-tab link stays in the tab, non-web refused.
  *   3. tool schema   bridge/browser-tools.mjs offers exactly the eight tools, with words
  *                    and schemas identical to shared/browser.ts (the canonical copy).
  *   4. link auth     the real BrowserLink answers the right token and refuses a wrong,
@@ -185,6 +187,33 @@ section('2b. what the page hides under, and the keys it hands back')
     }
   }
   check("main's browserKeyCombo names every key exactly as the keymap's comboFromEvent", drift.length === 0, drift.slice(0, 8).join('\n'))
+}
+
+/* ------------------------------------------------------------ 2c. pop-ups */
+section('2c. window.open: real pop-ups for sign-in, plain links stay in the tab')
+{
+  const req = (url, disposition = 'foreground-tab', frameName = '_blank', features = '') => ({ url, frameName, features, disposition })
+  const cases = [
+    ['an empty url (filled in by script) is a pop-up', req(''), 'popup'],
+    ['about:blank is a pop-up', req('about:blank'), 'popup'],
+    ['a sized window (features set) is a pop-up', req('https://example.com/', 'foreground-tab', '_blank', 'width=500,height=600'), 'popup'],
+    ["Chromium's new-window disposition is a pop-up", req('https://example.com/', 'new-window'), 'popup'],
+    ['a named window is a pop-up', req('https://example.com/', 'foreground-tab', 'g_auth'), 'popup'],
+    ['accounts.google.com as a new tab is a pop-up', req('https://accounts.google.com/o/oauth2/v2/auth?client_id=x'), 'popup'],
+    ['a googleapis.com page is a pop-up', req('https://content.googleapis.com/static/proxy.html?usegapi=1'), 'popup'],
+    ['a Firebase auth handler is a pop-up', req('https://motor-ledger-pro.firebaseapp.com/__/auth/handler?x=1'), 'popup'],
+    ['GitHub sign-in is a pop-up', req('https://github.com/login/oauth/authorize?x=1'), 'popup'],
+    ['a plain target=_blank link stays in the tab', req('https://example.com'), 'same-tab'],
+    ['a plain GitHub page stays in the tab', req('https://github.com/electron/electron'), 'same-tab'],
+    ['a look-alike host is not a sign-in page', req('https://accounts.google.com.evil.example/'), 'same-tab'],
+    ['javascript: is refused', req('javascript:alert(1)'), 'deny'],
+    ['javascript: is refused even as a sized window', req('javascript:void(0)', 'new-window', 'x', 'width=500'), 'deny'],
+    ['file: is refused', req('file:///C:/Windows/win.ini'), 'deny']
+  ]
+  for (const [name, r, want] of cases) {
+    const got = S.windowOpenAction(r)
+    check(name, got === want, `got ${got}, want ${want}`)
+  }
 }
 
 /* --------------------------------------------------------- 3. tool schema */

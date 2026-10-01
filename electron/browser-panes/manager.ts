@@ -6,11 +6,13 @@ import {
   session as electronSession,
   WebContentsView,
   type BaseWindow,
+  type BrowserWindow,
   type ContextMenuParams,
   type Input,
   type MenuItemConstructorOptions,
   type Session,
-  type WebContents
+  type WebContents,
+  type WindowOpenHandlerResponse
 } from 'electron'
 import {
   ARTIFACT_PARTITION,
@@ -20,6 +22,7 @@ import {
   browserKeyCombo,
   isArtifactUrl,
   normaliseBrowserUrl,
+  windowOpenAction,
   type BrowserAppKeys,
   type BrowserHistoryAction,
   type BrowserPageKey,
@@ -456,24 +459,20 @@ export class BrowserManager implements BrowserDriver {
 
     // A new-tab link becomes a navigation of this same tab: agents get
     // predictable pages, and nothing opens a window Forge does not manage. The
-    // one exception is a popup a script opened with a size — "Sign in with
+    // exception is a popup a script made (windowOpenAction) — "Sign in with
     // Google" and friends — which only works as a real window that keeps
     // window.opener, so it gets one, in this same signed-in session.
     // An artifact view opens nothing and goes nowhere but other canvas files.
-    wc.setWindowOpenHandler(({ url, disposition }) => {
-      const { url: safe, error } = normaliseBrowserUrl(url)
-      if (artifact || error || !safe) return { action: 'deny' }
-      if (disposition === 'new-window') {
-        const parent = this.window && !this.window.isDestroyed() ? this.window : undefined
-        return {
-          action: 'allow',
-          // The size is the page's own (window.open's features).
-          overrideBrowserWindowOptions: { ...(parent ? { parent } : {}), autoHideMenuBar: true, backgroundColor: '#ffffff' }
-        }
+    wc.setWindowOpenHandler((details) => {
+      const action = artifact ? 'deny' : windowOpenAction(details)
+      if (action === 'popup') return this.popupWindow()
+      if (action === 'same-tab') {
+        const { url: safe, error } = normaliseBrowserUrl(details.url)
+        if (!error && safe) void wc.loadURL(safe).catch(() => undefined)
       }
-      void wc.loadURL(safe).catch(() => undefined)
       return { action: 'deny' }
     })
+    wc.on('did-create-window', (win) => this.guardPopup(win))
     wc.on('before-input-event', (event, input) => this.pageKey(event, input))
     wc.on('context-menu', (_e, params) => this.pageMenu(id, wc, params, artifact))
     // A dead renderer leaves a blank frame and nothing saying why: say it, and
@@ -528,6 +527,30 @@ export class BrowserManager implements BrowserDriver {
 
     if (record.url && record.url !== 'about:blank') void wc.loadURL(record.url).catch(() => undefined)
     return view
+  }
+
+  /** A real pop-up window over Forge. Electron keeps the opener's session and window.opener. */
+  private popupWindow(): WindowOpenHandlerResponse {
+    const parent = this.window && !this.window.isDestroyed() ? this.window : undefined
+    return {
+      action: 'allow',
+      // The size is the page's own (window.open's features).
+      overrideBrowserWindowOptions: { ...(parent ? { parent } : {}), autoHideMenuBar: true, backgroundColor: '#ffffff' }
+    }
+  }
+
+  /**
+   * A pop-up keeps to the web, like its tab: its own pop-ups and new-tab links
+   * are real windows (a sign-in page must not be navigated away), anything but
+   * http(s) or a blank page is refused, and it closes itself from script as usual.
+   */
+  private guardPopup(win: BrowserWindow): void {
+    const wc = win.webContents
+    wc.setWindowOpenHandler((details) => (windowOpenAction(details) === 'deny' ? { action: 'deny' } : this.popupWindow()))
+    wc.on('did-create-window', (child) => this.guardPopup(child))
+    wc.on('will-navigate', (event, url) => {
+      if (!/^(https?:|about:blank)/i.test(url)) event.preventDefault()
+    })
   }
 
   private wcFor(id: string): WebContents | null {
