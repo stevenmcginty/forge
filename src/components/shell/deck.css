@@ -61,7 +61,9 @@
     0 20px 50px -20px rgba(0, 0, 0, 0.9);
 }
 
-/* The word for it: the pane with the keyboard says so in its header. */
+/* The word for it: the pane with the keyboard says so in its header. (The
+   Wall's tiles wear this solid chip too; a pane header restyles it as an
+   outline in the header chip system below.) */
 .deck .pane__active {
   display: inline-flex;
   align-items: center;
@@ -79,6 +81,13 @@
   background: var(--accent);
 }
 
+/* Full screen with one pane on the stage: that pane is the tab's active pane
+   (SplitView passes focused = activePaneId, and a one-leaf tab's active pane
+   is its leaf), so "Active" has nothing to tell apart. A split keeps it. */
+.deck .grid[data-view='full'] .grid__body > .pane .pane__active {
+  display: none;
+}
+
 /* A dispatch comet landing: the edge answers for a beat. */
 .deck .pane[data-hit='true'] {
   --edge: color-mix(in srgb, var(--pane-accent, var(--accent)) 90%, white);
@@ -93,16 +102,25 @@
   border-radius: var(--r-pane);
 }
 
+/* A plain header: the agent's colour lives in its badge, its name and its
+   edge, so the bar under them stays neutral and the name's own tint reads
+   clean instead of stacking into mud. The pane with the keyboard lifts a step. */
 .deck .pane__header {
   height: var(--pane-head-h);
   padding: 0 var(--s-2) 0 var(--s-4);
-  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 5%, var(--bg-terminal));
-  border-bottom: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 10%, var(--line-soft));
+  background: var(--bg-terminal);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .deck .pane[data-focused='true'] .pane__header {
-  background: color-mix(in srgb, var(--pane-accent, var(--accent)) 8%, var(--bg-header-live));
-  border-bottom-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 14%, var(--line-hairline));
+  background: var(--bg-header-live);
+  border-bottom-color: var(--line-hairline);
+}
+
+/* The activity dot repeats the state chip beside it in colour alone. The
+   Wall's tiles and the strip keep theirs: there it is the only state cue. */
+.deck .pane__header > .activity-dot {
+  display: none;
 }
 
 .deck .pane__ident {
@@ -132,23 +150,120 @@
 }
 
 .deck .pane__branch {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 150px;
-  height: 18px;
-  padding: 0 7px 0 6px;
-  border: 1px solid var(--glass-line);
-  border-radius: var(--r-full);
-  font-family: var(--font-mono);
-  font-size: 10px;
   color: var(--text-muted);
+  border-color: var(--glass-line);
 }
 
 .deck .pane__branch svg {
   flex: none;
+  opacity: 0.8;
+}
+
+/* ============================================================ header chips
+ *
+ * One chip, six meanings: branch, Active, the live state, the permission
+ * chip, Foreman and a handoff in flight. Same height, same pill, same face,
+ * size, weight and padding, so the row reads as one instrument strip and
+ * only the words and the ink change. Every chip carries a 1px rim (clear on
+ * the filled one) so they all sit on the same box.
+ *
+ * Loudness is rationed: the state chip is the only fill, because it is the
+ * thing that moves. Everything else is a quiet outline, its meaning in its
+ * word and its rim colour. Colours stay with their base rules wherever the
+ * base says something (Foreman lit, a handoff sent), so this block sets shape
+ * only, and every rule here is `.deck`-scoped: Forge Web reads these files.
+ */
+.deck .pane__header .pane__branch,
+.deck .pane__header .pane__active,
+.deck .pane__header .statechip,
+.deck .pane__header .pane__perm,
+.deck .pane__header .pane__foreman,
+.deck .pane__header .pane__handoff-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 18px;
+  padding: 0 8px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chips with no rim of their own get a clear one, for the same box. */
+.deck .pane__header .pane__active,
+.deck .pane__header .statechip {
+  border-color: transparent;
+}
+
+/* Active: an outline, not a fill. The halo already lights the pane. */
+.deck .pane__header .pane__active {
+  color: var(--accent-ink);
+  background: transparent;
+  border-color: var(--accent-line);
+}
+
+/* The live state: the one filled chip. Attention keeps a rim as well as the
+   wash, as a shape a colourblind eye can still find. */
+.deck .pane__header .statechip[data-state='attention'] {
+  border-color: var(--warn-line);
+  box-shadow: none;
+}
+
+/* Permission chips: an outline and a word. Bypass draws its rim harder than
+   any other chip in the row, so it is found by shape, never by red alone. */
+.deck .pane__header .pane__perm {
+  text-transform: uppercase;
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: transparent;
+}
+
+.deck .pane__header .pane__perm[data-danger='true'] {
+  color: var(--danger-ink);
+  border-color: color-mix(in srgb, var(--danger) 72%, transparent);
+  background: transparent;
+}
+
+/* Foreman: at rest its base hairline; lit, an accent outline with a wash
+   rather than a block, so it never outshouts the live state. */
+.deck .pane__header .pane__foreman {
+  text-transform: uppercase;
+}
+
+.deck .pane__header .pane__foreman[data-on='true']:not([data-status='done'], [data-status='error']) {
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+}
+
+.deck .pane__header .pane__handoff-chip {
+  max-width: 190px;
+}
+
+/* Sent or taken: the same lit outline as Foreman, the same wash. */
+.deck .pane__header .pane__handoff-chip:is([data-state='sent'], [data-state='took']) {
+  color: var(--accent-ink);
+  background: var(--accent-softer);
+}
+
+/* A light theme: an agent colour tuned to glow on dark (volt, a pale blue)
+   washes out as small words on paper, so Working pulls toward the ink. */
+:root[data-appearance='light'] .deck .pane__header .statechip[data-state='working'] {
+  color: color-mix(in srgb, var(--pane-accent, var(--accent)) 45%, var(--text-primary));
+}
+
+:root[data-appearance='light'] .deck .pane__header .statechip[data-state='working'] .statechip__clock {
+  color: color-mix(in srgb, var(--pane-accent, var(--accent)) 35%, var(--text-muted));
 }
 
 /* ================================================================ splits
