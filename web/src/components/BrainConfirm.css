@@ -1,0 +1,313 @@
+/*
+ * Forge Brain's confirm card (BrainConfirm.tsx): one component, two faces.
+ *
+ * Amber is the "waiting on you" colour, but the triangle and the words carry
+ * it on their own, and Yes / No are words — the same rule as AskBanner. Tokens
+ * only, with fallbacks for the harness, so every phone theme and both deck
+ * appearances draw it.
+ */
+
+.bconfirm {
+  display: flex;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.bconfirm__head {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/* The warning triangle: a shape of its own, apart from AskBanner's round "!". */
+.bconfirm__mark {
+  display: grid;
+  flex: none;
+}
+
+.bconfirm__mark svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bconfirm__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bconfirm__title {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bconfirm__what {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+
+.bconfirm__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+/* High risk says so in a heavier line as well as in its words. */
+.bconfirm[data-risk='high'] .bconfirm__risk {
+  font-weight: 700;
+}
+
+.bconfirm__btns {
+  display: flex;
+  flex: none;
+}
+
+.bconfirm__btn {
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.bconfirm__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ------------------------------------------------------------------ phone */
+
+.bconfirm[data-face='phone'] {
+  position: absolute;
+  top: var(--p-2, 8px);
+  right: var(--p-3, 12px);
+  left: var(--p-3, 12px);
+  /* Over AskBanner (6): this question has two minutes. Under every sheet. */
+  z-index: 7;
+  flex-direction: column;
+  gap: var(--p-3, 12px);
+  padding: var(--p-3, 12px) var(--p-3, 12px) var(--p-3, 12px) var(--p-4, 16px);
+  color: var(--p-ink, var(--text-primary));
+  background: var(--p-raised, var(--bg-panel-raised));
+  border: 2px solid var(--p-attn, var(--warn));
+  border-radius: var(--p-r-sheet, 20px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  user-select: none;
+  -webkit-user-select: none;
+  animation: bconfirm-drop var(--p-dur-sheet, 280ms) var(--p-ease-sheet, ease-out);
+}
+
+.bconfirm[data-face='phone'] .bconfirm__head {
+  gap: var(--p-3, 12px);
+}
+
+.bconfirm[data-face='phone'] .bconfirm__mark {
+  margin-top: 2px;
+  color: var(--p-attn, var(--warn));
+}
+
+.bconfirm[data-face='phone'] .bconfirm__mark svg {
+  width: 28px;
+  height: 28px;
+}
+
+.bconfirm[data-face='phone'] .bconfirm__text {
+  gap: 3px;
+}
+
+.bconfirm[data-face='phone'] .bconfirm__title {
+  color: var(--p-ink-2, var(--text-secondary));
+  font-size: var(--p-t-small, 13px);
+  line-height: 1.3;
+}
+
+.bconfirm[data-face='phone'] .bconfirm__what {
+  font-size: var(--p-t-title, 17px);
+  line-height: 1.3;
+}
+
+.bconfirm[data-face='phone'] .bconfirm__meta,
+.bconfirm[data-face='phone'] .bconfirm__refused {
+  color: var(--p-ink-2, var(--text-secondary));
+  font-size: var(--p-t-label, 14px);
+  line-height: 1.35;
+}
+
+.bconfirm[data-face='phone'][data-risk='high'] .bconfirm__risk,
+.bconfirm[data-face='phone'] .bconfirm__refused {
+  color: var(--p-ink, var(--text-primary));
+}
+
+/* Two halves of the card's width, a thumb tall. */
+.bconfirm[data-face='phone'] .bconfirm__btns {
+  gap: var(--p-2, 8px);
+}
+
+.bconfirm[data-face='phone'] .bconfirm__btn {
+  flex: 1 1 0;
+  min-height: 48px;
+  padding: 0 var(--p-4, 16px);
+  color: var(--p-ink, var(--text-primary));
+  background: transparent;
+  border: 1px solid var(--p-line-strong, var(--line-strong));
+  border-radius: var(--p-r-row, 12px);
+  font-size: var(--p-t-title, 17px);
+}
+
+.bconfirm[data-face='phone'] .bconfirm__btn--yes {
+  color: var(--p-act-ink, var(--text-on-accent));
+  background: var(--p-act, var(--accent));
+  border-color: transparent;
+}
+
+.bconfirm[data-face='phone'] .bconfirm__btn:active:not(:disabled) {
+  background: var(--p-press, var(--bg-active));
+}
+
+.bconfirm[data-face='phone'] .bconfirm__btn--yes:active:not(:disabled) {
+  background: var(--p-act, var(--accent));
+  opacity: 0.8;
+}
+
+.bconfirm[data-face='phone'] .bconfirm__btn:focus-visible {
+  outline: 2px solid var(--p-attn, var(--warn));
+  outline-offset: 2px;
+}
+
+@keyframes bconfirm-drop {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-100% - var(--p-2, 8px)));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------- deck */
+
+.bconfirm[data-face='deck'] {
+  position: fixed;
+  top: calc(var(--dk-bar-h, 40px) + 10px);
+  right: 0;
+  left: 0;
+  z-index: var(--z-toast);
+  align-items: center;
+  gap: 12px;
+  width: min(480px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 12px 12px 12px 14px;
+  color: var(--text-primary);
+  background: var(--sheet-bg, var(--bg-panel-raised));
+  border: 1px solid color-mix(in srgb, var(--warn) 60%, var(--glass-line-strong, var(--line-strong)));
+  border-radius: 14px;
+  box-shadow:
+    0 0 26px -4px color-mix(in srgb, var(--warn) 45%, transparent),
+    var(--glass-shadow, 0 8px 24px rgba(0, 0, 0, 0.4));
+  animation: bconfirm-rise 240ms ease-out;
+}
+
+.bconfirm[data-face='deck'] .bconfirm__head {
+  gap: 12px;
+}
+
+.bconfirm[data-face='deck'] .bconfirm__mark {
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+.bconfirm[data-face='deck'] .bconfirm__mark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.bconfirm[data-face='deck'] .bconfirm__text {
+  gap: 3px;
+}
+
+.bconfirm[data-face='deck'] .bconfirm__title {
+  color: var(--text-muted);
+  font-size: var(--t-xs);
+}
+
+.bconfirm[data-face='deck'] .bconfirm__what {
+  font-size: var(--t-md);
+  line-height: 1.4;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.bconfirm[data-face='deck'] .bconfirm__meta,
+.bconfirm[data-face='deck'] .bconfirm__refused {
+  color: var(--text-muted);
+  font-size: var(--t-sm);
+}
+
+.bconfirm[data-face='deck'][data-risk='high'] .bconfirm__risk,
+.bconfirm[data-face='deck'] .bconfirm__refused {
+  color: var(--text-primary);
+}
+
+.bconfirm[data-face='deck'] .bconfirm__btns {
+  gap: 6px;
+}
+
+.bconfirm[data-face='deck'] .bconfirm__btn {
+  height: 32px;
+  min-width: 56px;
+  padding: 0 14px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid var(--glass-line-strong, var(--line-strong));
+  border-radius: var(--r-full);
+  font-size: var(--t-md);
+}
+
+.bconfirm[data-face='deck'] .bconfirm__btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+.bconfirm[data-face='deck'] .bconfirm__btn--yes,
+.bconfirm[data-face='deck'] .bconfirm__btn--yes:hover:not(:disabled) {
+  color: var(--bg-base);
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.bconfirm[data-face='deck'] .bconfirm__btn:focus-visible {
+  outline: var(--focus-ring, 2px solid var(--accent));
+  outline-offset: var(--focus-offset, 2px);
+}
+
+@keyframes bconfirm-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+/* --------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .bconfirm {
+    animation: none !important;
+  }
+}
+
+:root[data-reduced-motion='true'] .bconfirm {
+  animation: none !important;
+}

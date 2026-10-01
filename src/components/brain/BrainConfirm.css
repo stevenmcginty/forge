@@ -1,0 +1,137 @@
+/*
+ * Forge Brain's confirm, on every screen (BrainConfirm.tsx).
+ *
+ * The app's notice tile (.dtoast, Shell.css) in its own corner, above the
+ * dock — so it never sits on the voice bar or a pane's close button — a size
+ * up, with a warning edge. The triangle and the words carry it; the amber is
+ * only extra. Tokens only, so it follows the dark and the light theme.
+ */
+
+.bconf {
+  /* Over any other notice in the corner: this one has a clock on it. */
+  z-index: calc(var(--z-toast) + 1);
+  align-items: flex-start;
+  gap: 12px;
+  width: min(440px, calc(100vw - 36px));
+  max-width: none;
+  padding: 12px 12px 12px 14px;
+  border-color: color-mix(in srgb, var(--warn) 60%, var(--glass-line-strong));
+  box-shadow:
+    0 0 26px -4px color-mix(in srgb, var(--warn) 45%, transparent),
+    var(--glass-shadow),
+    inset 0 1px 0 var(--glass-hi);
+  transition: bottom 200ms var(--ease-in-out);
+}
+
+/* Another notice is up in the corner: ride above it instead of covering it. */
+body:has(.dtoast:not(.bconf)) .bconf {
+  bottom: calc(var(--dock-clear) + 2px + 52px);
+}
+
+.bconf__mark {
+  display: grid;
+  flex: none;
+  margin-top: 1px;
+  color: var(--warn);
+}
+
+.bconf__mark .bctx__shape {
+  width: 20px;
+  height: 20px;
+}
+
+.bconf__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bconf__title {
+  font-size: var(--t-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* What it will do: the line to read. Three lines at most; the whole of it is in the title. */
+.bconf__what {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--t-md);
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.bconf__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* High risk says so in a heavier line as well as in its words. */
+.bconf[data-risk='high'] .bconf__risk {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.bconf__btns {
+  display: flex;
+  flex: none;
+  align-self: center;
+  gap: 6px;
+}
+
+.bconf__btn {
+  height: 32px;
+  min-width: 56px;
+  padding: 0 14px;
+  border: 1px solid var(--glass-line-strong);
+  border-radius: var(--r-full);
+  font-size: var(--t-md);
+  font-weight: 700;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.bconf__btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+.bconf__btn--yes {
+  border-color: transparent;
+  color: var(--bg-base);
+  background: var(--accent);
+}
+
+.bconf__btn--yes:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, var(--text-primary));
+}
+
+.bconf__btn:disabled {
+  opacity: 0.55;
+}
+
+.bconf__btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bconf {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .bconf {
+  transition: none;
+}

@@ -9,6 +9,7 @@ import { useActiveProject, useForge, useWorkspace } from '../state'
 import { useWebUpdate } from '../lib/update'
 import { AgentChooser } from './AgentChooser'
 import { AskBanner } from './AskBanner'
+import { BrainConfirm } from './BrainConfirm'
 import { MobilePanes } from './MobilePanes'
 import { useTextScale } from './MoreSheet'
 import { OfflineBanner } from './OfflineBanner'
@@ -414,6 +415,8 @@ export function Workspace(): ReactNode {
               )}
               {mobile ? notice : null}
               {mobile ? <AskBanner /> : null}
+              {/* Forge Brain waiting on a yes: over the display's top, and over the banner. */}
+              {mobile && !offline ? <BrainConfirm face="phone" /> : null}
             </div>
             <SessionComposer />
           </div>
@@ -428,6 +431,8 @@ export function Workspace(): ReactNode {
         </Suspense>
       ) : null}
       {deck ? <DeckKeys view={deckView} onView={setDeckView} place={barPlace} /> : null}
+      {/* Forge Brain waiting on a yes: a tile under the bar, whatever the stage shows. */}
+      {deck && !offline ? <BrainConfirm face="deck" /> : null}
 
       {mobile && gridShown ? null : notice}
 

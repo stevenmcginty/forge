@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { DictationCueHost } from '@/components/DictationCue'
 import { AccountPrompt } from '@/components/AccountPrompt'
+import { BrainConfirm } from '@/components/brain/BrainConfirm'
 import { BrainMapHost } from '@/components/brainview'
 import { Onboarding } from '@/components/Onboarding'
 import { WhatsNew } from '@/components/WhatsNew'
@@ -201,6 +202,8 @@ export function App(): ReactNode {
       <DeckToast />
       {/* A screenshot the moment you take it, top right, before it tucks into the menu's shelf. */}
       <ShotPop />
+      {/* Forge Brain waiting on a yes: on every screen, not only in its map. */}
+      <BrainConfirm />
       {/* The Dictate key's dictation, lit where its words land (the pane, the bar, or a band). */}
       <DictationCueHost />
       {/* Forge Brain's expanded map (src/components/brainview): nothing until opened. */}

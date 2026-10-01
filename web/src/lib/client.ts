@@ -1788,6 +1788,19 @@ export class ForgeClient {
     return 'The desktop answered that layout request with something this page does not understand.'
   }
 
+  /**
+   * A human's Yes or No to one of Forge Brain's waiting questions
+   * (`BrainStatus.confirms`). Resolves with the desktop's sentence — the
+   * question had already timed out, an older desktop — or null when it was
+   * taken; the `brain` push that follows is what takes it off the screen.
+   */
+  async brainConfirm(id: string, allow: boolean): Promise<string | null> {
+    const result = await this.request({ kind: 'brain-confirm', id, allow })
+    if (result.kind === 'ok') return null
+    if (result.kind === 'failed') return result.message
+    return 'The desktop answered that with something this page does not understand.'
+  }
+
   /* -------------------------------------------------------------- internals */
 
   /**

@@ -50,6 +50,7 @@ import type {
 } from '@/lib/realtime/session'
 import { buildRolloverSummary } from '@/lib/realtime/summary'
 import { REALTIME_TOOLS, realtimeResultLabel, realtimeToolLabel, runRealtimeTool } from '@/lib/realtime/tools'
+import { startBrainFeed, useBrain } from '@/components/brain/brainStore'
 import { useApp } from './AppState'
 import { useDictation } from './Dictation'
 import { useVoiceAgent, type AgentPhase } from './VoiceAgent'
@@ -298,6 +299,32 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       )
     })
   }, [])
+
+  // Forge Brain waiting on a yes (its confirm gate): each new question is said
+  // aloud once, by the same route as a line above. With no live session the
+  // Parakeet side says it and takes a spoken yes or no (VoiceAgent
+  // `hearBrainConfirm`, `runPhrase`). A live realtime session only tells him —
+  // it has no tool for the gate and must never get one: the answer is the Yes
+  // or No on screen.
+  const brainConfirms = useBrain().status?.confirms
+  const askedConfirms = useRef(new Set<string>())
+  useEffect(() => startBrainFeed(), [])
+  useEffect(() => {
+    for (const confirm of brainConfirms ?? []) {
+      if (askedConfirms.current.has(confirm.id)) continue
+      askedConfirms.current.add(confirm.id)
+      const session = sessionRef.current
+      if (!session) {
+        agentRef.current.hearBrainConfirm?.(confirm)
+        continue
+      }
+      const what = (confirm.summary.trim() || confirm.tool || 'an action').replace(/[\s.?!]+$/, '')
+      session.sendContext(
+        `[Forge Brain] Tell Steve this now, briefly. Only he can answer it, not you: Forge Brain asks: ${what}. Press Yes or No on screen.`,
+        true
+      )
+    }
+  }, [brainConfirms])
 
   const setNotice = useCallback((text: string | null): void => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
