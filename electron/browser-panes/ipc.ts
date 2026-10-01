@@ -19,6 +19,7 @@ import { BrowserService, type BrowserServiceDeps } from './service'
 let service: BrowserService | null = null
 /** Hooks other modules install, kept here so the order of registration does not matter. */
 let shotHook: NonNullable<BrowserServiceDeps['onShot']> | null = null
+let readyHook: (() => void) | null = null
 
 /** A pane caller, named from the PTY host's own record of that pane: its one name ("Zeb"). */
 function resolveFromPanes(caller: BrowserOwner): { owner: BrowserOwner; project?: string } {
@@ -50,6 +51,11 @@ export function registerBrowserPanes(): void {
   setBrowserLinkFile(service.linkFile)
   setBrainBrowserRunner((op, args) => service?.run(op, args, VOICE_OWNER) ?? Promise.resolve(notReady()))
   service.start().catch((err) => console.error('[browser] link failed to start:', err))
+  try {
+    readyHook?.()
+  } catch (err) {
+    console.error('[browser] ready hook failed:', err)
+  }
 }
 
 function notReady(): BrowserAgentReply {
@@ -70,6 +76,11 @@ export function disposeBrowserPanes(): void {
 /** The running service, or null before registerBrowserPanes / after quit. For Forge Web's tab copies. */
 export function browserService(): BrowserService | null {
   return service
+}
+
+/** Told once the service exists, for a Forge Web tab list asked for before it did. */
+export function setBrowserReadyHook(hook: () => void): void {
+  readyHook = hook
 }
 
 /** Every browser screenshot, for the canvas board. */

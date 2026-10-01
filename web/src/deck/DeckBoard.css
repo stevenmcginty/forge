@@ -1,0 +1,468 @@
+/*
+ * The deck's Board view (./DeckBoard.tsx): a gallery of cards, and a viewer
+ * that fills the same box, framed as one window like the Browser. Every state
+ * is a word or a shape as well as a colour.
+ */
+
+.app[data-face='deck'] .dk-board {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
+}
+
+.app[data-face='deck'] .dk-board__empty {
+  margin: auto;
+  padding: 24px;
+  max-width: 420px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------------- head */
+
+.app[data-face='deck'] .dk-board__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--font-display);
+}
+
+.app[data-face='deck'] .dk-board__heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.app[data-face='deck'] .dk-board__count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-board__offline {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px dashed var(--line-soft);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------- gallery */
+
+/* A plain scrolling box with the browser's own scroll bar: on a touchpad the
+   bar is the hint that there is more. */
+.app[data-face='deck'] .dk-board__gallery {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-auto-rows: max-content;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.app[data-face='deck'] .dk-board__cell {
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-board__card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-board__card:hover {
+  border-color: var(--glass-line);
+  background: color-mix(in srgb, var(--text-primary) 4%, var(--bg-sunken));
+}
+
+.app[data-face='deck'] .dk-board__card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.app[data-face='deck'] .dk-board__thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--bg-terminal);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.app[data-face='deck'] .dk-board__pic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.app[data-face='deck'] .dk-board__pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.app[data-face='deck'] .dk-board__kind {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* The most recent change: a word in a box, not a tint. */
+.app[data-face='deck'] .dk-board__newest {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--glass-line);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.app[data-face='deck'] .dk-board__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 9px 8px;
+}
+
+.app[data-face='deck'] .dk-board__title {
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.app[data-face='deck'] .dk-board__sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------------- viewer */
+
+.app[data-face='deck'] .dk-board__viewer {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app[data-face='deck'] .dk-board__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--line-hairline);
+  font-family: var(--font-display);
+}
+
+.app[data-face='deck'] .dk-board__btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app[data-face='deck'] .dk-board__btn--word {
+  width: auto;
+  padding: 0 10px;
+  border: 1px solid var(--glass-line);
+  color: var(--text-primary);
+}
+
+.app[data-face='deck'] .dk-board__btn:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.app[data-face='deck'] .dk-board__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.app[data-face='deck'] .dk-board__name {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-board__tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-board__steps {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.app[data-face='deck'] .dk-board__where {
+  min-width: 52px;
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-board__stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-terminal);
+}
+
+/* Text reads on the panel's ground, not the picture's. */
+.app[data-face='deck'] .dk-board__stage[data-kind='text'],
+.app[data-face='deck'] .dk-board__stage[data-kind='html'] {
+  background: var(--bg-panel);
+}
+
+.app[data-face='deck'] .dk-board__notice {
+  margin: auto;
+  padding: 14px 16px;
+  max-width: 420px;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.app[data-face='deck'] .dk-board__notice p {
+  margin: 0;
+}
+
+.app[data-face='deck'] .dk-board__progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 10px;
+  accent-color: var(--accent);
+}
+
+.app[data-face='deck'] .dk-board__picture,
+.app[data-face='deck'] .dk-board__clip {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* A page from the Board draws its own ground; white is what a page expects. */
+.app[data-face='deck'] .dk-board__frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.app[data-face='deck'] .dk-board__read {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+}
+
+.app[data-face='deck'] .dk-board__plain {
+  margin: 0 auto;
+  max-width: 820px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  user-select: text;
+}
+
+/* ------------------------------------------------------- markdown (md__*) */
+
+.app[data-face='deck'] .dk-board__prose {
+  margin: 0 auto;
+  max-width: 760px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__p {
+  margin: 0 0 12px;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__h {
+  margin: 22px 0 10px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__h:first-child {
+  margin-top: 0;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__list {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__quote {
+  margin: 0 0 12px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line-soft);
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-board__prose .md__hr {
+  margin: 18px 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* Links are underlined, so they read without their colour. */
+.app[data-face='deck'] .dk-board__prose .md__link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__inline-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__codeblock {
+  margin: 0 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.app[data-face='deck'] .dk-board__prose .md__code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line-hairline);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-board__prose .md__copy-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__code {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__tablewrap {
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__table th,
+.app[data-face='deck'] .dk-board__prose .md__table td {
+  padding: 5px 10px;
+  border: 1px solid var(--line-hairline);
+  text-align: left;
+}
+
+.app[data-face='deck'] .dk-board__prose .md__table th {
+  font-weight: 700;
+  background: var(--bg-sunken);
+}

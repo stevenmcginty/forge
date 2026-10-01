@@ -70,20 +70,23 @@ export function useBarPlace(): [BarPlace, (place: BarPlace) => void] {
 }
 
 /**
- * What the stage shows: the desktop's agents, or its Browser tabs
- * (./DeckBrowser.tsx). Per browser, like the view. A store rather than state,
- * because the top bar's switch and the stage are drawn from different parents.
+ * What the stage shows: the desktop's agents, its Browser tabs
+ * (./DeckBrowser.tsx) or the project's Board (./DeckBoard.tsx). Per browser,
+ * like the view. A store rather than state, because the top bar's switch and
+ * the stage are drawn from different parents.
  *
  *   agents   the panes, in focus or on the Wall (DeckView above)
  *   browser  the desktop's Browser tabs, one live picture at a time
+ *   board    what the agents put on the project's Board, read-only
  */
-export type DeckSurface = 'agents' | 'browser'
+export type DeckSurface = 'agents' | 'browser' | 'board'
 
 const SURFACE_KEY = 'forge-web-surface'
 
 function storedSurface(): DeckSurface {
   try {
-    return window.localStorage.getItem(SURFACE_KEY) === 'browser' ? 'browser' : 'agents'
+    const kept = window.localStorage.getItem(SURFACE_KEY)
+    return kept === 'browser' || kept === 'board' ? kept : 'agents'
   } catch {
     return 'agents'
   }

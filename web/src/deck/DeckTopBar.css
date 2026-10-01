@@ -384,7 +384,7 @@
 
 /* --------------------------------------------------------------- surface */
 
-/* Agents | Browser: what the stage shows. The one showing is pressed, bold
+/* Agents | Browser | Board: what the stage shows. The one showing is pressed, bold
    and underlined — shape and weight first, the accent agreeing. */
 .app[data-face='deck'] .dk-surface {
   display: inline-flex;

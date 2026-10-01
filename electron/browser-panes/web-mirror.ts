@@ -25,7 +25,7 @@ import {
   type BrowserWatchFrame
 } from '@shared/browser-mirror'
 import { getProjects } from '../store'
-import { browserService } from './ipc'
+import { browserService, setBrowserReadyHook } from './ipc'
 import { prepareBrowserSession } from './manager'
 import type { BrowserService } from './service'
 
@@ -130,6 +130,24 @@ function service(): BrowserService | null {
     hooked = s
   }
   return s
+}
+
+/**
+ * The service came up after a browser had asked for the tab list (Forge Web
+ * started first): listen to it now, and send the list it has, rather than
+ * leaving that browser on an empty strip until its next `browser:*` frame.
+ */
+function onServiceReady(): void {
+  const s = service()
+  if (!s || !tabListeners.size) return
+  const tabs = s.manager.records().map(summary)
+  for (const listener of tabListeners) {
+    try {
+      listener(tabs)
+    } catch {
+      /* a socket that died is released by its own close */
+    }
+  }
 }
 
 function record(tabId: string): BrowserSurfaceRecord | null {
@@ -626,7 +644,10 @@ let shared: BrowserMirrorHost | null = null
 
 /** The one host Forge Web (electron/web-host.ts) is handed. */
 export function sharedBrowserMirrorHost(): BrowserMirrorHost {
-  shared ??= browserMirrorHost()
+  if (!shared) {
+    shared = browserMirrorHost()
+    setBrowserReadyHook(onServiceReady)
+  }
   return shared
 }
 

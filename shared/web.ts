@@ -132,6 +132,7 @@ import type { ChatUpdate } from './chat'
 import type { MirrorButton, MirrorInputAction, MirrorKey, RemoteYesInfo } from './mobile'
 import type { ChatClientFrame, ChatServerFrame } from './chat-mirror'
 import type { BrowserClientFrame, BrowserServerFrame } from './browser-mirror'
+import type { BoardClientFrame, BoardServerFrame } from './board-mirror'
 
 /* --------------------------------------------------------- protocol identity */
 
@@ -1010,6 +1011,8 @@ export type WebClientFrame =
   | ChatClientFrame
   // The desktop's Browser tabs seen from a browser; see shared/browser-mirror.ts.
   | BrowserClientFrame
+  // The desktop's Board seen from a browser; see shared/board-mirror.ts.
+  | BoardClientFrame
 
 /* --------------------------------------------------------- layout operations
  *
@@ -2507,6 +2510,7 @@ export type WebServerFrame =
   | WebMirrorStopFrame
   | ChatServerFrame
   | BrowserServerFrame
+  | BoardServerFrame
 
 /* ------------------------------------------------------------ screen mirror
  *
@@ -2834,6 +2838,11 @@ export function parseFrame(raw: string): WebClientFrame | null {
     case 'browser:nav':
     case 'browser:open':
     case 'browser:close':
+    // And for the Board: `readBoardClientFrame` in shared/board-mirror.ts.
+    case 'board:subscribe':
+    case 'board:unsubscribe':
+    case 'board:get':
+    case 'board:cancel':
       return value as WebClientFrame
     default:
       return null

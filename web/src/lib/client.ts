@@ -36,6 +36,7 @@ import {
   type BrowserTabSummary,
   type BrowserWatchFrame
 } from '@shared/browser-mirror'
+import { BOARD_MIRROR_FEATURE, type BoardChunkFrame, type BoardItemSummary } from '@shared/board-mirror'
 import type { ForemanState } from '@shared/foreman'
 import type { BrainSaysEvent, BrainStatus } from '@shared/brain'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
@@ -734,6 +735,174 @@ function settleBrowserOpen(frame: BrowserOpenedFrame): void {
 /** Close a desktop tab. The desktop refuses one an agent owns. */
 export function closeBrowserTab(tabId: string): void {
   sendUp?.({ type: 'browser:close', tabId })
+}
+
+/* ----------------------------------------------------------------- board
+ *
+ * The desktop's Board (shared/board-mirror.ts), seen from the deck: one
+ * project's item list, pushed again on every change, and each item's file
+ * fetched on demand as `board:chunk` pieces. One project per browser — a new
+ * subscribe replaces the old one, on the desktop and here. The subscription is
+ * re-sent on every `hello-ok` to a desktop that still announces the feature; a
+ * fetch is not: it fails with the socket, in words, and the view asks again.
+ */
+
+type BoardItemsListener = (items: BoardItemSummary[]) => void
+
+/** The Board view's subscription; null while no Board is on screen. */
+let boardWatch: { project: string; listener: BoardItemsListener } | null = null
+
+interface BoardFetch {
+  resolve: (file: { mime: string; blob: Blob }) => void
+  reject: (error: Error) => void
+  onProgress?: (received: number, total: number) => void
+  /** The pieces by `seq`, so a late one still lands in its place. */
+  pieces: Uint8Array[]
+  received: number
+  mime: string
+  total: number
+  /** The `seq` of the piece marked `done`, once it has come; -1 before. */
+  last: number
+  timer: number
+}
+
+const boardFetches = new Map<string, BoardFetch>()
+let boardFetchSeq = 0
+/** How long a fetch may go without a piece before it is given up as failed. */
+const BOARD_IDLE_TIMEOUT_MS = 30_000
+
+/**
+ * Hear one project's board: the list now (the desktop answers a subscribe at
+ * once) and on every change. Returns the release, which unsubscribes — unless
+ * a later subscribe has already taken over.
+ */
+export function subscribeBoard(project: string, listener: BoardItemsListener): () => void {
+  const entry = { project, listener }
+  boardWatch = entry
+  sendUp?.({ type: 'board:subscribe', project })
+  return () => {
+    if (boardWatch !== entry) return
+    boardWatch = null
+    sendUp?.({ type: 'board:unsubscribe' })
+  }
+}
+
+function boardBytes(base64: string): Uint8Array {
+  const raw = window.atob(base64)
+  const bytes = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i)
+  return bytes
+}
+
+function endBoardFetch(reqId: string): BoardFetch | null {
+  const fetch = boardFetches.get(reqId)
+  if (!fetch) return null
+  boardFetches.delete(reqId)
+  window.clearTimeout(fetch.timer)
+  return fetch
+}
+
+function armBoardIdle(reqId: string, fetch: BoardFetch): void {
+  window.clearTimeout(fetch.timer)
+  fetch.timer = window.setTimeout(() => {
+    if (!endBoardFetch(reqId)) return
+    sendUp?.({ type: 'board:cancel', reqId })
+    fetch.reject(new Error('The desktop did not answer in time.'))
+  }, BOARD_IDLE_TIMEOUT_MS)
+}
+
+/**
+ * Fetch one board item's file. Resolves with its type and bytes once every
+ * piece is in; rejects with the desktop's sentence (`board:error`), a timeout's,
+ * or the dropped link's. Aborting `signal` tells the desktop to stop sending,
+ * and rejects with an `AbortError`.
+ */
+export function fetchBoardFile(
+  project: string,
+  name: string,
+  onProgress?: (received: number, total: number) => void,
+  signal?: AbortSignal
+): Promise<{ mime: string; blob: Blob }> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Stopped.', 'AbortError'))
+      return
+    }
+    if (!sendUp) {
+      reject(new Error('Not connected to the desktop.'))
+      return
+    }
+    boardFetchSeq += 1
+    const reqId = `g${boardFetchSeq}`
+    const fetch: BoardFetch = {
+      resolve,
+      reject,
+      onProgress,
+      pieces: [],
+      received: 0,
+      mime: '',
+      total: 0,
+      last: -1,
+      timer: 0
+    }
+    boardFetches.set(reqId, fetch)
+    armBoardIdle(reqId, fetch)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        if (!endBoardFetch(reqId)) return
+        sendUp?.({ type: 'board:cancel', reqId })
+        reject(new DOMException('Stopped.', 'AbortError'))
+      },
+      { once: true }
+    )
+    sendUp({ type: 'board:get', reqId, project, name })
+  })
+}
+
+function receiveBoardChunk(frame: BoardChunkFrame): void {
+  const fetch = boardFetches.get(frame.reqId)
+  if (!fetch || !Number.isInteger(frame.seq) || frame.seq < 0) return
+  if (fetch.pieces[frame.seq] === undefined) {
+    let bytes: Uint8Array
+    try {
+      bytes = boardBytes(typeof frame.data === 'string' ? frame.data : '')
+    } catch {
+      endBoardFetch(frame.reqId)
+      sendUp?.({ type: 'board:cancel', reqId: frame.reqId })
+      fetch.reject(new Error('The file arrived damaged. Try again.'))
+      return
+    }
+    fetch.pieces[frame.seq] = bytes
+    fetch.received += bytes.length
+  }
+  if (typeof frame.mime === 'string' && frame.mime) fetch.mime = frame.mime
+  if (typeof frame.total === 'number' && frame.total > 0) fetch.total = frame.total
+  if (frame.done) fetch.last = frame.seq
+  fetch.onProgress?.(fetch.received, fetch.total)
+  const parts: BlobPart[] = []
+  // Done only once the last piece has come and every one before it (a sparse
+  // array's holes are skipped by `some`, so each index is looked at).
+  for (let seq = 0; fetch.last >= 0 && seq <= fetch.last; seq += 1) {
+    const piece = fetch.pieces[seq]
+    if (!piece) break
+    parts.push(piece as BlobPart)
+  }
+  if (fetch.last < 0 || parts.length < fetch.last + 1) {
+    armBoardIdle(frame.reqId, fetch)
+    return
+  }
+  endBoardFetch(frame.reqId)
+  fetch.resolve({ mime: fetch.mime, blob: new Blob(parts, fetch.mime ? { type: fetch.mime } : {}) })
+}
+
+function failBoardFetch(reqId: string, error: string): void {
+  endBoardFetch(reqId)?.reject(new Error(error || 'The desktop could not send that file.'))
+}
+
+/** Every fetch in flight, failed: its socket is gone and no more pieces will come. */
+function failBoardFetches(message: string): void {
+  for (const reqId of [...boardFetches.keys()]) endBoardFetch(reqId)?.reject(new Error(message))
 }
 
 /* ------------------------------------------------------ what the desk can do
@@ -1804,6 +1973,7 @@ export class ForgeClient {
         this.told.clear()
         this.pendingReplay.clear()
         this.failWaiting('The link to the desktop dropped before that answered.')
+        failBoardFetches('The link to the desktop dropped before that file came.')
         // A watcher hears about it here rather than working it out from a picture
         // that stopped moving: a decoder holding a last frame looks exactly like a
         // desktop that is sitting still, and the two want different sentences. A
@@ -1911,6 +2081,10 @@ export class ForgeClient {
         if (deskFacts.features.includes(BROWSER_MIRROR_FEATURE)) {
           if (browserTabListeners.size > 0) this.send({ type: 'browser:subscribe' })
           for (const [tabId, { size }] of browserWatches) this.send({ type: 'browser:watch', tabId, ...size })
+        }
+        // And the Board view's project, for the same reason.
+        if (boardWatch && deskFacts.features.includes(BOARD_MIRROR_FEATURE)) {
+          this.send({ type: 'board:subscribe', project: boardWatch.project })
         }
         this.flushHeld()
         // The new socket starts from whatever the desktop last heard about
@@ -2173,6 +2347,22 @@ export class ForgeClient {
 
       case 'browser:opened':
         settleBrowserOpen(frame)
+        return
+
+      /* ----------------------------------------------------------- board */
+
+      case 'board:items':
+        if (boardWatch && frame.project === boardWatch.project) {
+          boardWatch.listener(Array.isArray(frame.items) ? frame.items : [])
+        }
+        return
+
+      case 'board:chunk':
+        receiveBoardChunk(frame)
+        return
+
+      case 'board:error':
+        failBoardFetch(frame.reqId, frame.error)
         return
 
       case 'pong':
@@ -2484,6 +2674,8 @@ export class ForgeClient {
     // this socket's delivery, and this socket is being retired.
     this.told.clear()
     this.pendingReplay.clear()
+    // A file half sent down this socket will not finish down the next one.
+    failBoardFetches('The link to the desktop dropped before that file came.')
     if (!socket) return
     this.retire(socket, why)
   }

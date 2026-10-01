@@ -75,6 +75,17 @@ import {
   type BrowserClientFrame,
   type BrowserMirrorHost
 } from '@shared/browser-mirror'
+import {
+  BOARD_CHUNK_BYTES,
+  BOARD_MAX_FETCH_BYTES,
+  BOARD_MAX_PARALLEL_GETS,
+  BOARD_MIRROR_FEATURE,
+  readBoardClientFrame,
+  type BoardClientFrame,
+  type BoardFileHandle,
+  type BoardGetFrame,
+  type BoardMirrorHost
+} from '@shared/board-mirror'
 /*
  * Foreman's boundary constants and shapes, from the file that owns them — the
  * seed cap is applied here, beside every other cap this link enforces, and the
@@ -251,6 +262,16 @@ const VOICE_QUEUE_MAX = 2000
  * last numbers of a burst still go out once the window passes.
  */
 const USAGE_THROTTLE_MS = 2000
+
+/**
+ * A Board file's next piece waits while the socket has more than this unsent,
+ * checked every BOARD_DRAIN_POLL_MS — a few pieces in flight, never a whole
+ * 50 MB file queued behind a slow tunnel. And the most `board:get`s one browser
+ * may have waiting behind the BOARD_MAX_PARALLEL_GETS being sent.
+ */
+const BOARD_BACKLOG = 1024 * 1024
+const BOARD_DRAIN_POLL_MS = 25
+const BOARD_MAX_QUEUED_GETS = 32
 
 /**
  * Close codes, so a browser can tell one hang-up from another in its own
@@ -761,6 +782,13 @@ export interface WebServerHost {
   browserMirror?: BrowserMirrorHost
 
   /**
+   * The desktop's Board, seen from a browser (shared/board-mirror.ts).
+   * Read-only. Optional, as `chatMirror`: a host without it never announces
+   * BOARD_MIRROR_FEATURE, and a `board:*` frame is answered `unsupported`.
+   */
+  boardMirror?: BoardMirrorHost
+
+  /**
    * Injected so the smoke test can drive the rate-limit buckets and a short
    * heartbeat without sleeping through the shipped values. Defaults are the
    * shipped ones.
@@ -862,6 +890,12 @@ interface Client {
   chats: Map<string, (update: ChatUpdate) => void>
   /** The unsubscribe for this browser's `browser:tabs` pushes, or null while it has not asked for them. */
   browserTabs: (() => void) | null
+  /** The one project whose `board:items` this browser is told, and the unsubscribe, or null. */
+  board: { project: string; off: () => void } | null
+  /** Board files being sent to this browser, by reqId; `cancelled` stops one between pieces. */
+  boardGets: Map<string, { cancelled: boolean }>
+  /** Board files asked for while BOARD_MAX_PARALLEL_GETS were already being sent, oldest first. */
+  boardQueue: BoardGetFrame[]
   /**
    * Whether this tab is on screen, as its last `visibility` request said —
    * `null` while it has never said.
@@ -1572,6 +1606,9 @@ export class WebServer {
       subs: new Set(),
       chats: new Map(),
       browserTabs: null,
+      board: null,
+      boardGets: new Map(),
+      boardQueue: [],
       visible: null,
       stale: new Set(),
       inputSecond: 0,
@@ -1648,6 +1685,8 @@ export class WebServer {
       this.host.chatMirror?.release(client.viewer)
       // The same for Browser tabs, and its tab-list pushes stop.
       this.releaseBrowser(client)
+      // Its Board pushes stop, and any file half-sent to it.
+      this.releaseBoard(client)
       // Every conversation this browser was reading, let go with it. A tail on
       // a file in `~/.claude` polling for a socket that closed is exactly the
       // watch nobody will ever stop.
@@ -1955,6 +1994,12 @@ export class WebServer {
       case 'browser:open':
       case 'browser:close':
         return this.onBrowser(client, frame)
+
+      case 'board:subscribe':
+      case 'board:unsubscribe':
+      case 'board:get':
+      case 'board:cancel':
+        return this.onBoard(client, frame)
     }
   }
 
@@ -2040,6 +2085,145 @@ export class WebServer {
     client.browserTabs?.()
     client.browserTabs = null
     this.host.browserMirror?.release(client.viewer)
+  }
+
+  /**
+   * The desktop's Board on this browser: one project's item list and its
+   * pushes, and an item's file in `board:chunk` pieces. Read-only. The same
+   * gates as `onBrowser`: only an admitted socket reaches here, what a frame
+   * means is decided by `readBoardClientFrame`, and which items exist by the
+   * host — `name` is looked up in the board's own list, never used as a path.
+   */
+  private onBoard(client: Client, raw: BoardClientFrame): void {
+    if (!client.device) return
+    const board = this.host.boardMirror
+    if (!board) {
+      this.send(client, {
+        type: 'error',
+        code: 'unsupported',
+        message: 'This desktop cannot show its Board to a browser.'
+      })
+      return
+    }
+    const frame = readBoardClientFrame(raw)
+    if (!frame) {
+      this.send(client, {
+        type: 'error',
+        code: 'bad-frame',
+        message: 'That is not a Board request this desktop understands.'
+      })
+      return
+    }
+    switch (frame.type) {
+      case 'board:subscribe': {
+        client.board?.off()
+        const project = frame.project
+        client.board = {
+          project,
+          off: board.onItems(project, (items) => {
+            if (this.clients.has(client)) this.send(client, { type: 'board:items', project, items })
+          })
+        }
+        this.send(client, { type: 'board:items', project, items: board.items(project) })
+        return
+      }
+      case 'board:unsubscribe':
+        client.board?.off()
+        client.board = null
+        return
+      case 'board:get':
+        if (client.boardGets.has(frame.reqId) || client.boardQueue.some((q) => q.reqId === frame.reqId)) {
+          this.send(client, { type: 'board:error', reqId: frame.reqId, error: 'That file is already being sent.' })
+          return
+        }
+        if (client.boardQueue.length >= BOARD_MAX_QUEUED_GETS) {
+          this.send(client, {
+            type: 'board:error',
+            reqId: frame.reqId,
+            error: 'Too many files asked for at once. Try again in a moment.'
+          })
+          return
+        }
+        client.boardQueue.push(frame)
+        this.pumpBoardGets(client)
+        return
+      case 'board:cancel': {
+        const live = client.boardGets.get(frame.reqId)
+        if (live) live.cancelled = true
+        client.boardQueue = client.boardQueue.filter((q) => q.reqId !== frame.reqId)
+        return
+      }
+    }
+  }
+
+  /** Start waiting Board files while fewer than BOARD_MAX_PARALLEL_GETS are being sent. */
+  private pumpBoardGets(client: Client): void {
+    while (client.boardGets.size < BOARD_MAX_PARALLEL_GETS && client.boardQueue.length) {
+      const frame = client.boardQueue.shift()!
+      const state = { cancelled: false }
+      client.boardGets.set(frame.reqId, state)
+      void this.sendBoardFile(client, frame, state).finally(() => {
+        if (client.boardGets.get(frame.reqId) === state) client.boardGets.delete(frame.reqId)
+        if (this.clients.has(client)) this.pumpBoardGets(client)
+      })
+    }
+  }
+
+  /**
+   * One Board file down the socket in BOARD_CHUNK_BYTES pieces, read a piece at
+   * a time. Unlike a picture, a piece is never skipped: past BOARD_BACKLOG
+   * unsent bytes this waits for the socket to drain. Stops between pieces on
+   * `board:cancel` and when the socket goes.
+   */
+  private async sendBoardFile(client: Client, frame: BoardGetFrame, state: { cancelled: boolean }): Promise<void> {
+    const board = this.host.boardMirror
+    if (!board) return
+    const gone = (): boolean => state.cancelled || !this.clients.has(client)
+    const fail = (error: string): void => {
+      if (!gone()) this.send(client, { type: 'board:error', reqId: frame.reqId, error })
+    }
+    let file: BoardFileHandle | null = null
+    try {
+      file = await board.open(frame.project, frame.name)
+      if (gone()) return
+      if (!file) return fail('That file is not on the board any more.')
+      if (file.total > BOARD_MAX_FETCH_BYTES) return fail('This file is too big to show here. Open it on the desktop.')
+      this.host.log?.(`[board-web] get ${logText(frame.project, 128)}/${logText(frame.name, 256)} ${file.total}`)
+      let offset = 0
+      for (let seq = 0; ; seq++) {
+        while (client.socket.bufferedAmount > BOARD_BACKLOG) {
+          await new Promise((resolve) => setTimeout(resolve, BOARD_DRAIN_POLL_MS))
+          if (gone()) return
+        }
+        const want = Math.min(BOARD_CHUNK_BYTES, file.total - offset)
+        const bytes = want > 0 ? await file.read(offset, want) : new Uint8Array(0)
+        if (gone()) return
+        offset += bytes.length
+        const done = offset >= file.total || bytes.length === 0
+        this.send(client, {
+          type: 'board:chunk',
+          reqId: frame.reqId,
+          seq,
+          data: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64'),
+          done,
+          ...(seq === 0 ? { mime: file.mime, total: file.total } : {})
+        })
+        if (done) return
+      }
+    } catch (err) {
+      fail(`The file could not be read (${err instanceof Error ? err.message : String(err)}).`)
+    } finally {
+      file?.close()
+    }
+  }
+
+  /** A socket went: its Board pushes stop and every file being sent to it stops. Idempotent. */
+  private releaseBoard(client: Client): void {
+    client.board?.off()
+    client.board = null
+    for (const state of client.boardGets.values()) state.cancelled = true
+    client.boardGets.clear()
+    client.boardQueue = []
   }
 
   /**
@@ -2290,7 +2474,8 @@ export class WebServer {
       ...(this.host.projectRemove && this.host.projectRemovePreview ? [WEB_FEATURE_PROJECT_REMOVE] : []),
       ...(this.host.usage ? [WEB_FEATURE_USAGE] : []),
       ...(this.host.chatMirror ? [CHAT_MIRROR_FEATURE] : []),
-      ...(this.host.browserMirror ? [BROWSER_MIRROR_FEATURE] : [])
+      ...(this.host.browserMirror ? [BROWSER_MIRROR_FEATURE] : []),
+      ...(this.host.boardMirror ? [BOARD_MIRROR_FEATURE] : [])
     ]
     this.log(`${outcome.device.name} connected from ${client.source} (client ${wireString(frame.client, 32) || '?'})`)
     this.send(client, {
@@ -3914,6 +4099,7 @@ export class WebServer {
     this.dropViewer(client)
     this.host.chatMirror?.release(client.viewer)
     this.releaseBrowser(client)
+    this.releaseBoard(client)
     this.stopTranscripts(client)
     this.closeVoiceClaude(client)
     try {

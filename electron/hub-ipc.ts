@@ -3,6 +3,7 @@ import { join, resolve, sep } from 'node:path'
 import {
   CANVAS_DIR_ENV,
   HUB_IPC,
+  type CanvasChange,
   type CanvasLayoutPatch,
   type KeymapFile,
   type SavedPromptInput
@@ -21,6 +22,8 @@ let board: CanvasBoard | null = null
 let feed: BridgeOutFeed | null = null
 let store: HubStore | null = null
 let activeProjectId: string | null = null
+/** Others told of every board change, as the windows are (Forge Web's Board, electron/board-web.ts). */
+const canvasListeners = new Set<(change: CanvasChange) => void>()
 
 function broadcast(channel: string, ...args: unknown[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -31,9 +34,31 @@ function broadcast(channel: string, ...args: unknown[]): void {
 function getBoard(): CanvasBoard {
   board ??= new CanvasBoard({
     root: join(getDataDir(), 'canvas'),
-    onChange: (change) => broadcast(HUB_IPC.canvasChanged, change)
+    onChange: (change) => {
+      broadcast(HUB_IPC.canvasChanged, change)
+      for (const listener of canvasListeners) {
+        try {
+          listener(change)
+        } catch (err) {
+          console.error('[canvas] change listener failed:', err)
+        }
+      }
+    }
   })
   return board
+}
+
+/** The canvas board, for main-side readers (Forge Web's Board, electron/board-web.ts). */
+export function canvasBoard(): CanvasBoard {
+  return getBoard()
+}
+
+/** Hear every board change, as the windows do. Returns the unsubscribe. */
+export function onCanvasChange(listener: (change: CanvasChange) => void): () => void {
+  canvasListeners.add(listener)
+  return () => {
+    canvasListeners.delete(listener)
+  }
 }
 
 function getStore(): HubStore {

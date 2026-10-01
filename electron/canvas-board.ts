@@ -98,6 +98,16 @@ export class CanvasBoard {
     return this.snapshot(projectId, entries)
   }
 
+  /**
+   * The whole board, read fresh off disk, *without* moving the baseline the
+   * next diff is taken against — for readers other than the Board (Forge Web,
+   * electron/board-web.ts), so a look from them can never swallow a change the
+   * Board is about to be told about.
+   */
+  peek(projectId: string): CanvasSnapshot {
+    return this.snapshot(projectId, this.scan(projectId))
+  }
+
   /** Re-read one project's folder and push the difference, if there is one. */
   rescan(projectId: string): CanvasChange | null {
     const key = safeId(projectId)

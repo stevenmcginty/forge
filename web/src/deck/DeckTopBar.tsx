@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
+import { BOARD_MIRROR_FEATURE } from '@shared/board-mirror'
 import { BROWSER_MIRROR_FEATURE } from '@shared/browser-mirror'
 import { AgentChooser } from '../components/AgentChooser'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
@@ -16,7 +17,8 @@ import './DeckTopBar.css'
 /*
  * The deck face's top bar: one slim row, and the only chrome above the panes.
  *
- * Left, the mark; the Agents | Browser switch (./DeckBrowser.tsx); then the
+ * Left, the mark; the Agents | Browser | Board switch (./DeckBrowser.tsx,
+ * ./DeckBoard.tsx); then the
  * two things that decide which agents the stage shows — the Agents menu (which agent is on screen, every other one a click away, New
  * agent, close) and the Wall switch — and New, the Agents menu's New agent a
  * click nearer. Centre, the voice bar (project, D,
@@ -163,22 +165,28 @@ export function DeckTopBar({
 
 const SURFACES: { id: DeckSurface; label: string; icon: IconName; title: string }[] = [
   { id: 'agents', label: 'Agents', icon: 'terminal', title: "The desktop's agents" },
-  { id: 'browser', label: 'Browser', icon: 'globe', title: "The desktop's Browser tabs — sign in to sites from here" }
+  { id: 'browser', label: 'Browser', icon: 'globe', title: "The desktop's Browser tabs — sign in to sites from here" },
+  { id: 'board', label: 'Board', icon: 'image', title: "What the agents put on this project's Board" }
 ]
 
 /**
- * Agents or Browser: what the stage shows (./view.ts `DeckSurface`). The one
- * showing is pressed, bold and underlined, never marked by colour alone.
- * Hidden from a desktop too old to serve its Browser tabs, unless this browser
- * is already on the Browser — then it stays, so there is a way back.
+ * Agents, Browser or Board: what the stage shows (./view.ts `DeckSurface`).
+ * The one showing is pressed, bold and underlined, never marked by colour
+ * alone. Browser and Board each hide from a desktop too old to serve them,
+ * unless this browser is already on that one — then it stays, so there is a
+ * way back. With neither left, the switch hides.
  */
 function SurfaceSwitch(): ReactNode {
   const surface = useDeckSurface()
-  const supported = useDeskFeature(BROWSER_MIRROR_FEATURE)
-  if (!supported && surface === 'agents') return null
+  const browser = useDeskFeature(BROWSER_MIRROR_FEATURE)
+  const board = useDeskFeature(BOARD_MIRROR_FEATURE)
+  const shown = SURFACES.filter(
+    ({ id }) => id === 'agents' || id === surface || (id === 'browser' ? browser : board)
+  )
+  if (shown.length < 2) return null
   return (
     <div className="dk-surface" role="group" aria-label="Show on the stage">
-      {SURFACES.map(({ id, label, icon, title }) => {
+      {shown.map(({ id, label, icon, title }) => {
         const on = surface === id
         return (
           <button

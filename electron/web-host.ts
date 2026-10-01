@@ -58,6 +58,7 @@ import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsub
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeChatMirrors, findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
 import { disposeBrowserMirrors, sharedBrowserMirrorHost } from './browser-panes/web-mirror'
+import { sharedBoardMirrorHost } from './board-web'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import type { CodexPane } from './web/codex-usage'
 import { disposeUsageHub, ensureUsageHub, onUsageFrame, registerUsageHandlers, usageFrames } from './usage-hub'
@@ -1727,6 +1728,9 @@ async function start(): Promise<void> {
     // copy of a tab per watch, in the same signed-in session. Input stays
     // inside that copy — never the OS, never the desktop's own view.
     browserMirror: sharedBrowserMirrorHost(),
+    // The desktop's Board on a browser, read-only: one project's item list,
+    // pushed again on every change, and an item's file in pieces.
+    boardMirror: sharedBoardMirrorHost(),
     // Straight through to electron/web/push.ts, which owns the keypair, the
     // subscription list and the file both live in. The server carries the key
     // out and the subscriptions back; deciding when anything is actually *sent*

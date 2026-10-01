@@ -51,6 +51,7 @@ import { requestPaneView, usePaneView } from '../lib/pane-status'
 import { getClaudeView } from '../lib/view-pref'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStateChip, bringForward, deckAgent, OutputPulse, useTrackDeckDone, type DeckAgent } from './agents'
+import { DeckBoard } from './DeckBoard'
 import { DeckBrowser } from './DeckBrowser'
 import { composerField, composerOpen } from './composer'
 import { useDeckDictation } from './dictation'
@@ -123,9 +124,12 @@ export function DeckStage({
   const profiles = useProfiles()
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
-  // The Browser has the stage: the panes stay mounted but hidden (`data-away`),
-  // so no terminal is disposed and re-attached for a look at a web page.
-  const away = useDeckSurface() === 'browser'
+  // The Browser or the Board has the stage: the panes stay mounted but hidden
+  // (`data-away`), so no terminal is disposed and re-attached for a look at a
+  // web page or a picture.
+  const surface = useDeckSurface()
+  const away = surface !== 'agents'
+  const elsewhere = surface === 'browser' ? <DeckBrowser /> : surface === 'board' ? <DeckBoard /> : null
 
   const [closingTarget, setClosingTarget] = useState<{ agent: DeckAgent; anchor: HTMLElement } | null>(null)
   const [closingChat, setClosingChat] = useState<{ tab: TerminalTab; chat: ChatLeaf; anchor: HTMLElement } | null>(null)
@@ -153,7 +157,7 @@ export function DeckStage({
     [actions, workspace.tabs]
   )
 
-  if (empty || !activeTab) return away ? <DeckBrowser /> : <div className="dk-stage__empty">{empty}</div>
+  if (empty || !activeTab) return elsewhere ?? <div className="dk-stage__empty">{empty}</div>
 
   const wall = view === 'wall'
   // Everything on the Wall has been seen; it stays mounted when focus comes back.
@@ -174,7 +178,7 @@ export function DeckStage({
 
   return (
     <>
-      {away ? <DeckBrowser /> : null}
+      {elsewhere}
       <div
         className="dk-panes"
         data-view={view}
