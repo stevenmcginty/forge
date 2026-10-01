@@ -1,5 +1,13 @@
 # Handoff
 
+## Sign-in pop-ups + screenshot pop-up (2026-10-01 17:22; master 613e2bd + 64edd6a, pushed)
+
+- **Asked (Steve):** Dealer Ledger Pro in a Forge browser pane kept showing "Grrr! A pop-up blocker may be preventing the application from opening the page"; new screenshots should pop up top right for ~10 s (drag out, copy, close), then go back to the menu.
+- **Built (foreman: builder + designer, worktrees `forge-popups`, `forge-shotpop`, node_modules junctioned):** `shared/browser.ts` `windowOpenAction()` (script pop-ups, named targets, about:blank/empty, sign-in hosts -> real child window keeping `window.opener`; plain links unchanged), used in `electron/browser-panes/manager.ts` with `guardPopup`. `src/components/ShotPop.{tsx,css}` mounted in `App.tsx`; tray copy/drag moved into `useCopyShot()`/`dragShotOut()`; DeckMenu's "Screenshot captured" notice removed.
+- **Checked:** typecheck 0, browser:check 184/184, lint:hooks 0, shots:smoke OK, designer screenshots (dark/light). NOT tested live on motor-ledger-pro; pop-up fix needs a Forge restart (main process). Card covers the pane's top-right split/close for its 10 s.
+- **Agent bar takes dropped files (17:25, pushed):** `src/components/hub/Composer.{tsx,css}` — any file (Explorer, screenshot pop-up/tray, rail row) dropped on the bar goes in as its quoted path at the caret; dashed outline while held over. typecheck + eslint clean; live renderer took it. Not tried by hand.
+- **Right Shift trace:** pushed; `[hub] dictation keyboard ...` focus lines in `useDictation.ts`/`stt-gesture.ts` (marks replayed page keys). Since 17:14 every key stop worked; waiting for Steve's next "missed".
+
 ## Dictate key (Right Shift) sometimes did not stop (2026-10-01 17:00; master, pushed; desktop renderer only)
 
 - **Asked (Steve, live):** Right Shift starts dictation, but the stop press often does nothing; he has to click the stop button.
