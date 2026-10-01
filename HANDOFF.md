@@ -1,5 +1,14 @@
 # Handoff
 
+## Forge browser gets the desktop's Browser tabs (2026-10-01; branch `browser-remote` 4d40137; desktop + web)
+
+- **Asked (Steve, away from home):** replicate the desktop's Browser and Board (artifacts) views in the Forge browser (deck face, `web/src/deck/`), like the agent view, mainly to sign in to websites remotely. Not the phone face. Time-boxed to one hour, so split: **Option 1 = Browser only (built)**, Option 2 = Board + "same tab, not a copy" (next).
+- **How it works (v1, a copy):** like the chat mirror. While the deck shows a tab, the desktop keeps an offscreen copy of that tab's page in `persist:forge-browser`, sized to the deck's box, streams JPEG frames; clicks/wheel/keys/text/paste come back and are performed on the copy only (never the OS pointer). Logins are shared with every tab and agent at home. The copy opens at the tab's current address and then lives its own life (the desktop tab does not follow it). Sign-in pop-ups load in the same copy.
+- **Built (foreman + 2 builders, worktree `C:\Users\steve\Desktop\forge-browser-remote`):** contract `shared/browser-mirror.ts` (feature `browser-mirror`, 8 client frames, `browser:tabs/frame/state/opened` down, reader `readBrowserClientFrame`); desktop `electron/browser-panes/web-mirror.ts` (copy manager, max 3, 60 s idle), `service.ts` `onTabsChanged`, `electron/web/server.ts` `onBrowser` + per-client tab subscription, `electron/web-host.ts` wiring; deck `web/src/deck/DeckBrowser.{tsx,css}`, "Agents | Browser" switch in `DeckTopBar.tsx`, surface store in `deck/view.ts` (`forge-web-surface`), client methods in `web/src/lib/client.ts`. New tabs from the deck are real desktop tabs owned by "You"; ✕ only on "You" tabs.
+- **Checked:** typecheck 0 (4 tsconfigs), lint:hooks 0, chat-mirror-check 42/42, web:build 0. `web-deck-check` has the same 13 FAILs on master (pre-existing, `--dk-dock-h` …). **NOT tested live** — Steve tests it himself.
+- **Known gaps:** key names mapped from memory (`ArrowUp` → `Up`), wheel sign flipped for Electron — check live; a deck that subscribes before the browser service starts gets an empty list until its next `browser:*` frame; no drag/hover; file-upload boxes not handled; Board not built.
+- **Next (Option 2):** Board view on the deck (live gallery, HTML artifacts in a sandboxed iframe); spike streaming the desktop's own tab (CDP screencast) instead of a copy, so agents can be watched live.
+
 ## Cloud sessions from the phone (2026-10-01; master 30bbb99, pushed; web only)
 
 - **Asked (Steve, phone shot of "Could not look up your PC"):** when the phone cannot find the desktop, and as a choice even when it can, work in Claude Code cloud sessions (spends his $250 cloud credit).
