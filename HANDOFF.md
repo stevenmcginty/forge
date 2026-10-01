@@ -1,5 +1,12 @@
 # Handoff
 
+## Forge browser: centred switch + Browser fixes (2026-10-01; 11e9fd4 + 7ef8948; desktop + web)
+
+- **Asked (Steve, testing live):** "Agents | Browser | Board should be central, like the desktop app"; in the Browser "I can't see a cursor", "can't close some of the tabs", "when I click on a tab I can't close it".
+- **Built:** `DeckTopBar.tsx/.css`: the switch sits in `.dk-bar__centre` as `nav.dk-modes` with a sliding lamp like the desktop's `deckbar__modes`; words drop at ≤1060px (inactive) and ≤860px (all); the top-placed voice bar moved to the right group. Browser: any tab can be closed (desktop allows it too; the "You only" refusal is gone), ✕ always on the selected tab, hover/focus on others, middle-click closes, strip scrolls sideways, tabs shrink to 88px. New `move` input (≤20/s, coalesced on the desktop) and `cursor` on `browser:state` from the copy's `cursor-changed` (Electron 43: `hand`→pointer, `text`/`ibeam`→text); the copy is focused on watch and on every click so the caret paints.
+- **Checked:** typecheck 0, lint:hooks 0, web:build 0, chat-mirror-check 42/42, web-deck-check same 13 pre-existing FAILs (it also crashes on untracked `web/src/deck/PanesSheet.tsx`). **NOT tested live:** whether `cursor-changed` fires offscreen and whether the caret paints.
+- **Watch:** moves share the 120/s mirror input budget in `electron/web/server.ts`; fast 120 Hz scrolling could hit it.
+
 ## Forge browser gets the desktop's Board (2026-10-01; branch `board-remote` 2069d12; desktop + web)
 
 - **Asked (Steve, away):** after the Browser view, "continue with the artifacts part". Same-tab streaming (instead of a copy) is still not built.
