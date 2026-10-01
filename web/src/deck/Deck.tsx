@@ -501,6 +501,7 @@ function FaceSwitch({ paneId, name, compact = false }: { paneId: string; name: s
             key={face}
             type="button"
             className="dk-face__btn"
+            data-face={face}
             data-on={on ? 'true' : 'false'}
             aria-pressed={on}
             aria-label={label}

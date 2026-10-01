@@ -46,6 +46,14 @@
   --p-danger: var(--danger);
   --p-danger-soft: var(--danger-soft);
 
+  /* charts / usage */
+  --p-chart-plan: #6ea8ff;
+  --p-chart-session: #4dd2e6;
+  --p-ring-sky: #63b8ff;
+  --p-ring-blue: #547bd8;
+  --p-ring-amber: #e6a23c;
+  --p-ring-red: #f06a57;
+
   /* shape */
   --p-r-pill: 999px;
   --p-r-sheet: 20px;
@@ -125,6 +133,12 @@
 
 :root[data-appearance='light'] .app[data-mobile],
 :root[data-appearance='light'] .bsheet-layer {
+  --p-chart-plan: #1f5fd6;
+  --p-chart-session: #07748a;
+  --p-ring-sky: #1f5fd6;
+  --p-ring-blue: #3b5cb8;
+  --p-ring-amber: #c98200;
+  --p-ring-red: #ee5646;
   --p-dict: #5a32d8;
   --p-dict-2: #3f4fe6;
   --p-dict-core: #2a168f;

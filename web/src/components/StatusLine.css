@@ -120,6 +120,22 @@
   box-shadow: inset 0 0 0 1px var(--p-line);
 }
 
+/* Each view face has its own subtle icon colour: Chat is sky blue, Cards is warm amber, Terminal is mint green */
+.pseg__btn[data-face='chat'] {
+  --face-color: var(--info, #7fd1ff);
+}
+
+.pseg__btn[data-face='feed'],
+.pseg__btn[data-face='card'],
+.pseg__btn[data-face='cards'] {
+  --face-color: var(--warn, #ffb347);
+}
+
+.pseg__btn[data-face='term'],
+.pseg__btn[data-face='terminal'] {
+  --face-color: var(--ok, #5ee6a8);
+}
+
 .pseg__btn {
   display: grid;
   place-items: center;
@@ -129,11 +145,12 @@
   padding: 0 2px;
   border: 0;
   background: transparent;
-  color: var(--p-ink-2);
+  color: color-mix(in srgb, var(--face-color, var(--p-ink-2)) 62%, var(--p-ink-2));
   font: 600 var(--p-t-small) / 1 var(--p-font);
   letter-spacing: 0;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: color var(--p-dur-fast) var(--p-ease);
 }
 
 .pseg__btn:first-child {
@@ -156,8 +173,12 @@
     box-shadow var(--p-dur-fast) var(--p-ease);
 }
 
+.pseg__btn[data-on='false']:hover {
+  color: color-mix(in srgb, var(--face-color, var(--p-ink)) 85%, var(--p-ink));
+}
+
 .pseg__btn[data-on='true'] {
-  color: var(--p-ink);
+  color: var(--face-color, var(--p-ink));
   cursor: default;
 }
 
@@ -175,7 +196,7 @@
 }
 
 .pseg__btn:focus-visible .pseg__face {
-  outline: 2px solid var(--p-ink);
+  outline: 2px solid var(--face-color, var(--p-ink));
   outline-offset: 1px;
 }
 
@@ -258,23 +279,36 @@
   stroke: var(--p-line-strong);
 }
 
+.pgauge .pring__track {
+  stroke: color-mix(in srgb, var(--p-ring-sky, #63b8ff) 18%, var(--p-line-strong));
+}
+
 .pring__arc {
   fill: none;
-  stroke: var(--p-ring-sky);
+  stroke: var(--p-ring-sky, #63b8ff);
   stroke-linecap: round;
   transition: stroke-dasharray var(--p-dur) var(--p-ease);
 }
 
-.pstat {
-  --p-ring-sky: #63b8ff;
-  --p-ring-blue: #547bd8;
-  --p-ring-amber: #e6a23c;
-  --p-ring-red: #f06a57;
+:is(.pstat, .pgauge, .bsheet-layer) {
+  --p-ring-sky: var(--p-ring-sky, #63b8ff);
+  --p-ring-blue: var(--p-ring-blue, #547bd8);
+  --p-ring-amber: var(--p-ring-amber, #e6a23c);
+  --p-ring-red: var(--p-ring-red, #f06a57);
 }
 
+.pring__arc--q1 { stroke: var(--p-ring-sky); }
 .pring__arc--q2 { stroke: var(--p-ring-blue); }
 .pring__arc--q3 { stroke: var(--p-ring-amber); }
 .pring__arc--q4 { stroke: var(--p-ring-red); }
+
+:is(.pstat__ctx, .pgauge)[data-level='warn'] .pring__arc {
+  stroke: var(--p-attn);
+}
+
+:is(.pstat__ctx, .pgauge)[data-level='full'] .pring__arc {
+  stroke: var(--p-danger);
+}
 
 /* Before there is a reading, the agent's badge holds the ring's place. */
 .pstat__badge {
@@ -590,6 +624,14 @@
   color: var(--p-ink);
 }
 
+.pgauge[data-level='warn'] .pgauge__big {
+  color: var(--p-attn);
+}
+
+.pgauge[data-level='full'] .pgauge__big {
+  color: var(--p-danger);
+}
+
 .pgauge__sub {
   font-size: var(--p-t-small);
   line-height: 1.4;
@@ -636,26 +678,45 @@
 .plimit__bar {
   position: relative;
   display: block;
-  height: 4px;
+  height: 6px;
   overflow: hidden;
   border-radius: var(--p-r-pill);
-  background: var(--p-line);
+  background: color-mix(in srgb, var(--p-chart-plan, #6ea8ff) 18%, transparent);
 }
 
 .plimit__bar > span {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: var(--p-ink-2);
+  background: var(--p-chart-plan, #6ea8ff);
   transition: transform var(--p-dur) var(--p-ease);
 }
 
+.plimit[data-level='warn'] .plimit__bar {
+  background: color-mix(in srgb, var(--p-attn) 20%, transparent);
+}
+
 .plimit[data-level='warn'] .plimit__bar > span {
-  background: var(--p-attn);
+  background-color: var(--p-attn);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--p-raised) 45%, transparent) 3px 5px
+  );
+}
+
+.plimit[data-level='full'] .plimit__bar {
+  background: color-mix(in srgb, var(--p-danger) 22%, transparent);
 }
 
 .plimit[data-level='full'] .plimit__bar > span {
-  background: var(--p-danger);
+  background-color: var(--p-danger);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 2px,
+    color-mix(in srgb, var(--p-raised) 55%, transparent) 2px 4px
+  );
+  box-shadow: inset -2px 0 0 var(--p-ink);
 }
 
 .plimit__reset {

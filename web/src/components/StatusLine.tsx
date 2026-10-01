@@ -339,6 +339,7 @@ function Segments({ view, onPick }: { view: PaneFace; onPick: (face: PaneFace) =
           aria-label={label}
           title={label}
           className="pseg__btn"
+          data-face={face}
           data-on={view === face ? 'true' : 'false'}
           onClick={() => {
             if (view !== face) onPick(face)
@@ -550,7 +551,15 @@ function PaneSheet({
 function LimitRow({ label, limit }: { label: string; limit: UsageLimit }): ReactNode {
   const used = Math.round(limit.usedPct)
   return (
-    <div className="plimit" data-level={usageLevel(used)}>
+    <div
+      className="plimit"
+      data-level={usageLevel(used)}
+      role="progressbar"
+      aria-label={label}
+      aria-valuenow={used}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
       <div className="plimit__head">
         <span className="plimit__label">{label}</span>
         <span className="plimit__pct">{used}% used</span>

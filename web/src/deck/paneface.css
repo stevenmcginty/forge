@@ -39,13 +39,32 @@
   cursor: pointer;
 }
 
+.app[data-face='deck'] .dk-face__btn[data-face='chat'] {
+  --face-color: var(--info, #7fd1ff);
+}
+.app[data-face='deck'] .dk-face__btn[data-face='feed'],
+.app[data-face='deck'] .dk-face__btn[data-face='card'],
+.app[data-face='deck'] .dk-face__btn[data-face='cards'] {
+  --face-color: var(--warn, #ffb347);
+}
+.app[data-face='deck'] .dk-face__btn[data-face='term'],
+.app[data-face='deck'] .dk-face__btn[data-face='terminal'] {
+  --face-color: var(--ok, #5ee6a8);
+}
+
 .app[data-face='deck'] .dk-face__btn svg {
   flex: none;
+  color: color-mix(in srgb, var(--face-color, var(--text-secondary)) 62%, var(--text-secondary));
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .app[data-face='deck'] .dk-face__btn:hover {
   color: var(--text-primary);
   background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.app[data-face='deck'] .dk-face__btn:hover svg {
+  color: color-mix(in srgb, var(--face-color, var(--text-primary)) 85%, var(--text-primary));
 }
 
 .app[data-face='deck'] .dk-face__btn[data-on='true'] {
@@ -55,6 +74,10 @@
   border-color: color-mix(in srgb, var(--text-primary) 30%, transparent);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   cursor: default;
+}
+
+.app[data-face='deck'] .dk-face__btn[data-on='true'] svg {
+  color: var(--face-color, var(--text-primary));
 }
 
 .app[data-face='deck'] .dk-face__btn:focus-visible {
