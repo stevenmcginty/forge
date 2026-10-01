@@ -1,6 +1,6 @@
 # Handoff
 
-## Agent bar + top bar redesign, "Machined Capsule" (2026-10-01 late; merged to master c4c110f, NOT pushed)
+## Agent bar + top bar redesign, "Machined Capsule" (2026-10-01 late; master c4c110f, pushed 22:01 with 326ebe1)
 
 - **Asked (Steve):** make the bottom agent bar beautiful, animated and fast, the same on Forge desktop and Forge browser (deck face); then the top bar and every drop-down "slicker, more professional", with a New button that stands out. Fable agents only. Hard limits from him: the bar keeps its position, its overlap of the terminal and its grow-when-talking; the context-window / usage read-outs stay on show; the in-app Browser view is not touched. He cut the mock-up step ("just build it") and the heavy verify list ("all this testing is ridiculous").
 - **Built (two Fable designers, worktrees `C:\Users\steve\Desktop\forge-bar` branch `bar-polish`, `C:\Users\steve\Desktop\forge-topbar` branch `topbar-polish`):**
@@ -9,7 +9,8 @@
   - Design contract (scratchpad, gone with the session): surface, radii, 36/30px rhythm, lime = live/go, violet = dictation, every state has a word or shape.
 - **Checked:** per branch typecheck 0, lint:hooks 0, agent-bar 45/0, hub 199/0, browser:check 184/0, dictation 33/0, voice 188; merged tree typecheck 0 and web:build 0 (in the `forge-topbar` worktree at c4c110f). Desktop seen in throwaway instances (Volt, Paper for the bar). **NOT seen:** the web bar on a live deck (markup against built CSS only), desktop light themes for the top bar, Brain pop-over, projects sheet, web with the voice bar on top.
 - **Left:** Popovers animate in only (exit needs `src/components/Popover.tsx`, another session's uncommitted file). Groq/OpenRouter keep drawn marks (no real logo in `shared/agent-logos.ts`). `scripts/web-deck-check.mjs` still stale.
-- **Next:** Steve looks at it live; push on his word (CI then releases the desktop and deploys Forge Web). Other sessions' uncommitted files in this checkout (`Popover.tsx`, `ProjectRail.tsx`, `shell/deck.css`, `AppState.tsx`) were left as they were.
+- **Live follow-ups (22:05-22:10, 5d647de + 5c1db9b, pushed):** Steve saw it live. (1) Forge browser had a big gap between terminal and bar: `useDockClearance` (`web/src/deck/Deck.tsx`) now measures from the bar's top (`.composer__card` / `.dk-bar-idle`) to the dock foot, so the status row and voice line float over the terminal's foot like the desktop. (2) Two chevrons side by side (model picker + usage toggle) looked wrong: the usage toggle is now a `meter` icon (`src/components/Icon.tsx`, three rising bars) on a faint plate, ringed while the usage line shows, desktop `.apick-toggle` and web `.dk-apick-toggle`. Steve approved both from a live screenshot.
+- **Next:** nothing asked. Still open from above: Popover exit animation, Groq/OpenRouter logos, stale `scripts/web-deck-check.mjs`. Other sessions' uncommitted files in this checkout (`Popover.tsx`, `ProjectRail.tsx`, `shell/deck.css`, `AppState.tsx`) were left as they were.
 
 ## Forge Brain "option A" + six phone fixes (2026-10-01 evening; merged to master and pushed; Forge NOT restarted)
 
