@@ -802,7 +802,14 @@
   color: var(--text-dim);
 }
 
-/* ---------------------------------------------------------------- sheets */
+/* ---------------------------------------------------------------- sheets
+ *
+ * One surface for everything that opens out of the chrome (the shared
+ * contract's "Popover / menu"), the desktop's `.sheet` (shell/Dock.css)
+ * restated: opaque, a hairline rim, the 16px corner with 10px rows inside it,
+ * the menus' shadow. A sheet rises 8px out of the dock on the pop spring and
+ * sinks 6px to leave; from the top bar it drops 6px and lifts back up.
+ */
 
 .app[data-face='deck'] .dk-sheet {
   position: absolute;
@@ -811,7 +818,7 @@
   flex-direction: column;
   background: var(--sheet-bg);
   border: 1px solid var(--glass-line-strong);
-  border-radius: 16px;
+  border-radius: var(--r-sheet);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
   overflow: hidden;
   cursor: default;
@@ -826,14 +833,29 @@
 @keyframes dk-sheet-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 12px, 0) scale(0.965);
+    transform: translate3d(0, 8px, 0) scale(0.975);
   }
 }
 
 @keyframes dk-sheet-out {
   to {
     opacity: 0;
-    transform: translate3d(0, 8px, 0) scale(0.98);
+    transform: translate3d(0, 6px, 0);
+  }
+}
+
+/* From the top bar: down out of the control, and back up to leave. */
+@keyframes dk-sheet-drop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0) scale(0.975);
+  }
+}
+
+@keyframes dk-sheet-lift {
+  to {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0);
   }
 }
 
@@ -872,39 +894,38 @@
   animation-name: dk-sheet-drop;
 }
 
-/* Every agent in the project, dropping from the Agents button. */
+/* Every agent in the project, dropping from the Agents chip. */
 .app[data-face='deck'] .dk-sheet--agents {
-  top: calc(100% + 8px);
+  top: calc(100% + 7px);
   left: 0;
-  width: min(460px, calc(100vw - 32px));
-  max-height: min(600px, calc(100vh - var(--dk-bar-h) - 24px));
-  transform-origin: 40px 0;
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - var(--dk-bar-h) - 24px));
+  transform-origin: 36px 0;
   animation-name: dk-sheet-drop;
 }
 
-@keyframes dk-sheet-drop {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -10px, 0) scale(0.97);
-  }
+.app[data-face='deck'] .dk-bar .dk-sheet--projects[data-state='closing'],
+.app[data-face='deck'] .dk-sheet--agents[data-state='closing'] {
+  animation-name: dk-sheet-lift;
 }
 
+/* The head: an eyebrow and a count beside it. */
 .app[data-face='deck'] .dk-sheet__head {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
-  height: 44px;
-  padding: 0 10px 0 16px;
+  height: 40px;
+  padding: 0 7px 0 16px;
   border-bottom: 1px solid var(--glass-line);
 }
 
 .app[data-face='deck'] .dk-sheet__eyebrow {
   flex: none;
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
@@ -913,21 +934,24 @@
   flex: 1;
   min-width: 0;
   font-size: var(--t-xs);
-  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
 }
 
 .app[data-face='deck'] .dk-sheet__list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px;
+  overscroll-behavior: contain;
+  padding: var(--sheet-inset);
   outline: none;
 }
 
 .app[data-face='deck'] .dk-sheet__empty {
-  padding: 24px 12px;
+  padding: 22px 12px;
   text-align: center;
-  color: var(--text-dim);
+  font-size: var(--t-md);
+  color: var(--text-muted);
 }
 
 .app[data-face='deck'] .dk-sheet__foot {
@@ -935,8 +959,8 @@
   align-items: center;
   gap: 12px;
   flex: none;
-  height: 52px;
-  padding: 0 12px;
+  height: 48px;
+  padding: 0 12px 0 9px;
   border-top: 1px solid var(--glass-line);
 }
 
@@ -952,7 +976,12 @@
   color: var(--text-dim);
 }
 
-/* An agent row: go (the whole row) and close (behind a confirm, in the row). */
+/*
+ * An agent row — the desktop's (shell/Dock.css `.sheet__list .prow`): the
+ * contract's two-line 42px row. Go (the whole row: number, a round 28px logo
+ * plate, the name over what runs in it, the state chip) and close (behind a
+ * confirm, in the row).
+ */
 .app[data-face='deck'] .dk-arow {
   position: relative;
   display: flex;
@@ -960,30 +989,56 @@
   gap: 4px;
   height: 42px;
   padding-right: 6px;
-  border-radius: 10px;
+  border-radius: var(--r-sheet-row);
   color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
-.app[data-face='deck'] .dk-arow[data-cursor='true'] {
-  background: color-mix(in srgb, var(--pane-accent) 9%, var(--bg-hover));
+.app[data-face='deck'] .dk-arow + .dk-arow {
+  margin-top: var(--s-1);
+}
+
+/* Under the pointer, or where the arrow keys have got to. */
+.app[data-face='deck'] .dk-arow[data-cursor='true'],
+.app[data-face='deck'] .dk-arow:hover {
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
-/* The one on screen: a bar at its edge, a ▶ where its number was, and "Active". */
+/* The one on screen is the pick in force: a wash, an upright bar at the edge,
+   a ▶ where its number was, and a tick and the words. */
 .app[data-face='deck'] .dk-arow[data-current='true'] {
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-softer);
+}
+
+.app[data-face='deck'] .dk-arow[data-current='true']:is([data-cursor='true'], :hover) {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-hover));
+}
+
+.app[data-face='deck'] .dk-arow[data-current='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  margin-top: -9px;
+  border-radius: var(--r-full);
+  background: var(--accent);
 }
 
 .app[data-face='deck'] .dk-arow__go {
   display: grid;
-  grid-template-columns: 18px auto minmax(0, 1fr) auto auto;
+  grid-template-columns: 18px 28px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding: 0 6px 0 8px;
-  border-radius: 10px;
+  padding: 0 6px 0 6px;
+  border-radius: var(--r-sheet-row);
   text-align: left;
   color: inherit;
 }
@@ -999,6 +1054,34 @@
   color: var(--accent);
 }
 
+/* The maker's logo on a round plate, 28px: the badge's own colours, reshaped. */
+.app[data-face='deck'] .dk-arow__plate {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+
+.app[data-face='deck'] .dk-arow__plate .agent-badge {
+  width: 28px;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.app[data-face='deck'] .dk-arow__plate .agent-badge__logo {
+  height: 15px;
+}
+
+/* A chat tab's plate: the bot's own paint (components/ChatBadge.tsx). */
+.app[data-face='deck'] .dk-arow__plate--chat {
+  border-radius: 50%;
+  color: var(--chat-ink);
+  background: var(--chat-bg);
+  box-shadow: inset 0 0 0 1px var(--chat-border);
+}
+
 .app[data-face='deck'] .dk-arow__text {
   display: flex;
   flex-direction: column;
@@ -1008,24 +1091,34 @@
 
 .app[data-face='deck'] .dk-arow__name {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.015em;
+  line-height: 1.25;
   color: var(--text-primary);
 }
 
 .app[data-face='deck'] .dk-arow__kind {
   font-size: var(--t-xs);
+  line-height: 1.25;
   color: var(--text-dim);
 }
 
+.app[data-face='deck'] .dk-arow:is([data-cursor='true'], [data-current='true'], :hover) .dk-arow__kind {
+  color: var(--text-muted);
+}
+
 .app[data-face='deck'] .dk-arow__here {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: var(--font-display);
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--accent);
+  white-space: nowrap;
+  color: var(--accent-ink);
 }
 
 .app[data-face='deck'] .dk-arow__close {
@@ -1034,15 +1127,16 @@
   flex: none;
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--r-full);
   color: var(--text-dim);
   opacity: 0.55;
   transition:
     opacity var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
     background var(--dur-fast) var(--ease-out);
 }
 
-.app[data-face='deck'] .dk-arow[data-cursor='true'] .dk-arow__close {
+.app[data-face='deck'] .dk-arow:is([data-cursor='true'], :hover) .dk-arow__close {
   opacity: 1;
 }
 
@@ -1074,8 +1168,8 @@
 .app[data-face='deck'] .dk-arow__yes,
 .app[data-face='deck'] .dk-arow__no {
   height: 24px;
-  padding: 0 10px;
-  border-radius: 7px;
+  padding: 0 11px;
+  border-radius: var(--r-full);
   font-family: var(--font-display);
   font-size: 11px;
   font-weight: 600;
@@ -1083,7 +1177,7 @@
 }
 
 .app[data-face='deck'] .dk-arow__yes {
-  color: var(--danger);
+  color: var(--danger-ink);
   background: var(--danger-soft);
   box-shadow: inset 0 0 0 1px var(--danger-line);
 }
@@ -1093,9 +1187,15 @@
   box-shadow: inset 0 0 0 1px var(--glass-line-strong);
 }
 
+.app[data-face='deck'] .dk-arow__no:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
 .app[data-face='deck'] .dk-arow button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
   outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
 }
 
 @media (prefers-reduced-motion: reduce) {

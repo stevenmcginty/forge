@@ -1,18 +1,44 @@
 /*
  * The deck face's top bar — the only chrome above the panes, so it is slim:
- * one 40px row on the backdrop, no slab. Its own file on purpose, so the whole
+ * one 38px row on the backdrop, no slab. Its own file on purpose, so the whole
  * bar can be replaced without touching the rest of the face.
  *
- * Three grid columns, the desktop title bar's (src/components/shell/DeckBar.css):
- * which agents the stage shows on the left (mark, Agents, Wall, New), the
- * Agents | Browser | Board switch dead centre, and on the right the voice bar
- * (when it lives up here), the pane tools, the link and "…". The outer two
- * share the slack equally, so the switch sits on the window's centre line and
- * nothing runs into it; the responsive rules at the foot shed words before
- * they shed controls.
+ * It is the desktop's top bar (src/components/shell/DeckBar.css), restated
+ * rule for rule in the deck's `dk-` names — change one, change the other. One
+ * family of parts (the chrome's shared contract, "Machined Capsule"):
+ *
+ *   chip   a lone capsule that opens something (Agents)
+ *   well   a sunken capsule that groups a switch's segments
+ *   lamp   the raised key inside a well, on the segment you are in
+ *   disc   a round icon button (the menu, Skills, Commands)
+ *   New    the one solid-accent control on the bar
+ *
+ * Everything is 28px tall in the 38px bar, with 22px parts inside a well.
+ * Nothing is lit in the accent at rest but New and the mode lamp's pilot
+ * light: state is a shape (the raised lamp) and a word, the colour only agrees.
+ *
+ * Three grid columns: which agents the stage shows on the left (mark, Agents,
+ * Wall | Full screen, New), the Agents | Browser | Board switch dead centre,
+ * and on the right the voice bar (when it lives up here), the pane tools, the
+ * link and the menu. The outer two share the slack equally, so the switch sits
+ * on the window's centre line and nothing runs into it; the responsive rules
+ * at the foot shed words before they shed controls.
  */
 
+/* The desktop's 38px (--titlebar-h). Two classes, so it wins over deck.css's
+   own value whichever of the two files loads last. */
+.app.deck[data-face='deck'] {
+  --dk-bar-h: 38px;
+}
+
 .app[data-face='deck'] .dk-bar {
+  /* The shade inside a well and under a lamp: the theme's own scrim, so a
+     light theme gets a light one. */
+  --bar-shade: color-mix(in srgb, var(--bg-scrim) 55%, transparent);
+  --bar-wash: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  --bar-wash-hover: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --bar-key: color-mix(in srgb, var(--text-primary) 9%, transparent);
+
   position: relative;
   /* Over the floating composer, so a sheet dropping from the bar is never under it. */
   z-index: calc(var(--z-dock) + 1);
@@ -23,10 +49,10 @@
      never under it. */
   grid-template-columns: minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr);
   align-items: center;
-  column-gap: 12px;
+  column-gap: 16px;
   flex: none;
   height: var(--dk-bar-h);
-  padding: 0 8px 0 10px;
+  padding: 0 10px 0 12px;
   background: var(--bg-base);
   border-bottom: 1px solid var(--line-hairline);
 }
@@ -39,6 +65,10 @@
   min-width: 0;
 }
 
+.app[data-face='deck'] .dk-bar__left {
+  gap: 8px;
+}
+
 .app[data-face='deck'] .dk-bar__right {
   justify-content: flex-end;
 }
@@ -49,6 +79,7 @@
   min-width: 0;
 }
 
+/* The mark: the brand's glyph in the accent, on a neutral plate. */
 .app[data-face='deck'] .dk-bar__mark {
   display: grid;
   place-items: center;
@@ -57,30 +88,27 @@
   height: 22px;
   border-radius: 7px;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  background: var(--bar-wash);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
 }
 
 .app[data-face='deck'] .dk-bar__wordmark {
   flex: none;
-  margin-left: 2px;
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.34em;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
-.app[data-face='deck'] .dk-bar__rule {
-  flex: none;
-  width: 1px;
-  height: 18px;
-  margin: 0 4px 0 2px;
-  background: var(--glass-line-strong);
-}
-
-/* The bar's round-cornered square buttons: +, Type, the pane tools. */
+/* ------------------------------------------------------------------ discs
+ *
+ * A round icon button: Type (in the top-placed voice bar) and the pane tools.
+ * Open, it is a raised key — neutral, never the accent.
+ */
 .app[data-face='deck'] .dk-bar__icon,
 .app[data-face='deck'] .dk-tools > .ghost-btn {
   display: grid;
@@ -93,34 +121,48 @@
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-full);
   color: var(--text-muted);
   background: transparent;
   transition:
     background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .app[data-face='deck'] .dk-bar__icon:hover:not(:disabled),
 .app[data-face='deck'] .dk-tools > .ghost-btn:hover {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--bar-wash-hover);
 }
 
 .app[data-face='deck'] .dk-bar__icon[data-on='true'],
 .app[data-face='deck'] .dk-tools > .ghost-btn[data-on='true'] {
-  color: var(--accent);
-  background: var(--accent-softer);
+  color: var(--text-primary);
+  background: var(--bar-key);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.app[data-face='deck'] .dk-bar__icon:active:not(:disabled),
+.app[data-face='deck'] .dk-tools > .ghost-btn:active {
+  transform: scale(0.94);
 }
 
 .app[data-face='deck'] .dk-bar__icon:disabled {
-  opacity: 0.4;
+  color: var(--text-dim);
+  outline: 1px dashed var(--glass-line-strong);
+  outline-offset: -1px;
   cursor: default;
 }
 
+/* One keyboard ring for every button on the bar: the deck's (--focus-ring). */
 .app[data-face='deck'] .dk-bar button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--r-full);
 }
 
 /* The tally beside Skills keeps its word, just smaller. */
@@ -135,7 +177,7 @@
   gap: 3px;
   width: auto;
   min-width: 28px;
-  padding: 0 7px;
+  padding: 0 8px;
 }
 
 .app[data-face='deck'] .dk-tools .tabstrip__tally {
@@ -150,15 +192,17 @@
 
 /* ---------------------------------------------------------------- agents
  *
- * The Agents button: who is on screen and in what state, as the pane header
- * used to say it — badge, name, a shape and a word — plus how many there are.
+ * The Agents chip: who is on screen and in what state, as the pane header
+ * used to say it — the maker's logo on a round plate, the name, a shape and a
+ * word — plus how many there are and a chevron that turns when open.
  */
 
 .app[data-face='deck'] .dk-agents {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
+  margin-left: 4px;
 }
 
 .app[data-face='deck'] .dk-agents__anchor {
@@ -170,68 +214,96 @@
 .app[data-face='deck'] .dk-agents__btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
   max-width: 400px;
-  height: 30px;
-  padding: 0 9px 0 7px;
-  border-radius: 9px;
+  height: 28px;
+  padding: 0 8px 0 3px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--text-secondary);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  backdrop-filter: blur(16px) saturate(1.3);
-  border: 1px solid color-mix(in srgb, var(--pane-accent, var(--accent)) 22%, var(--glass-line));
-  box-shadow: inset 0 1px 0 var(--glass-hi);
+  background: var(--bar-wash);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
   transition:
     color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-med) var(--ease-out);
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
-.app[data-face='deck'] .dk-agents__btn:hover {
-  color: var(--text-primary);
-  border-color: color-mix(in srgb, var(--pane-accent, var(--accent)) 38%, var(--glass-line-strong));
-}
-
+.app[data-face='deck'] .dk-agents__btn:hover,
 .app[data-face='deck'] .dk-agents__btn[data-open='true'] {
   color: var(--text-primary);
-  border-color: var(--accent-line);
-  box-shadow:
-    0 0 0 3px var(--accent-softer),
-    inset 0 1px 0 var(--glass-hi);
+  background: var(--bar-wash-hover);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.app[data-face='deck'] .dk-agents__btn:active {
+  transform: scale(0.97);
+}
+
+/* The maker's logo on a round 22px plate: the badge's own colours, reshaped. */
+.app[data-face='deck'] .dk-agents__plate {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.app[data-face='deck'] .dk-agents__plate .agent-badge {
+  width: 22px;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.app[data-face='deck'] .dk-agents__plate .agent-badge__logo {
+  height: 12px;
 }
 
 .app[data-face='deck'] .dk-agents__name {
   min-width: 0;
   max-width: 180px;
-  font-family: var(--font-display);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.015em;
   color: var(--text-primary);
 }
 
+/* No plate to lead it: the words take the chip's own left padding. */
 .app[data-face='deck'] .dk-agents__name--none {
+  margin-left: 9px;
   font-weight: 500;
   color: var(--text-muted);
 }
 
+.app[data-face='deck'] .dk-agents__btn > .chat-chip {
+  margin-left: 1px;
+}
+
 .app[data-face='deck'] .dk-agents__count {
   flex: none;
-  display: grid;
-  place-items: center;
   min-width: 18px;
-  height: 18px;
+  height: 16px;
   padding: 0 5px;
-  border-radius: 6px;
-  font-size: 10px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border-radius: var(--r-full);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--text-primary);
+  background: var(--bar-key);
 }
 
 .app[data-face='deck'] .dk-agents__chev {
   flex: none;
-  margin-left: -3px;
+  margin-left: -1px;
   color: var(--text-dim);
   transition: transform var(--dur-glide) var(--spring-glide);
 }
@@ -240,28 +312,36 @@
   transform: rotate(180deg);
 }
 
-/* Somebody else is waiting on you: a diamond and the words, in warn. */
+/* Somebody else is waiting on you: a diamond and the words, in warn — a chip
+   like the one beside it, so it reads as a button and not a notice. */
 .app[data-face='deck'] .dk-agents__ask {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
   max-width: 190px;
-  height: 24px;
-  padding: 0 9px 0 8px;
+  height: 28px;
+  padding: 0 11px 0 9px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   color: var(--warn);
   background: var(--warn-soft);
   box-shadow: inset 0 0 0 1px var(--warn-line);
+  transition:
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
   animation: dk-ask-in var(--dur-pop) var(--spring-pop) both;
 }
 
 .app[data-face='deck'] .dk-agents__ask:hover {
   box-shadow: inset 0 0 0 1px var(--warn-line-strong, var(--warn));
+}
+
+.app[data-face='deck'] .dk-agents__ask:active {
+  transform: scale(0.97);
 }
 
 .app[data-face='deck'] .dk-agents__ask-glyph {
@@ -330,206 +410,317 @@
   flex: none;
 }
 
-/* ------------------------------------------------------------------ wall */
+/* ----------------------------------------------------- wells and the lamp
+ *
+ * A switch is a well: a sunken capsule whose segments are all one width, with
+ * one raised key — the lamp — on the segment you are in. Equal widths mean the
+ * lamp never changes size, so the whole glide is one transform: `--i` (which
+ * segment) and `--n` (how many) are set inline and nothing is measured.
+ */
 
+.app[data-face='deck'] .dk-modes,
 .app[data-face='deck'] .dk-wall {
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  flex: none;
+  height: 28px;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 2px var(--bar-shade);
+}
+
+.app[data-face='deck'] .dk-modes__lamp,
+.app[data-face='deck'] .dk-wall__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--n, 1));
+  height: 22px;
+  border-radius: var(--r-full);
+  background: var(--bar-key);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi),
+    0 1px 2px var(--bar-shade);
+  transform: translate3d(calc(var(--i, 0) * 100%), 0, 0);
+  pointer-events: none;
+  transition:
+    transform var(--dur-glide) var(--spring-glide),
+    opacity var(--dur-fast) var(--ease-out);
+}
+
+/* The pilot light: the one accent in the switch, and it rides the lamp. */
+.app[data-face='deck'] .dk-modes__lamp::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 12px;
+  height: 2px;
+  margin-left: -6px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+/* Over the Browser or the Board neither view is the one you are in: no lamp. */
+.app[data-face='deck'] .dk-wall__thumb[data-hidden='true'] {
+  opacity: 0;
+}
+
+.app[data-face='deck'] .dk-modes__btn,
+.app[data-face='deck'] .dk-wall__view {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  /* Wide enough for the close mark, so switching never nudges the bar. */
-  min-width: 84px;
-  gap: 6px;
-  flex: none;
-  height: 30px;
-  padding: 0 11px 0 9px;
-  border-radius: 9px;
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
-  border: 1px solid var(--glass-line);
-  background: transparent;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
-}
-
-.app[data-face='deck'] .dk-wall:hover {
-  color: var(--text-primary);
-  border-color: var(--glass-line-strong);
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
-}
-
-/* Off: four empty windows. On: the windows fill, a close mark joins them and
-   the button reads as pressed — shape and word first, the accent agreeing. */
-.app[data-face='deck'] .dk-wall__glyph rect {
-  fill: transparent;
-  transition: fill var(--dur-fast) var(--ease-out);
-}
-
-.app[data-face='deck'] .dk-wall[data-on='true'] {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, #000 30%, transparent);
-}
-
-.app[data-face='deck'] .dk-wall[data-on='true'] .dk-wall__glyph rect {
-  fill: currentColor;
-}
-
-.app[data-face='deck'] .dk-wall__x {
-  margin-left: 1px;
-  opacity: 0.8;
-}
-
-/* ----------------------------------------------------------------- modes */
-
-/* Agents | Browser | Board: the desktop's mode pill (DeckBar.css .deckbar__modes)
-   in the deck's tokens — a glass capsule, and inside it one lit capsule, rim
-   and all, that glides to the one showing. The lamp is the state: a shape, the
-   accent only agreeing. */
-.app[data-face='deck'] .dk-modes {
-  position: relative;
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  height: 28px;
-  padding: 2px;
-  border-radius: var(--r-full);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  backdrop-filter: blur(16px) saturate(1.3);
-  border: 1px solid var(--glass-line);
-  box-shadow: var(--pill-shadow), inset 0 1px 0 var(--glass-hi);
-}
-
-.app[data-face='deck'] .dk-modes__lamp {
-  position: absolute;
-  top: 2px;
-  left: 0;
-  width: 0;
-  height: 22px;
-  border-radius: var(--r-full);
-  background: var(--accent-soft);
-  box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 0 16px -4px var(--accent-glow);
-  pointer-events: none;
-}
-
-.app[data-face='deck'] .dk-modes__lamp[data-ready='true'] {
-  transition:
-    transform var(--dur-glide) var(--spring-glide),
-    width var(--dur-glide) var(--spring-glide);
-}
-
-.app[data-face='deck'] .dk-modes__btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
   height: 22px;
-  padding: 0 13px 0 11px;
+  padding: 0 12px;
   border: 0;
   border-radius: var(--r-full);
   background: transparent;
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
   white-space: nowrap;
   color: var(--text-muted);
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
-/* A taller target than the drawn capsule, inside the bar's 40px. */
+.app[data-face='deck'] .dk-modes__btn {
+  padding: 0 12px 0 10px;
+  cursor: pointer;
+}
+
+/* The whole height of the bar is the target, not just the 22px drawn. */
 .app[data-face='deck'] .dk-modes__btn::after {
   content: '';
   position: absolute;
-  inset: -7px 0;
+  inset: -8px 0;
 }
 
-.app[data-face='deck'] .dk-modes__btn:hover {
+.app[data-face='deck'] .dk-modes__btn svg,
+.app[data-face='deck'] .dk-wall__view svg {
+  flex: none;
+}
+
+.app[data-face='deck'] .dk-modes__btn > *,
+.app[data-face='deck'] .dk-wall__view > * {
+  display: block;
+  transition: transform var(--dur-instant) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-modes__btn:hover,
+.app[data-face='deck'] .dk-modes__btn[data-on='true'],
+.app[data-face='deck'] .dk-wall__view[data-lit='true'] {
   color: var(--text-primary);
 }
 
+.app[data-face='deck'] .dk-modes__btn[data-on='false']:hover {
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
 .app[data-face='deck'] .dk-modes__btn[data-on='true'] {
-  color: var(--accent-ink);
   cursor: default;
 }
 
-.app[data-face='deck'] .dk-modes__btn:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-  border-radius: var(--r-full);
+.app[data-face='deck'] .dk-modes__btn:active > *,
+.app[data-face='deck'] .dk-wall:active .dk-wall__view > * {
+  transform: scale(0.96);
 }
 
-/* ------------------------------------------------------------------- new */
+.app[data-face='deck'] .dk-bar .dk-modes__btn:focus-visible {
+  outline-offset: 1px;
+}
 
-/* New, beside the Wall and cut from the same cloth, so the pair reads as the
-   stage's two verbs. 30px drawn; the ::after takes the target to 44px tall
-   without reaching into the Wall beside it. */
+/* ---------------------------------------------- Wall | Full screen switch
+ *
+ * One button, two words: the view you are in sits on the lamp, which glides
+ * across when Ctrl+G or a click flips it. Hovering the switch washes the other
+ * word — that is where a click goes. The glyphs are for a narrow window, where
+ * the words drop.
+ */
+
+.app[data-face='deck'] .dk-wall {
+  cursor: pointer;
+}
+
+/* A taller target than the drawn well, inside the bar's 38px. */
+.app[data-face='deck'] .dk-wall::after {
+  content: '';
+  position: absolute;
+  inset: -5px 0;
+}
+
+.app[data-face='deck'] .dk-wall__view > svg {
+  display: none;
+}
+
+.app[data-face='deck'] .dk-wall:hover .dk-wall__view:not([data-lit='true']) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+/* -------------------------------------------------------------------- New
+ *
+ * The one loud control: a solid accent capsule, so "start an agent" is the
+ * first thing the eye finds on the bar. Hover lights it — the glow widens, the
+ * plus turns, one sheen crosses — and while its chooser is open the plus rests
+ * as a close mark. Everything that moves is a transform or an opacity. The
+ * ::before takes the target to the bar's full height.
+ */
+
 .app[data-face='deck'] .dk-new {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   flex: none;
-  min-width: 36px;
-  height: 30px;
-  padding: 0 12px 0 9px;
-  border-radius: 9px;
+  height: 28px;
+  padding: 0 13px 0 9px;
+  border: 0;
+  border-radius: var(--r-full);
   font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
-  border: 1px solid var(--glass-line);
-  background: transparent;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-on-accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-bright) 60%, var(--accent)), var(--accent));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-on-accent) 16%, transparent),
+    inset 0 1px 0 var(--accent-bright),
+    0 2px 10px -4px var(--accent-line);
   transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    box-shadow var(--dur-med) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
-.app[data-face='deck'] .dk-new::after {
+.app[data-face='deck'] .dk-new::before {
   content: '';
   position: absolute;
-  inset: -7px -3px;
+  inset: -5px -3px;
+}
+
+.app[data-face='deck'] .dk-new svg {
+  position: relative;
+  flex: none;
+  stroke-width: 2;
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.app[data-face='deck'] .dk-new__word {
+  position: relative;
 }
 
 .app[data-face='deck'] .dk-new:hover:not(:disabled),
 .app[data-face='deck'] .dk-new[data-open='true'] {
-  color: var(--text-primary);
-  border-color: var(--glass-line-strong);
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-on-accent) 16%, transparent),
+    inset 0 1px 0 var(--accent-bright),
+    0 3px 18px -4px var(--accent);
 }
 
+.app[data-face='deck'] .dk-new:hover:not(:disabled) svg {
+  transform: rotate(90deg);
+}
+
+.app[data-face='deck'] .dk-new[data-open='true'] svg,
+.app[data-face='deck'] .dk-new[data-open='true']:hover svg {
+  transform: rotate(135deg);
+}
+
+.app[data-face='deck'] .dk-new:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* The sheen: one band of the brighter accent, crossing once per hover. */
+.app[data-face='deck'] .dk-new__sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.app[data-face='deck'] .dk-new__sheen::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 46%;
+  background: linear-gradient(100deg, transparent, var(--accent-bright), transparent);
+  opacity: 0;
+  transform: translate3d(-110%, 0, 0);
+}
+
+.app[data-face='deck'] .dk-new:hover:not(:disabled) .dk-new__sheen::before {
+  opacity: 1;
+  transform: translate3d(330%, 0, 0);
+  transition: transform 520ms var(--ease-out);
+}
+
+/* Cannot open one (the desktop is not answering): no fill, a dashed rim, and
+   the tooltip says why. */
 .app[data-face='deck'] .dk-new:disabled {
-  opacity: 0.4;
+  color: var(--text-dim);
+  background: none;
+  box-shadow: none;
+  outline: 1px dashed var(--glass-line-strong);
+  outline-offset: -1px;
   cursor: default;
+}
+
+/* An empty project: a slow ring leaves the button until the first agent exists. */
+.app[data-face='deck'] .dk-new[data-invite='true']:not(:disabled)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: dk-invite 2600ms var(--ease-out) infinite;
+}
+
+@keyframes dk-invite {
+  0% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.2, 1.5);
+  }
 }
 
 /* ------------------------------------------------------------------ link */
 
-/* The link: a shape and a word first, the desktop's name after. */
-.app[data-face='deck'] .dk-link {
+/* The link: a readout, not a button — a shape and a word first, the desktop's
+   name after. The word and the shape carry the state; the ink only agrees. */
+.app[data-face='deck'] .dk-bar .dk-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 200px;
-  height: 24px;
+  height: 22px;
   padding: 0 9px 0 8px;
+  border: 0;
   border-radius: var(--r-full);
-  border: 1px solid var(--glass-line);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
-  box-shadow: none;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--glass-line);
   color: var(--text-muted);
 }
 
@@ -540,8 +731,8 @@
 .app[data-face='deck'] .dk-link__word {
   flex: none;
   font-family: var(--font-display);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 9.5px;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -550,24 +741,28 @@
   min-width: 0;
   font-family: var(--font-display);
   font-size: 11px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: var(--text-secondary);
 }
 
 .app[data-face='deck'] .dk-link[data-state='live'][data-warm='true'] {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-softer);
+  color: var(--accent-ink);
 }
 
 .app[data-face='deck'] .dk-link[data-state='live']:not([data-warm='true']) {
   color: var(--warn);
-  border-color: var(--warn-line);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
 }
 
 .app[data-face='deck'] .dk-link[data-state='connecting'] {
   color: var(--info);
-  border-color: color-mix(in srgb, var(--info) 30%, transparent);
+}
+
+.app[data-face='deck'] .dk-link[data-state='offline'] {
+  color: var(--text-dim);
+  box-shadow: none;
+  outline: 1px dashed var(--glass-line-strong);
+  outline-offset: -1px;
 }
 
 /* ------------------------------------------------------------- voice bar
@@ -635,93 +830,149 @@
   transform: rotate(180deg);
 }
 
-/* ------------------------------------------------------------- the … menu */
+/* ------------------------------------------------------------- the … menu
+ *
+ * Every drop-down from the bar wears one surface (the sheets' opaque one: a
+ * menu can cover a live terminal), one row, and one motion: it drops 6px out
+ * of the control that opened it on the pop spring, and lifts back up to leave
+ * (deck.css `dk-sheet-drop` / `dk-sheet-lift`).
+ */
 
 .app[data-face='deck'] .dk-menu {
   position: relative;
   display: inline-flex;
 }
 
+/* A disc: the menu button. Open, it is a raised key and the cog has turned. */
 .app[data-face='deck'] .dk-menu__btn {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 32px;
+  width: 28px;
   height: 28px;
-  border-radius: 9px;
+  border-radius: var(--r-full);
   color: var(--text-muted);
   transition:
     background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-menu__btn > svg {
+  transition: transform var(--dur-glide) var(--spring-glide);
 }
 
 .app[data-face='deck'] .dk-menu__btn:hover {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--bar-wash-hover);
 }
 
 .app[data-face='deck'] .dk-menu__btn[data-on='true'] {
-  color: var(--accent);
-  background: var(--accent-softer);
+  color: var(--text-primary);
+  background: var(--bar-key);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.app[data-face='deck'] .dk-menu__btn[data-on='true'] > svg {
+  transform: rotate(60deg);
+}
+
+.app[data-face='deck'] .dk-menu__btn:active {
+  transform: scale(0.94);
 }
 
 .app[data-face='deck'] .dk-sheet.dk-menu__panel {
-  top: calc(100% + 8px);
+  top: calc(100% + 7px);
   right: 0;
   width: 320px;
   max-height: calc(100vh - var(--dk-bar-h) - 24px);
   overflow-y: auto;
-  transform-origin: calc(100% - 16px) 0;
-  animation-name: dk-menu-in;
+  overscroll-behavior: contain;
+  transform-origin: calc(100% - 14px) 0;
+  animation-name: dk-sheet-drop;
 }
 
-@keyframes dk-menu-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -8px, 0) scale(0.97);
-  }
+.app[data-face='deck'] .dk-sheet.dk-menu__panel[data-state='closing'] {
+  animation-name: dk-sheet-lift;
 }
 
 .app[data-face='deck'] .dk-menu__rows {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 6px;
+  padding: var(--sheet-inset);
   border-bottom: 1px solid var(--glass-line);
 }
 
 .app[data-face='deck'] .dk-menu__row {
+  position: relative;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  height: 34px;
+  height: var(--menu-row-h);
   padding: 0 10px;
-  border-radius: 10px;
+  border-radius: var(--r-sheet-row);
   text-align: left;
   text-decoration: none;
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 
-.app[data-face='deck'] .dk-menu__row:hover:not(:disabled) {
-  color: var(--text-primary);
+.app[data-face='deck'] .dk-menu__row:hover:not(:disabled),
+.app[data-face='deck'] .dk-menu__row:focus-visible {
   background: var(--bg-hover);
 }
 
-.app[data-face='deck'] .dk-menu__row:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+.app[data-face='deck'] .dk-menu__row:active:not(:disabled) {
+  background: var(--bg-active);
 }
 
+/* Inset: the panel scrolls, and a ring outside the row would be clipped. */
+.app[data-face='deck'] .dk-menu__row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
+}
+
+/* Nothing to press: the words stay readable, the pointer says so. */
 .app[data-face='deck'] .dk-menu__row:disabled {
   cursor: default;
 }
 
 .app[data-face='deck'] .dk-menu__row svg {
   color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-menu__row:hover:not(:disabled) svg,
+.app[data-face='deck'] .dk-menu__row:focus-visible svg {
+  color: var(--text-primary);
+}
+
+/* On right now: the pick-in-force look — a wash, an upright bar at the edge —
+   and the row's own state word beside it. */
+.app[data-face='deck'] .dk-menu__row[data-on='true'] {
+  background: var(--accent-softer);
+}
+
+.app[data-face='deck'] .dk-menu__row[data-on='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: var(--r-full);
+  background: var(--accent);
 }
 
 .app[data-face='deck'] .dk-menu__row[data-on='true'] svg {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .app[data-face='deck'] .dk-menu__label {
@@ -730,7 +981,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-display);
-  font-size: 12.5px;
+  font-size: var(--t-md);
   font-weight: 500;
   letter-spacing: 0.02em;
 }
@@ -745,14 +996,14 @@
 }
 
 .app[data-face='deck'] .dk-menu__row[data-on='true'] .dk-menu__detail {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .app[data-face='deck'] .dk-menu__section {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px 12px;
+  padding: 10px 16px 12px;
 }
 
 .app[data-face='deck'] .dk-menu__eyebrow {
@@ -767,7 +1018,7 @@
 /* Themes: a swatch each, the one in use ringed, ticked and saying so. */
 .app[data-face='deck'] .dk-themes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -775,41 +1026,47 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
   text-align: left;
 }
 
 .app[data-face='deck'] .dk-theme__swatch {
   position: relative;
   display: block;
-  height: 38px;
-  border-radius: 9px;
+  height: 34px;
+  border-radius: var(--r-md);
   overflow: hidden;
   border: 1px solid var(--glass-line-strong);
   transition:
     border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .app[data-face='deck'] .dk-theme__panel {
   position: absolute;
   left: 6px;
-  right: 16px;
+  right: 14px;
   bottom: 0;
-  height: 20px;
+  height: 17px;
   border-radius: 5px 5px 0 0;
 }
 
 .app[data-face='deck'] .dk-theme__accent {
   position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 8px;
-  height: 8px;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
 }
 
 .app[data-face='deck'] .dk-theme:hover .dk-theme__swatch {
   border-color: var(--text-muted);
+}
+
+.app[data-face='deck'] .dk-theme:active .dk-theme__swatch {
+  transform: scale(0.96);
 }
 
 .app[data-face='deck'] .dk-theme[data-here='true'] .dk-theme__swatch {
@@ -822,8 +1079,8 @@
 }
 
 .app[data-face='deck'] .dk-theme:focus-visible .dk-theme__swatch {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .app[data-face='deck'] .dk-theme__check {
@@ -832,8 +1089,8 @@
   left: 4px;
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   color: var(--text-on-accent);
   background: var(--accent);
@@ -841,13 +1098,14 @@
 
 .app[data-face='deck'] .dk-theme__name {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 5px;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
   font-family: var(--font-display);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
   color: var(--text-secondary);
 }
 
@@ -855,25 +1113,43 @@
   color: var(--text-primary);
 }
 
-/* "in use" drops to its own line whole when a long name leaves no room beside it. */
+/* "in use", on its own line under the name. */
 .app[data-face='deck'] .dk-theme__here {
   white-space: nowrap;
   font-size: 8.5px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
+/* --------------------------------------------------------------- popovers
+ *
+ * The chooser, the flyouts and the hand-off menu are Popovers, portalled to
+ * <body>; their deck look is src/components/Popover.css's "on the deck" block
+ * (`body:has(.app.deck) > .popover`), shared with the desktop.
+ */
 
 @media (prefers-reduced-motion: reduce) {
-  .app[data-face='deck'] .dk-agents__ask {
+  .app[data-face='deck'] .dk-agents__ask,
+  .app[data-face='deck'] .dk-new[data-invite='true']::after {
     animation: none;
   }
 
-  .app[data-face='deck'] .dk-modes__lamp[data-ready='true'] {
+  .app[data-face='deck'] .dk-new:hover:not(:disabled) .dk-new__sheen::before {
+    opacity: 0;
     transition: none;
   }
+}
+
+:root[data-reduced-motion='true'] .app[data-face='deck'] .dk-agents__ask,
+:root[data-reduced-motion='true'] .app[data-face='deck'] .dk-new[data-invite='true']::after {
+  animation: none;
+}
+
+:root[data-reduced-motion='true'] .app[data-face='deck'] .dk-new:hover:not(:disabled) .dk-new__sheen::before {
+  opacity: 0;
+  transition: none;
 }
 
 /* A big window: the names have the room, so they stop cutting short. */
@@ -915,22 +1191,24 @@
   }
 }
 
-@media (max-width: 1060px) {
-  /* Glyph and close mark, so switching still never nudges the bar. */
-  .app[data-face='deck'] .dk-wall {
-    min-width: 52px;
+@media (max-width: 1100px) {
+  .app[data-face='deck'] .dk-bar {
+    column-gap: 10px;
   }
 
+  /* The view switch's words give way to their glyphs; the lamp still says which. */
   .app[data-face='deck'] .dk-wall__word,
-  .app[data-face='deck'] .dk-modes__btn[data-on='false'] .dk-modes__word,
   .app[data-face='deck'] .dk-link__word,
   .app[data-face='deck'] .dk-agents__btn .dk-schip__word {
     display: none;
   }
 
-  /* The one showing keeps its word; the rest are their icons. */
-  .app[data-face='deck'] .dk-modes__btn[data-on='false'] {
-    padding: 0 10px;
+  .app[data-face='deck'] .dk-wall__view {
+    padding: 0 9px;
+  }
+
+  .app[data-face='deck'] .dk-wall__view > svg {
+    display: block;
   }
 
   .app[data-face='deck'] .dk-agents__ask {
@@ -945,14 +1223,15 @@
     display: none;
   }
 
-  /* Icons only: the label stays on each button for screen readers. */
+  /* Glyphs only, still one width each: the label stays on each button for
+     screen readers, and the lamp still lands on the one showing. */
   .app[data-face='deck'] .dk-modes__btn {
     padding: 0 10px;
   }
 
-  /* The plus alone, still 44px across with its ::after. */
+  /* The plus alone. */
   .app[data-face='deck'] .dk-new {
-    width: 38px;
+    width: 32px;
     padding: 0;
   }
 

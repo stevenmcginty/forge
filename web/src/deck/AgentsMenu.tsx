@@ -4,7 +4,8 @@ import { Icon } from '@/components/Icon'
 import { chatLeafOf } from '@/lib/splitTree'
 import type { ChatLeaf, TerminalTab } from '@shared/types'
 import { AgentChooser } from '../components/AgentChooser'
-import { ChatTabChip } from '../components/ChatBadge'
+import { CHATBOTS } from '@shared/chatbots'
+import { ChatBotMark, ChatTabChip, chatTabStyle } from '../components/ChatBadge'
 import { useActiveProject, useForge, useWorkspace } from '../state'
 import { AgentStateChip, bringForward, useDeckAgents, type DeckAgent } from './agents'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
@@ -18,7 +19,9 @@ import type { DeckView } from './view'
  * list drops from it: every pane in the project, across every tab, with its
  * state and a close behind a confirm; New agent at its foot. Picking a row puts
  * that agent on the whole stage (focus view). ↑↓ and Enter move through the
- * rows, 1–9 jump.
+ * rows, 1–9 jump. The rows are the desktop's (src/components/shell/AgentsMenu.tsx):
+ * number, the maker's logo on a round plate, the name over what runs in it, a
+ * tick and "on screen" on the one that is, the state chip.
  *
  * Beside it, only when it is true: which *other* agent is waiting on you, as a
  * button that goes straight to it — with one agent on screen, nothing else
@@ -80,7 +83,9 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
             <ChatTabChip bot={frontChat.bot} size="sm" />
           ) : current ? (
             <>
-              <AgentBadge profile={current.profile} size="sm" />
+              <span className="dk-agents__plate">
+                <AgentBadge profile={current.profile} size="sm" />
+              </span>
               <span className="dk-agents__name truncate">{current.name}</span>
               <AgentStateChip paneId={current.leaf.id} compact />
             </>
@@ -148,6 +153,25 @@ export function AgentsMenu({ onView }: { onView: (view: DeckView) => void }): Re
         selectedId={project.defaultProfileId}
       />
     </div>
+  )
+}
+
+/** Where the number was, on the row that is on screen. */
+function HereMark(): ReactNode {
+  return (
+    <svg width="8" height="9" viewBox="0 0 8 9">
+      <path d="M1 0.8 L7.2 4.5 L1 8.2 Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** The one on screen: a tick and the words, so it is never the row's wash alone. */
+function OnScreen(): ReactNode {
+  return (
+    <span className="dk-arow__here">
+      <Icon name="check" size={10} />
+      on screen
+    </span>
   )
 }
 
@@ -265,21 +289,21 @@ function AgentsList({
               <button type="button" className="dk-arow__go" tabIndex={-1} disabled={confirming} onClick={() => onPick(agent)}>
                 <span className="dk-arow__mark mono" aria-hidden="true">
                   {here ? (
-                    <svg width="8" height="9" viewBox="0 0 8 9">
-                      <path d="M1 0.8 L7.2 4.5 L1 8.2 Z" fill="currentColor" />
-                    </svg>
+                    <HereMark />
                   ) : i < 9 ? (
                     i + 1
                   ) : (
                     ''
                   )}
                 </span>
-                <AgentBadge profile={agent.profile} size="sm" />
+                <span className="dk-arow__plate">
+                  <AgentBadge profile={agent.profile} size="sm" />
+                </span>
                 <span className="dk-arow__text">
                   <span className="dk-arow__name truncate">{agent.name}</span>
                   <span className="dk-arow__kind truncate">{agent.title}</span>
                 </span>
-                {here ? <span className="dk-arow__here">Active</span> : null}
+                {here ? <OnScreen /> : null}
                 <AgentStateChip paneId={agent.leaf.id} />
               </button>
               {confirming ? (
@@ -326,10 +350,17 @@ function AgentsList({
                 disabled={confirming}
                 onClick={() => onPickChat(tab)}
               >
-                <span className="dk-arow__mark mono" aria-hidden="true" />
-                <ChatTabChip bot={chat.bot} />
-                <span className="dk-arow__text" />
-                {here ? <span className="dk-arow__here">Active</span> : null}
+                <span className="dk-arow__mark mono" aria-hidden="true">
+                  {here ? <HereMark /> : null}
+                </span>
+                <span className="dk-arow__plate dk-arow__plate--chat" style={chatTabStyle(chat.bot)}>
+                  <ChatBotMark bot={chat.bot} size={15} />
+                </span>
+                <span className="dk-arow__text">
+                  <span className="dk-arow__name truncate">{CHATBOTS[chat.bot].name}</span>
+                  <span className="dk-arow__kind truncate">Chat</span>
+                </span>
+                {here ? <OnScreen /> : null}
               </button>
               {confirming ? (
                 <span className="dk-arow__confirm" role="group" aria-label={`Close ${chat.title} chat?`}>

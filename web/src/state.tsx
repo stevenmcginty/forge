@@ -329,7 +329,8 @@ interface ForgeContextValue {
   actions: ForgeActions
 }
 
-const ForgeContext = createContext<ForgeContextValue | null>(null)
+/** Exported for the preview harness only (deck/TopBarPreview.tsx), which feeds it fixtures. */
+export const ForgeContext = createContext<ForgeContextValue | null>(null)
 
 export function useForge(): ForgeContextValue {
   const value = useContext(ForgeContext)
