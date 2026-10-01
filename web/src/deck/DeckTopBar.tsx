@@ -1,11 +1,11 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
+import { useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
 import { BOARD_MIRROR_FEATURE } from '@shared/board-mirror'
 import { BROWSER_MIRROR_FEATURE } from '@shared/browser-mirror'
 import { AgentChooser } from '../components/AgentChooser'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
 import { useDeskFeature } from '../lib/features'
-import { useActiveProject, useForge } from '../state'
+import { useActiveProject, useForge, useWorkspace } from '../state'
 import { AgentsMenu } from './AgentsMenu'
 import { ShortcutKeys } from './DictationKey'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
@@ -31,6 +31,10 @@ import './DeckTopBar.css'
  * There is no tab strip and no pane header: a tab is just where an agent lives
  * on the desk, so the Agents menu lists agents across every tab and names the
  * tab beside each one.
+ *
+ * It is the desktop's top bar (src/components/TitleBar.tsx) part for part: the
+ * same chips, wells, lamps and discs, the same solid New, the same menus and
+ * the same motion — DeckTopBar.css restates shell/DeckBar.css rule for rule.
  */
 
 export interface DeckMenuRow {
@@ -87,7 +91,8 @@ export function DeckTopBar({
   rows,
   menuRef,
   themeId,
-  onTheme
+  onTheme,
+  everySurface = false
 }: {
   link: DeckLink
   view: DeckView
@@ -97,6 +102,8 @@ export function DeckTopBar({
   menuRef?: Ref<HTMLButtonElement>
   themeId: string
   onTheme: (id: string) => void
+  /** The preview harness: show Browser and Board whatever the desktop announces. */
+  everySurface?: boolean
 }): ReactNode {
   const sheet = useDeckSheet()
   const said = linkWord(link)
@@ -114,14 +121,13 @@ export function DeckTopBar({
           <Icon name="forge" size={15} />
         </span>
         <span className="dk-bar__wordmark">Forge</span>
-        <span className="dk-bar__rule" aria-hidden="true" />
         <AgentsMenu onView={toAgents} />
         <WallSwitch view={view} onView={toAgents} />
         <NewAgentButton onView={toAgents} />
       </div>
 
       <div className="dk-bar__centre">
-        <SurfaceSwitch />
+        <SurfaceSwitch every={everySurface} />
       </div>
 
       <div className="dk-bar__right">
@@ -173,51 +179,33 @@ const SURFACES: { id: DeckSurface; label: string; icon: IconName; title: string 
 
 /**
  * Agents, Browser or Board: what the stage shows (./view.ts `DeckSurface`) —
- * the desktop's mode pill (src/components/TitleBar.tsx `ModePill`), centred
- * in the bar the same way. The one showing sits in a lit capsule, rim and all,
- * that glides between them: a shape, never colour alone. One element moved by
- * transform, measured off the button it lands on, and measured again when the
- * pill changes size (the words drop as the window narrows). Browser and Board
- * each hide from a desktop too old to serve them, unless this browser is
- * already on that one — then it stays, so there is a way back. With neither
- * left, the switch hides.
+ * the desktop's mode switch (src/components/TitleBar.tsx `ModePill`), centred
+ * in the bar the same way. A well, and in it one raised key — the lamp — on
+ * the one showing: a shape and a word, never colour alone. The segments are
+ * all one width, so the lamp is placed by two numbers (which segment, of how
+ * many) and moved by a transform alone; nothing is measured, and it still
+ * lands right when the words drop in a narrow window. Browser and Board each
+ * hide from a desktop too old to serve them, unless this browser is already on
+ * that one — then it stays, so there is a way back. With neither left, the
+ * switch hides.
  */
-function SurfaceSwitch(): ReactNode {
+function SurfaceSwitch({ every }: { every: boolean }): ReactNode {
   const surface = useDeckSurface()
   const browser = useDeskFeature(BROWSER_MIRROR_FEATURE)
   const board = useDeskFeature(BOARD_MIRROR_FEATURE)
-  const ref = useRef<HTMLElement | null>(null)
-  const lampRef = useRef<HTMLSpanElement | null>(null)
   const shown = SURFACES.filter(
-    ({ id }) => id === 'agents' || id === surface || (id === 'browser' ? browser : board)
+    ({ id }) => every || id === 'agents' || id === surface || (id === 'browser' ? browser : board)
   )
   const count = shown.length
-
-  useLayoutEffect(() => {
-    const root = ref.current
-    const lamp = lampRef.current
-    if (!root || !lamp) return
-    const place = (): void => {
-      const btn = root.querySelector<HTMLElement>(`[data-surface='${surface}']`)
-      if (!btn) return
-      lamp.style.width = `${btn.offsetWidth}px`
-      lamp.style.transform = `translate3d(${btn.offsetLeft}px, 0, 0)`
-    }
-    place()
-    // The first placing never glides in from the left edge.
-    const raf = requestAnimationFrame(() => lamp.setAttribute('data-ready', 'true'))
-    const watch = new ResizeObserver(place)
-    watch.observe(root)
-    return () => {
-      cancelAnimationFrame(raf)
-      watch.disconnect()
-    }
-  }, [surface, count])
+  const index = Math.max(
+    0,
+    shown.findIndex(({ id }) => id === surface)
+  )
 
   if (count < 2) return null
   return (
-    <nav className="dk-modes" ref={ref} aria-label="Show on the stage">
-      <span className="dk-modes__lamp" ref={lampRef} aria-hidden="true" />
+    <nav className="dk-modes" aria-label="Show on the stage" style={{ '--i': index, '--n': count } as CSSProperties}>
+      <span className="dk-modes__lamp" aria-hidden="true" />
       {shown.map(({ id, label, icon, title }) => {
         const on = surface === id
         return (
@@ -242,25 +230,45 @@ function SurfaceSwitch(): ReactNode {
 }
 
 /**
- * The Wall, on or off. One button rather than a two-way switch: focus is where
- * you work, the Wall is where you look around. Its state is in its shape — the
- * four windows fill in and a close mark appears while it is on — as well as in
- * `aria-pressed`, never in colour alone.
+ * Wall on or off, shown as the two views it flips between — the desktop's
+ * switch (src/components/TitleBar.tsx `WallSwitch`). On: the Wall, every agent
+ * at once. Off: Full screen, one agent on the whole stage. Both words are
+ * always there and the one you are in sits on the lamp — a word and a shape,
+ * never colour alone — which glides across. Still one button: a click (or
+ * Ctrl+G) flips it, and `aria-pressed` says whether the Wall is on. Over the
+ * Browser or the Board neither is where you are, so the lamp goes and a click
+ * brings the agents back, as the Wall. In a narrow window the words give way
+ * to their glyphs.
  */
 function WallSwitch({ view, onView }: { view: DeckView; onView: (view: DeckView) => void }): ReactNode {
-  const on = view === 'wall'
+  const surface = useDeckSurface()
+  const aside = surface !== 'agents'
+  const on = view === 'wall' && !aside
+  const title = on
+    ? 'Wall — every agent at once. Click for Full screen, one agent (Ctrl+G)'
+    : aside
+      ? 'Wall — every agent in this project at once (Ctrl+G)'
+      : 'Full screen — one agent. Click for the Wall, every agent at once (Ctrl+G)'
   return (
     <button
       type="button"
       className="dk-wall"
       data-on={on ? 'true' : undefined}
       aria-pressed={on}
-      title={on ? 'Leave the Wall — back to one agent on the whole screen (Ctrl+G)' : 'Wall — every agent in this project at once (Ctrl+G)'}
-      onClick={() => onView(on ? 'focus' : 'wall')}
+      aria-label="Wall"
+      title={title}
+      style={{ '--i': on ? 0 : 1, '--n': 2 } as CSSProperties}
+      onClick={() => onView(aside ? 'wall' : on ? 'focus' : 'wall')}
     >
-      <Icon name="wall" size={13} className="dk-wall__glyph" />
-      <span className="dk-wall__word">Wall</span>
-      {on ? <Icon name="close" size={10} className="dk-wall__x" /> : null}
+      <span className="dk-wall__thumb" aria-hidden="true" data-hidden={aside ? 'true' : undefined} />
+      <span className="dk-wall__view" data-view="wall" data-lit={on ? 'true' : undefined}>
+        <Icon name="wall" size={13} />
+        <span className="dk-wall__word">Wall</span>
+      </span>
+      <span className="dk-wall__view" data-view="full" data-lit={!on && !aside ? 'true' : undefined}>
+        <Icon name="expand" size={13} />
+        <span className="dk-wall__word">Full screen</span>
+      </span>
     </button>
   )
 }
@@ -268,12 +276,16 @@ function WallSwitch({ view, onView }: { view: DeckView; onView: (view: DeckView)
 /**
  * New, beside the Wall: exactly the Agents menu's New agent — the chooser, and
  * the pick opens as a new tab on the whole stage — without opening the list.
- * A plus and the word; under 860px the word goes and the label stays.
+ * The one solid-accent control on the bar, as on the desktop: a plus that
+ * rests as a close mark while its chooser is up, and a slow ring inviting the
+ * first agent into an empty project. Under 860px the word goes and the label
+ * stays.
  */
 function NewAgentButton({ onView }: { onView: (view: DeckView) => void }): ReactNode {
   const { state, actions } = useForge()
   const project = useActiveProject()
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
+  const none = useWorkspace().tabs.length === 0
   const ref = useRef<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   if (!project) return null
@@ -284,6 +296,7 @@ function NewAgentButton({ onView }: { onView: (view: DeckView) => void }): React
         type="button"
         className="dk-new"
         data-open={open ? 'true' : undefined}
+        data-invite={none && live ? 'true' : undefined}
         aria-label="New agent"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -294,6 +307,7 @@ function NewAgentButton({ onView }: { onView: (view: DeckView) => void }): React
           setOpen((v) => !v)
         }}
       >
+        <span className="dk-new__sheen" aria-hidden="true" />
         <Icon name="plus" size={13} />
         <span className="dk-new__word">New</span>
       </button>
@@ -332,10 +346,20 @@ function DeckMenuBody({
     deckSheet.set(null)
     fn?.()
   }
+  // The rows are a menu: the arrows walk them, Home and End jump to the ends.
+  const onRowKey = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+    if (!step && e.key !== 'Home' && e.key !== 'End') return
+    const items = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')]
+    if (!items.length) return
+    e.preventDefault()
+    const at = items.indexOf(document.activeElement as HTMLElement)
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (at + step + items.length) % items.length
+    items[next]?.focus()
+  }
   return (
     <>
-      <ShortcutKeys />
-      <div className="dk-menu__rows" role="menu">
+      <div className="dk-menu__rows" role="menu" onKeyDown={onRowKey}>
         {rows.map((row) =>
           row.href ? (
             <a
@@ -367,6 +391,7 @@ function DeckMenuBody({
           )
         )}
       </div>
+      <ShortcutKeys />
       <div className="dk-menu__section">
         <span className="dk-menu__eyebrow">Theme · this browser</span>
         <div className="dk-themes" role="radiogroup" aria-label="Theme">

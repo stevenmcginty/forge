@@ -37,6 +37,7 @@ import './styles.css'
 
 import { App } from './App'
 import { paintStoredTheme } from './deck/theme'
+import { TopBarPreview } from './deck/TopBarPreview'
 import { AskBannerPreview } from './components/AskBannerPreview'
 import { ChatPreview } from './components/ChatPreview'
 import { CloudLaunchPreview } from './components/CloudLaunchPreview'
@@ -102,6 +103,8 @@ createRoot(host).render(
       <AskBannerPreview />
     ) : preview === 'cloud' ? (
       <CloudLaunchPreview />
+    ) : preview === 'decktop' ? (
+      <TopBarPreview />
     ) : (
       <ForgeProvider>
         <RepoProvider>
