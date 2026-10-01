@@ -21,7 +21,7 @@ import {
 import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
-import type { BrainStatus } from '@shared/brain'
+import type { BrainConfirmRequest, BrainStatus } from '@shared/brain'
 import type { AgentProfile, GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 import type { HandoffTargetWire } from '@shared/handoffview'
 import { collectLeaves } from '@/lib/splitTree'
@@ -214,7 +214,16 @@ export interface ForgeState {
    * ask, so the banner can restart its fuse. Null when there is nothing to show.
    */
   askBanner: AskBanner | null
+  /**
+   * What Forge Brain is waiting on a yes for, oldest first (`picture.brain`,
+   * shared/brain.ts). Empty with no brain, and from an older desktop. The
+   * confirm card's (components/BrainConfirm.tsx), on both faces.
+   */
+  brainConfirms: BrainConfirmRequest[]
 }
+
+/** No brain, or nothing waiting: one list, so the state memo does not move. */
+const NO_CONFIRMS: BrainConfirmRequest[] = []
 
 /** Which pane the heads-up banner is about. Its words are read off the picture and `prompts`. */
 export interface AskBanner {
@@ -300,6 +309,12 @@ export interface ForgeActions {
   dismissAskBanner: () => void
   /** Go to the banner's pane — the same jump a notification tap makes — and put it away. */
   openAskBanner: () => void
+  /**
+   * Yes or No to one of `brainConfirms`. Resolves with the desktop's sentence
+   * when it was not taken (it had timed out, the link is down), or null: the
+   * `brain` push that follows takes the question off the list.
+   */
+  brainConfirm: (id: string, allow: boolean) => Promise<string | null>
   /**
    * Ask the browser for OS-notification permission. Must run from a user
    * gesture — see the bell control in TopBar.
@@ -1486,6 +1501,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setAskBanner(null)
         if (banner) setPendingSession(banner.sessionId)
       },
+      brainConfirm: (id, allow) => client.brainConfirm(id, allow),
       requestNotifyPermission: async () => {
         // Only ever meaningful from a click — browsers refuse a permission
         // prompt with no gesture behind it, which is why this lives behind the
@@ -1511,6 +1527,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   /** What the page shows is the head of the queue; the rest wait behind it. */
   const notice = notices[0]?.text ?? ''
 
+  const brainConfirms = picture?.brain?.confirms ?? NO_CONFIRMS
+
   const state = useMemo<ForgeState>(
     () => ({
       stage,
@@ -1532,7 +1550,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       offlineMode,
       notifyPermission,
       pushActive,
-      askBanner
+      askBanner,
+      brainConfirms
     }),
     [
       stage,
@@ -1554,7 +1573,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       offlineMode,
       notifyPermission,
       pushActive,
-      askBanner
+      askBanner,
+      brainConfirms
     ]
   )
 

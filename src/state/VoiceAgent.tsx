@@ -28,7 +28,15 @@ import {
 } from '@/lib/agentbrain'
 import { describePaneText, registerVoiceAgentTools } from '@/lib/agenttools'
 import { isForgeBrainAgent, migrateAgentBrain } from '@shared/agent-brain'
-import { BRAIN_VOICE_DEFAULT, BRAIN_VOICE_FALLBACKS, type BrainAskResult, type BrainSaysEvent } from '@shared/brain'
+import {
+  BRAIN_VOICE_DEFAULT,
+  BRAIN_VOICE_FALLBACKS,
+  type BrainAskResult,
+  type BrainConfirmRequest,
+  type BrainSaysEvent
+} from '@shared/brain'
+import { brainSnapshot } from '@/components/brain/brainStore'
+import { gatherWait, joinPhrases, parseConfirmAnswer } from '@/lib/brainConfirmVoice'
 import { getHubRuntime } from '@/lib/hubRuntime'
 import { buildAppContext, ContextTracker, projectBranch, type PaneStateWord } from '@/lib/realtime/context'
 import { endedNote, parseVoiceDictation, stopPhraseOf, type ConversationEnd, type VoiceDictation } from '@/lib/realtime/conversation'
@@ -268,6 +276,28 @@ function spokenBrainReply(text: string): string {
   return more && said ? `${said} The details are in the text.` : said
 }
 
+/**
+ * The mic level at which the sidecar itself calls a block voiced: its meter is
+ * (rms / its speech threshold) × 0.35, smoothed (stt/stt_service.py).
+ */
+const MIC_VOICED_LEVEL = 0.35
+/** How often a held phrase looks at the mic again (the gather, below). */
+const GATHER_POLL_MS = 150
+
+/** Spoken phrases held for Forge Brain until they can go as one message. */
+interface BrainGather {
+  /** The one turn card they share. */
+  id: string
+  parts: string[]
+  /** `Date.now()` when the newest part arrived. */
+  lastAt: number
+  /** `Date.now()` when the mic last heard a voice after that; null = it has not. */
+  voicedAt: number | null
+  timer: number | null
+  /** Every `runPhrase` call that joined: each resolves with the one reply. */
+  waiters: Array<{ resolve: (text: string) => void; reject: (err: unknown) => void }>
+}
+
 const ERROR_MS = 1800
 /** How long the activity strip lingers after the last tool call ends. */
 const TOOL_LINGER_MS = 1200
@@ -436,6 +466,13 @@ export interface VoiceAgentCtx {
    * realtime session is there to take it.
    */
   hearBrain?(event: BrainSaysEvent): void
+  /**
+   * Forge Brain is waiting on a yes (shared/brain.ts `BrainConfirmRequest`):
+   * the question, said aloud once in the TTS voice — "Forge Brain asks: … Say
+   * yes or no." The answer is `runPhrase`'s, by code. VoiceHubController
+   * routes it here when no live realtime session is there to say it.
+   */
+  hearBrainConfirm?(confirm: BrainConfirmRequest): void
 }
 
 /**
@@ -1913,6 +1950,123 @@ ${said}` : said)
     []
   )
 
+  /* ------------------------------------------- Forge Brain: whole sentences
+   *
+   * The recogniser cuts a phrase on a pause, so one thought said with a breath
+   * in it used to reach Forge Brain as three turns ("…a virtual world that." /
+   * "has uh agents" / "But um"), each 3–6 s, and the brain answered "that got
+   * cut off". Two rules, for spoken phrases only (src/lib/brainConfirmVoice.ts):
+   *
+   *   one ask at a time   phrases that arrive while the brain is answering are
+   *                       kept, and go as ONE joined message when it returns;
+   *   a short hold        before it is sent, a phrase that does not read as a
+   *                       whole sentence waits ~900 ms for the rest — longer
+   *                       while the mic hears him still speaking.
+   *
+   * Typed words and the phone's (`silent`) are never held. Every phrase that
+   * joined shares one turn card, and its `runPhrase` resolves with the one reply.
+   */
+  const brainAsks = useRef(0)
+  const gatherRef = useRef<BrainGather | null>(null)
+  /** Assigned below; read at call time (the ask and the pump call each other). */
+  const pumpGatherRef = useRef<() => void>(() => undefined)
+
+  /**
+   * His words into the brain pane, its reply to them once its turn is over,
+   * read out short. The whole reply is on the card and in the brain's chat. Its
+   * own sentence when it is off, stopped or still working is the answer: those
+   * are true, not failures to vary.
+   */
+  const askForgeBrain = useCallback(
+    async (id: string, said: string, silent: boolean): Promise<string> => {
+      const ask = window.forge.brain?.ask
+      brainAsks.current++
+      const answer: BrainAskResult = ask
+        ? await ask(`${FORGE_BRAIN_VOICE_TAG} ${said}`).catch((err: unknown) => ({
+            ok: false as const,
+            error: err instanceof Error ? err.message : String(err)
+          }))
+        : { ok: false, error: 'This window cannot reach Forge Brain. Restart Forge.' }
+      brainAsks.current--
+      thinkingSince.current = null
+      if (answer.ok || answer.late) {
+        const text = answer.ok ? answer.text : answer.error
+        if (armedRef.current && !speaksAloud) flash('replied', REPLIED_MS)
+        const reply: BrainReply = { understood: text, confidence: 'high' }
+        const repliedAt = Date.now()
+        setTurns((prev) => prev.map((t) => (t.id === id && t.kind === 'brain' ? { ...t, phase: 'done', reply, repliedAt } : t)))
+        if (!silent && wakeWordRef.current && armedRef.current) wantFollowUp.current = true
+        // What he said while it was answering goes now, as one message.
+        pumpGatherRef.current()
+        if (!silent) await sayBrain(id, spokenBrainReply(text))
+      } else {
+        if (armedRef.current) flash('error', ERROR_MS)
+        setTurns((prev) =>
+          prev.map((t) =>
+            t.id === id && t.kind === 'brain'
+              ? // The sentence is the reply too, so the bar's caption shows why.
+                { ...t, phase: 'error', error: answer.error, reply: { understood: answer.error, confidence: 'low' }, repliedAt: Date.now() }
+              : t
+          )
+        )
+        pumpGatherRef.current()
+        if (!silent) await sayAloud(`${id}:error`, answer.error)
+      }
+      // The next message is already with the brain: the bar says so once this reply has been said.
+      if (thinkingSince.current !== null && armedRef.current && !speakingRef.current) setPhase('thinking')
+      return answer.ok ? answer.text : answer.error
+    },
+    [flash, sayAloud, sayBrain, speaksAloud]
+  )
+
+  /** Send what is held, if it is time; otherwise look again shortly. */
+  const pumpGather = useCallback((): void => {
+    const g = gatherRef.current
+    if (!g) return
+    if (g.timer !== null) {
+      window.clearTimeout(g.timer)
+      g.timer = null
+    }
+    // One ask at a time: the one in flight comes back here when it returns.
+    if (brainAsks.current > 0) return
+    const now = Date.now()
+    const mic = sttRef.current
+    // Speaking again, or a phrase of his still being transcribed: more is coming.
+    if (mic.phase === 'finishing' || (isCapturing(mic.phase, mic.mode, mic.capturing) && levelRef.current >= MIC_VOICED_LEVEL)) {
+      g.voicedAt = now
+    }
+    const wait = gatherWait({
+      last: g.parts[g.parts.length - 1] ?? '',
+      sinceLast: now - g.lastAt,
+      sinceVoice: g.voicedAt === null ? null : now - g.voicedAt,
+      pauseMs: Math.min(2000, Math.max(500, silenceMsRef.current || 800))
+    })
+    if (wait > 0) {
+      g.timer = window.setTimeout(() => pumpGatherRef.current(), Math.min(wait, GATHER_POLL_MS))
+      return
+    }
+    gatherRef.current = null
+    thinkingSince.current = now
+    if (armedRef.current && !speakingRef.current) setPhase('thinking')
+    void askForgeBrain(g.id, joinPhrases(g.parts), false).then(
+      (text) => g.waiters.forEach((w) => w.resolve(text)),
+      (err: unknown) => g.waiters.forEach((w) => w.reject(err))
+    )
+  }, [askForgeBrain])
+  pumpGatherRef.current = pumpGather
+
+  // The window is going: a held phrase's timer must not fire into it.
+  useEffect(
+    () => () => {
+      const timer = gatherRef.current?.timer
+      if (timer != null) window.clearTimeout(timer)
+    },
+    []
+  )
+
+  /** Confirm questions a spoken or typed yes/no has already answered, until the status says so too. */
+  const answeredConfirms = useRef(new Set<string>())
+
   /* ---------------------------------------------------- transcript intake */
 
   /**
@@ -1947,6 +2101,38 @@ ${said}` : said)
       if (typed) lastTypedRef.current = null
       if (import.meta.env.DEV) {
         console.info(`[hub] event=turn-sent via=${opts?.silent ? 'phone' : typed ? 'typed' : 'voice'} chars=${said.length}`)
+      }
+
+      // 0g — Forge Brain is waiting on a yes (its confirm gate, shared/brain.ts).
+      // A phrase that is, whole, one of a short fixed list answers the oldest
+      // question — by code, here, and nowhere else: no model ever answers the
+      // gate. Before the commands and the brain, so "Yeah" is never a new turn
+      // for a brain that is stopped waiting for it; after the echo guards, so
+      // Forge's own "say yes or no" cannot answer itself. Anything longer
+      // ("yes but wait") is not an answer and carries on below.
+      const confirm = (brainSnapshot().status?.confirms ?? []).find((c) => !answeredConfirms.current.has(c.id))
+      const verdict = confirm ? parseConfirmAnswer(said) : null
+      if (confirm && verdict) {
+        const allow = verdict === 'yes'
+        answeredConfirms.current.add(confirm.id)
+        const send = window.forge.brain?.confirm
+        const taken = await (send ? send({ id: confirm.id, allow }) : Promise.resolve(false)).catch(() => false)
+        if (!taken) {
+          // It timed out (a no) in the moment before he spoke.
+          answeredConfirms.current.delete(confirm.id)
+          const gone = 'That question is no longer waiting.'
+          setTurns((prev) => [...prev, { id, said: gone, at: Date.now(), kind: 'note', tone: 'warn' }])
+          await speak(`${id}:confirm`, gone)
+          return gone
+        }
+        // "No" and "stop" are the brake's words too: a prompt counting down
+        // into a terminal is held as well, as it would have been.
+        const held = !allow && holds.current.size > 0 ? cancelAllHolds() : 0
+        const what = confirm.summary.trim() || confirm.tool || 'An action'
+        const note = `${allow ? 'Allowed' : 'Not allowed'}: ${what}${held ? ` (and held ${held === 1 ? 'the prompt' : `${held} prompts`} — not sent)` : ''}`
+        setTurns((prev) => [...prev, { id, said: note, at: Date.now(), kind: 'note', tone: allow ? 'ok' : 'warn' }])
+        await speak(`${id}:confirm`, 'Okay.')
+        return note
       }
 
       // 0d — the conversation's own words (B11), spoken only: never the phone,
@@ -2035,6 +2221,21 @@ ${said}` : said)
         return spoken
       }
 
+      // 2, before any of it — Forge Brain is already holding words of his (in
+      // the hold window, or behind the ask in flight): these are the rest of
+      // that message. They join its card and wait for the one reply.
+      const gather = gatherRef.current
+      if (gather && spokenHere && usingForgeBrainRef.current) {
+        gather.parts.push(said)
+        gather.lastAt = Date.now()
+        gather.voicedAt = null
+        const joined = joinPhrases(gather.parts)
+        setTurns((prev) => prev.map((t) => (t.id === gather.id && t.kind === 'brain' ? { ...t, said: joined } : t)))
+        const reply = new Promise<string>((resolve, reject) => gather.waiters.push({ resolve, reject }))
+        pumpGatherRef.current()
+        return reply
+      }
+
       // 2 — everything else is a conversation with the brain.
       thinkingSince.current = Date.now()
       if (armedRef.current) setPhase('thinking')
@@ -2046,40 +2247,17 @@ ${said}` : said)
       const brainNote = brainNoteRef.current
       brainNoteRef.current = null
 
-      // 2, first — Forge Brain itself: his words into the brain pane, its reply to
-      // them once its turn is over, read out short. The whole reply is on the
-      // card and in the brain's chat. Its own sentence when it is off, stopped
-      // or still working is the answer: those are true, not failures to vary.
+      // 2, first — Forge Brain itself (`askForgeBrain`, above). Typed words and
+      // the phone's go straight in. Spoken ones are held first — for the rest
+      // of the sentence, and behind an ask already in flight — and whatever
+      // joins them on the way goes as one message (the gather, above).
       if (usingForgeBrainRef.current) {
-        const ask = window.forge.brain?.ask
-        const answer: BrainAskResult = ask
-          ? await ask(`${FORGE_BRAIN_VOICE_TAG} ${said}`).catch((err: unknown) => ({
-              ok: false as const,
-              error: err instanceof Error ? err.message : String(err)
-            }))
-          : { ok: false, error: 'This window cannot reach Forge Brain. Restart Forge.' }
-        thinkingSince.current = null
-        if (answer.ok || answer.late) {
-          const text = answer.ok ? answer.text : answer.error
-          if (armedRef.current && !speaksAloud) flash('replied', REPLIED_MS)
-          const reply: BrainReply = { understood: text, confidence: 'high' }
-          const repliedAt = Date.now()
-          setTurns((prev) => prev.map((t) => (t.id === id && t.kind === 'brain' ? { ...t, phase: 'done', reply, repliedAt } : t)))
-          if (!opts?.silent && wakeWordRef.current && armedRef.current) wantFollowUp.current = true
-          if (!opts?.silent) await sayBrain(id, spokenBrainReply(text))
-          return text
-        }
-        if (armedRef.current) flash('error', ERROR_MS)
-        setTurns((prev) =>
-          prev.map((t) =>
-            t.id === id && t.kind === 'brain'
-              ? // The sentence is the reply too, so the bar's caption shows why.
-                { ...t, phase: 'error', error: answer.error, reply: { understood: answer.error, confidence: 'low' }, repliedAt: Date.now() }
-              : t
-          )
-        )
-        await speak(`${id}:error`, answer.error)
-        return answer.error
+        if (!spokenHere) return askForgeBrain(id, said, opts?.silent === true)
+        const reply = new Promise<string>((resolve, reject) => {
+          gatherRef.current = { id, parts: [said], lastAt: Date.now(), voicedAt: null, timer: null, waiters: [{ resolve, reject }] }
+        })
+        pumpGatherRef.current()
+        return reply
       }
       const heard = brainNote ? `[Forge Brain told you, for context: ${brainNote}]
 
@@ -2205,6 +2383,7 @@ ${said}` : said
         .catch(failed)
     },
     [
+      askForgeBrain,
       brain,
       cancelAllHolds,
       flash,
@@ -2215,7 +2394,6 @@ ${said}` : said
       runClaudeTurn,
       runVoiceDictation,
       sayAloud,
-      sayBrain,
       speaksAloud
     ]
   )
@@ -2234,6 +2412,23 @@ ${said}` : said
       const id = `brain-says-${event.id}`
       setTurns((prev) => [...prev, { id, said: `Forge Brain: ${text}`, at: event.at, kind: 'note', tone: 'ok' }])
       void sayBrain(id, spokenBrainReply(text))
+    },
+    [sayBrain]
+  )
+
+  /**
+   * Forge Brain's confirm question, aloud (VoiceAgentCtx.hearBrainConfirm).
+   * The words are fixed, not the brain's: what it will do, then how to answer.
+   * Once per question — the caller keeps count, and the mouth speaks a key once.
+   */
+  const hearBrainConfirm = useCallback(
+    (confirm: BrainConfirmRequest): void => {
+      const what = confirm.summary.trim() || confirm.tool || 'an action'
+      const id = `brain-confirm-${confirm.id}`
+      setTurns((prev) => [...prev, { id, said: `Forge Brain asks: ${what}`, at: confirm.at, kind: 'note', tone: 'warn' }])
+      // With the wake word on, the answer must not need "hey Jarvis" first.
+      if (wakeWordRef.current && armedRef.current) wantFollowUp.current = true
+      void sayBrain(id, `Forge Brain asks: ${speakable(what, 240).replace(/[\s.?!]+$/, '')}. Say yes or no.`)
     },
     [sayBrain]
   )
@@ -2572,6 +2767,7 @@ ${said}` : said
       ended,
       endConversation,
       hearBrain,
+      hearBrainConfirm,
       recogniser: {
         phase: stt.phase,
         ready: stt.ready,
@@ -2615,6 +2811,7 @@ ${said}` : said
       ended,
       endConversation,
       hearBrain,
+      hearBrainConfirm,
       captureWanted
     ]
   )
