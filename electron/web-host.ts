@@ -57,6 +57,7 @@ import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type WebServerHost } from './web/server'
 import { disposeChatMirrors, findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
+import { disposeBrowserMirrors, sharedBrowserMirrorHost } from './browser-panes/web-mirror'
 import { disposeTranscriptWatchers, nudgeTranscript, stopTranscript, watchTranscript } from './web/transcript-watcher'
 import type { CodexPane } from './web/codex-usage'
 import { disposeUsageHub, ensureUsageHub, onUsageFrame, registerUsageHandlers, usageFrames } from './usage-hub'
@@ -1722,6 +1723,10 @@ async function start(): Promise<void> {
     // its pictures and its taps. Input stays inside that page — never the OS.
     // One host for both phone links, so the cap on offscreen copies is shared.
     chatMirror: sharedChatMirrorHost(),
+    // The desktop's Browser tabs on a browser: the tab list, and an offscreen
+    // copy of a tab per watch, in the same signed-in session. Input stays
+    // inside that copy — never the OS, never the desktop's own view.
+    browserMirror: sharedBrowserMirrorHost(),
     // Straight through to electron/web/push.ts, which owns the keypair, the
     // subscription list and the file both live in. The server carries the key
     // out and the subscriptions back; deciding when anything is actually *sent*
@@ -2087,6 +2092,7 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   // `~/.claude`.
   disposeTranscriptWatchers()
   disposeChatMirrors()
+  disposeBrowserMirrors()
   releaseBlocker()
 
   const instance = server

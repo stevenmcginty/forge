@@ -69,6 +69,12 @@ import {
   type ChatClientFrame,
   type ChatMirrorHost
 } from '@shared/chat-mirror'
+import {
+  BROWSER_MIRROR_FEATURE,
+  readBrowserClientFrame,
+  type BrowserClientFrame,
+  type BrowserMirrorHost
+} from '@shared/browser-mirror'
 /*
  * Foreman's boundary constants and shapes, from the file that owns them — the
  * seed cap is applied here, beside every other cap this link enforces, and the
@@ -747,6 +753,14 @@ export interface WebServerHost {
   chatMirror?: ChatMirrorHost
 
   /**
+   * The desktop's Browser tabs, seen and used from a browser
+   * (shared/browser-mirror.ts). Optional, as `chatMirror`: a host without it
+   * never announces BROWSER_MIRROR_FEATURE, and a `browser:*` frame is
+   * answered `unsupported`.
+   */
+  browserMirror?: BrowserMirrorHost
+
+  /**
    * Injected so the smoke test can drive the rate-limit buckets and a short
    * heartbeat without sleeping through the shipped values. Defaults are the
    * shipped ones.
@@ -846,6 +860,8 @@ interface Client {
    * the subscription — see `transcriptStop` on `WebServerHost`.
    */
   chats: Map<string, (update: ChatUpdate) => void>
+  /** The unsubscribe for this browser's `browser:tabs` pushes, or null while it has not asked for them. */
+  browserTabs: (() => void) | null
   /**
    * Whether this tab is on screen, as its last `visibility` request said —
    * `null` while it has never said.
@@ -1555,6 +1571,7 @@ export class WebServer {
       viewer: `web-${++viewerSeq}`,
       subs: new Set(),
       chats: new Map(),
+      browserTabs: null,
       visible: null,
       stale: new Set(),
       inputSecond: 0,
@@ -1629,6 +1646,8 @@ export class WebServer {
       this.dropViewer(client)
       // Every chat tab this socket was watching stops being drawn for it.
       this.host.chatMirror?.release(client.viewer)
+      // The same for Browser tabs, and its tab-list pushes stop.
+      this.releaseBrowser(client)
       // Every conversation this browser was reading, let go with it. A tail on
       // a file in `~/.claude` polling for a socket that closed is exactly the
       // watch nobody will ever stop.
@@ -1698,6 +1717,8 @@ export class WebServer {
     // A chat tab's taps and scrolls are pointer traffic too, so they spend the
     // same separate budget rather than the terminal's.
     if (frame.type === 'chat:input' || frame.type === 'chat:focusComposer') return this.onChat(client, frame)
+    // And a Browser tab's clicks, scrolls and keys.
+    if (frame.type === 'browser:input') return this.onBrowser(client, frame)
 
     if (!this.allowInput(client, frame)) return
 
@@ -1925,7 +1946,100 @@ export class WebServer {
       case 'chat:watch':
       case 'chat:unwatch':
         return this.onChat(client, frame)
+
+      case 'browser:subscribe':
+      case 'browser:unsubscribe':
+      case 'browser:watch':
+      case 'browser:unwatch':
+      case 'browser:nav':
+      case 'browser:open':
+      case 'browser:close':
+        return this.onBrowser(client, frame)
     }
+  }
+
+  /**
+   * The desktop's Browser tabs on this browser: the tab list and its pushes,
+   * watching one tab's offscreen copy, one gesture or address-bar action on it,
+   * and opening or closing a tab. The same gates as `onChat`: only an admitted
+   * socket reaches here, input spends the mirror budget, what a frame means is
+   * decided by `readBrowserClientFrame`, and which tabs exist by the host.
+   */
+  private onBrowser(client: Client, raw: BrowserClientFrame): void {
+    const device = client.device
+    if (!device) return
+    const browser = this.host.browserMirror
+    if (!browser) {
+      this.send(client, {
+        type: 'error',
+        code: 'unsupported',
+        message: 'This desktop cannot show its Browser tabs to a browser.'
+      })
+      return
+    }
+    if (raw.type === 'browser:input' && !this.allowMirrorInput(client)) return
+    const frame = readBrowserClientFrame(raw)
+    if (!frame) {
+      this.send(client, {
+        type: 'error',
+        code: 'bad-frame',
+        message: 'That is not a Browser tab request this desktop understands.'
+      })
+      return
+    }
+    switch (frame.type) {
+      case 'browser:subscribe':
+        client.browserTabs ??= browser.onTabs((tabs) => {
+          if (this.clients.has(client)) this.send(client, { type: 'browser:tabs', tabs })
+        })
+        this.send(client, { type: 'browser:tabs', tabs: browser.tabs() })
+        return
+      case 'browser:unsubscribe':
+        client.browserTabs?.()
+        client.browserTabs = null
+        return
+      case 'browser:watch':
+        browser.watch(frame, {
+          viewer: client.viewer,
+          who: device.name,
+          send: (out) => {
+            if (this.clients.has(client)) this.send(client, out)
+          },
+          backlog: () => client.socket.bufferedAmount
+        })
+        return
+      case 'browser:unwatch':
+        browser.unwatch(frame.tabId, client.viewer)
+        return
+      case 'browser:input':
+        browser.input(frame, client.viewer)
+        return
+      case 'browser:nav':
+        browser.nav(frame, client.viewer)
+        return
+      case 'browser:open':
+        void browser
+          .open(frame)
+          .catch((err: unknown) => ({
+            type: 'browser:opened' as const,
+            reqId: frame.reqId,
+            error: `The tab could not be opened (${err instanceof Error ? err.message : String(err)}).`
+          }))
+          .then((reply) => {
+            if (this.clients.has(client)) this.send(client, reply)
+          })
+        return
+      case 'browser:close':
+        browser.close(frame.tabId)
+        return
+    }
+  }
+
+  /** A socket went: its Browser tab watches start their idle grace and its tab pushes stop. Idempotent. */
+  private releaseBrowser(client: Client): void {
+    client.browserTabs?.()
+    client.browserTabs = null
+    this.host.browserMirror?.release(client.viewer)
   }
 
   /**
@@ -2175,7 +2289,8 @@ export class WebServer {
       ...(this.host.projectRoot ? [WEB_FEATURE_FILES] : []),
       ...(this.host.projectRemove && this.host.projectRemovePreview ? [WEB_FEATURE_PROJECT_REMOVE] : []),
       ...(this.host.usage ? [WEB_FEATURE_USAGE] : []),
-      ...(this.host.chatMirror ? [CHAT_MIRROR_FEATURE] : [])
+      ...(this.host.chatMirror ? [CHAT_MIRROR_FEATURE] : []),
+      ...(this.host.browserMirror ? [BROWSER_MIRROR_FEATURE] : [])
     ]
     this.log(`${outcome.device.name} connected from ${client.source} (client ${wireString(frame.client, 32) || '?'})`)
     this.send(client, {
@@ -3798,6 +3913,7 @@ export class WebServer {
     // idempotence, for the transcript tails behind this socket.
     this.dropViewer(client)
     this.host.chatMirror?.release(client.viewer)
+    this.releaseBrowser(client)
     this.stopTranscripts(client)
     this.closeVoiceClaude(client)
     try {

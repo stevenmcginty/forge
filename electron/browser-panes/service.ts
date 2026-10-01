@@ -11,6 +11,7 @@ import {
   type BrowserHistoryAction,
   type BrowserOwner,
   type BrowserRect,
+  type BrowserSurfaceInfo,
   type BrowserViewBounds
 } from '@shared/browser'
 import { BrowserAgentOps } from './agent-ops'
@@ -57,6 +58,8 @@ export class BrowserService {
   private activeProject = ''
   /** Owner id → project, learned when a caller is resolved. */
   private readonly ownerProject = new Map<string, string>()
+  /** Others told when the surface list changes (Forge Web's tab strip, electron/browser-panes/web-mirror.ts). */
+  private readonly tabListeners = new Set<(list: BrowserSurfaceInfo[]) => void>()
 
   constructor(deps: BrowserServiceDeps) {
     this.deps = deps
@@ -69,6 +72,13 @@ export class BrowserService {
       onChanged: (list) => {
         const win = this.window
         if (win && !win.isDestroyed()) win.webContents.send(BROWSER_IPC.changed, list)
+        for (const listener of this.tabListeners) {
+          try {
+            listener(list)
+          } catch (err) {
+            console.error('[browser] tab listener failed:', err)
+          }
+        }
       },
       onShot: (path, owner, id, project) => this.deps.onShot?.(path, owner, id, project),
       onAppKey: (key, takeFocus) => {
@@ -84,6 +94,14 @@ export class BrowserService {
     })
     this.ops = new BrowserAgentOps(this.manager, (owner) => this.ownerProject.get(owner.id) ?? this.activeProject)
     this.link = new BrowserLink(dir, (op, args, caller) => this.run(op, args, caller))
+  }
+
+  /** Hear every change to the surface list, as the renderer does. Returns the unsubscribe. */
+  onTabsChanged(listener: (list: BrowserSurfaceInfo[]) => void): () => void {
+    this.tabListeners.add(listener)
+    return () => {
+      this.tabListeners.delete(listener)
+    }
   }
 
   /** Where the bridge finds the pipe and token: FORGE_BROWSER_LINK_FILE. */
@@ -188,6 +206,7 @@ export class BrowserService {
   dispose(): void {
     this.offHost?.()
     this.offHost = null
+    this.tabListeners.clear()
     this.link.close()
     this.manager.dispose()
     this.window = null

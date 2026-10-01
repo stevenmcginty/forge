@@ -67,6 +67,11 @@ export function disposeBrowserPanes(): void {
   service = null
 }
 
+/** The running service, or null before registerBrowserPanes / after quit. For Forge Web's tab copies. */
+export function browserService(): BrowserService | null {
+  return service
+}
+
 /** Every browser screenshot, for the canvas board. */
 export function setBrowserShotHook(hook: NonNullable<BrowserServiceDeps['onShot']>): void {
   shotHook = hook

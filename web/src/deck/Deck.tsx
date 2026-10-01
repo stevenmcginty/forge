@@ -51,9 +51,10 @@ import { requestPaneView, usePaneView } from '../lib/pane-status'
 import { getClaudeView } from '../lib/view-pref'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStateChip, bringForward, deckAgent, OutputPulse, useTrackDeckDone, type DeckAgent } from './agents'
+import { DeckBrowser } from './DeckBrowser'
 import { composerField, composerOpen } from './composer'
 import { useDeckDictation } from './dictation'
-import type { BarPlace, DeckView } from './view'
+import { useDeckSurface, type BarPlace, type DeckView } from './view'
 import { ProjectsSheet, VoiceBar, VoiceLine } from './VoiceBar'
 import './deck.css'
 // After deck.css (and so after DeckTopBar.css and VoicePill.css): the bar's own look has the last word.
@@ -122,6 +123,9 @@ export function DeckStage({
   const profiles = useProfiles()
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const activeTab = workspace.tabs.find((t) => t.id === workspace.activeTabId) ?? workspace.tabs[0] ?? null
+  // The Browser has the stage: the panes stay mounted but hidden (`data-away`),
+  // so no terminal is disposed and re-attached for a look at a web page.
+  const away = useDeckSurface() === 'browser'
 
   const [closingTarget, setClosingTarget] = useState<{ agent: DeckAgent; anchor: HTMLElement } | null>(null)
   const [closingChat, setClosingChat] = useState<{ tab: TerminalTab; chat: ChatLeaf; anchor: HTMLElement } | null>(null)
@@ -149,7 +153,7 @@ export function DeckStage({
     [actions, workspace.tabs]
   )
 
-  if (empty || !activeTab) return <div className="dk-stage__empty">{empty}</div>
+  if (empty || !activeTab) return away ? <DeckBrowser /> : <div className="dk-stage__empty">{empty}</div>
 
   const wall = view === 'wall'
   // Everything on the Wall has been seen; it stays mounted when focus comes back.
@@ -170,9 +174,11 @@ export function DeckStage({
 
   return (
     <>
+      {away ? <DeckBrowser /> : null}
       <div
         className="dk-panes"
         data-view={view}
+        data-away={away ? 'true' : undefined}
         style={wall ? ({ '--dk-wall-cols': columnsFor(total) } as CSSProperties) : undefined}
       >
         {slots.map(({ leaf, tab }) => {
@@ -219,7 +225,7 @@ export function DeckStage({
                 leaf={leaf}
                 focused={focused}
                 onlyPane={!wall || total === 1}
-                onScreen={shown}
+                onScreen={shown && !away}
                 fullScreen={!wall && shown}
                 tabTitle={agent.name}
                 faceSwitch={!wall && faces ? <FaceSwitch paneId={leaf.id} name={agent.name} /> : null}
@@ -272,7 +278,7 @@ export function DeckStage({
                   </span>
                 </div>
               ) : null}
-              {wall ? <ChatTile leaf={chat} onOpen={open} /> : <ChatMirror leaf={chat} onScreen={shown} />}
+              {wall ? <ChatTile leaf={chat} onOpen={open} /> : <ChatMirror leaf={chat} onScreen={shown && !away} />}
             </div>
           )
         })}

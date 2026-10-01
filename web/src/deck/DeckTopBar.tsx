@@ -1,21 +1,23 @@
 import { useRef, useState, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
+import { BROWSER_MIRROR_FEATURE } from '@shared/browser-mirror'
 import { AgentChooser } from '../components/AgentChooser'
 import { CommandsButton, SkillsButton } from '../components/Flyouts'
+import { useDeskFeature } from '../lib/features'
 import { useActiveProject, useForge } from '../state'
 import { AgentsMenu } from './AgentsMenu'
 import { ShortcutKeys } from './DictationKey'
 import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import { DECK_THEMES, swatchOf } from './theme'
-import type { BarPlace, DeckView } from './view'
+import { setDeckSurface, useDeckSurface, type BarPlace, type DeckSurface, type DeckView } from './view'
 import { VoiceBar } from './VoiceBar'
 import './DeckTopBar.css'
 
 /*
  * The deck face's top bar: one slim row, and the only chrome above the panes.
  *
- * Left, the mark; then the two things that decide what the stage shows — the
- * Agents menu (which agent is on screen, every other one a click away, New
+ * Left, the mark; the Agents | Browser switch (./DeckBrowser.tsx); then the
+ * two things that decide which agents the stage shows — the Agents menu (which agent is on screen, every other one a click away, New
  * agent, close) and the Wall switch — and New, the Agents menu's New agent a
  * click nearer. Centre, the voice bar (project, D,
  * Type) while it lives up here rather than in the dock. Right, the pane
@@ -96,6 +98,12 @@ export function DeckTopBar({
 }): ReactNode {
   const sheet = useDeckSheet()
   const said = linkWord(link)
+  // Picking an agent, the Wall or New is asking for the agents: the stage
+  // leaves the Browser for them.
+  const toAgents = (next: DeckView): void => {
+    setDeckSurface('agents')
+    onView(next)
+  }
 
   return (
     <header className="dk-bar">
@@ -105,9 +113,10 @@ export function DeckTopBar({
         </span>
         <span className="dk-bar__wordmark">Forge</span>
         <span className="dk-bar__rule" aria-hidden="true" />
-        <AgentsMenu onView={onView} />
-        <WallSwitch view={view} onView={onView} />
-        <NewAgentButton onView={onView} />
+        <SurfaceSwitch />
+        <AgentsMenu onView={toAgents} />
+        <WallSwitch view={view} onView={toAgents} />
+        <NewAgentButton onView={toAgents} />
       </div>
 
       <div className="dk-bar__centre">{place === 'top' ? <VoiceBar place="top" /> : null}</div>
@@ -149,6 +158,44 @@ export function DeckTopBar({
         </span>
       </div>
     </header>
+  )
+}
+
+const SURFACES: { id: DeckSurface; label: string; icon: IconName; title: string }[] = [
+  { id: 'agents', label: 'Agents', icon: 'terminal', title: "The desktop's agents" },
+  { id: 'browser', label: 'Browser', icon: 'globe', title: "The desktop's Browser tabs — sign in to sites from here" }
+]
+
+/**
+ * Agents or Browser: what the stage shows (./view.ts `DeckSurface`). The one
+ * showing is pressed, bold and underlined, never marked by colour alone.
+ * Hidden from a desktop too old to serve its Browser tabs, unless this browser
+ * is already on the Browser — then it stays, so there is a way back.
+ */
+function SurfaceSwitch(): ReactNode {
+  const surface = useDeckSurface()
+  const supported = useDeskFeature(BROWSER_MIRROR_FEATURE)
+  if (!supported && surface === 'agents') return null
+  return (
+    <div className="dk-surface" role="group" aria-label="Show on the stage">
+      {SURFACES.map(({ id, label, icon, title }) => {
+        const on = surface === id
+        return (
+          <button
+            key={id}
+            type="button"
+            className="dk-surface__btn"
+            data-on={on ? 'true' : 'false'}
+            aria-pressed={on}
+            title={on ? `${label} — showing now` : title}
+            onClick={() => setDeckSurface(id)}
+          >
+            <Icon name={icon} size={13} />
+            <span className="dk-surface__word">{label}</span>
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

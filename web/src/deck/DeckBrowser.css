@@ -1,0 +1,315 @@
+/*
+ * The deck's Browser view (./DeckBrowser.tsx): a tab strip, an address row and
+ * the tab's live picture, framed as one window like a pane. Every state is a
+ * word or a shape as well as a colour.
+ */
+
+/* The panes stay mounted while the Browser has the stage; display: none is
+   what lib/term.ts refuses to fit, so no PTY is resized behind it. */
+.app[data-face='deck'] .dk-panes[data-away='true'] {
+  display: none;
+}
+
+.app[data-face='deck'] .dk-browser {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
+}
+
+.app[data-face='deck'] .dk-browser__empty {
+  margin: auto;
+  padding: 24px;
+  max-width: 420px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-browser__hint {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+/* ---------------------------------------------------------------- tab strip */
+
+.app[data-face='deck'] .dk-browser__strip {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.app[data-face='deck'] .dk-browser__tab {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 220px;
+  align-items: center;
+  min-width: 96px;
+  height: 32px;
+  border-radius: 7px 7px 0 0;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-browser__tab:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+/* The tab on screen: bold, lifted onto the address row's ground, and
+   underlined — shape and weight first, the accent agreeing. */
+.app[data-face='deck'] .dk-browser__tab[data-on='true'] {
+  color: var(--text-primary);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.app[data-face='deck'] .dk-browser__tab[data-on='true'] .dk-browser__tab-name {
+  font-weight: 700;
+}
+
+.app[data-face='deck'] .dk-browser__tab-btn {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 6px 0 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-display);
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.app[data-face='deck'] .dk-browser__tab-btn svg {
+  flex: none;
+}
+
+.app[data-face='deck'] .dk-browser__tab-name {
+  min-width: 0;
+}
+
+.app[data-face='deck'] .dk-browser__owner {
+  flex: none;
+  max-width: 96px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-browser__tab-close,
+.app[data-face='deck'] .dk-browser__new,
+.app[data-face='deck'] .dk-browser__navbtn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.app[data-face='deck'] .dk-browser__tab-close {
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+}
+
+.app[data-face='deck'] .dk-browser__new {
+  width: 30px;
+  height: 30px;
+  margin: 0 0 1px 2px;
+  border: 1px solid var(--glass-line);
+}
+
+.app[data-face='deck'] .dk-browser__navbtn {
+  width: 28px;
+  height: 28px;
+}
+
+.app[data-face='deck'] :is(.dk-browser__tab-close, .dk-browser__new, .dk-browser__navbtn):hover:not(:disabled) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.app[data-face='deck'] :is(.dk-browser__tab-close, .dk-browser__new, .dk-browser__navbtn):disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.app[data-face='deck'] :is(.dk-browser__tab-btn, .dk-browser__tab-close, .dk-browser__new, .dk-browser__navbtn):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* --------------------------------------------------------------- the tab */
+
+.app[data-face='deck'] .dk-browser__tabview {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app[data-face='deck'] .dk-browser__nav {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.app[data-face='deck'] .dk-browser__address {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  margin: 0 4px;
+  padding: 0 10px;
+  border: 1px solid var(--glass-line);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.app[data-face='deck'] .dk-browser__address:focus {
+  outline: none;
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.app[data-face='deck'] .dk-browser__state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  min-width: 96px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.app[data-face='deck'] .dk-browser__state[data-state='live'] {
+  color: var(--text-primary);
+}
+
+.app[data-face='deck'] .dk-browser__state[data-state='error'] {
+  color: var(--danger);
+}
+
+.app[data-face='deck'] .dk-browser__glyph {
+  flex: none;
+}
+
+.app[data-face='deck'] .dk-browser__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-terminal);
+  cursor: default;
+  /* Every gesture here is the page's, not this one's. */
+  touch-action: none;
+  user-select: none;
+}
+
+.app[data-face='deck'] .dk-browser__picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* No picture has arrived yet: nothing to draw, not a broken-image box. */
+.app[data-face='deck'] .dk-browser__stage:not([data-pictured]) .dk-browser__picture {
+  visibility: hidden;
+}
+
+/* The capture box: focusable, and out of sight. */
+.app[data-face='deck'] .dk-browser__keys {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.app[data-face='deck'] .dk-browser__notice {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0 auto;
+  max-width: 420px;
+  padding: 14px 16px;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.app[data-face='deck'] .dk-browser__notice p {
+  margin: 0;
+}
+
+/* Where typing goes, in words; the ring on the picture only agrees. */
+.app[data-face='deck'] .dk-browser__stage[data-typing='true']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px var(--accent-line);
+  pointer-events: none;
+}
+
+.app[data-face='deck'] .dk-browser__typing {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 5px 10px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.app[data-face='deck'] .dk-browser__typing[data-typing='true'] {
+  font-weight: 700;
+  color: var(--text-primary);
+}

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useSyncExternalStore } from 'react'
 
 /**
  * Focus or the Wall — the deck's Ctrl+G, as this browser's own choice.
@@ -67,4 +67,49 @@ export function useBarPlace(): [BarPlace, (place: BarPlace) => void] {
     setPlace(next)
   }, [])
   return [place, set]
+}
+
+/**
+ * What the stage shows: the desktop's agents, or its Browser tabs
+ * (./DeckBrowser.tsx). Per browser, like the view. A store rather than state,
+ * because the top bar's switch and the stage are drawn from different parents.
+ *
+ *   agents   the panes, in focus or on the Wall (DeckView above)
+ *   browser  the desktop's Browser tabs, one live picture at a time
+ */
+export type DeckSurface = 'agents' | 'browser'
+
+const SURFACE_KEY = 'forge-web-surface'
+
+function storedSurface(): DeckSurface {
+  try {
+    return window.localStorage.getItem(SURFACE_KEY) === 'browser' ? 'browser' : 'agents'
+  } catch {
+    return 'agents'
+  }
+}
+
+let surface: DeckSurface = storedSurface()
+const surfaceListeners = new Set<() => void>()
+
+export function setDeckSurface(next: DeckSurface): void {
+  if (next === surface) return
+  try {
+    window.localStorage.setItem(SURFACE_KEY, next)
+  } catch {
+    /* this page still switches */
+  }
+  surface = next
+  for (const listener of [...surfaceListeners]) listener()
+}
+
+function subscribeSurface(listener: () => void): () => void {
+  surfaceListeners.add(listener)
+  return () => {
+    surfaceListeners.delete(listener)
+  }
+}
+
+export function useDeckSurface(): DeckSurface {
+  return useSyncExternalStore(subscribeSurface, () => surface, () => surface)
 }

@@ -26,6 +26,16 @@ import {
 import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ChatFrameFrame, ChatInputFrame, ChatStateFrame, ChatWatchFrame } from '@shared/chat-mirror'
+import {
+  BROWSER_MIRROR_FEATURE,
+  type BrowserFrameFrame,
+  type BrowserInputFrame,
+  type BrowserNavAction,
+  type BrowserOpenedFrame,
+  type BrowserStateFrame,
+  type BrowserTabSummary,
+  type BrowserWatchFrame
+} from '@shared/browser-mirror'
 import type { ForemanState } from '@shared/foreman'
 import type { BrainSaysEvent, BrainStatus } from '@shared/brain'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
@@ -613,6 +623,117 @@ export function sendChatInput(input: Omit<ChatInputFrame, 'type'>): void {
 /** Put the caret in the chat site's own message box. */
 export function focusChatComposer(leafId: string): void {
   sendUp?.({ type: 'chat:focusComposer', leafId })
+}
+
+/* ---------------------------------------------------------- browser tabs
+ *
+ * The desktop's Browser tabs (shared/browser-mirror.ts), seen from the deck:
+ * the tab list as one subscription shared by whoever is listening, and each
+ * tab's live picture routed the way a chat's is — keyed by tab id, out of the
+ * page's state. Both are re-sent on every `hello-ok` to a desktop that still
+ * announces the feature, because a fresh socket starts out watching nothing.
+ */
+
+/** What a Browser tab on screen is told. */
+export interface BrowserWatcher {
+  onFrame: (frame: BrowserFrameFrame) => void
+  onState: (frame: BrowserStateFrame) => void
+}
+
+type BrowserTabsListener = (tabs: BrowserTabSummary[]) => void
+
+const browserTabListeners = new Set<BrowserTabsListener>()
+/** The last list the desktop sent; null until the first answer to a subscribe. */
+let browserTabs: BrowserTabSummary[] | null = null
+const browserWatches = new Map<string, { watcher: BrowserWatcher; size: Omit<BrowserWatchFrame, 'type' | 'tabId'> }>()
+const browserOpens = new Map<string, { resolve: (tabId: string) => void; reject: (error: Error) => void; timer: number }>()
+let browserOpenSeq = 0
+/** How long a `browser:open` may go unanswered before it is given up as failed. */
+const BROWSER_OPEN_TIMEOUT_MS = 20_000
+
+function setBrowserTabs(tabs: BrowserTabSummary[]): void {
+  browserTabs = tabs
+  for (const listener of [...browserTabListeners]) listener(tabs)
+}
+
+/**
+ * Hear the desktop's Browser tab list, now (if one is in hand) and on every
+ * change. The first listener subscribes, the last one out unsubscribes.
+ */
+export function subscribeBrowserTabs(listener: BrowserTabsListener): () => void {
+  browserTabListeners.add(listener)
+  if (browserTabs) listener(browserTabs)
+  if (browserTabListeners.size === 1) sendUp?.({ type: 'browser:subscribe' })
+  return () => {
+    if (!browserTabListeners.delete(listener) || browserTabListeners.size > 0) return
+    browserTabs = null
+    sendUp?.({ type: 'browser:unsubscribe' })
+  }
+}
+
+/**
+ * Watch a Browser tab at a size, or re-send the size of one already watched.
+ * Returns the release, which unwatches — the caller runs it when its surface
+ * goes or switches tab.
+ */
+export function watchBrowser(
+  tabId: string,
+  size: Omit<BrowserWatchFrame, 'type' | 'tabId'>,
+  watcher: BrowserWatcher
+): () => void {
+  const entry = { watcher, size }
+  browserWatches.set(tabId, entry)
+  sendUp?.({ type: 'browser:watch', tabId, ...size })
+  return () => {
+    if (browserWatches.get(tabId) !== entry) return
+    browserWatches.delete(tabId)
+    sendUp?.({ type: 'browser:unwatch', tabId })
+  }
+}
+
+/** One gesture on a watched tab's copy. The body only, so the discriminant is written here. */
+export function sendBrowserInput(input: Omit<BrowserInputFrame, 'type'>): void {
+  sendUp?.({ type: 'browser:input', ...input })
+}
+
+/** Back, forward, reload, stop, or go to `url` — on the tab's copy. */
+export function browserNav(tabId: string, action: BrowserNavAction, url?: string): void {
+  sendUp?.({ type: 'browser:nav', tabId, action, ...(action === 'go' && url ? { url } : {}) })
+}
+
+/**
+ * Open a real Browser tab on the desktop, owned by "You". Resolves with its id,
+ * or rejects with the desktop's sentence (or a timeout's).
+ */
+export function openBrowserTab(project: string, url?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!sendUp) {
+      reject(new Error('Not connected to the desktop.'))
+      return
+    }
+    browserOpenSeq += 1
+    const reqId = `b${browserOpenSeq}`
+    const timer = window.setTimeout(() => {
+      browserOpens.delete(reqId)
+      reject(new Error('The desktop did not answer in time.'))
+    }, BROWSER_OPEN_TIMEOUT_MS)
+    browserOpens.set(reqId, { resolve, reject, timer })
+    sendUp({ type: 'browser:open', reqId, project, ...(url ? { url } : {}) })
+  })
+}
+
+function settleBrowserOpen(frame: BrowserOpenedFrame): void {
+  const waiting = browserOpens.get(frame.reqId)
+  if (!waiting) return
+  browserOpens.delete(frame.reqId)
+  window.clearTimeout(waiting.timer)
+  if (typeof frame.tabId === 'string' && frame.tabId) waiting.resolve(frame.tabId)
+  else waiting.reject(new Error(frame.error || 'The desktop could not open a tab.'))
+}
+
+/** Close a desktop tab. The desktop refuses one an agent owns. */
+export function closeBrowserTab(tabId: string): void {
+  sendUp?.({ type: 'browser:close', tabId })
 }
 
 /* ------------------------------------------------------ what the desk can do
@@ -1785,6 +1906,12 @@ export class ForgeClient {
         // And every chat tab on screen, for the same reason: the desktop let
         // each copy go idle when the old socket closed.
         for (const [leafId, { size }] of chatWatches) this.send({ type: 'chat:watch', leafId, ...size })
+        // And the Browser view's tab list and the tab on screen — only to a
+        // desktop that still serves them, as an older one has no such frames.
+        if (deskFacts.features.includes(BROWSER_MIRROR_FEATURE)) {
+          if (browserTabListeners.size > 0) this.send({ type: 'browser:subscribe' })
+          for (const [tabId, { size }] of browserWatches) this.send({ type: 'browser:watch', tabId, ...size })
+        }
         this.flushHeld()
         // The new socket starts from whatever the desktop last heard about
         // this tab, which is nothing: state the flag now rather than waiting
@@ -2028,6 +2155,24 @@ export class ForgeClient {
 
       case 'chat:state':
         chatWatches.get(frame.leafId)?.watcher.onState(frame)
+        return
+
+      /* ---------------------------------------------------- browser tabs */
+
+      case 'browser:tabs':
+        setBrowserTabs(Array.isArray(frame.tabs) ? frame.tabs : [])
+        return
+
+      case 'browser:frame':
+        browserWatches.get(frame.tabId)?.watcher.onFrame(frame)
+        return
+
+      case 'browser:state':
+        browserWatches.get(frame.tabId)?.watcher.onState(frame)
+        return
+
+      case 'browser:opened':
+        settleBrowserOpen(frame)
         return
 
       case 'pong':
