@@ -8,6 +8,8 @@ import { publishDictationReview, setBarDictationSink, useBarDictationPhase } fro
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
+import { PATH_DRAG_TYPE } from '@/lib/mosaicLayout'
+import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { comboFromEvent } from '@/lib/keymap'
 import { commandForCombo, setCommandHandler } from '@/lib/keymapRegistry'
 import { relayComet } from '@/lib/relayComet'
@@ -459,6 +461,44 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     return () => window.removeEventListener('pointerdown', onDown, true)
   }, [risen])
 
+  /* --------------------------------------------------------- dropped files */
+
+  /**
+   * A file dropped on the bar (Explorer, the screenshot pop-up or tray, a rail
+   * row) goes into the words as its quoted path, at the caret — the way a pane
+   * takes one. maybeFiles (lib/paths) says why acceptance is generous: a drag
+   * declined on dragover is a drop that never fires. And an unprevented file
+   * drop navigates the whole window to the file.
+   */
+  const [fileOver, setFileOver] = useState(false)
+  const acceptDrop = (e: React.DragEvent): void => {
+    if (!maybeFiles(e) && !e.dataTransfer.types.includes(PATH_DRAG_TYPE)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    if (!fileOver) setFileOver(true)
+  }
+  const onDropFiles = (e: React.DragEvent): void => {
+    e.preventDefault()
+    setFileOver(false)
+    const tracked = e.dataTransfer.getData(PATH_DRAG_TYPE)
+    const paths = tracked ? [tracked] : droppedFilePaths(e)
+    if (paths.length === 0) return
+    const quoted = paths.map((p) => `"${p}"`).join(' ')
+    const field = fieldRef.current
+    const from = field?.selectionStart ?? text.length
+    const to = field?.selectionEnd ?? from
+    const before = text.slice(0, from)
+    const gap = before && !/\s$/.test(before) ? ' ' : ''
+    const head = `${before}${gap}${quoted} `
+    setText(head + text.slice(to).replace(/^\s+/, ''))
+    // Into the words, caret after the path: a drop is a deliberate act, and
+    // focusing the box also stops a send that was counting down.
+    requestAnimationFrame(() => {
+      field?.focus()
+      field?.setSelectionRange(head.length, head.length)
+    })
+  }
+
   /* --------------------------------------------------------------- words */
 
   const dictateKey = hotkeyLabel(state.settings.sttHotkey || 'AltRight')
@@ -485,6 +525,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       data-empty={text ? undefined : 'true'}
       data-palette={showPalette ? 'true' : undefined}
       data-tall={tall ? 'true' : undefined}
+      data-dropping={fileOver ? 'true' : undefined}
       data-mic={agentEdge ? undefined : (micCue ?? undefined)}
       data-edge={agentEdge ? 'agent' : micCue || review ? 'dictation' : undefined}
       style={{ '--pane-accent': profile?.accent ?? 'var(--accent)' } as React.CSSProperties}
@@ -494,6 +535,12 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           focusField()
         }
       }}
+      onDragEnter={acceptDrop}
+      onDragOver={acceptDrop}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileOver(false)
+      }}
+      onDrop={onDropFiles}
     >
       {/* The bar's outline is the synthesizer: one voice at a time. The agent's
           (Jarvis listening or speaking) wins while he has the mic: his volt, a

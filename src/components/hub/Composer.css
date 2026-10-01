@@ -954,3 +954,9 @@
     width: calc(100vw - 56px);
   }
 }
+
+/* A file held over the bar: a dashed outline (a shape, not just a colour) says it will drop in. */
+.dock__composer.comp[data-dropping='true'] {
+  outline: 2px dashed var(--pane-accent, var(--accent));
+  outline-offset: 3px;
+}
