@@ -32,9 +32,15 @@ import './ChatView.css'
  *   from `announcePaneSent`, before the transcript has it), two ticks is in
  *   the transcript.
  * - The agent's bubbles carry a speaker beside the time: one tap reads that
- *   bubble aloud, and while it reads the speaker is a stop square.
+ *   bubble's answer aloud, and while it reads the speaker is a stop square.
  * - Long-press a bubble (~450 ms) for Copy, Read aloud and, on your own,
- *   Send again. Right-click does the same with a mouse.
+ *   Send again. Right-click does the same with a mouse. On a reply that used
+ *   tools, Copy and Read aloud take the answer — the words after the last tool
+ *   call — and Copy all / Read all take the whole turn.
+ * - On a touch screen a bubble's text does not select (the hold is the menu's),
+ *   so a part of a reply is taken three ways: tap inline code to copy it, tap
+ *   a link, or "Select text" in the menu, which lets that one bubble's text be
+ *   selected until the next tap outside it.
  * - Each run of tool calls folds into one quiet row inside the bubble.
  * - Working is a "typing" bubble; on the phone its clock is the status row's, below.
  *
@@ -64,7 +70,12 @@ const MATCH_SKEW_MS = 10 * 60_000
 /** What the long-press menu is open on. */
 interface Held {
   key: string
+  /** What Copy and Read aloud take: your words, or a reply's answer. */
   text: string
+  /** The whole turn, when it is more than `text` — a reply whose answer came after tool calls. */
+  all?: string
+  /** A touch screen, where the bubble's text does not select: the menu offers "Select text". */
+  selectable: boolean
   mine: boolean
   /** Where the menu goes, in the chat's own box. */
   x: number
@@ -74,7 +85,10 @@ interface Held {
   above?: number
 }
 
-export function ChatView({
+// Memoised: the pane above re-renders on every parsed screen frame — about
+// twelve a second while an agent streams — and none of that is the chat's
+// business unless one of these props moved. PaneView keeps them stable.
+export const ChatView = memo(function ChatView({
   turns,
   truncated,
   busy,
@@ -134,6 +148,9 @@ export function ChatView({
 
   const lastId = turns.length ? turns[turns.length - 1]!.id : ''
   const rows = useMemo(() => toRows(turns), [turns])
+  /** The rows as last drawn, for the menu: a held reply's whole turn is read from here. */
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
   const replying = rows.length > 0 && rows[rows.length - 1]!.kind === 'reply'
 
   // Sent from this phone and not in the transcript yet: shown at once, one tick.
@@ -186,14 +203,45 @@ export function ChatView({
     press.current = null
   }, [])
 
+  /*
+   * "Select text": on a touch screen a bubble's text does not select, because
+   * the hold opens this menu. The menu can hand one bubble back to the phone's
+   * own selection (`data-select`, which ChatView.css turns into
+   * `user-select: text`) — until a tap anywhere outside it, or another menu.
+   */
+  const selecting = useRef<HTMLElement | null>(null)
+  const endSelect = useCallback(() => {
+    const bubble = selecting.current
+    if (!bubble) return
+    selecting.current = null
+    bubble.removeAttribute('data-select')
+    const picked = window.getSelection()
+    if (picked && !picked.isCollapsed && bubble.contains(picked.anchorNode)) picked.removeAllRanges()
+  }, [])
+  useEffect(() => {
+    const onDown = (event: Event): void => {
+      const bubble = selecting.current
+      if (bubble && !(event.target instanceof Node && bubble.contains(event.target))) endSelect()
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true)
+      endSelect()
+    }
+  }, [endSelect])
+
   const openMenu = useCallback((bubble: HTMLElement, y: number, from?: HTMLElement) => {
     const box = root.current?.getBoundingClientRect()
     const key = bubble.dataset['bubbleKey']
     const text = bubble.dataset['bubbleText'] ?? ''
     if (!box || !key) return
+    endSelect()
     // From the ⋯ the menu hangs off the button itself; otherwise off the bubble's edge.
     const r = (from ?? bubble).getBoundingClientRect()
     const mine = bubble.dataset['bubbleMine'] === 'true'
+    // A reply's bubble carries its answer; the whole turn is read off the row.
+    const row = mine ? undefined : rowsRef.current.find((candidate) => candidate.key === key)
+    const whole = row?.kind === 'reply' ? pickAnswer(row.segments).all : text
     heldEl.current?.closest('li')?.removeAttribute('data-held')
     opener.current?.setAttribute('aria-expanded', 'false')
     heldEl.current = bubble
@@ -203,6 +251,9 @@ export function ChatView({
     setHeld({
       key,
       text,
+      all: whole !== text ? whole : undefined,
+      // The same question ChatView.css asks before it turns selection off.
+      selectable: typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
       mine,
       x: mine ? box.right - r.right : r.left - box.left,
       y: (from ? r.bottom : y) - box.top,
@@ -215,7 +266,7 @@ export function ChatView({
     } catch {
       /* no vibration motor, or not allowed: the menu is the feedback */
     }
-  }, [])
+  }, [endSelect])
 
   const closeMenu = useCallback((refocus: boolean) => {
     const bubble = heldEl.current
@@ -235,6 +286,8 @@ export function ChatView({
       if (event.pointerType === 'mouse' || !event.isPrimary) return
       const bubble = (event.target as Element).closest<HTMLElement>('[data-bubble-key]')
       if (!bubble) return
+      // Its text is being selected: a hold there is the phone's, not the menu's.
+      if (bubble.hasAttribute('data-select')) return
       cancelPress()
       const { clientX: x, clientY: y, pointerId: id } = event
       press.current = {
@@ -265,6 +318,8 @@ export function ChatView({
       const target = event.target as Element
       const bubble = target.closest<HTMLElement>('[data-bubble-key]')
       if (!bubble) return
+      // "Select text" is on for this bubble: the phone's own selection and its menu are the point.
+      if (bubble.hasAttribute('data-select')) return
       if (desk && !held) {
         // A link, or words picked out of the bubble, want the browser's own
         // menu (open in a new tab, copy just these words), not ours.
@@ -283,16 +338,37 @@ export function ChatView({
     [desk, held, cancelPress, openMenu]
   )
 
-  /** The ⋯ beside a bubble on the deck: the same menu, for a mouse or the keyboard. */
+  const copy = useCallback((text: string) => {
+    const done = navigator.clipboard?.writeText(text)
+    if (!done) setToast('Could not copy')
+    else void done.then(() => setToast('Copied')).catch(() => setToast('Could not copy'))
+  }, [])
+
+  /**
+   * On the deck, the ⋯ beside a bubble: the same menu, for a mouse or the
+   * keyboard. On the phone, a tap on inline code: a command, a path or a name
+   * out of a long reply is copied by itself, and the toast says so. Handled
+   * here, on the column, so the rows stay memo-cheap. (A mouse selects code
+   * the ordinary way, so the deck does not copy on a click.)
+   */
   const onClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
-      const more = (event.target as Element).closest<HTMLElement>('[data-bubble-more]')
+      const target = event.target as Element
+      if (!desk) {
+        const code = target.closest<HTMLElement>('code.md__inline-code')
+        // Code that is a link's words follows the link; code being selected is left to the selection.
+        if (!code || code.closest('a[href]') || code.closest('[data-select]')) return
+        const text = code.textContent ?? ''
+        if (text) copy(text)
+        return
+      }
+      const more = target.closest<HTMLElement>('[data-bubble-more]')
       const bubble = more?.closest<HTMLElement>('[data-bubble-key]')
       if (!more || !bubble) return
       event.preventDefault()
       openMenu(bubble, 0, more)
     },
-    [openMenu]
+    [desk, copy, openMenu]
   )
 
   const onClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
@@ -315,13 +391,18 @@ export function ChatView({
   // Read aloud is keyed per bubble, under this pane, so the one being read can say so.
   const speakPrefix = `${paneId ?? 'chat'}#`
   const readingKey = speaking?.startsWith(speakPrefix) ? speaking.slice(speakPrefix.length) : null
+  // Read through a ref so the callback keeps its identity when reading starts
+  // or stops: every reply row takes it as a prop, and only the row being read
+  // (its `reading` flag) has anything to redraw.
+  const readingRef = useRef(readingKey)
+  readingRef.current = readingKey
   // Synchronous from the tap on purpose: a phone only lets speech start inside the gesture.
   const toggleRead = useCallback(
     (key: string, text: string) => {
-      if (readingKey === key) stopSpeaking()
+      if (readingRef.current === key) stopSpeaking()
       else speakReply(speakPrefix + key, text)
     },
-    [readingKey, speakPrefix]
+    [speakPrefix]
   )
   const canSpeak = speechSupported()
 
@@ -415,7 +496,7 @@ export function ChatView({
           onPointerCancel={cancelPress}
           onContextMenu={onContextMenu}
           onClickCapture={onClickCapture}
-          onClick={desk ? onClick : undefined}
+          onClick={onClick}
         >
           {truncated && turns.length ? (
             <div
@@ -507,15 +588,43 @@ export function ChatView({
           onCopy={() => {
             const text = held.text
             closeMenu(false)
-            const done = navigator.clipboard?.writeText(text)
-            if (!done) setToast('Could not copy')
-            else void done.then(() => setToast('Copied')).catch(() => setToast('Could not copy'))
+            copy(text)
           }}
+          onCopyAll={
+            held.all !== undefined
+              ? () => {
+                  const text = held.all ?? held.text
+                  closeMenu(false)
+                  copy(text)
+                }
+              : undefined
+          }
           onRead={
             canSpeak
               ? () => {
                   toggleRead(held.key, held.text)
                   closeMenu(false)
+                }
+              : undefined
+          }
+          onReadAll={
+            canSpeak && held.all !== undefined
+              ? () => {
+                  // Synchronous from the tap, as Read aloud is; it takes over from whatever was being read.
+                  speakReply(speakPrefix + held.key, held.all ?? held.text)
+                  closeMenu(false)
+                }
+              : undefined
+          }
+          onSelect={
+            held.selectable
+              ? () => {
+                  const bubble = heldEl.current
+                  closeMenu(false)
+                  if (!bubble) return
+                  selecting.current = bubble
+                  bubble.setAttribute('data-select', 'true')
+                  setToast('Hold a word to select it')
                 }
               : undefined
           }
@@ -533,14 +642,17 @@ export function ChatView({
       <div className="chatview__toast" role="status" aria-live="polite" data-show={toast ? 'true' : 'false'}>
         {toast ? (
           <>
-            <Icon name={toast === 'Copied' ? 'check' : 'close'} size={16} />
+            {/* A tick or a cross for how a copy went; any other line is only its words. */}
+            {toast === 'Copied' || toast === 'Could not copy' ? (
+              <Icon name={toast === 'Copied' ? 'check' : 'close'} size={16} />
+            ) : null}
             <span>{toast}</span>
           </>
         ) : null}
       </div>
     </div>
   )
-}
+})
 
 /* -------------------------------------------------------------------- rows
  *
@@ -572,6 +684,8 @@ type Row =
       lastClock?: string
       segments: Segment[]
     }
+
+type ReplyOf = Extract<Row, { kind: 'reply' }>
 
 function toRows(turns: ChatTurn[]): Row[] {
   const rows: Row[] = []
@@ -610,6 +724,79 @@ function textOf(turn: ChatTurn): string {
     .filter((b): b is TextBlock => b.kind === 'text')
     .map((b) => b.text)
     .join('\n\n')
+}
+
+/**
+ * A reply's words, two ways. `all` is every paragraph of the turn — the
+ * running commentary between tool calls included. `answer` is what the agent
+ * said once it was done: the text after the last run of tool calls. A long
+ * turn is one bubble, and reading it aloud from "I'll start by looking at…"
+ * is a long wait for the result, so Copy and Read aloud take `answer`.
+ *
+ * When nothing follows the last tool call — the agent is still working, or
+ * it ended on a tool — `answer` is `all`, so there is always something to
+ * take. Thinking is neither: it is not said to the person.
+ *
+ * Exported for scripts/web-phone-six-check.mjs.
+ */
+export function pickAnswer(segments: readonly Segment[]): { answer: string; all: string } {
+  const texts: string[] = []
+  let sinceTools: string[] = []
+  for (const segment of segments) {
+    if (segment.kind === 'tools') sinceTools = []
+    else if (segment.kind === 'text') {
+      texts.push(segment.block.text)
+      sinceTools.push(segment.block.text)
+    }
+  }
+  const all = texts.join('\n\n')
+  const answer = sinceTools.join('\n\n')
+  return { answer: answer.trim() ? answer : all, all }
+}
+
+/*
+ * Sameness, for the rows' memos. A transcript read from the session file
+ * keeps its turn and block objects from one update to the next, so these are
+ * identity checks that end at once. A chat read off the screen is rebuilt
+ * whole on every parsed frame — new objects, the same words — and there the
+ * comparison by value is what keeps every finished row from being drawn again
+ * about twelve times a second while the last one streams.
+ */
+
+function sameBlock(a: ChatBlock, b: ChatBlock): boolean {
+  if (a === b) return true
+  if (a.kind === 'tool') {
+    return b.kind === 'tool' && a.name === b.name && a.gist === b.gist && a.note === b.note && a.failed === b.failed
+  }
+  return b.kind !== 'tool' && a.kind === b.kind && a.text === b.text
+}
+
+function sameBlocks(a: readonly ChatBlock[], b: readonly ChatBlock[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (!sameBlock(a[i]!, b[i]!)) return false
+  return true
+}
+
+function sameSegment(a: Segment, b: Segment): boolean {
+  if (a === b) return true
+  if (a.key !== b.key) return false
+  if (a.kind === 'text') return b.kind === 'text' && sameBlock(a.block, b.block)
+  if (a.kind === 'thinking') return b.kind === 'thinking' && a.text === b.text
+  return b.kind === 'tools' && sameBlocks(a.tools, b.tools)
+}
+
+function sameReply(a: ReplyOf, b: ReplyOf): boolean {
+  if (a === b) return true
+  if (a.key !== b.key || a.at !== b.at || a.lastClock !== b.lastClock) return false
+  if (a.segments.length !== b.segments.length) return false
+  for (let i = 0; i < a.segments.length; i++) if (!sameSegment(a.segments[i]!, b.segments[i]!)) return false
+  return true
+}
+
+function sameTurn(a: ChatTurn, b: ChatTurn): boolean {
+  if (a === b) return true
+  return a.id === b.id && a.role === b.role && a.at === b.at && a.clock === b.clock && sameBlocks(a.blocks, b.blocks)
 }
 
 /* ------------------------------------------------------- pending sends
@@ -756,36 +943,41 @@ function Prompts({ blocks, room }: { blocks: ChatBlock[]; room?: ReactNode }): R
 }
 
 // Turns are immutable by id — the transcript only ever appends or resets — so
-// a memo on the turn is all a prompt needs to stay cheap.
-const UserRow = memo(function UserRow({
-  turn,
-  desk,
-  tail,
-  reading
-}: {
-  turn: ChatTurn
-  desk: boolean
-  tail: boolean
-  reading: boolean
-}): ReactNode {
-  const text = textOf(turn)
-  const time = timeOf(turn.at, turn.clock)
-  return (
-    <li className="chatview__turn" data-role="user" data-tail={tail ? 'true' : undefined}>
-      <div
-        className="chatview__bubble chatview__msg"
-        data-bubble-key={turn.id}
-        data-bubble-text={text}
-        data-bubble-mine="true"
-        tabIndex={-1}
-      >
-        <Prompts blocks={turn.blocks} room={<MetaRoom time={time} ticks />} />
-        <Meta time={time} ticks="landed" reading={reading} />
-        {desk ? <MoreButton mine /> : null}
-      </div>
-    </li>
-  )
-})
+// a memo on the turn is all a prompt needs to stay cheap. The turn is compared
+// by what it says (`sameTurn`): a chat read off the screen hands over a new
+// object for the same prompt on every frame.
+const UserRow = memo(
+  function UserRow({
+    turn,
+    desk,
+    tail,
+    reading
+  }: {
+    turn: ChatTurn
+    desk: boolean
+    tail: boolean
+    reading: boolean
+  }): ReactNode {
+    const text = textOf(turn)
+    const time = timeOf(turn.at, turn.clock)
+    return (
+      <li className="chatview__turn" data-role="user" data-tail={tail ? 'true' : undefined}>
+        <div
+          className="chatview__bubble chatview__msg"
+          data-bubble-key={turn.id}
+          data-bubble-text={text}
+          data-bubble-mine="true"
+          tabIndex={-1}
+        >
+          <Prompts blocks={turn.blocks} room={<MetaRoom time={time} ticks />} />
+          <Meta time={time} ticks="landed" reading={reading} />
+          {desk ? <MoreButton mine /> : null}
+        </div>
+      </li>
+    )
+  },
+  (a, b) => a.desk === b.desk && a.tail === b.tail && a.reading === b.reading && sameTurn(a.turn, b.turn)
+)
 
 /** Sent from this phone a moment ago; the transcript has not shown it yet. */
 function PendingRow({ send, desk, tail }: { send: PendingSend; desk: boolean; tail: boolean }): ReactNode {
@@ -820,55 +1012,67 @@ function UserPiece({ block }: { block: ChatBlock }): ReactNode {
  * Everything the agent said between two prompts. Consecutive replies are one
  * row by construction, so a reply row always follows a change of speaker and
  * always carries the name.
+ *
+ * The bubble's text — what its speaker reads and the menu's Copy takes — is
+ * the turn's answer (`pickAnswer`), not the whole turn; the menu reads the
+ * whole turn off the row for Copy all and Read all.
+ *
+ * Memoised on what the row says (`sameReply`): the rows are rebuilt each time
+ * the transcript moves, and only the one that grew has anything to redraw.
  */
-function ReplyRow({
-  row,
-  agentName,
-  desk,
-  reading,
-  onRead
-}: {
-  row: Extract<Row, { kind: 'reply' }>
-  agentName?: string
-  desk: boolean
-  reading: boolean
-  /** Read this bubble aloud, or stop it (keyed by the row). Absent: this browser has no voice. */
-  onRead?: (key: string, text: string) => void
-}): ReactNode {
-  const text = row.segments
-    .filter((s): s is Extract<Segment, { kind: 'text' }> => s.kind === 'text')
-    .map((s) => s.block.text)
-    .join('\n\n')
-  const pieces = row.segments.map((segment) =>
-    segment.kind === 'text' ? (
-      <Prose key={segment.key} block={segment.block} />
-    ) : segment.kind === 'thinking' ? (
-      <ThoughtFold key={segment.key} text={segment.text} />
-    ) : (
-      <ToolGroup key={segment.key} tools={segment.tools} />
+const ReplyRow = memo(
+  function ReplyRow({
+    row,
+    agentName,
+    desk,
+    reading,
+    onRead
+  }: {
+    row: ReplyOf
+    agentName?: string
+    desk: boolean
+    reading: boolean
+    /** Read this bubble aloud, or stop it (keyed by the row). Absent: this browser has no voice. */
+    onRead?: (key: string, text: string) => void
+  }): ReactNode {
+    const text = pickAnswer(row.segments).answer
+    const pieces = row.segments.map((segment) =>
+      segment.kind === 'text' ? (
+        <Prose key={segment.key} block={segment.block} />
+      ) : segment.kind === 'thinking' ? (
+        <ThoughtFold key={segment.key} text={segment.text} />
+      ) : (
+        <ToolGroup key={segment.key} tools={segment.tools} />
+      )
     )
-  )
-  return (
-    <li className="chatview__turn" data-role="assistant" data-tail="true">
-      <div
-        className="chatview__reply chatview__msg"
-        data-bubble-key={row.key}
-        data-bubble-text={text}
-        tabIndex={-1}
-      >
-        <Speaker agentName={agentName} />
-        {pieces}
-        <div className="chatview__meta-line">
-          {onRead && text ? (
-            <ReadAloud reading={reading} onToggle={() => onRead(row.key, text)} />
-          ) : null}
-          <Meta time={timeOf(row.at, row.lastClock)} reading={reading && !(onRead && text)} />
+    return (
+      <li className="chatview__turn" data-role="assistant" data-tail="true">
+        <div
+          className="chatview__reply chatview__msg"
+          data-bubble-key={row.key}
+          data-bubble-text={text}
+          tabIndex={-1}
+        >
+          <Speaker agentName={agentName} />
+          {pieces}
+          <div className="chatview__meta-line">
+            {onRead && text ? (
+              <ReadAloud reading={reading} onToggle={() => onRead(row.key, text)} />
+            ) : null}
+            <Meta time={timeOf(row.at, row.lastClock)} reading={reading && !(onRead && text)} />
+          </div>
+          {desk ? <MoreButton mine={false} /> : null}
         </div>
-        {desk ? <MoreButton mine={false} /> : null}
-      </div>
-    </li>
-  )
-}
+      </li>
+    )
+  },
+  (a, b) =>
+    a.agentName === b.agentName &&
+    a.desk === b.desk &&
+    a.reading === b.reading &&
+    a.onRead === b.onRead &&
+    sameReply(a.row, b.row)
+)
 
 /**
  * Read aloud, on the bubble: a speaker beside the time, a stop square in a
@@ -938,31 +1142,47 @@ function Speaker({ agentName }: { agentName?: string }): ReactNode {
 }
 
 // The block object is stable for the life of its turn, so the markdown parse
-// runs once per paragraph however many times the reply around it grows.
-const Prose = memo(function Prose({ block }: { block: TextBlock }): ReactNode {
-  return <div className="chatview__prose">{renderMarkdown(block.text)}</div>
-})
+// runs once per paragraph however many times the reply around it grows. A
+// block read off the screen is a new object each frame; the same words there
+// are the same paragraph, and are not parsed again either.
+const Prose = memo(
+  function Prose({ block }: { block: TextBlock }): ReactNode {
+    return <div className="chatview__prose">{renderMarkdown(block.text)}</div>
+  },
+  (a, b) => a.block === b.block || a.block.text === b.block.text
+)
 
 /* -------------------------------------------------------- the hold menu */
 
 /**
  * What a held bubble offers: Copy, Read aloud (Stop reading while it is), and
- * on your own bubble Send again. Icons with words, 48px rows, over a clear
- * layer that takes the next tap anywhere else as "never mind".
+ * on your own bubble Send again. On a reply whose answer came after tool
+ * calls those two take the answer, and Copy all / Read all take the whole
+ * turn. On a touch screen, Select text. Icons with words, 48px rows, over a
+ * clear layer that takes the next tap anywhere else as "never mind".
  */
 function BubbleMenu({
   held,
   reading,
   onClose,
   onCopy,
+  onCopyAll,
   onRead,
+  onReadAll,
+  onSelect,
   onSendAgain
 }: {
   held: Held
   reading: boolean
   onClose: (refocus: boolean) => void
   onCopy: () => void
+  /** Copy the whole turn. Absent: Copy already takes all of it. */
+  onCopyAll?: () => void
   onRead?: () => void
+  /** Read the whole turn. Absent: Read aloud already reads all of it, or there is no voice. */
+  onReadAll?: () => void
+  /** Let this bubble's text be selected. Absent: it already can be (a mouse). */
+  onSelect?: () => void
   onSendAgain?: () => void
 }): ReactNode {
   const menu = useRef<HTMLDivElement | null>(null)
@@ -1040,10 +1260,28 @@ function BubbleMenu({
           <Icon name="clipboard" size={20} />
           <span>Copy</span>
         </button>
+        {onCopyAll ? (
+          <button type="button" role="menuitem" className="chatview__menu-item" onClick={onCopyAll}>
+            <Icon name="clipboard" size={20} />
+            <span>Copy all</span>
+          </button>
+        ) : null}
         {onRead ? (
           <button type="button" role="menuitem" className="chatview__menu-item" onClick={onRead}>
             {reading ? <StopGlyph /> : <Speaker16Large />}
             <span>{reading ? 'Stop reading' : 'Read aloud'}</span>
+          </button>
+        ) : null}
+        {onReadAll && !reading ? (
+          <button type="button" role="menuitem" className="chatview__menu-item" onClick={onReadAll}>
+            <Speaker16Large />
+            <span>Read all</span>
+          </button>
+        ) : null}
+        {onSelect ? (
+          <button type="button" role="menuitem" className="chatview__menu-item" onClick={onSelect}>
+            <SelectGlyph />
+            <span>Select text</span>
           </button>
         ) : null}
         {onSendAgain ? (
@@ -1062,6 +1300,15 @@ function Speaker16Large(): ReactNode {
     <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2.5 6h2.6L8.6 3v10L5.1 10H2.5z" />
       <path d="M11 5.6a3.4 3.4 0 0 1 0 4.8M12.9 3.8a6 6 0 0 1 0 8.4" />
+    </svg>
+  )
+}
+
+/** A text caret between its two serifs: "Select text". */
+function SelectGlyph(): ReactNode {
+  return (
+    <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 3.2v9.6M5.6 2.4c1.2 0 2.4.4 2.4.8 0-.4 1.2-.8 2.4-.8M5.6 13.6c1.2 0 2.4-.4 2.4-.8 0 .4 1.2.8 2.4.8" />
     </svg>
   )
 }
