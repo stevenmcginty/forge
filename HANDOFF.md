@@ -1,5 +1,12 @@
 # Handoff
 
+## Forge browser gets the desktop's Board (2026-10-01; branch `board-remote` 2069d12; desktop + web)
+
+- **Asked (Steve, away):** after the Browser view, "continue with the artifacts part". Same-tab streaming (instead of a copy) is still not built.
+- **Built (foreman + 2 builders, same worktree):** contract `shared/board-mirror.ts` (feature `board-mirror`; `board:subscribe/unsubscribe/get/cancel` up, `board:items/chunk/error` down; 256 KB base64 chunks, 50 MB cap, 2 gets per client). Desktop `electron/board-web.ts`, `CanvasBoard.peek()` (reads never move the desktop Board's diff baseline), `hub-ipc.ts` exports `canvasBoard()`/`onCanvasChange()`, `onBoard` in `electron/web/server.ts` (name must be in the board's own list; waits on backpressure). Deck `web/src/deck/DeckBoard.{tsx,css}`, third switch "Board", gallery + viewer (Esc, arrows), HTML in `iframe sandbox="allow-scripts"` srcdoc. `firebase.json` CSP gained `media-src 'self' blob:` so clips play. Browser gap fixed: tab pushes start when the browser service comes up (`setBrowserReadyHook`).
+- **Checked:** typecheck 0, lint:hooks 0, chat-mirror-check 42/42, web:build 0, web-deck-check = same 13 pre-existing FAILs as master. **NOT tested live.**
+- **Known gap:** HTML pages from the Board inherit hosted Forge Web's `script-src 'self'` (srcdoc/blob/data all inherit CSP), so their scripts do not run; static HTML/CSS shows. Fix = serve pages from a separate origin (e.g. a second Firebase site fed by postMessage). Pictures over 8 MB show an icon, not a thumbnail.
+
 ## Forge browser gets the desktop's Browser tabs (2026-10-01; branch `browser-remote` 4d40137; desktop + web)
 
 - **Asked (Steve, away from home):** replicate the desktop's Browser and Board (artifacts) views in the Forge browser (deck face, `web/src/deck/`), like the agent view, mainly to sign in to websites remotely. Not the phone face. Time-boxed to one hour, so split: **Option 1 = Browser only (built)**, Option 2 = Board + "same tab, not a copy" (next).
