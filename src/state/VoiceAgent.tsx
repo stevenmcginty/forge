@@ -36,7 +36,7 @@ import {
   type BrainSaysEvent
 } from '@shared/brain'
 import { brainSnapshot } from '@/components/brain/brainStore'
-import { gatherWait, joinPhrases, parseConfirmAnswer } from '@/lib/brainConfirmVoice'
+import { confirmQuestion, gatherWait, joinPhrases, parseConfirmAnswer, voiceConfirmTarget } from '@/lib/brainConfirmVoice'
 import { getHubRuntime } from '@/lib/hubRuntime'
 import { buildAppContext, ContextTracker, projectBranch, type PaneStateWord } from '@/lib/realtime/context'
 import { endedNote, parseVoiceDictation, stopPhraseOf, type ConversationEnd, type VoiceDictation } from '@/lib/realtime/conversation'
@@ -469,8 +469,10 @@ export interface VoiceAgentCtx {
   /**
    * Forge Brain is waiting on a yes (shared/brain.ts `BrainConfirmRequest`):
    * the question, said aloud once in the TTS voice — "Forge Brain asks: … Say
-   * yes or no." The answer is `runPhrase`'s, by code. VoiceHubController
-   * routes it here when no live realtime session is there to say it.
+   * yes or no." (with the mic not armed: "… Press Yes or No on screen."). The
+   * answer is `runPhrase`'s, by code, and by voice only for a question that
+   * was said in full here, for a short while after. VoiceHubController routes
+   * it here when no live realtime session is there to say it.
    */
   hearBrainConfirm?(confirm: BrainConfirmRequest): void
 }
@@ -750,7 +752,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   /** Chunks waiting their turn, in the order they must be said. */
   /** `brain`: Forge Brain speaking — its own voice, neural only (`brainVoiceRef`). */
-  const speakQueue = useRef<{ key: string; text: string; brain?: boolean }[]>([])
+  /** `heard`: told once this chunk has been through the mouth — true only if it was said, in full. */
+  const speakQueue = useRef<{ key: string; text: string; brain?: boolean; heard?: (spoke: boolean) => void }[]>([])
   /** Set while more chunks may still arrive: the drain waits instead of ending. */
   const speakOpen = useRef(false)
   /** Wakes the drain the instant there is something to say. */
@@ -880,6 +883,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         if (import.meta.env.DEV) {
           console.info(`[hub] event=tts-end key=${next.key} spoke=${said.spoke} engine=${said.engine} ms=${Date.now() - saidAt}`)
         }
+        // Talked over is not heard: a line cut short does not count as said.
+        next.heard?.(said.spoke && !interrupted)
       }
     } finally {
       bargeIn.disarm()
@@ -917,20 +922,24 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   /** Hand one finished chunk to the mouth. Silent when nothing can speak. `brain`: in Forge Brain's voice. */
   const pushSpeech = useCallback(
-    (key: string, text: string, brain = false): void => {
+    (key: string, text: string, brain = false, heard?: (spoke: boolean) => void): void => {
       if (!speaksAloudRef.current || !text.trim()) return
       if (!brain && !speaker.available && chooseEngine(voiceConfigRef.current) === 'local') return
-      speakQueue.current.push({ key, text, brain })
+      speakQueue.current.push({ key, text, brain, heard })
       pump()
     },
     [pump]
   )
 
-  /** Forge Brain says one whole thing, in its own voice, and waits for it to be said. */
+  /**
+   * Forge Brain says one whole thing, in its own voice, and waits for it to be said.
+   * `heard` is called when the line has been through the mouth, with whether it
+   * really was said in full — never when nothing speaks (text replies).
+   */
   const sayBrain = useCallback(
-    async (key: string, text: string): Promise<void> => {
+    async (key: string, text: string, heard?: (spoke: boolean) => void): Promise<void> => {
       if (!speaksAloud || !text.trim()) return
-      pushSpeech(key, text, true)
+      pushSpeech(key, text, true, heard)
       closeMouth()
       await speakRun.current
     },
@@ -2066,6 +2075,36 @@ ${said}` : said)
 
   /** Confirm questions a spoken or typed yes/no has already answered, until the status says so too. */
   const answeredConfirms = useRef(new Set<string>())
+  /**
+   * Per confirm id, `Date.now()` when its question FINISHED being said aloud —
+   * only when it really was said, in full, with the mic armed. A spoken yes or
+   * no answers only a question with a record here, inside its window
+   * (`voiceConfirmTarget`); every other question is answered on screen.
+   */
+  const confirmSpokenAt = useRef(new Map<string, number>())
+
+  /**
+   * Forge Brain's confirm question, aloud (VoiceAgentCtx.hearBrainConfirm).
+   * The words are fixed, not the brain's: what it will do, then how to answer —
+   * "Say yes or no." with the mic armed, "Press Yes or No on screen." without.
+   * Once per question — the caller keeps count, and the mouth speaks a key
+   * once; `again` is a fresh key, for the question that is next after an answer.
+   */
+  const hearBrainConfirm = useCallback(
+    (confirm: BrainConfirmRequest, again?: string): void => {
+      const what = confirm.summary.trim() || confirm.tool || 'an action'
+      const id = again ?? `brain-confirm-${confirm.id}`
+      const question = confirmQuestion(speakable(what, 240), armedRef.current)
+      setTurns((prev) => [...prev, { id, said: `Forge Brain asks: ${what}`, at: Date.now(), kind: 'note', tone: 'warn' }])
+      // With the wake word on, the answer must not need "hey Jarvis" first.
+      if (question.byVoice && wakeWordRef.current) wantFollowUp.current = true
+      void sayBrain(id, question.line, (spoke) => {
+        // The window for a spoken answer opens when he has heard all of it.
+        if (spoke && question.byVoice) confirmSpokenAt.current.set(confirm.id, Date.now())
+      })
+    },
+    [sayBrain]
+  )
 
   /* ---------------------------------------------------- transcript intake */
 
@@ -2103,18 +2142,38 @@ ${said}` : said)
         console.info(`[hub] event=turn-sent via=${opts?.silent ? 'phone' : typed ? 'typed' : 'voice'} chars=${said.length}`)
       }
 
+      // Said aloud at this machine: not the phone, not the keyboard.
+      const spokenHere = !opts?.silent && !typed
+
       // 0g — Forge Brain is waiting on a yes (its confirm gate, shared/brain.ts).
-      // A phrase that is, whole, one of a short fixed list answers the oldest
-      // question — by code, here, and nowhere else: no model ever answers the
-      // gate. Before the commands and the brain, so "Yeah" is never a new turn
-      // for a brain that is stopped waiting for it; after the echo guards, so
+      // A phrase that is, whole, one of a short fixed list answers a question
+      // — by code, here, and nowhere else: no model ever answers the gate.
+      // Before the commands and the brain, so "Yeah" is never a new turn for a
+      // brain that is stopped waiting for it; after the echo guards, so
       // Forge's own "say yes or no" cannot answer itself. Anything longer
       // ("yes but wait") is not an answer and carries on below.
-      const confirm = (brainSnapshot().status?.confirms ?? []).find((c) => !answeredConfirms.current.has(c.id))
-      const verdict = confirm ? parseConfirmAnswer(said) : null
+      //
+      // WHICH question. Spoken: only the one he last heard said aloud in full,
+      // and only for CONFIRM_VOICE_WINDOW_MS after it — a question never
+      // spoken, or spoken too long ago, is answered on screen, and the words
+      // carry on below like any others. Typed (the type panel, the phone): the
+      // oldest, the one the toast and the web card show — typing is deliberate.
+      const pending = (brainSnapshot().status?.confirms ?? []).filter((c) => !answeredConfirms.current.has(c.id))
+      const verdict = pending.length ? parseConfirmAnswer(said) : null
+      const targetId = !verdict
+        ? null
+        : spokenHere
+          ? voiceConfirmTarget(
+              pending.map((c) => c.id),
+              confirmSpokenAt.current,
+              Date.now()
+            )
+          : (pending[0]?.id ?? null)
+      const confirm = targetId ? pending.find((c) => c.id === targetId) : undefined
       if (confirm && verdict) {
         const allow = verdict === 'yes'
         answeredConfirms.current.add(confirm.id)
+        confirmSpokenAt.current.delete(confirm.id)
         const send = window.forge.brain?.confirm
         const taken = await (send ? send({ id: confirm.id, allow }) : Promise.resolve(false)).catch(() => false)
         if (!taken) {
@@ -2132,6 +2191,11 @@ ${said}` : said)
         const note = `${allow ? 'Allowed' : 'Not allowed'}: ${what}${held ? ` (and held ${held === 1 ? 'the prompt' : `${held} prompts`} — not sent)` : ''}`
         setTurns((prev) => [...prev, { id, said: note, at: Date.now(), kind: 'note', tone: allow ? 'ok' : 'warn' }])
         await speak(`${id}:confirm`, 'Okay.')
+        // Another question is waiting — the oldest, the one the toast now
+        // shows: say it now (again, if it was said before), so the next yes or
+        // no is for a question he has just heard, with a window of its own.
+        const next = (brainSnapshot().status?.confirms ?? []).find((c) => !answeredConfirms.current.has(c.id))
+        if (next && !opts?.silent) hearBrainConfirm(next, `${id}:next`)
         return note
       }
 
@@ -2139,7 +2203,6 @@ ${said}` : said)
       // never the keyboard. They are about the conversation, so no brain and
       // no grammar ever sees them. "That's all" / "stop listening" ends it;
       // "type this into Everest: …" types his words, raw, into that pane.
-      const spokenHere = !opts?.silent && !typed
       if (spokenHere && armedRef.current) {
         const stop = stopPhraseOf(said)
         if (stop) {
@@ -2387,6 +2450,7 @@ ${said}` : said
       brain,
       cancelAllHolds,
       flash,
+      hearBrainConfirm,
       patchOutcome,
       project?.path,
       resetToolActivity,
@@ -2412,23 +2476,6 @@ ${said}` : said
       const id = `brain-says-${event.id}`
       setTurns((prev) => [...prev, { id, said: `Forge Brain: ${text}`, at: event.at, kind: 'note', tone: 'ok' }])
       void sayBrain(id, spokenBrainReply(text))
-    },
-    [sayBrain]
-  )
-
-  /**
-   * Forge Brain's confirm question, aloud (VoiceAgentCtx.hearBrainConfirm).
-   * The words are fixed, not the brain's: what it will do, then how to answer.
-   * Once per question — the caller keeps count, and the mouth speaks a key once.
-   */
-  const hearBrainConfirm = useCallback(
-    (confirm: BrainConfirmRequest): void => {
-      const what = confirm.summary.trim() || confirm.tool || 'an action'
-      const id = `brain-confirm-${confirm.id}`
-      setTurns((prev) => [...prev, { id, said: `Forge Brain asks: ${what}`, at: confirm.at, kind: 'note', tone: 'warn' }])
-      // With the wake word on, the answer must not need "hey Jarvis" first.
-      if (wakeWordRef.current && armedRef.current) wantFollowUp.current = true
-      void sayBrain(id, `Forge Brain asks: ${speakable(what, 240).replace(/[\s.?!]+$/, '')}. Say yes or no.`)
     },
     [sayBrain]
   )
