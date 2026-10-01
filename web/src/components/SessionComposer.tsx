@@ -46,7 +46,6 @@ import { getVoiceAutoStop } from '../lib/voice-prefs'
 import type { PermissionMode } from '@/lib/rich'
 import { onDraftInsert, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
-import { KeysToggle } from './StatusLine'
 import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
 import { ModelChip } from './ModelChip'
@@ -978,7 +977,8 @@ export function SessionComposer({
   // Above the early returns: a hook below them is skipped for a project with no
   // tabs, and React unmounts the whole page ("Rendered fewer hooks").
   const keysPref = face === 'deck' ? DECK_KEYS_PREF : KEYS_PREF
-  const [keysShown, setKeysShown] = useState(() => savedKeysShown(keysPref))
+  // The deck has a real keyboard: its terminal keys never show. The phone keeps its toggle.
+  const [keysShown, setKeysShown] = useState(() => face !== 'deck' && savedKeysShown(keysPref))
   const dKey = useDictationKey()
 
   if (offline && state.offlineMode === 'github') return null
@@ -1237,7 +1237,6 @@ export function SessionComposer({
         listen={face === 'deck' ? undefined : <PhoneListen />}
         listenLine={face === 'deck' ? undefined : <PhoneListenLine />}
         picker={deckPicker}
-        tool={deck && activeView === 'term' ? <KeysToggle shown={keysShown} onClick={() => toggleKeys()} /> : undefined}
         edge={
           deck ? (
             <DeckBarCue voice={voice} readMic={readMic} docked={Boolean(lead)} keyName={dictationKeyName(dKey)} />

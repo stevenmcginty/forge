@@ -138,8 +138,7 @@ export function Composer({
   listen,
   listenLine,
   edge,
-  picker,
-  tool
+  picker
 }: {
   draft: string
   disabled: boolean
@@ -270,8 +269,6 @@ export function Composer({
    * row, which then has nothing to show.
    */
   picker?: ReactNode
-  /** The deck bar only: one more small button at the head of the tools (the terminal keys). */
-  tool?: ReactNode
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
@@ -1049,7 +1046,6 @@ export function Composer({
           onKeyDown={onKey}
         />
         <div className="composer__tools">
-          {bar ? tool : null}
           <button
             ref={attachRef}
             type="button"
