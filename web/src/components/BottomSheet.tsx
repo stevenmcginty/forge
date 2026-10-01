@@ -422,7 +422,7 @@ export function SheetConfirm({
 
 /* ---------------------------------------------------------------- glyphs */
 
-export type SheetGlyphName = 'bell' | 'signOut' | 'textSize' | 'handoff' | 'autoStop' | 'link'
+export type SheetGlyphName = 'bell' | 'signOut' | 'textSize' | 'handoff' | 'autoStop' | 'link' | 'cloud' | 'stop'
 
 /**
  * The few glyphs the phone's sheets need that the desktop's icon set does not
@@ -466,7 +466,9 @@ const GLYPHS: Record<SheetGlyphName, ReactNode> = {
       <circle cx="8" cy="8" r="2" />
       <path d="M4.2 11.8a5.4 5.4 0 0 1 0-7.6M11.8 4.2a5.4 5.4 0 0 1 0 7.6" />
     </>
-  )
+  ),
+  cloud: <path d="M4.4 12.4h7.4a2.6 2.6 0 0 0 .3-5.2A4 4 0 0 0 4.4 6.5a3 3 0 0 0 0 5.9z" />,
+  stop: <rect x="4" y="4" width="8" height="8" rx="1.6" />
 }
 
 export function SheetGlyph({ name, size = 20 }: { name: SheetGlyphName; size?: number }): ReactNode {

@@ -1,0 +1,107 @@
+/*
+ * The "Work in the cloud" sheet (CloudLaunch.tsx). Rows, buttons and tokens
+ * are the sheet's own (BottomSheet.css, phone-tokens.css); this adds the
+ * chosen-project tick, the task box and the button row.
+ */
+
+/* The chosen project: a tick and a heavier name, never the colour alone. */
+.cloudl__pick[data-current='true'] .bsrow__label {
+  font-weight: 650;
+}
+
+.cloudl__pick:disabled .bsrow__sub {
+  color: var(--p-ink-3);
+}
+
+.cloudl__tick {
+  width: 24px;
+  justify-content: center;
+  color: var(--p-ink);
+}
+
+.cloudl__task {
+  display: grid;
+  gap: var(--p-2);
+  padding: 0 var(--p-3) var(--p-2);
+}
+
+/* The body size (16px), or iOS zooms the page on focus. */
+.cloudl__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 104px;
+  padding: var(--p-3) var(--p-4);
+  font: 400 var(--p-t-body) / 1.45 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-radius: var(--p-r-row);
+  resize: vertical;
+  user-select: text;
+  transition:
+    border-color var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur-fast) var(--p-ease);
+}
+
+.cloudl__input::placeholder {
+  color: var(--p-ink-3);
+}
+
+.cloudl__input:focus {
+  outline: none;
+  border-color: var(--p-ink-2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 12%, transparent);
+}
+
+/* The words still being heard, before they land in the box. */
+.cloudl__interim {
+  margin: 0;
+  font-size: var(--p-t-small);
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--p-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.cloudl__note {
+  margin: 0;
+  font-size: var(--p-t-small);
+  line-height: 1.4;
+  color: var(--p-ink-2);
+}
+
+.cloudl__mic,
+.cloudl__open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--p-2);
+}
+
+.cloudl__mic {
+  justify-self: start;
+  min-height: 44px;
+}
+
+/* Listening: the stop square and the word "Stop" say it; the ink fill backs them up. */
+.cloudl__mic[data-listening='true'] {
+  color: var(--p-raised);
+  background: var(--p-ink);
+  border-color: var(--p-ink);
+}
+
+.cloudl__go {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: var(--p-2);
+  padding: var(--p-3) var(--p-3) var(--p-2);
+}
+
+.cloudl__open {
+  text-decoration: none;
+}
+
+/* The gates' "Work in the cloud": the outlined second button, with its cloud. */
+.gate__cloud {
+  gap: var(--p-2, 8px);
+}

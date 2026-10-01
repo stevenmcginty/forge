@@ -28,7 +28,8 @@ import {
   type PreparedEnrolment
 } from '../lib/passkey'
 import { useForge } from '../state'
-import { BottomSheet } from './BottomSheet'
+import { BottomSheet, SheetGlyph } from './BottomSheet'
+import { CloudLaunch } from './CloudLaunch'
 import './Sheets.phone.css'
 import './Passkey.css'
 
@@ -280,6 +281,7 @@ export function Connecting({ note }: { attempt: number; note?: string }): ReactN
   const { state, actions } = useForge()
   const desktop = state.picture?.desktopName || state.cached?.desktopName || ''
   const [slow, setSlow] = useState(false)
+  const [cloud, setCloud] = useState(false)
   const stage = state.stage.kind
 
   // Counted from the moment this screen went up — not per attempt, because
@@ -318,12 +320,26 @@ export function Connecting({ note }: { attempt: number; note?: string }): ReactN
         <span className="pbar gate__progress" data-on="true" role="progressbar" aria-label="Connecting" />
       </GateLead>
       {slow ? (
-        <button type="button" className="cta-btn gate__go" onClick={again} data-testid="connecting-again">
-          {stage === 'loading' ? 'Reload' : 'Look again'}
-        </button>
+        <>
+          <button type="button" className="cta-btn gate__go" onClick={again} data-testid="connecting-again">
+            {stage === 'loading' ? 'Reload' : 'Look again'}
+          </button>
+          <CloudButton onClick={() => setCloud(true)} />
+        </>
       ) : null}
       <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
+      <CloudLaunch open={cloud} onClose={() => setCloud(false)} />
     </GateFrame>
+  )
+}
+
+/** The way on when the PC cannot be reached: send the job to Claude in the cloud instead. */
+function CloudButton({ onClick }: { onClick: () => void }): ReactNode {
+  return (
+    <button type="button" className="ghost-btn gate__copy gate__cloud" onClick={onClick} data-testid="gate-cloud">
+      <SheetGlyph name="cloud" size={18} />
+      Work in the cloud
+    </button>
   )
 }
 
@@ -679,6 +695,7 @@ export function PinPrompt({
 /** The database could not be read at all. Not the same as "the desktop is off". */
 export function Unreachable({ error }: { error: string }): ReactNode {
   const { state, actions } = useForge()
+  const [cloud, setCloud] = useState(false)
   return (
     <GateFrame reason="unreachable">
       <GateLead icon="gear" title="Could not look up your PC">
@@ -689,7 +706,9 @@ export function Unreachable({ error }: { error: string }): ReactNode {
       <button type="button" className="cta-btn gate__go" onClick={() => actions.refind()}>
         Look again
       </button>
+      <CloudButton onClick={() => setCloud(true)} />
       <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} />
+      <CloudLaunch open={cloud} onClose={() => setCloud(false)} />
     </GateFrame>
   )
 }

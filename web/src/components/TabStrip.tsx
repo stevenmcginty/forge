@@ -11,6 +11,7 @@ import { useDoneUnseen, useTrackDone } from '../lib/pane-state'
 import { useForge, useProfiles, useWorkspace } from '../state'
 import { AgentChooser } from './AgentChooser'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection } from './BottomSheet'
+import { CloudLaunch } from './CloudLaunch'
 import { ChatBotMark, ChatTabChip } from './ChatBadge'
 import { CommandsButton, SkillsButton } from './Flyouts'
 import { PaneHandoffMenu } from './TopBar'
@@ -62,6 +63,7 @@ export function TabStrip({ mobile = false }: { mobile?: boolean }): ReactNode {
   const workspace = useWorkspace()
   const newTabRef = useRef<HTMLButtonElement | null>(null)
   const [chooserOpen, setChooserOpen] = useState(false)
+  const [cloudOpen, setCloudOpen] = useState(false)
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
   const project = (state.picture?.projects ?? state.cached?.projects ?? []).find((p) => p.id === state.projectId)
   const profiles = useProfiles()
@@ -241,6 +243,10 @@ export function TabStrip({ mobile = false }: { mobile?: boolean }): ReactNode {
             setSheetTabId(null)
             setChooserOpen(true)
           }}
+          onCloud={() => {
+            setSheetTabId(null)
+            setCloudOpen(true)
+          }}
           onHandoff={(tabId) => {
             setSheetTabId(null)
             setHandoffTabId(tabId)
@@ -261,6 +267,8 @@ export function TabStrip({ mobile = false }: { mobile?: boolean }): ReactNode {
           onClose={() => setHandoffTabId(null)}
         />
       ) : null}
+
+      {mobile ? <CloudLaunch open={cloudOpen} projectId={project?.id} onClose={() => setCloudOpen(false)} /> : null}
 
       <AgentChooser
         anchor={newTabRef.current}
@@ -720,6 +728,7 @@ function TabSheet({
   onStep,
   onClose,
   onNewAgent,
+  onCloud,
   onHandoff,
   onCloseTab
 }: {
@@ -733,6 +742,7 @@ function TabSheet({
   onStep: (step: 'list' | 'close') => void
   onClose: () => void
   onNewAgent: () => void
+  onCloud: () => void
   onHandoff: (tabId: string) => void
   onCloseTab: (tabId: string) => void
 }): ReactNode {
@@ -792,6 +802,13 @@ function TabSheet({
             disabled={!live}
             onClick={onNewAgent}
             testId="tab-sheet-new"
+          />
+          <SheetRow
+            icon={<SheetGlyph name="cloud" />}
+            label="New cloud session"
+            secondary={`Claude works on ${projectName} on GitHub, not your PC`}
+            onClick={onCloud}
+            testId="tab-sheet-cloud"
           />
           <SheetRow
             icon={<SheetGlyph name="handoff" />}

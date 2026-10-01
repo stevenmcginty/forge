@@ -24,7 +24,8 @@ import { useDeskFeature } from '../lib/features'
 import { openLiveFiles } from '../lib/live-files'
 import { shortPath } from '../lib/paths'
 import { insertIntoDraft, useForge } from '../state'
-import { BottomSheet, openSheetCount, SheetRow, SheetSection } from './BottomSheet'
+import { BottomSheet, openSheetCount, SheetGlyph, SheetRow, SheetSection } from './BottomSheet'
+import { CloudLaunch } from './CloudLaunch'
 import { AlertGlyph } from './Connection'
 import { FolderPicker, type AddedProject } from './FolderPicker'
 import './Sheets.phone.css'
@@ -97,6 +98,8 @@ export function ProjectSheet({
   const [page, setPage] = useState<Page>('main')
   const [query, setQuery] = useState('')
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  /** The project "New cloud session" was asked for, while that sheet is open. */
+  const [cloudFor, setCloudFor] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
   /** Removed here, not yet gone from the `projects` push. */
   const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set())
@@ -521,11 +524,17 @@ export function ProjectSheet({
           setMenuFor(null)
           onNewAgent(id)
         }}
+        onCloud={(id) => {
+          setMenuFor(null)
+          setCloudFor(id)
+        }}
         onRemoved={(id) => {
           setRemoved((all) => new Set([...all, id]))
           setMenuFor(null)
         }}
       />
+
+      <CloudLaunch open={cloudFor !== null} projectId={cloudFor} onClose={() => setCloudFor(null)} />
 
       <FolderPicker anchor={null} open={picking} onClose={() => setPicking(false)} onAdded={onAdded} />
     </>
@@ -539,12 +548,14 @@ function ProjectMenu({
   live,
   onClose,
   onNewAgent,
+  onCloud,
   onRemoved
 }: {
   project: Project | null
   live: boolean
   onClose: () => void
   onNewAgent: (projectId: string) => void
+  onCloud: (projectId: string) => void
   onRemoved: (projectId: string) => void
 }): ReactNode {
   const { actions } = useForge()
@@ -662,6 +673,13 @@ function ProjectMenu({
               disabled={!live}
               onClick={() => onNewAgent(p.id)}
               testId="menu-new-agent"
+            />
+            <SheetRow
+              icon={<SheetGlyph name="cloud" />}
+              label="New cloud session"
+              secondary="Claude works on GitHub, not your PC"
+              onClick={() => onCloud(p.id)}
+              testId="menu-new-cloud"
             />
             <SheetRow
               icon={<Icon name="folder" size={20} />}
