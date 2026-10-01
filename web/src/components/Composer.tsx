@@ -102,6 +102,7 @@ function Ticker({ since, to }: { since?: number; to?: number }): ReactNode {
 export function Composer({
   draft,
   disabled,
+  typeable = false,
   disabledReason = 'Reconnecting…',
   to,
   onDraft,
@@ -141,6 +142,14 @@ export function Composer({
 }: {
   draft: string
   disabled: boolean
+  /**
+   * The phone only: the box cannot send, but its pane is still there — the
+   * link dropped. The words field stays open (so the keyboard stays up and a
+   * sentence can be finished) and everything that sends waits: the disc shows
+   * a turning ring, and a tap on it says in words why nothing went. Without
+   * it a disabled box is locked, as it always was.
+   */
+  typeable?: boolean
   /** What the box says when it cannot send — inline, in the placeholder's place. */
   disabledReason?: string
   /** Who the words go to — "Claude Code · forge" — for the placeholder. */
@@ -449,6 +458,10 @@ export function Composer({
 
   const hasDraft = draft.trim().length > 0 || files.length > 0
   const ready = !disabled
+  /** The phone's box is open for words while nothing can be sent (`typeable`). */
+  const held = mobile && disabled && typeable
+  /** Why nothing sends, as the start of a sentence: "Reconnecting", not "Reconnecting…". */
+  const heldWhy = disabledReason.replace(/[….]+$/, '')
   const busySending = sending !== null
   /**
    * The button, not the keyboard: a keyboard Enter on an empty box stays the
@@ -477,6 +490,11 @@ export function Composer({
   // the Terminal view's key row.)
   const submit = (event?: FormEvent): void => {
     event?.preventDefault()
+    if (held) {
+      // The words stay where they are; the tap is answered in words.
+      if (hasDraft) onNotice?.(`Not sent: ${heldWhy}. Your words stay in the box.`)
+      return
+    }
     if (!ready || busySending) return
     const trimmed = draft.trim().toLowerCase()
     if (trimmed === '/voice' || trimmed === '/talk' || trimmed === '/dictate' || trimmed === '/record' || trimmed === '/dictation') {
@@ -642,7 +660,8 @@ export function Composer({
       <form
         className="composer"
         data-region="compose"
-        data-disabled={disabled ? 'true' : undefined}
+        data-disabled={disabled && !held ? 'true' : undefined}
+        data-held={held ? 'true' : undefined}
         data-voice={phase}
         data-voice-mode={phase === 'recording' ? voiceState.mode : undefined}
         data-cancel-armed={cancelArmed ? 'true' : undefined}
@@ -769,9 +788,11 @@ export function Composer({
               className="composer__input"
               rows={1}
               value={draft}
-              disabled={disabled}
-              placeholder={tintedPlaceholder ? '' : placeholder}
-              aria-label={tintedPlaceholder ? placeholder : undefined}
+              // Open while the link is down (`typeable`): a field disabled
+              // mid-sentence loses its focus, and the phone's keyboard with it.
+              disabled={disabled && !held}
+              placeholder={tintedPlaceholder && !held ? '' : placeholder}
+              aria-label={tintedPlaceholder && !held ? placeholder : undefined}
               enterKeyHint="enter"
               autoCapitalize="sentences"
               autoCorrect="on"
@@ -828,14 +849,25 @@ export function Composer({
               className="composer__send"
               data-draft={hasDraft ? 'true' : 'false'}
               data-sending={busySending ? 'true' : undefined}
-              disabled={!ready || busySending}
-              aria-label={busySending ? 'Sending' : hasDraft ? 'Send' : 'Enter'}
-              title={busySending ? 'Sending…' : hasDraft ? 'Send' : 'Enter'}
+              // Held: it keeps the disabled look and says so by shape — a
+              // turning ring where the arrow was — but still takes the tap,
+              // so the tap can be answered in words (see `submit`).
+              data-held={held ? 'true' : undefined}
+              aria-disabled={held ? true : undefined}
+              // Held, the tap must not take the focus out of the box: that
+              // would close the keyboard, the thing `typeable` is there to keep.
+              onPointerDown={held ? (event) => event.preventDefault() : undefined}
+              onMouseDown={held ? (event) => event.preventDefault() : undefined}
+              disabled={(!ready && !held) || busySending}
+              aria-label={held ? `Cannot send yet: ${heldWhy}` : busySending ? 'Sending' : hasDraft ? 'Send' : 'Enter'}
+              title={held ? `${heldWhy}. Your words are kept.` : busySending ? 'Sending…' : hasDraft ? 'Send' : 'Enter'}
             >
               {sending && sending.total > 0 ? (
                 <span className="composer__send-progress">
                   Sending {sending.done}/{sending.total}…
                 </span>
+              ) : held ? (
+                <span className="composer__mic-ring" aria-hidden="true" />
               ) : (
                 <Glyph name={hasDraft || busySending ? 'send' : 'enter'} size={24} weight={2} />
               )}

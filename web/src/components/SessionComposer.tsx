@@ -32,7 +32,9 @@ import {
   type VoiceState
 } from '../lib/dictate'
 import { useLendDictation, type DictationSeat } from '../lib/dictation-seat'
+import { readDrafts, writeDraft } from '../lib/drafts'
 import { isImageFile, uploadFileChunks } from '../lib/file'
+import { buzz, type Buzz } from '../lib/haptics'
 import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
 import { announcePaneSent } from '../lib/pane-sent'
@@ -83,6 +85,9 @@ const TRANSCRIBE_TIMEOUT_MS = 75_000
 
 /** How long dictated words sit in the box, with Undo, before they send. */
 const REVIEW_MS = 1500
+
+/** How long a draft rests after the last keystroke before it is written to storage. */
+const DRAFT_SAVE_MS = 300
 
 /** How long Stop waits, spinning, before it offers a second Esc to an agent still working. */
 const STOP_AGAIN_MS = 3000
@@ -146,6 +151,12 @@ export function SessionComposer({
   const alive = paneId !== null && (state.picture?.sessions ?? []).some((s) => s.id === paneId)
   const canType = live && alive && paneId !== null
   const leaf = tab && paneId ? findLeaf(tab.root, paneId) : null
+  /*
+   * The link is down but the pane is still in the layout: the phone's box
+   * stays open for words, and only the send waits (Composer `typeable`). A
+   * blip used to disable the box mid-sentence and drop the keyboard.
+   */
+  const canDraft = !live && leaf !== null
   const profile = leaf ? resolveProfile(profiles, leaf.profileId) : null
   const status = usePaneStatus(paneId)
   const view = usePaneView(paneId)
@@ -169,13 +180,59 @@ export function SessionComposer({
   /*
    * One draft per pane. The ref is the same map, kept current the instant it
    * is written, for the async voice and send paths that outlive a render.
+   *
+   * The map starts from storage (lib/drafts.ts) and is written back there, so
+   * a reload, a discarded tab or a bounce through the PIN gate brings every
+   * pane's words back — on mount for the pane showing, and for any other pane
+   * the moment it is switched to. Typing saves once it rests DRAFT_SAVE_MS;
+   * an emptied draft (sent, or cleared) is forgotten at once, so a reload
+   * straight after a send cannot bring the sent words back into the box.
    */
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => readDrafts())
   const draftsRef = useRef(drafts)
   const draft = paneId ? (drafts[paneId] ?? '') : ''
-  const setDraftFor = useCallback((pane: string, value: string) => {
-    draftsRef.current = { ...draftsRef.current, [pane]: value }
-    setDrafts((all) => (all[pane] === value ? all : { ...all, [pane]: value }))
+  const unsaved = useRef(new Set<string>())
+  const saveTimer = useRef(0)
+  const saveDrafts = useCallback(() => {
+    window.clearTimeout(saveTimer.current)
+    saveTimer.current = 0
+    for (const pane of unsaved.current) writeDraft(pane, draftsRef.current[pane] ?? '')
+    unsaved.current.clear()
+  }, [])
+  const setDraftFor = useCallback(
+    (pane: string, value: string) => {
+      draftsRef.current = { ...draftsRef.current, [pane]: value }
+      setDrafts((all) => (all[pane] === value ? all : { ...all, [pane]: value }))
+      unsaved.current.add(pane)
+      window.clearTimeout(saveTimer.current)
+      if (value) saveTimer.current = window.setTimeout(saveDrafts, DRAFT_SAVE_MS)
+      else saveDrafts()
+    },
+    [saveDrafts]
+  )
+  // A page on its way out does not wait for the timer: what is typed is kept.
+  useEffect(() => {
+    const onHide = (): void => {
+      if (document.visibilityState === 'hidden') saveDrafts()
+    }
+    window.addEventListener('pagehide', saveDrafts)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      window.removeEventListener('pagehide', saveDrafts)
+      document.removeEventListener('visibilitychange', onHide)
+      saveDrafts()
+    }
+  }, [saveDrafts])
+
+  /*
+   * The dictation's moments, under the thumb (lib/haptics.ts) — the phone
+   * only: the deck lends this same dictation to its D key, and a desk has no
+   * thumb on it.
+   */
+  const hapticsOn = useRef(false)
+  hapticsOn.current = mobile && face !== 'deck'
+  const thumb = useCallback((kind: Buzz) => {
+    if (hapticsOn.current) buzz(kind)
   }, [])
 
   /** A send in flight: Send stays disabled until the upload and the write are done. */
@@ -369,14 +426,19 @@ export function SessionComposer({
     if (voiceRef.current.phase === 'review') setVoice(IDLE)
   }, [setVoice])
 
-  /** Send: the draft is taken and the box cleared at once, before any upload. */
+  /**
+   * Send: the draft is taken and the box cleared at once, before any upload.
+   * False when nothing was taken — the link is down, or a send is in flight —
+   * and the words are still in the box.
+   */
   const sendDraft = useCallback(
-    (files: File[]) => {
-      if (!canType || !paneId || sendingRef.current) return
+    (files: File[]): boolean => {
+      if (!canType || !paneId || sendingRef.current) return false
       endReview()
       const text = draftsRef.current[paneId] ?? ''
       setDraftFor(paneId, '')
       void sendText(text, files)
+      return true
     },
     [canType, endReview, paneId, sendText, setDraftFor]
   )
@@ -469,12 +531,13 @@ export function SessionComposer({
         const now = latest.current
         if (!now.canType || now.paneId !== pane) {
           actions.setNotice('Not sent — the words are waiting in the box.')
+          thumb('failed')
           return
         }
-        now.sendDraft([])
+        thumb(now.sendDraft([]) ? 'sent' : 'failed')
       }, REVIEW_MS)
     },
-    [actions, setVoice]
+    [actions, setVoice, thumb]
   )
 
   /** Undo: no send; the words stay in the box, and the box takes the focus to edit them. */
@@ -537,13 +600,17 @@ export function SessionComposer({
               ? `${why} Tap ↻ in the box to send the same recording again.`
               : `${why} The recording is kept — tap ↻ in that pane's box to try again.`
           )
+          thumb('failed')
         }
         return false
       }
       if (!stillMine() && !moved()) return false
       setFailedVoice((kept) => (kept?.pane === pane ? null : kept))
       if (!text) {
-        if (stillMine()) actions.setNotice('The desktop heard nothing in that.')
+        if (stillMine()) {
+          actions.setNotice('The desktop heard nothing in that.')
+          thumb('failed')
+        }
         return false
       }
       const now = latest.current
@@ -568,7 +635,7 @@ export function SessionComposer({
       startReview(pane, words)
       return true
     },
-    [actions, parkWords, runVoiceCommand, setDraftFor, startReview]
+    [actions, parkWords, runVoiceCommand, setDraftFor, startReview, thumb]
   )
 
   /**
@@ -605,6 +672,7 @@ export function SessionComposer({
     const run = ++voiceRun.current
     const stillMine = (): boolean => voiceRun.current === run
     setVoice({ phase: 'transcribing', startedAt: Date.now() })
+    thumb('stop')
     let reviewing = false
     try {
       const audio = await current.stop()
@@ -613,19 +681,24 @@ export function SessionComposer({
       if (!stillMine() && movedRun.current !== run) return
       if (audio.size === 0) {
         actions.setNotice('Nothing was recorded.')
+        thumb('failed')
         return
       }
       if (silent) {
         actions.setNotice('I heard nothing — check the mic (is it on Bluetooth?)')
+        thumb('failed')
         return
       }
       reviewing = await hear(pane, audio, run, joinsReview)
     } catch (err) {
-      if (stillMine()) actions.setNotice(err instanceof Error ? err.message : 'Dictation failed.')
+      if (stillMine()) {
+        actions.setNotice(err instanceof Error ? err.message : 'Dictation failed.')
+        thumb('failed')
+      }
     } finally {
       if (stillMine() && !reviewing) setVoice(IDLE)
     }
-  }, [actions, hear, setVoice])
+  }, [actions, hear, setVoice, thumb])
 
   /** ↻ in the box: the recording that failed, to the desktop's ears once more. */
   const retryVoice = useCallback(async () => {
@@ -688,13 +761,16 @@ export function SessionComposer({
       levelRef.current = monitor
       setVoiceLevel(monitor)
       setVoice({ phase: 'recording', mode: holdRef.current ? 'hold' : 'tap', startedAt: Date.now() })
+      // Only now: the buzz says the microphone is really open, not that it was asked for.
+      thumb('open')
       if (end === 'stop') void finishVoiceRef.current()
     } catch (err) {
       starting.current = false
       pendingEnd.current = null
       actions.setNotice(err instanceof Error ? err.message : 'Could not open the microphone.')
+      thumb('failed')
     }
-  }, [actions, endReview, setVoice])
+  }, [actions, endReview, setVoice, thumb])
 
   /** The press became a hold, or a hold fell back to a tap. */
   const setVoiceMode = useCallback(
@@ -1111,6 +1187,7 @@ export function SessionComposer({
       <Composer
         draft={draft}
         disabled={!canType}
+        typeable={canDraft}
         disabledReason={reason}
         to={to}
         onDraft={(value) => {

@@ -6,8 +6,9 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
  * ChatView renders what the assistant *wrote* — markdown source straight out
  * of the session transcript — and this is the whole renderer: headings, bold,
  * italic, strikethrough, inline code, fenced code blocks, ordered and
- * unordered lists (one level of nesting), links, blockquotes, tables,
- * horizontal rules, paragraphs. Nothing else, on purpose: a dependency here
+ * unordered lists (one level of nesting), links (written `[so](https://…)`,
+ * or a bare `https://…` in prose), blockquotes, tables, horizontal rules,
+ * paragraphs. Nothing else, on purpose: a dependency here
  * would be the first npm package Forge Web pulls in for presentation, and the
  * transcript never needs more than this.
  *
@@ -244,10 +245,49 @@ const TOKEN_SOURCE = [
   '__([^_\\n]+)__', //                                           6    bold __
   '\\*([^*\\n]+)\\*', //                                         7    italic *
   '(?<![\\w`])_([^_\\n]+)_(?![\\w`])', //                        8    italic _
-  '~~([^~\\n]+)~~' //                                            9    strike
+  '~~([^~\\n]+)~~', //                                           9    strike
+  '(?<![\\w/+@])(https?:\\/\\/[^\\s<>`"]+)' //                   10   bare URL
 ].join('|')
 
-function parseInline(text: string, depth = 0): ReactNode {
+/** What may end a sentence, a bracket or an emphasis run, and so is not the end of a URL. */
+const URL_TAIL = /[.,;:!?'"*_~]$/
+
+/**
+ * Where a bare URL really ends. The token rule takes everything up to the
+ * next space, and prose puts punctuation there: the full stop after
+ * `https://x.dev/pr/12.`, the bracket that closes `(see https://x.dev)`, the
+ * stars of a bold run. Those go back to the prose. A `)` stays only while the
+ * URL holds a `(` it closes (`…/wiki/Rust_(language)`). Exported for
+ * scripts/web-phone-six-check.mjs.
+ */
+export function trimBareUrl(raw: string): string {
+  let url = raw
+  for (;;) {
+    if (URL_TAIL.test(url)) url = url.slice(0, -1)
+    else if (/[)\]}]$/.test(url) && !balanced(url)) url = url.slice(0, -1)
+    else break
+  }
+  // Nothing but the scheme is not a place to go.
+  return /^https?:\/\/[^\s/?#]/i.test(url) ? url : ''
+}
+
+/** The closing bracket on the end of `url` has an opener inside it. */
+function balanced(url: string): boolean {
+  const close = url[url.length - 1]!
+  const open = close === ')' ? '(' : close === ']' ? '[' : '{'
+  let depth = 0
+  for (const ch of url) {
+    if (ch === open) depth += 1
+    else if (ch === close) depth -= 1
+  }
+  return depth >= 0
+}
+
+/**
+ * `linked` is true inside a link's own words: a URL written there is the
+ * link's text, and an `<a>` in an `<a>` is not valid.
+ */
+function parseInline(text: string, depth = 0, linked = false): ReactNode {
   if (depth > 3 || !text) return text
   const out: ReactNode[] = []
   let last = 0
@@ -257,6 +297,21 @@ function parseInline(text: string, depth = 0): ReactNode {
   // then rematches the same token forever.
   const token = new RegExp(TOKEN_SOURCE, 'g')
   for (let m = token.exec(text); m; m = token.exec(text)) {
+    if (m[10] !== undefined) {
+      // A bare URL: only http(s), by the rule itself. Its trailing
+      // punctuation is prose, so the scan picks up again right after the link.
+      const url = linked ? '' : trimBareUrl(m[10])
+      if (!url) continue
+      if (m.index > last) out.push(text.slice(last, m.index))
+      out.push(
+        <a key={key++} className="md__link" href={url} target="_blank" rel="noopener noreferrer">
+          {url}
+        </a>
+      )
+      last = m.index + url.length
+      token.lastIndex = last
+      continue
+    }
     if (m.index > last) out.push(text.slice(last, m.index))
     if (m[2] !== undefined) {
       out.push(
@@ -267,15 +322,15 @@ function parseInline(text: string, depth = 0): ReactNode {
     } else if (m[3] !== undefined && m[4] !== undefined) {
       out.push(
         <a key={key++} className="md__link" href={m[4]} target="_blank" rel="noopener noreferrer">
-          {parseInline(m[3], depth + 1)}
+          {parseInline(m[3], depth + 1, true)}
         </a>
       )
     } else if (m[5] !== undefined || m[6] !== undefined) {
-      out.push(<strong key={key++}>{parseInline(m[5] ?? m[6]!, depth + 1)}</strong>)
+      out.push(<strong key={key++}>{parseInline(m[5] ?? m[6]!, depth + 1, linked)}</strong>)
     } else if (m[7] !== undefined || m[8] !== undefined) {
-      out.push(<em key={key++}>{parseInline(m[7] ?? m[8]!, depth + 1)}</em>)
+      out.push(<em key={key++}>{parseInline(m[7] ?? m[8]!, depth + 1, linked)}</em>)
     } else if (m[9] !== undefined) {
-      out.push(<del key={key++}>{parseInline(m[9], depth + 1)}</del>)
+      out.push(<del key={key++}>{parseInline(m[9], depth + 1, linked)}</del>)
     }
     last = m.index + m[0].length
   }

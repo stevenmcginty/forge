@@ -653,6 +653,10 @@ function PaneViewInner({
     },
     [leaf.id]
   )
+  // One identity for the life of the pane: ChatView is memoised, and a closure
+  // made in the JSX would be a new prop — a whole transcript reconciled — on
+  // every parsed screen frame while the agent streams.
+  const onSendAgain = useCallback((text: string) => void sendAgain(text), [sendAgain])
   const foremanDriving = Boolean(foreman && FOREMAN_DRIVING.has(foreman.status))
   const canSendAgain = live && alive && !foremanDriving
 
@@ -1300,7 +1304,7 @@ function PaneViewInner({
               agentName={profile?.name}
               asking={asking && live}
               paneId={leaf.id}
-              onSendAgain={canSendAgain ? (text) => void sendAgain(text) : undefined}
+              onSendAgain={canSendAgain ? onSendAgain : undefined}
             />
             {chatRefusal && effectiveTurns.length === 0 ? (
               <div className="pane__chat-note" role="note">
