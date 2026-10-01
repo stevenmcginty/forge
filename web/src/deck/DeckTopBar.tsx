@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type Ref } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
 import { BOARD_MIRROR_FEATURE } from '@shared/board-mirror'
 import { BROWSER_MIRROR_FEATURE } from '@shared/browser-mirror'
@@ -17,14 +17,14 @@ import './DeckTopBar.css'
 /*
  * The deck face's top bar: one slim row, and the only chrome above the panes.
  *
- * Left, the mark; the Agents | Browser | Board switch (./DeckBrowser.tsx,
- * ./DeckBoard.tsx); then the
+ * Left, the mark; then the
  * two things that decide which agents the stage shows — the Agents menu (which agent is on screen, every other one a click away, New
  * agent, close) and the Wall switch — and New, the Agents menu's New agent a
- * click nearer. Centre, the voice bar (project, D,
- * Type) while it lives up here rather than in the dock. Right, the pane
- * tools (skills, slash commands), the link, and one "…" menu that holds
- * everything else. TopBar
+ * click nearer. Centre, the Agents | Browser | Board switch (./DeckBrowser.tsx,
+ * ./DeckBoard.tsx), where the desktop's title bar keeps its mode pill. Right,
+ * the voice bar (project, D, Type) while it lives up here rather than in the
+ * dock, the pane tools (skills, slash commands), the link, and one "…" menu
+ * that holds everything else. TopBar
  * supplies the menu's rows — Foreman, hand off, the screen, notifications,
  * sign out — because it already owns what they do; this file only draws them.
  *
@@ -115,15 +115,17 @@ export function DeckTopBar({
         </span>
         <span className="dk-bar__wordmark">Forge</span>
         <span className="dk-bar__rule" aria-hidden="true" />
-        <SurfaceSwitch />
         <AgentsMenu onView={toAgents} />
         <WallSwitch view={view} onView={toAgents} />
         <NewAgentButton onView={toAgents} />
       </div>
 
-      <div className="dk-bar__centre">{place === 'top' ? <VoiceBar place="top" /> : null}</div>
+      <div className="dk-bar__centre">
+        <SurfaceSwitch />
+      </div>
 
       <div className="dk-bar__right">
+        {place === 'top' ? <VoiceBar place="top" /> : null}
         <span className="dk-tools" role="group" aria-label="Pane tools">
           <SkillsButton />
           <CommandsButton />
@@ -170,40 +172,72 @@ const SURFACES: { id: DeckSurface; label: string; icon: IconName; title: string 
 ]
 
 /**
- * Agents, Browser or Board: what the stage shows (./view.ts `DeckSurface`).
- * The one showing is pressed, bold and underlined, never marked by colour
- * alone. Browser and Board each hide from a desktop too old to serve them,
- * unless this browser is already on that one — then it stays, so there is a
- * way back. With neither left, the switch hides.
+ * Agents, Browser or Board: what the stage shows (./view.ts `DeckSurface`) —
+ * the desktop's mode pill (src/components/TitleBar.tsx `ModePill`), centred
+ * in the bar the same way. The one showing sits in a lit capsule, rim and all,
+ * that glides between them: a shape, never colour alone. One element moved by
+ * transform, measured off the button it lands on, and measured again when the
+ * pill changes size (the words drop as the window narrows). Browser and Board
+ * each hide from a desktop too old to serve them, unless this browser is
+ * already on that one — then it stays, so there is a way back. With neither
+ * left, the switch hides.
  */
 function SurfaceSwitch(): ReactNode {
   const surface = useDeckSurface()
   const browser = useDeskFeature(BROWSER_MIRROR_FEATURE)
   const board = useDeskFeature(BOARD_MIRROR_FEATURE)
+  const ref = useRef<HTMLElement | null>(null)
+  const lampRef = useRef<HTMLSpanElement | null>(null)
   const shown = SURFACES.filter(
     ({ id }) => id === 'agents' || id === surface || (id === 'browser' ? browser : board)
   )
-  if (shown.length < 2) return null
+  const count = shown.length
+
+  useLayoutEffect(() => {
+    const root = ref.current
+    const lamp = lampRef.current
+    if (!root || !lamp) return
+    const place = (): void => {
+      const btn = root.querySelector<HTMLElement>(`[data-surface='${surface}']`)
+      if (!btn) return
+      lamp.style.width = `${btn.offsetWidth}px`
+      lamp.style.transform = `translate3d(${btn.offsetLeft}px, 0, 0)`
+    }
+    place()
+    // The first placing never glides in from the left edge.
+    const raf = requestAnimationFrame(() => lamp.setAttribute('data-ready', 'true'))
+    const watch = new ResizeObserver(place)
+    watch.observe(root)
+    return () => {
+      cancelAnimationFrame(raf)
+      watch.disconnect()
+    }
+  }, [surface, count])
+
+  if (count < 2) return null
   return (
-    <div className="dk-surface" role="group" aria-label="Show on the stage">
+    <nav className="dk-modes" ref={ref} aria-label="Show on the stage">
+      <span className="dk-modes__lamp" ref={lampRef} aria-hidden="true" />
       {shown.map(({ id, label, icon, title }) => {
         const on = surface === id
         return (
           <button
             key={id}
             type="button"
-            className="dk-surface__btn"
+            className="dk-modes__btn"
+            data-surface={id}
             data-on={on ? 'true' : 'false'}
             aria-pressed={on}
+            aria-label={label}
             title={on ? `${label} — showing now` : title}
             onClick={() => setDeckSurface(id)}
           >
             <Icon name={icon} size={13} />
-            <span className="dk-surface__word">{label}</span>
+            <span className="dk-modes__word">{label}</span>
           </button>
         )
       })}
-    </div>
+    </nav>
   )
 }
 
