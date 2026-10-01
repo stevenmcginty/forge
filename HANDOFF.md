@@ -1,5 +1,25 @@
 # Handoff
 
+## Cloud sessions from the phone (2026-10-01; master 30bbb99, pushed; web only)
+
+- **Asked (Steve, phone shot of "Could not look up your PC"):** when the phone cannot find the desktop, and as a choice even when it can, work in Claude Code cloud sessions (spends his $250 cloud credit).
+- **Found:** the account already runs cloud routines (9 triggers, environment `env_016FirfDBx8CkhrRAQhaQ5tn`, GitHub repos attached), so GitHub + environment setup exists. Forge Web is static Firebase Hosting with no server code; the gate is `web/src/components/Connection.tsx:684` (Firebase RTDB lookup failed, `web/src/lib/rendezvous.ts:35`).
+- **Routes:** (1) official deep link `https://claude.ai/code?prompt=…&repositories=stevenmcginty/forge` (also `environment`); pre-fills only, Steve presses send and drives it in claude.ai / Claude app. (2) A Forge-native cloud chat has no official subscription API: `/v1/code/sessions` is private, routine `/fire` is one-shot with a bearer token in page JS, Managed Agents bills the API key (not the credit). Recommended (1).
+- **Credit (press only, UNVERIFIED by an Anthropic page):** claim by 2026-10-07 via `/claim-credit` in the CLI or the claude.ai/code banner; unused expires 2026-11-04.
+- **Research notes:** session scratchpad `cloud-research.md` (gone with the session).
+- **Picked:** route (1). **Built (builder via foreman, worktree `C:\Users\steve\Desktop\forge-cloud`, branch `cloud-launch` 30bbb99, NOT merged/pushed):** web/src only. `lib/cloud.ts` (`githubSlug`, `cloudSessionUrl`), `CloudLaunch.{tsx,css}` sheet (project picker from live state or the offline cache, "no GitHub link" rows disabled, "Pick the repo in Claude", task box, Web Speech "Speak" when the browser has it, "Open Claude" is an `<a target=_blank>` so Android can hand it to the Claude app), `?preview=cloud`. Entry points: "Work in the cloud" on the Unreachable and slow Connecting gates; "New cloud session" under "New agent here" in ProjectSheet and TabStrip. Cloud glyph lives in `SheetGlyph` (BottomSheet.tsx) because `@/components/Icon` is `src/`.
+- **Checked:** typecheck 0, lint:hooks 0, web:build 0 (worktree), slug/URL helper cases pass, preview screenshots at 390 in WA dark/light. NOT seen: the gate buttons (need a Firebase sign-in), real speech, Volt/Paper.
+- **Shipped:** fast-forwarded into master and pushed on Steve's "merge and push" (2026-10-01); CI deploys Forge Web, no desktop restart needed. **Next:** Steve checks the gate button live.
+
+## PowerDraw becomes a looping carousel (2026-09-30 22:00, pushed b017e92; web only)
+
+- **Asked (Steve, with a phone shot):** the phone's project drum "doesn't look good, make this look real professional"; then "needs to be a beautiful carousel".
+- **Was wrong:** the top half was blank on every open (the open project sorts near the top, the drum centred it), and far rows shrank to ghost text. The preview hid this: its fixture put the open project at index 4.
+- **Built (designer via foreman):** `web/src/components/PowerDraw.{tsx,css}`, `PowerDrawPreview.tsx`. A solid card low on the right, sized to its rows, with a fixed lens as the chosen slot. It loops with 3+ projects: a hand-driven engine (native scroll cannot loop) with spring snap and flick. Off-centre rows scale gently (2D, not rotateX, which made names lean). Header: count + close ✕ (`powerdraw-close`). Taps are resolved by position; the row buttons still serve keys and screen readers. The tick fires only on a finger turn. The preview uses the real order (`&current=`, `&open=1`, `&ask=0`).
+- **Checked:** typecheck 0, lint:hooks 0; screenshots at 390 and 360 in WA dark/light, Volt, Paper (session scratchpad, gone with the session). The designer's tap/drag/key script was deleted, so behaviour is on its word. NOT tried on the real phone.
+- **Moved to the middle (716ddd0, Steve: "it needs to be in the middle"):** the card centres up and down by margins, not a transform (the swipe drag writes the transform inline). Seen at 390 in the preview.
+- **Left:** with exactly 2 projects one slot below stays empty.
+
 ## Phone notifications fixed + heads-up banner (2026-09-30 21:45; merged to master 6f9a070 and pushed ~22:00 on Steve's "merge and push"; Forge NOT restarted)
 
 - **Asked (Steve):** Forge mobile browser notification pop-up "not working correctly"; fix it and make notifications much better.
