@@ -72,6 +72,62 @@ check('anything longer or different is not an answer', () => {
   }
 })
 
+console.log('\nthe gate: which question a spoken answer hits')
+
+const T0 = 1_000_000
+
+check('a question that was never spoken is not answered by voice', () => {
+  assert.equal(V.voiceConfirmTarget(['a'], new Map(), T0), null)
+  assert.equal(V.voiceConfirmTarget(['a', 'b'], new Map([['gone', T0 - 1000]]), T0), null)
+  assert.equal(V.voiceConfirmTarget([], new Map([['a', T0 - 1000]]), T0), null)
+})
+
+check('spoken 5 s ago: answered', () => {
+  assert.equal(V.voiceConfirmTarget(['a'], new Map([['a', T0 - 5000]]), T0), 'a')
+})
+
+check('spoken 25 s ago: not answered — the window is 20 s, at the edge and not past it', () => {
+  assert.equal(V.CONFIRM_VOICE_WINDOW_MS, 20_000)
+  assert.equal(V.voiceConfirmTarget(['a'], new Map([['a', T0 - 25_000]]), T0), null)
+  assert.equal(V.voiceConfirmTarget(['a'], new Map([['a', T0 - 20_000]]), T0), 'a')
+  assert.equal(V.voiceConfirmTarget(['a'], new Map([['a', T0 - 20_001]]), T0), null)
+})
+
+check('two spoken: the later one, not the oldest', () => {
+  const spoken = new Map([
+    ['a', T0 - 9000],
+    ['b', T0 - 3000]
+  ])
+  assert.equal(V.voiceConfirmTarget(['a', 'b'], spoken, T0), 'b')
+  // Re-spoken after the other was answered: it is the later one now.
+  assert.equal(V.voiceConfirmTarget(['a'], new Map([...spoken, ['a', T0 - 1000]]), T0), 'a')
+  // Both past the window: neither.
+  assert.equal(
+    V.voiceConfirmTarget(
+      ['a', 'b'],
+      new Map([
+        ['a', T0 - 40_000],
+        ['b', T0 - 21_000]
+      ]),
+      T0
+    ),
+    null
+  )
+  // One spoken, one not: the spoken one, wherever it is in the list.
+  assert.equal(V.voiceConfirmTarget(['a', 'b'], new Map([['a', T0 - 3000]]), T0), 'a')
+  assert.equal(V.voiceConfirmTarget(['a', 'b'], new Map([['b', T0 - 3000]]), T0), 'b')
+})
+
+check('not armed: the line points at the screen and no voice record is made', () => {
+  const off = V.confirmQuestion('close the tab Zeb', false)
+  assert.equal(off.line, 'Forge Brain asks: close the tab Zeb. Press Yes or No on screen.')
+  assert.equal(off.byVoice, false)
+  const on = V.confirmQuestion('close the tab Zeb.', true)
+  assert.equal(on.line, 'Forge Brain asks: close the tab Zeb. Say yes or no.')
+  assert.equal(on.byVoice, true)
+  assert.equal(V.confirmQuestion('  ', true).line, 'Forge Brain asks: an action. Say yes or no.')
+})
+
 console.log('\nthe gather: hold a half-sentence')
 
 check('a whole sentence is not held: 5+ words ending . ? or !', () => {
@@ -154,6 +210,16 @@ check('runPhrase answers the gate after the echo guard, before the commands and 
   const grammar = agent.indexOf('parseUtterance(said, ctx)')
   assert.ok(echo > 0 && gate > echo, 'the gate is checked after the echo guard')
   assert.ok(grammar > gate, 'and before the command grammar')
+})
+
+check('a spoken answer goes through the voice target; the record is made only by a question said in full, armed', () => {
+  const agent = read('src/state/VoiceAgent.tsx')
+  assert.ok(agent.includes('voiceConfirmTarget('), 'runPhrase picks the question with voiceConfirmTarget')
+  const records = agent.split('confirmSpokenAt.current.set(').length - 1
+  assert.equal(records, 1, 'one place makes a voice record')
+  assert.ok(/if \(spoke && question\.byVoice\) confirmSpokenAt\.current\.set\(/.test(agent), 'and only once the mouth says it spoke')
+  assert.ok(agent.includes('next.heard?.(said.spoke && !interrupted)'), 'talked over is not heard')
+  assert.ok(agent.includes('confirmQuestion(speakable(what, 240), armedRef.current)'), 'the line follows the mic: armed or not')
 })
 
 check('no model can answer the gate: no voice tool reaches the confirm', () => {
