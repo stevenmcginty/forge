@@ -58,7 +58,7 @@ export interface BrowserUnwatchFrame {
   tabId: string
 }
 
-export type BrowserInputKind = 'click' | 'scroll' | 'text' | 'key'
+export type BrowserInputKind = 'click' | 'move' | 'scroll' | 'text' | 'key'
 
 /** Named keys a browser may press. A closed list, never a keycode. */
 export const BROWSER_KEYS = [
@@ -91,7 +91,8 @@ export interface BrowserMods {
 /**
  * One gesture on the tab's page. `x`/`y` are in the page's CSS pixels (the
  * frame's `width`/`height` space). `click` is a left click (`count` 2 = double);
- * `scroll` carries `dx`/`dy` as a mouse wheel would, positive = content moves
+ * `move` is the pointer moving over the page with no button held (`x`/`y`
+ * only), so the page sees hover and answers with its cursor; `scroll` carries `dx`/`dy` as a mouse wheel would, positive = content moves
  * up/left (the page scrolls down/right). `text` is typed as-is (also paste);
  * `key` is one of BROWSER_KEYS, or a BROWSER_CTRL_LETTERS letter with ctrl.
  */
@@ -131,7 +132,7 @@ export interface BrowserOpenFrame {
   url?: string
 }
 
-/** Close a desktop tab. The desktop refuses a tab an agent owns. */
+/** Close a desktop tab, whoever owns it — as the desktop's own close button does. */
 export interface BrowserCloseFrame {
   type: 'browser:close'
   tabId: string
@@ -210,6 +211,12 @@ export interface BrowserStateFrame {
   loading?: boolean
   canGoBack?: boolean
   canGoForward?: boolean
+  /**
+   * The pointer the page asks for where the pointer last was, as a CSS cursor
+   * keyword ('default', 'pointer', 'text', ...). The picture has no pointer
+   * drawn in it, so the browser shows this one over it.
+   */
+  cursor?: string
 }
 
 /** Answer to `browser:open`: the new tab's id, or `error` in words. */
@@ -289,6 +296,18 @@ function readInput(v: Record<string, unknown>, tabId: string): BrowserInputFrame
         y: Math.round(clamp(y, 0, BROWSER_MAX_HEIGHT)),
         count,
         ...withMods
+      }
+    }
+    case 'move': {
+      const x = num(v.x)
+      const y = num(v.y)
+      if (x === null || y === null) return null
+      return {
+        type: 'browser:input',
+        tabId,
+        kind: 'move',
+        x: Math.round(clamp(x, 0, BROWSER_MAX_WIDTH)),
+        y: Math.round(clamp(y, 0, BROWSER_MAX_HEIGHT))
       }
     }
     case 'scroll': {
@@ -417,7 +436,7 @@ export interface BrowserMirrorHost {
   nav: (frame: BrowserNavFrame, viewer: string) => void
   /** Open a real tab owned by "You". Resolves to the `browser:opened` answer. */
   open: (frame: BrowserOpenFrame) => Promise<BrowserOpenedFrame>
-  /** Close a tab Steve owns; an agent's or Voice's is left alone. */
+  /** Close a tab, whoever owns it (Steve, Voice or an agent), as the desktop's own close does. */
   close: (tabId: string) => void
   /** A socket went: every watch it held starts its idle grace. */
   release: (viewer: string) => void

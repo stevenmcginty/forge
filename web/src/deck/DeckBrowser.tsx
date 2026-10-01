@@ -41,6 +41,8 @@ const RESIZE_SETTLE_MS = 200
 const MAX_DPR = 1.5
 /** Which tab was on screen, per project, in this browser. */
 const PICKS_KEY = 'forge-web-browser-tab'
+/** The fewest milliseconds between two pointer moves sent to the desktop (about 20 a second). */
+const MOVE_EVERY_MS = 50
 
 type Shown = 'update' | 'reconnecting' | BrowserCopyStatus
 
@@ -126,6 +128,7 @@ export function DeckBrowser(): ReactNode {
   const [picks, setPicks] = useState<Record<string, string>>(loadPicks)
   const [opening, setOpening] = useState(false)
   const [hint, setHint] = useState('')
+  const stripRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!supported) return undefined
@@ -141,6 +144,25 @@ export function DeckBrowser(): ReactNode {
       savePicks(next)
       return next
     })
+  }
+
+  // The tab on screen is kept in view in a strip that has scrolled sideways.
+  const selectedId = selected?.id ?? ''
+  useEffect(() => {
+    if (!selectedId) return
+    const el = stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(selectedId)}"]`)
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [selectedId])
+
+  /** Close any tab, as the desktop's own close does; closing the one on screen puts its neighbour there. */
+  const closeTab = (tabId: string): void => {
+    if (!live) return
+    if (tabId === selected?.id) {
+      const at = shownTabs.findIndex((t) => t.id === tabId)
+      const next = shownTabs[at + 1] ?? shownTabs[at - 1]
+      if (next) pick(next.id)
+    }
+    closeBrowserTab(tabId)
   }
 
   const openTab = (): void => {
@@ -163,13 +185,38 @@ export function DeckBrowser(): ReactNode {
 
   return (
     <div className="dk-browser">
-      <div className="dk-browser__strip" role="tablist" aria-label="Browser tabs on the desktop">
+      <div
+        ref={stripRef}
+        className="dk-browser__strip"
+        role="tablist"
+        aria-label="Browser tabs on the desktop"
+        onWheel={(e) => {
+          // An up-and-down wheel turns into sideways, so a full strip scrolls
+          // with any wheel; a touchpad's sideways swipe scrolls it as it is.
+          const el = e.currentTarget
+          if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && el.scrollWidth > el.clientWidth) el.scrollLeft += e.deltaY
+        }}
+      >
         {shownTabs.map((tab) => {
           const on = tab.id === selected?.id
           const name = tabName(tab)
           const owned = tab.ownerId !== 'user'
           return (
-            <div key={tab.id} className="dk-browser__tab" data-on={on ? 'true' : 'false'}>
+            <div
+              key={tab.id}
+              className="dk-browser__tab"
+              data-on={on ? 'true' : 'false'}
+              data-tab-id={tab.id}
+              onMouseDown={(e) => {
+                // No autoscroll circle from a middle press: it closes the tab instead.
+                if (e.button === 1) e.preventDefault()
+              }}
+              onAuxClick={(e) => {
+                if (e.button !== 1) return
+                e.preventDefault()
+                closeTab(tab.id)
+              }}
+            >
               <button
                 type="button"
                 role="tab"
@@ -182,18 +229,16 @@ export function DeckBrowser(): ReactNode {
                 <span className="dk-browser__tab-name truncate">{name}</span>
                 {owned ? <span className="dk-browser__owner truncate">{tab.ownerLabel}&apos;s tab</span> : null}
               </button>
-              {!owned ? (
-                <button
-                  type="button"
-                  className="dk-browser__tab-close"
-                  disabled={!live}
-                  aria-label={`Close ${name}`}
-                  title={live ? `Close ${name} on the desktop` : 'The desktop is not answering, so it cannot close one'}
-                  onClick={() => closeBrowserTab(tab.id)}
-                >
-                  <Icon name="close" size={10} />
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="dk-browser__tab-close"
+                disabled={!live}
+                aria-label={`Close ${name}`}
+                title={live ? `Close ${name} on the desktop` : 'The desktop is not answering, so it cannot close one'}
+                onClick={() => closeTab(tab.id)}
+              >
+                <Icon name="close" size={10} />
+              </button>
             </div>
           )
         })}
@@ -319,6 +364,23 @@ function BrowserTabView({ tab, live }: { tab: BrowserTabSummary; live: boolean }
     const pending = wheel.current
     return () => window.cancelAnimationFrame(pending.raf)
   }, [])
+
+  // The pointer over the picture, sent at most every MOVE_EVERY_MS, the last
+  // place always sent: the page sees hover and answers with its cursor.
+  const pointer = useRef<{ x: number; y: number; sent: number; timer: number }>({ x: 0, y: 0, sent: 0, timer: 0 })
+  useEffect(() => {
+    const pending = pointer.current
+    return () => window.clearTimeout(pending.timer)
+  }, [])
+
+  const flushMove = (): void => {
+    const p = pointer.current
+    p.timer = 0
+    p.sent = performance.now()
+    // No picture yet, so no map from the box to the page: nothing is sent.
+    const at = pagePoint(p.x, p.y)
+    if (at) sendBrowserInput({ tabId: tab.id, kind: 'move', x: at.x, y: at.y })
+  }
 
   const flushWheel = (): void => {
     const w = wheel.current
@@ -448,6 +510,18 @@ function BrowserTabView({ tab, live }: { tab: BrowserTabSummary; live: boolean }
         className="dk-browser__stage"
         data-pictured={pictured ? 'true' : undefined}
         data-typing={typing ? 'true' : undefined}
+        // The picture has no pointer drawn in it: this one is the page's own.
+        style={{ cursor: canTouch ? copy?.cursor || 'default' : 'default' }}
+        onPointerMove={(e) => {
+          if (!canTouch || e.pointerType === 'touch') return
+          const p = pointer.current
+          p.x = e.clientX
+          p.y = e.clientY
+          if (p.timer) return
+          const wait = MOVE_EVERY_MS - (performance.now() - p.sent)
+          if (wait <= 0) flushMove()
+          else p.timer = window.setTimeout(flushMove, wait)
+        }}
         onMouseDown={(e) => {
           // Keep the caret in the capture box: a press on the picture is the page's.
           if (canTouch) e.preventDefault()

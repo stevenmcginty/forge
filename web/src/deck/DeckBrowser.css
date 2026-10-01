@@ -40,6 +40,8 @@
 
 /* ---------------------------------------------------------------- tab strip */
 
+/* Tabs shrink to a floor, as Chrome's do; past that the strip scrolls
+   sideways, with a thin bar that stays in sight so there is a handle. */
 .app[data-face='deck'] .dk-browser__strip {
   display: flex;
   flex: none;
@@ -48,6 +50,9 @@
   min-width: 0;
   padding: 6px 8px 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -56,7 +61,7 @@
   display: inline-flex;
   flex: 0 1 220px;
   align-items: center;
-  min-width: 96px;
+  min-width: 88px;
   height: 32px;
   border-radius: 7px 7px 0 0;
   color: var(--text-secondary);
@@ -105,7 +110,8 @@
 }
 
 .app[data-face='deck'] .dk-browser__owner {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 96px;
   padding: 1px 6px;
   border: 1px solid var(--line-soft);
@@ -130,16 +136,28 @@
 }
 
 .app[data-face='deck'] .dk-browser__tab-close {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   margin-right: 4px;
 }
 
+/* Every tab has its close: always on the tab on screen, on the others when
+   the pointer or the keyboard is on them (and always where there is no hover). */
+@media (hover: hover) {
+  .app[data-face='deck'] .dk-browser__tab[data-on='false']:not(:hover, :focus-within) .dk-browser__tab-close {
+    opacity: 0;
+  }
+}
+
+/* Stays at the strip's right edge while the tabs scroll under it. */
 .app[data-face='deck'] .dk-browser__new {
+  position: sticky;
+  right: 0;
   width: 30px;
   height: 30px;
   margin: 0 0 1px 2px;
   border: 1px solid var(--glass-line);
+  background: var(--bg-panel);
 }
 
 .app[data-face='deck'] .dk-browser__navbtn {
@@ -268,6 +286,7 @@
 
 .app[data-face='deck'] .dk-browser__notice {
   position: absolute;
+  cursor: default;
   left: 16px;
   right: 16px;
   top: 50%;

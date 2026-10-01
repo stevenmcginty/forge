@@ -62,6 +62,45 @@ const DRAIN_POLL_MS = 150
 
 const ARTIFACT_REFUSAL = 'This tab is a Board page. It is not shown here yet.'
 
+/** Electron's cursor types (WebContents 'cursor-changed') that have a CSS keyword of another name. */
+const CURSOR_NAMES: Record<string, string> = {
+  // Electron's `pointer` is the arrow; CSS's `pointer` is Electron's `hand`.
+  pointer: 'default',
+  hand: 'pointer',
+  ibeam: 'text',
+  nodrop: 'not-allowed'
+}
+
+/** Electron's cursor types whose CSS keyword is the same word. */
+const CURSOR_SAME = new Set([
+  'default',
+  'text',
+  'wait',
+  'progress',
+  'crosshair',
+  'move',
+  'not-allowed',
+  'e-resize',
+  'n-resize',
+  'ne-resize',
+  'nw-resize',
+  's-resize',
+  'se-resize',
+  'sw-resize',
+  'w-resize',
+  'ns-resize',
+  'ew-resize',
+  'nesw-resize',
+  'nwse-resize',
+  'col-resize',
+  'row-resize'
+])
+
+/** An Electron cursor type as a CSS cursor keyword; anything without a plain match is the arrow. */
+function cssCursor(type: string): string {
+  return CURSOR_NAMES[type] ?? (CURSOR_SAME.has(type) ? type : 'default')
+}
+
 interface Copy {
   tabId: string
   win: BrowserWindow
@@ -81,6 +120,10 @@ interface Copy {
   /** Input is performed in order. */
   queue: Promise<void>
   lastUsed: number
+  /** The page's pointer, as a CSS cursor keyword, for the browser to draw over the picture. */
+  cursor: string
+  /** The latest pointer move not yet performed; moves behind it in the queue are dropped for it. */
+  pendingMove: { x: number; y: number } | null
 }
 
 const copies = new Map<string, Copy>()
@@ -166,7 +209,13 @@ function send(sink: BrowserSink, frame: BrowserServerFrame): void {
 
 function stateOf(m: Copy): BrowserStateFrame {
   const status = m.error ? 'error' : m.started ? 'live' : 'loading'
-  const base: BrowserStateFrame = { type: 'browser:state', tabId: m.tabId, status, ...(m.error ? { error: m.error } : {}) }
+  const base: BrowserStateFrame = {
+    type: 'browser:state',
+    tabId: m.tabId,
+    status,
+    cursor: m.cursor,
+    ...(m.error ? { error: m.error } : {})
+  }
   const wc = m.win.isDestroyed() ? null : m.win.webContents
   if (!wc || wc.isDestroyed()) return base
   return {
@@ -304,7 +353,9 @@ function create(tabId: string, url: string, frame: BrowserWatchFrame): Copy {
     drainTimer: null,
     idleTimer: null,
     queue: Promise.resolve(),
-    lastUsed: Date.now()
+    lastUsed: Date.now(),
+    cursor: 'default',
+    pendingMove: null
   }
   const wc = win.webContents
   wc.setFrameRate(FRAME_RATE)
@@ -319,6 +370,14 @@ function create(tabId: string, url: string, frame: BrowserWatchFrame): Copy {
     if (!/^(https?:|about:blank)/i.test(target)) event.preventDefault()
   })
   wc.on('paint', (_event, _dirty, image) => onPaint(m, image))
+  // Nothing draws a pointer into the picture, so the browser draws the one the
+  // page asks for: the hand over a link, the I-beam over a text box.
+  wc.on('cursor-changed', (_event, type) => {
+    const cursor = cssCursor(type)
+    if (cursor === m.cursor) return
+    m.cursor = cursor
+    pushState(m)
+  })
   wc.on('did-start-loading', () => {
     m.error = undefined
     pushState(m)
@@ -405,6 +464,9 @@ function modifiersOf(mods: BrowserMods | undefined): Modifier[] {
 
 function click(m: Copy, x: number, y: number, count: number, modifiers: Modifier[]): void {
   const wc = m.win.webContents
+  // Focused on every click, not only when it has lost focus, so the text box
+  // clicked into paints its blinking caret.
+  wc.focus()
   wc.sendInputEvent({ type: 'mouseMove', x, y, modifiers })
   // A double click arrives as it would from a mouse: a first click, then a
   // second whose clickCount is 2.
@@ -412,6 +474,23 @@ function click(m: Copy, x: number, y: number, count: number, modifiers: Modifier
     wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: n, modifiers })
     wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: n, modifiers })
   }
+}
+
+/**
+ * The pointer moved over the picture: hover, and the cursor the page answers
+ * with. Moves are coalesced — a move still waiting in the queue is replaced by
+ * the newer one rather than performed after it — so a slow page never falls
+ * behind the pointer.
+ */
+function move(m: Copy, x: number, y: number): void {
+  const queued = m.pendingMove !== null
+  m.pendingMove = { x, y }
+  if (queued) return
+  perform(m, (mm) => {
+    const at = mm.pendingMove
+    mm.pendingMove = null
+    if (at) mm.win.webContents.sendInputEvent({ type: 'mouseMove', x: at.x, y: at.y })
+  })
 }
 
 /**
@@ -518,7 +597,9 @@ function browserMirrorHost(): BrowserMirrorHost {
         m.win.setContentSize(frame.width, frame.height)
       }
       // The new socket has seen nothing yet: the state, then a fresh picture.
+      // Focused too, so a text box the page has focused paints its caret.
       m.last = null
+      if (!m.win.webContents.isFocused()) m.win.webContents.focus()
       send(sink, stateOf(m))
       m.win.webContents.startPainting()
       m.win.webContents.invalidate()
@@ -540,6 +621,9 @@ function browserMirrorHost(): BrowserMirrorHost {
             const count = frame.count ?? 1
             perform(m, (mm) => click(mm, x, y, count, modifiers))
           }
+          return
+        case 'move':
+          if (frame.x !== undefined && frame.y !== undefined) move(m, frame.x, frame.y)
           return
         case 'scroll':
           if (frame.x !== undefined && frame.y !== undefined) {
@@ -626,10 +710,9 @@ function browserMirrorHost(): BrowserMirrorHost {
       const s = service()
       const rec = record(tabId)
       if (!s || !rec) return
-      if (rec.owner.id !== USER_OWNER.id) {
-        console.log(`[browser-mirror] refused to close ${tabId}: it is ${rec.owner.label}'s`)
-        return
-      }
+      // Any tab, as the desktop's own close button: agents leave tabs open, and
+      // this is how Steve clears them from far away.
+      console.log(`[browser-mirror] a browser closed ${tabId} (${rec.owner.label}'s)`)
       s.ops.forget(tabId)
       void s.manager.close(tabId)
     },

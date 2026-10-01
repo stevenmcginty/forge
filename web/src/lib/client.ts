@@ -732,7 +732,7 @@ function settleBrowserOpen(frame: BrowserOpenedFrame): void {
   else waiting.reject(new Error(frame.error || 'The desktop could not open a tab.'))
 }
 
-/** Close a desktop tab. The desktop refuses one an agent owns. */
+/** Close a desktop tab, whoever owns it — as the desktop's own close button does. */
 export function closeBrowserTab(tabId: string): void {
   sendUp?.({ type: 'browser:close', tabId })
 }
