@@ -46,6 +46,7 @@ import { getVoiceAutoStop } from '../lib/voice-prefs'
 import type { PermissionMode } from '@/lib/rich'
 import { onDraftInsert, useForge, useProfiles, useWorkspace } from '../state'
 import { AgentStatus } from './AgentStatus'
+import { KeysToggle } from './StatusLine'
 import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
 import { ModelChip } from './ModelChip'
@@ -1144,7 +1145,8 @@ export function SessionComposer({
     // it, so the phone's key row and status strip trade places on the same face
     // the pane shows — never on a guess.
     <div className="session-composer" data-view={activeView} data-keys={keysShown ? 'shown' : 'hidden'}>
-      {profile ? (
+      {/* Not on the deck: the pane header, the bar and its usage line already say all of it. */}
+      {profile && !deck ? (
         <AgentStatus
           profile={profile}
           tab={paneName ?? undefined}
@@ -1235,6 +1237,7 @@ export function SessionComposer({
         listen={face === 'deck' ? undefined : <PhoneListen />}
         listenLine={face === 'deck' ? undefined : <PhoneListenLine />}
         picker={deckPicker}
+        tool={deck && activeView === 'term' ? <KeysToggle shown={keysShown} onClick={() => toggleKeys()} /> : undefined}
         edge={
           deck ? (
             <DeckBarCue voice={voice} readMic={readMic} docked={Boolean(lead)} keyName={dictationKeyName(dKey)} />
