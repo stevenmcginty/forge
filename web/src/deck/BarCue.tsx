@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { VoiceState } from '../lib/dictate'
 import { DictationEdge, type CuePhase } from './DictationEdge'
 import { useDeckDictation } from './dictation'
-import { readWebVoiceLevels, useWebVoice } from './voiceAgent'
+import { readWebVoiceLevels, useWebVoiceCore } from './voiceAgent'
 
 /**
  * The deck bar's one moving cue, as the desktop bar has it (src/components/hub/
@@ -42,7 +42,8 @@ export function DeckBarCue({
   keyName?: string
 }): ReactNode {
   const opening = useDeckDictation() === 'starting'
-  const agent = useWebVoice()
+  // The phase only: a caption growing word by word does not redraw the edge's host.
+  const agent = useWebVoiceCore()
 
   const dictation: CuePhase | null =
     voice.phase === 'recording'

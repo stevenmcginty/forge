@@ -4,10 +4,12 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode
 } from 'react'
+import { agentLogoFor } from '@shared/agent-logos'
 import type { ClaudePermissionMode } from '@shared/types'
 import {
   effortRefusal,
@@ -250,7 +252,7 @@ export interface DeckPickerProps {
  * there and the bar is one row, as before.
  */
 export function DeckAgentPicker(props: DeckPickerProps): ReactNode {
-  const { paneId, paneName, agentName, models, levels, status, currentModelId, disabled } = props
+  const { paneId, paneName, agentName, command, models, levels, modes, status, currentModelId, rung, disabled } = props
   const usage = usePaneUsage(paneId, status)
   const frame = usePaneUsageFrame(paneId)
   const picked = usePicked(paneId)
@@ -338,9 +340,15 @@ export function DeckAgentPicker(props: DeckPickerProps): ReactNode {
       sec: 'plan'
     }))
   ]
+  // The mode the pane's own screen names, as a word on the usage line.
+  const modeWord = rung === 'auto' ? 'Auto' : rung ? (modes.find((m) => m.id === rung)?.label ?? null) : null
+  // Whose agent it is: the maker's own mark on the chip (shared/agent-logos.ts).
+  const logo = agentLogoFor({ id: '', command, kind: 'agent' })
+  const maker = logo && logo.key !== 'shell' ? logo : null
   const summary = [
     ...items.map((it) => `${it.label} ${it.pct}% used${levelWord(it.pct) ? `, ${levelWord(it.pct)}` : ''}`),
-    costUsd !== null ? `session cost ${fmtCost(costUsd)}` : null
+    costUsd !== null ? `session cost ${fmtCost(costUsd)}` : null,
+    modeWord ? `mode ${modeWord}` : null
   ]
     .filter(Boolean)
     .join('; ')
@@ -361,9 +369,27 @@ export function DeckAgentPicker(props: DeckPickerProps): ReactNode {
           onMouseDown={(e) => e.preventDefault()}
           onClick={toggle('chip')}
         >
-          <span className="dk-apick-chip__tile" aria-hidden="true">
-            {model ? monogram(model.label) : modelName ? monogram(modelName) : <Icon name="sparkle" size={10} />}
-          </span>
+          {maker ? (
+            <span
+              className="dk-apick-chip__tile dk-mplate"
+              style={
+                maker.color
+                  ? ({ '--logo-on-dark': maker.color.dark, '--logo-on-light': maker.color.light } as CSSProperties)
+                  : undefined
+              }
+              aria-hidden="true"
+            >
+              <svg width="11" height="11" viewBox={maker.viewBox} fill="currentColor" aria-hidden="true">
+                {maker.paths.map((path, i) => (
+                  <path key={i} d={path.d} fillRule={maker.evenOdd ? 'evenodd' : undefined} />
+                ))}
+              </svg>
+            </span>
+          ) : (
+            <span className="dk-apick-chip__tile" aria-hidden="true">
+              {model ? monogram(model.label) : modelName ? monogram(modelName) : <Icon name="sparkle" size={10} />}
+            </span>
+          )}
           <span className="dk-apick-chip__face">{face}</span>
           <Icon name="chevronDown" size={11} className="dk-apick-chip__chev" />
         </button>
@@ -419,6 +445,12 @@ export function DeckAgentPicker(props: DeckPickerProps): ReactNode {
             <span className="dk-ustrip__item" data-rank={3} data-sec="session" aria-hidden="true">
               <span className="dk-ustrip__label">Session</span>
               <span className="dk-ustrip__pct">{fmtCost(costUsd)}</span>
+            </span>
+          ) : null}
+          {modeWord ? (
+            <span className="dk-ustrip__item" data-rank={3} data-sec="mode" aria-hidden="true">
+              <span className="dk-ustrip__label">Mode</span>
+              <span className="dk-ustrip__val">{modeWord}</span>
             </span>
           ) : null}
           <span className="dk-ustrip__more" aria-hidden="true">

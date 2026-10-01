@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { AGENT_LOGOS, type AgentLogo } from '@shared/agent-logos'
 import { AgentBadge } from '@/components/AgentBadge'
+import { SynthesizerIndicator } from '@/components/hub/SynthesizerIndicator'
 import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import { usePresence } from '@/lib/motion'
@@ -26,6 +28,7 @@ import { DeckSheet, deckSheet, useDeckSheet } from './sheet'
 import type { BarPlace, DeckView } from './view'
 import {
   holdWebVoiceMic,
+  readWebVoiceLevels,
   setVoiceLink,
   setVoiceNavigator,
   setWebVoiceAgent,
@@ -33,6 +36,7 @@ import {
   stopWebVoice,
   toggleWebVoice,
   useWebVoice,
+  useWebVoiceCore,
   webVoiceState,
   webVoiceSupported,
   type WebVoiceState
@@ -197,8 +201,20 @@ function cancelListenHold(): void {
  * cannot start); the words are in the title and the accessible name. A
  * failure's sentence is on the voice line (VoiceLine).
  */
+/** The state in one word, on the dock's Listen key: the desktop bar's (hub/VoicePill.tsx). */
+const KEY_WORD: Record<Look, string> = {
+  offline: '',
+  error: '',
+  connecting: 'Starting',
+  listening: 'Listening',
+  thinking: 'Thinking',
+  speaking: 'Speaking',
+  muted: 'Muted'
+}
+
 function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
-  const voice = useWebVoice()
+  // Phase, agent, muted: not the captions, which change with every word spoken.
+  const voice = useWebVoiceCore()
   const live = useLive()
   const supported = webVoiceSupported()
   const open = useDeckSheet() === 'voice'
@@ -239,7 +255,24 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => toggleWebVoice()}
       >
-        <VoiceAgentGlyph look={look} on={on} />
+        {place === 'bottom' ? (
+          // The dock wears the desktop bar's Listen key: a round key with the
+          // mic, five bars drawn still per state (the edge is the one moving
+          // cue), and the state as a word while it is on.
+          <>
+            <span className="dk-vagent__key" aria-hidden="true">
+              <Icon name="mic" size={16} />
+            </span>
+            <SynthesizerIndicator look={look} readLevels={readWebVoiceLevels} width={24} height={14} still className="dk-vagent__synth" />
+            {on && KEY_WORD[look] ? (
+              <span key={KEY_WORD[look]} className="dk-vagent__word" aria-hidden="true">
+                {KEY_WORD[look]}
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <VoiceAgentGlyph look={look} on={on} />
+        )}
       </button>
       <button
         type="button"
@@ -252,7 +285,7 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => deckSheet.toggle('voice')}
       >
-        <span className="dk-vagent__tile">
+        <span className="dk-vagent__tile dk-mplate" style={agentBrand(voice.agent)}>
           <AgentMark agent={voice.agent} />
         </span>
         <Icon name="chevronDown" size={11} className="dk-vagent__chev" />
@@ -361,36 +394,33 @@ function VoiceAgentGlyph({ look, on }: { look: Look; on: boolean }): ReactNode {
   )
 }
 
+/** Whose agent it is, as the maker's own logo (shared/agent-logos.ts); Forge Brain has its own glyph. */
+function agentLogo(agent: WebVoiceAgent): AgentLogo | null {
+  if (agent === 'forge-brain') return null
+  return agent === 'gemini-live' ? AGENT_LOGOS.gemini : agent === 'claude' ? AGENT_LOGOS.claude : AGENT_LOGOS.openai
+}
+
+/** The maker's colour, as the two properties a plate reads (voicebar.css `.dk-mplate`). */
+function agentBrand(agent: WebVoiceAgent): CSSProperties | undefined {
+  const logo = agentLogo(agent)
+  return logo?.color ? ({ '--logo-on-dark': logo.color.dark, '--logo-on-light': logo.color.light } as CSSProperties) : undefined
+}
+
 /**
- * Which agent, as a mark rather than a word: Gemini a four-point spark,
- * ChatGPT a hexagon, Claude an eight-ray burst, Forge Brain the desktop top
- * bar's brain glyph, still (../components/BrainGlyph.tsx). Silhouettes that
- * stay apart at 14px; the word is in the title, the accessible name, and the
- * menu.
+ * Which agent, as a mark rather than a word: the maker's real logo — the
+ * Gemini sparkle, the Claude spark, the OpenAI blossom — the same marks the
+ * desktop bar and every terminal's badge wear; Forge Brain the desktop top
+ * bar's brain glyph, still (../components/BrainGlyph.tsx). The word is in the
+ * title, the accessible name, and the menu.
  */
 function AgentMark({ agent }: { agent: WebVoiceAgent }): ReactNode {
-  if (agent === 'forge-brain') return <BrainGlyphMark size={14} className="dk-amark" />
+  const logo = agentLogo(agent)
+  if (!logo) return <BrainGlyphMark size={14} className="dk-amark" />
   return (
-    <svg className="dk-amark" data-agent={agent} width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      {agent === 'gemini-live' ? (
-        <path d="M7 .8C7.5 4.6 9.4 6.5 13.2 7 9.4 7.5 7.5 9.4 7 13.2 6.5 9.4 4.6 7.5.8 7 4.6 6.5 6.5 4.6 7 .8Z" fill="currentColor" />
-      ) : agent === 'claude' ? (
-        <path
-          d="M7 1.2V4.6M7 9.4V12.8M1.2 7H4.6M9.4 7H12.8M2.9 2.9 5.3 5.3M8.7 8.7 11.1 11.1M11.1 2.9 8.7 5.3M5.3 8.7 2.9 11.1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-        />
-      ) : (
-        <path
-          d="M7 1.4 11.85 4.2V9.8L7 12.6 2.15 9.8V4.2Z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        />
-      )}
+    <svg className="dk-amark" data-agent={agent} width="14" height="14" viewBox={logo.viewBox} fill="currentColor" aria-hidden="true">
+      {logo.paths.map((path, i) => (
+        <path key={i} d={path.d} fillRule={logo.evenOdd ? 'evenodd' : undefined} />
+      ))}
     </svg>
   )
 }

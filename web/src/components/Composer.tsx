@@ -1015,6 +1015,7 @@ export function Composer({
             controls={voiceControls}
             analyser={voiceLevel?.analyser ?? null}
             cancelArmed={cancelArmed}
+            meter={!bar}
           />
         ) : null}
         {files.length ? (
@@ -1393,12 +1394,15 @@ function VoicePanel({
   state,
   controls,
   analyser,
-  cancelArmed
+  cancelArmed,
+  meter = true
 }: {
   state: VoiceState
   controls: VoiceControls
   analyser: AnalyserNode | null
   cancelArmed: boolean
+  /** False on the deck bar: its edge is the meter, so the hidden one is not mounted to run its loop. */
+  meter?: boolean
 }): ReactNode {
   if (state.phase === 'review') {
     return (
@@ -1436,7 +1440,7 @@ function VoicePanel({
       <span className="composer__voice-label" role="status">
         {words}
       </span>
-      {state.phase === 'recording' ? <VoiceMeter analyser={analyser} /> : null}
+      {state.phase === 'recording' && meter ? <VoiceMeter analyser={analyser} /> : null}
       {state.phase === 'recording' || state.phase === 'transcribing' ? <Ticker since={state.startedAt} /> : null}
     </div>
   )

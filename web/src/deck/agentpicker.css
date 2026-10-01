@@ -50,31 +50,43 @@
 .dk-apick__group[data-sec='effort'] {
   --sec: var(--apick-effort);
 }
-.dk-apick__group[data-sec='mode'] {
+:is(.dk-apick__group, .dk-ustrip__item)[data-sec='mode'] {
   --sec: var(--apick-mode);
 }
 
 /* ------------------------------------------------------------------ chip */
 
-/* The chip and its usage toggle share one cell of the bar's grid, beside the words. */
+/*
+ * The destination well (the desktop's `.comp__dest`, hub/Composer.css): a
+ * sunken 36px pocket in the bar's grid, beside the words, that holds what the
+ * pane runs — the maker's mark, the model and effort by name — and the small
+ * chevron that tucks the usage line away.
+ */
 .dk-apick-slot {
   grid-area: pick;
   display: inline-flex;
   align-items: center;
   align-self: end;
+  gap: 2px;
   min-width: 0;
-  height: 34px;
+  height: 36px;
+  padding: 3px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 2px var(--well-shade, rgba(0, 0, 0, 0.35));
 }
 
 .dk-apick-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 190px;
-  height: 26px;
-  padding: 0 7px 0 4px;
+  height: 30px;
+  padding: 0 7px 0 5px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
   font-size: 11.5px;
@@ -83,12 +95,12 @@
   white-space: nowrap;
   color: var(--text-secondary);
   background: transparent;
-  border: 1px solid var(--line-hairline);
+  border: 0;
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .dk-apick-chip:hover:not(:disabled),
@@ -97,9 +109,15 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
+.dk-apick-chip:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Cannot type into the pane: dashed, the words still readable. */
 .dk-apick-chip:disabled {
   cursor: default;
-  border-style: dashed;
+  outline: 1px dashed var(--glass-line-strong);
+  outline-offset: -1px;
 }
 
 .dk-apick-chip:focus-visible,
@@ -109,19 +127,23 @@
   outline-offset: 1px;
 }
 
-/* The model's letter, in the Model section's violet. */
+/* The maker's mark on its plate (voicebar.css `.dk-mplate`). An agent with no
+   logo keeps the model's letter here, in the Model section's violet. */
 .dk-apick-chip__tile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   font-family: var(--font-display);
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
+}
+
+.dk-apick-chip__tile:not(.dk-mplate) {
   color: var(--apick-model);
   background: color-mix(in srgb, var(--apick-model) 16%, transparent);
 }
@@ -136,7 +158,7 @@
   flex: none;
   color: var(--text-dim);
   transition:
-    transform var(--dur-fast) var(--ease-out),
+    transform var(--dur-glide) var(--spring-glide),
     color var(--dur-fast) var(--ease-out);
 }
 
@@ -155,9 +177,8 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 22px;
-  height: 26px;
-  margin-left: 1px;
+  width: 26px;
+  height: 30px;
   padding: 0;
   border: 0;
   border-radius: var(--r-full);
@@ -174,6 +195,10 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
+.dk-apick-toggle__chev {
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
 .dk-apick-toggle[data-shown='false'] .dk-apick-toggle__chev {
   transform: rotate(180deg);
 }
@@ -181,20 +206,26 @@
 /* ------------------------------------------------------------ the strip */
 
 /*
- * Under the row, the bar's instrument line: a hairline, then each reading as a
- * word, a small bar and its number. Quiet by default, in the ink near a limit.
- * Its own container, so as the bar narrows the least pressing readings go first.
+ * Under the row, the bar's instrument line (the desktop's `.ustrip`,
+ * hub/ModelPicker.css): how full the pane's context is, how close each
+ * plan-limit window is, what the session has cost and the mode it is in.
+ * First-class read-outs, not small print: each is a label (small caps, quiet),
+ * a short meter in its section's colour, and its number in the ink, in tabular
+ * figures, so "Context 41%" reads at a glance. A hairline divides one reading
+ * from the next. Near a limit the reading also says so in words and its meter
+ * is striped: never the colour alone. Its own container, so as the bar narrows
+ * the least pressing readings go first.
  */
 .dk-ustrip {
   grid-area: strip;
   container: dk-ustrip / inline-size;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 0;
   min-width: 0;
-  height: 24px;
-  margin: 5px 2px 0 6px;
-  padding: 3px 6px 0 8px;
+  height: 26px;
+  margin: 5px 3px 0 8px;
+  padding: 3px 4px 0 4px;
   overflow: hidden;
   border: 0;
   border-top: 1px solid var(--glass-line);
@@ -203,44 +234,68 @@
   font-size: 11px;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
+  animation: dk-ustrip-in var(--dur-glide) var(--spring-glide) both;
 }
 
-.dk-ustrip:hover,
-.dk-ustrip[data-open='true'] {
-  color: var(--text-secondary);
+@keyframes dk-ustrip-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
 }
 
 .dk-ustrip__item {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex: none;
   min-width: 0;
+  padding: 0 14px;
+}
+
+.dk-ustrip__item:first-child {
+  padding-left: 4px;
+}
+
+/* The hairline between two readings. */
+.dk-ustrip__item + .dk-ustrip__item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  background: var(--glass-line);
 }
 
 .dk-ustrip__label {
-  color: var(--text-dim);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .dk-ustrip:hover .dk-ustrip__label,
 .dk-ustrip[data-open='true'] .dk-ustrip__label {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .dk-ustrip__bar {
   position: relative;
   display: block;
   flex: none;
-  width: 34px;
+  width: 44px;
   height: 4px;
   overflow: hidden;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--sec, var(--text-primary)) 16%, transparent);
+  background: color-mix(in srgb, var(--sec, var(--text-primary)) 18%, transparent);
 }
 
 .dk-ustrip__bar > span {
@@ -251,26 +306,42 @@
   background: var(--sec, currentColor);
 }
 
+/* The number: the reading itself, in the ink. */
 .dk-ustrip__pct {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--text-primary);
 }
 
-.dk-ustrip__item[data-level='warn'],
-.dk-ustrip__item[data-level='full'] {
+/* A reading that is a word (the mode). */
+.dk-ustrip__val {
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
 .dk-ustrip__word {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  color: var(--text-primary);
+  border: 1px solid var(--warn-line-strong);
+}
+
+.dk-ustrip__item[data-level='full'] .dk-ustrip__word {
+  border-style: double;
+  border-width: 3px;
+  padding: 0 4px;
 }
 
 .dk-ustrip__reset {
-  color: var(--text-dim);
+  font-size: 10.5px;
+  color: var(--text-muted);
 }
 
 .dk-ustrip__reset::before {
@@ -283,16 +354,20 @@
   gap: 4px;
   flex: none;
   margin-left: auto;
-  color: var(--text-dim);
+  padding-left: 12px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .dk-ustrip:hover .dk-ustrip__more,
 .dk-ustrip[data-open='true'] .dk-ustrip__more {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .dk-ustrip__chev {
   transform: rotate(180deg);
+  transition: transform var(--dur-glide) var(--spring-glide);
 }
 
 .dk-ustrip[data-open='true'] .dk-ustrip__chev {
@@ -301,20 +376,20 @@
 
 /* Narrowing: reset times, then cost and the word "Details", then the other
    windows, then context. The most-used window always stays. */
-@container dk-ustrip (max-width: 700px) {
+@container dk-ustrip (max-width: 780px) {
   .dk-ustrip__reset {
     display: none;
   }
 }
 
-@container dk-ustrip (max-width: 540px) {
+@container dk-ustrip (max-width: 620px) {
   .dk-ustrip__item[data-rank='3'],
   .dk-ustrip__more-word {
     display: none;
   }
 }
 
-@container dk-ustrip (max-width: 420px) {
+@container dk-ustrip (max-width: 460px) {
   .dk-ustrip__item[data-rank='2'] {
     display: none;
   }
@@ -743,13 +818,22 @@
     animation: none;
   }
 
-  .dk-apick__row::before {
+  .dk-apick__row::before,
+  .dk-apick-chip,
+  .dk-apick-chip__chev,
+  .dk-apick-toggle__chev,
+  .dk-ustrip__chev {
     transition: none;
+  }
+
+  .dk-ustrip {
+    animation: none;
   }
 }
 
 :root[data-reduced-motion='true'] .popover:has(> .dk-apick),
-:root[data-reduced-motion='true'] .dk-apick__row::before {
+:root[data-reduced-motion='true'] .dk-ustrip,
+:root[data-reduced-motion='true'] :is(.dk-apick__row::before, .dk-apick-chip, .dk-apick-chip__chev, .dk-apick-toggle__chev, .dk-ustrip__chev) {
   animation: none;
   transition: none;
 }
