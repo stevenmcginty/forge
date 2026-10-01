@@ -69,8 +69,9 @@
   padding: 0;
   border: 0;
   border-radius: var(--r-full);
-  color: var(--text-dim);
-  background: transparent;
+  color: var(--text-secondary);
+  /* A faint plate so it stands out a touch beside the chip. */
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease-out),
@@ -79,7 +80,7 @@
 
 .apick-toggle:hover {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
 }
 
 .apick-toggle:focus-visible {
