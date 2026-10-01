@@ -471,7 +471,6 @@
 .app[data-face='deck'] .dk-float .composer__card {
   box-shadow:
     0 24px 60px -16px rgba(0, 0, 0, 0.85),
-    0 0 36px -10px var(--accent-glow),
     inset 0 1px 0 var(--glass-hi);
 }
 
@@ -483,9 +482,8 @@
   margin: 0 12px 4px;
   padding: 0 10px;
   border-radius: 10px 10px 0 0;
-  background: color-mix(in srgb, var(--bg-base) 72%, transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  /* Opaque: it rides over a live terminal, and nothing is blurred over one. */
+  background: color-mix(in srgb, var(--bg-panel) 72%, var(--bg-base));
 }
 
 /* The composer's wrapper gives up its slab: the dock is glass, not a panel. */
@@ -517,11 +515,17 @@
 
 /* --------------------------------------------------------------- the bar
  *
- * Dock.css's `.dock__composer` glass and rim, laid out as hub/Composer.css
- * lays the deck's bar: one row — project, voice agent, the words, the agent
- * picker's chip, attach, and the mic (or Send, once there are words) — and the
- * usage line under it once the desktop has numbers. The terminal keys fold into
- * a row above it, so at rest the dock is one line.
+ * Dock.css's `.dock__composer` surface and rim, laid out as hub/Composer.css
+ * lays the deck's bar: one row — project, the voice well, the words, the
+ * destination well (the agent picker's chip), attach, and the mic (or Send,
+ * once there are words) — and the usage line under it once the desktop has
+ * numbers. The terminal keys fold into a row above it, so at rest the dock is
+ * one line.
+ *
+ * The surface is the desktop bar's: machined, opaque, neutral at rest. No
+ * backdrop blur — the bar sits over live terminals and under the edge canvas,
+ * and a blur there is recomputed with every frame of either. The accent is
+ * kept for live, focused and go.
  */
 .app[data-face='deck'] .dk-composer .composer__card {
   position: relative;
@@ -531,21 +535,30 @@
     'files files files files'
     'sub sub sub sub'
     'lead field attach send';
+  /* The shade inside a well's top edge: deep on a dark theme, a breath on a light one. */
+  --well-shade: rgba(0, 0, 0, 0.35);
   align-items: end;
-  column-gap: 8px;
+  column-gap: 6px;
   row-gap: 0;
   min-height: var(--dock-h);
-  padding: 6px 8px 6px 6px;
+  padding: 6px 7px 6px 6px;
   border-radius: 24px;
-  background: var(--glass-bg-strong);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--glass-line-strong));
-  box-shadow:
-    var(--glass-shadow),
-    0 0 36px -10px var(--accent-glow),
-    inset 0 1px 0 var(--glass-hi);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-panel-raised) 55%, var(--bg-panel)),
+    color-mix(in srgb, var(--bg-panel) 72%, var(--bg-base))
+  );
+  /* The phone's card is blurred glass (styles.css); the deck's is not. */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
   cursor: text;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+:root[data-appearance='light'] .app[data-face='deck'] .dk-composer .composer__card {
+  --well-shade: rgba(0, 0, 0, 0.07);
 }
 
 /* With the agent picker (./AgentPicker.tsx): its chip sits beside the words, as
@@ -559,26 +572,23 @@
     'strip strip strip strip strip';
 }
 
-/* A hairline of light along the top edge: the one lit object in the foreground. */
+/* A hairline of light along the top edge: the one lit object in the
+   foreground. Neutral at rest: the accent is kept for "live". */
 .app[data-face='deck'] .dk-composer .composer__card::before {
   content: '';
   position: absolute;
   top: -1px;
-  left: 18%;
-  right: 18%;
+  left: 16%;
+  right: 16%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 70%, white), transparent);
-  opacity: 0.7;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text-primary) 55%, transparent), transparent);
+  opacity: 0.55;
   pointer-events: none;
 }
 
+/* The keyboard is in the bar: its rim steps up. */
 .app[data-face='deck'] .dk-composer .composer__card:focus-within {
-  border-color: var(--glass-line-strong);
-  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
-  box-shadow:
-    var(--glass-shadow),
-    0 0 36px -10px var(--accent-glow),
-    inset 0 1px 0 var(--glass-hi);
+  border-color: color-mix(in srgb, var(--text-primary) 32%, transparent);
 }
 
 /* Nothing can be sent: the rim goes dashed, the reason is in the box. */
@@ -601,6 +611,7 @@
   grid-area: field;
   min-width: 0;
   min-height: 0;
+  margin: 0 0 1px;
   padding: 12px 2px 8px;
   font-family: var(--font-ui);
   font-size: 14.5px;
@@ -632,16 +643,17 @@
 
 .app[data-face='deck'] .dk-composer .composer__tools > .composer__icon {
   grid-area: attach;
-  align-self: center;
-  width: 34px;
-  height: 34px;
-  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  align-self: end;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 3px;
+  background: transparent;
   border-color: transparent;
 }
 
 .app[data-face='deck'] .dk-composer .composer__send {
   grid-area: send;
-  align-self: center;
+  align-self: end;
   margin: 0;
 }
 
@@ -739,7 +751,12 @@
   cursor: pointer;
   transition:
     color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.app[data-face='deck'] .dk-project:active {
+  transform: scale(0.97);
 }
 
 .app[data-face='deck'] .dk-project:hover,
@@ -788,10 +805,12 @@
   margin-top: var(--dk-strip-h);
   padding: 6px 16px 6px 6px;
   border-radius: 24px;
-  background: var(--glass-bg-strong);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid var(--glass-line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-panel-raised) 55%, var(--bg-panel)),
+    color-mix(in srgb, var(--bg-panel) 72%, var(--bg-base))
+  );
+  border: 1px solid var(--glass-line-strong);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
 }
 

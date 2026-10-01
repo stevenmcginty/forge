@@ -603,11 +603,17 @@ function useDockClearance(ref: RefObject<HTMLDivElement | null>, on: boolean): v
     const root = dock?.closest<HTMLElement>('.app[data-face="deck"]')
     if (!on || !dock || !root) return undefined
     let frame = 0
+    let written = ''
     const measure = (): void => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         if (dock.querySelector(DOCK_TYPING)) return
-        root.style.setProperty('--dk-dock-h', `${Math.ceil(dock.getBoundingClientRect().height)}px`)
+        // Written only when it really changed: an observer call that leaves the
+        // height where it was must not restyle the root and refit every terminal.
+        const next = `${Math.ceil(dock.getBoundingClientRect().height)}px`
+        if (next === written) return
+        written = next
+        root.style.setProperty('--dk-dock-h', next)
       })
     }
     measure()

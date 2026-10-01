@@ -365,14 +365,19 @@ export function DictationEdge({
       return p
     }
 
-    /** Colour round the edge: a conic sweep from the bar's middle, turned by `flow`. */
-    const sweep = (g: Geometry, alpha: number): CanvasGradient => {
+    /**
+     * Colour round the edge: a conic sweep from the bar's middle, turned by
+     * `flow`. Built once a frame at full strength; each layer that wears it
+     * sets its own strength with globalAlpha, so a frame makes one gradient,
+     * not three.
+     */
+    const sweep = (g: Geometry): CanvasGradient => {
       const grad = ctx.createConicGradient(flow * TAU, g.cw / 2, g.ch / 2)
       const [a, b, c] = stops
-      grad.addColorStop(0, rgba(a, alpha))
-      grad.addColorStop(0.33, rgba(b, alpha))
-      grad.addColorStop(0.66, rgba(c, alpha))
-      grad.addColorStop(1, rgba(a, alpha))
+      grad.addColorStop(0, rgba(a, 1))
+      grad.addColorStop(0.33, rgba(b, 1))
+      grad.addColorStop(0.66, rgba(c, 1))
+      grad.addColorStop(1, rgba(a, 1))
       return grad
     }
 
@@ -488,17 +493,21 @@ export function DictationEdge({
       const depthShape = off
       const lag = Math.round(n / 22)
       for (let i = 0; i < n; i++) depthShape[i] = shape[(i + lag) % n]!
-      ctx.fillStyle = sweep(g, variant === 'agent' ? 0.2 : 0.28)
+      const colours = sweep(g)
+      ctx.fillStyle = colours
+      ctx.globalAlpha = variant === 'agent' ? 0.2 : 0.28
       ctx.fill(band(g, crest(g, depthShape, 0.5, maxH)), 'evenodd')
 
       // 3. The ribbon itself, its colour flowing round the edge.
-      ctx.fillStyle = sweep(g, (variant === 'agent' ? 0.5 : 0.68) + 0.2 * level * amp)
+      ctx.globalAlpha = Math.min(1, (variant === 'agent' ? 0.5 : 0.68) + 0.2 * level * amp)
       ctx.fill(band(g, main), 'evenodd')
 
       // 4. Its crest, a fine bright line that rides the wave.
       ctx.lineWidth = 1.1
-      ctx.strokeStyle = sweep(g, variant === 'agent' ? 0.6 : 0.9)
+      ctx.strokeStyle = colours
+      ctx.globalAlpha = variant === 'agent' ? 0.6 : 0.9
       ctx.stroke(main)
+      ctx.globalAlpha = 1
 
       // 5. The rim in the companion colour, and the bright thin core line on it.
       ctx.lineWidth = 2
@@ -531,21 +540,42 @@ export function DictationEdge({
     const ro = new ResizeObserver(resize)
     ro.observe(host)
 
+    /*
+     * The loop: at most one draw per 60 Hz frame (a 120 Hz screen would
+     * otherwise pay for the ribbon twice as often for no visible gain), and
+     * none at all while the window is hidden.
+     */
     let raf = 0
     let timer = 0
-    if (still) {
-      drawStill()
-      timer = window.setInterval(drawStill, 100)
-    } else {
-      const loop = (now: number): void => {
-        draw(now)
+    let drawnAt = 0
+    const loop = (now: number): void => {
+      raf = requestAnimationFrame(loop)
+      if (now - drawnAt < 15) return
+      drawnAt = now
+      draw(now)
+    }
+    const run = (): void => {
+      if (document.hidden) return
+      if (still) {
+        if (timer) return
+        drawStill()
+        timer = window.setInterval(drawStill, 100)
+      } else if (!raf) {
         raf = requestAnimationFrame(loop)
       }
-      raf = requestAnimationFrame(loop)
     }
-    return () => {
+    const rest = (): void => {
       cancelAnimationFrame(raf)
+      raf = 0
       window.clearInterval(timer)
+      timer = 0
+    }
+    const onVisibility = (): void => (document.hidden ? rest() : run())
+    run()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      rest()
+      document.removeEventListener('visibilitychange', onVisibility)
       ro.disconnect()
     }
   }, [mounted, pad, variant, compact])

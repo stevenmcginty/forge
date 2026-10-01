@@ -164,6 +164,31 @@ export function useWebVoice(): WebVoiceState {
   return useSyncExternalStore(subscribe, () => state, () => state)
 }
 
+/**
+ * The state without what it is saying: the phase, the agent, muted, the error.
+ * `show` (a caption growing word by word, a tool call) notifies every listener,
+ * but this snapshot only changes when one of those five does, so a view that
+ * draws the switch or the edge does not re-render with every caption delta.
+ * Its `caption` and `lastAction` are not kept fresh: read `useWebVoice` for those.
+ */
+let core: WebVoiceState = state
+function coreSnapshot(): WebVoiceState {
+  if (
+    core.phase !== state.phase ||
+    core.error !== state.error ||
+    core.ended !== state.ended ||
+    core.muted !== state.muted ||
+    core.agent !== state.agent
+  ) {
+    core = state
+  }
+  return core
+}
+
+export function useWebVoiceCore(): Omit<WebVoiceState, 'caption' | 'lastAction'> {
+  return useSyncExternalStore(subscribe, coreSnapshot, coreSnapshot)
+}
+
 /** The same, read now rather than as of the last render (the Listen key). */
 export function webVoiceState(): WebVoiceState {
   return state
