@@ -186,12 +186,14 @@
   padding: 0;
 }
 
-/* The reference tools, reseated as rows in the dock's Tools sheet. */
+/* The reference tools, reseated as rows in the … menu's Tools section: the
+   menu's own row (DeckBar.css `.deckmenu__row`) — 32px, the 10px corner, the
+   display face — so the section reads as more of the same menu. */
 .deck .deck-tools {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 2px;
+  gap: 1px;
 }
 
 .deck .deck-tools > .ghost-btn,
@@ -200,12 +202,40 @@
   justify-content: flex-start;
   gap: 10px;
   width: 100%;
-  height: 36px;
+  height: var(--menu-row-h);
   margin: 0;
-  padding: 0 12px;
-  border-radius: 10px;
+  padding: 0 10px;
+  border-radius: var(--r-sheet-row);
+  font-family: var(--font-display);
   font-size: var(--t-md);
-  color: var(--text-secondary);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.deck .deck-tools > .ghost-btn:focus-visible,
+.deck .deck-tools .tabstrip__skills:focus-visible,
+.deck .deck-tools .tabstrip__cmds:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
+}
+
+/* The menu rows' 18px glyph column, so the labels line up under them. */
+.deck .deck-tools > .ghost-btn > svg:first-child,
+.deck .deck-tools .tabstrip__skills > svg:first-child,
+.deck .deck-tools .tabstrip__cmds > svg:first-child {
+  flex: none;
+  width: 18px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.deck .deck-tools .tabstrip__slash {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  color: var(--text-muted);
 }
 
 .deck .deck-tools .tabstrip__tint {
@@ -216,6 +246,12 @@
 .deck .deck-tools .tabstrip__tint::after {
   content: 'Tab text colours';
   font-size: var(--t-md);
+}
+
+/* On: the menus' pick-in-force wash, and the row says "on" in words. */
+.deck .deck-tools .tabstrip__tint[data-on='true'] {
+  background: var(--accent-softer);
+  box-shadow: none;
 }
 
 .deck .deck-tools .tabstrip__tint[data-on='true']::after {

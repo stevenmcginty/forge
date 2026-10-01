@@ -301,7 +301,15 @@
   opacity: 0;
 }
 
-/* ================================================================= sheets */
+/* ================================================================= sheets
+ *
+ * One surface for everything that opens out of the chrome (the shared
+ * contract's "Popover / menu"): opaque, a hairline rim, the 16px corner with
+ * 10px rows inside it, the menus' shadow. A sheet rises 8px out of the dock on
+ * the pop spring and sinks 6px to leave; from the top bar it drops instead
+ * (DeckBar.css). Forge Web's deck restates these as `.dk-sheet*`
+ * (web/src/deck/deck.css).
+ */
 
 .sheet {
   position: absolute;
@@ -311,7 +319,7 @@
   flex-direction: column;
   background: var(--sheet-bg);
   border: 1px solid var(--glass-line-strong);
-  border-radius: 16px;
+  border-radius: var(--r-sheet);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
   overflow: hidden;
   animation: sheet-in var(--dur-pop) var(--spring-pop) both;
@@ -325,14 +333,14 @@
 @keyframes sheet-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 12px, 0) scale(0.965);
+    transform: translate3d(0, 8px, 0) scale(0.975);
   }
 }
 
 @keyframes sheet-out {
   to {
     opacity: 0;
-    transform: translate3d(0, 8px, 0) scale(0.98);
+    transform: translate3d(0, 6px, 0);
   }
 }
 
@@ -345,38 +353,39 @@
 
 .sheet--panes {
   right: 0;
-  width: min(500px, calc(100vw - 32px));
+  width: min(480px, calc(100vw - 32px));
   max-height: min(620px, calc(100vh - 38px - var(--dock-clear) - 20px));
   transform-origin: calc(100% - 60px) 100%;
 }
 
+/* The head: an eyebrow, a count beside it, and whatever switch sits at the right. */
 .sheet__head {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
-  height: 44px;
-  padding: 0 10px 0 16px;
+  height: 40px;
+  padding: 0 7px 0 16px;
   border-bottom: 1px solid var(--glass-line);
 }
 
 .sheet__eyebrow {
   flex: none;
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
-
 .sheet__count {
   flex: 1;
+  min-width: 0;
   font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
-
 
 .sheet__rail {
   flex: 1;
@@ -390,24 +399,29 @@
   background: transparent;
 }
 
+/* Full screen | Wall inside the sheet: the top bar's well, with a raised key
+   on the view you are in — a shape and a word, the ink only agreeing. */
 .sheet__seg {
   display: flex;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--glass-line);
+  padding: 3px;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
 }
 
 .sheet__seg > button {
-  height: 24px;
-  padding: 0 11px;
+  height: 20px;
+  padding: 0 10px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
   font-size: 11px;
-  letter-spacing: 0.05em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
-  transition: color var(--dur-fast) var(--ease-out);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .sheet__seg > button:hover {
@@ -416,27 +430,31 @@
 
 .sheet__seg > button:focus-visible {
   outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
+  outline-offset: 1px;
   border-radius: var(--r-full);
 }
 
 .sheet__seg > button[data-active='true'] {
-  color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
 }
 
 .sheet__list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px;
+  overscroll-behavior: contain;
+  padding: var(--sheet-inset);
   outline: none;
 }
 
 .sheet__empty {
-  padding: 24px 12px;
+  padding: 22px 12px;
   text-align: center;
+  font-size: var(--t-md);
   color: var(--text-muted);
 }
 
@@ -445,8 +463,8 @@
   align-items: center;
   gap: 12px;
   flex: none;
-  height: 52px;
-  padding: 0 12px;
+  height: 48px;
+  padding: 0 12px 0 9px;
   border-top: 1px solid var(--glass-line);
 }
 
@@ -459,16 +477,17 @@
   margin-left: auto;
   font-size: var(--t-eyebrow);
   letter-spacing: 0.06em;
-  color: var(--text-muted);
+  color: var(--text-dim);
 }
 
 /* --------------------------------------------------------------- pane row
  *
  * The rail (ProjectRail.css) also calls its rows `.prow`, and scopes all of
- * its own rules to `.rail`; the spacing and the ease below are scoped to this
- * sheet's list for the same reason, so neither list can reach into the other.
- * Forge Web's deck mirrors this row (scripts/web-deck-check.mjs), which is why
- * the class keeps its name.
+ * its own rules to `.rail`. The unscoped block below is the old base both
+ * lists were written against, kept as it was; the agent row itself — the
+ * contract's two-line 42px row: number, a round 28px logo plate, the name over
+ * what runs in it, the state chip — is scoped to this sheet's list, so neither
+ * list can reach into the other.
  */
 
 .prow {
@@ -482,32 +501,6 @@
   border-radius: 10px;
   text-align: left;
   color: var(--text-secondary);
-}
-
-.sheet__list .prow {
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
-}
-
-.sheet__list .prow + .prow {
-  margin-top: var(--s-1);
-}
-
-/* Inset: the list scrolls, and a ring outside the row would be clipped. */
-.sheet__list .prow:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: -2px;
-  border-radius: var(--r-sheet-row);
-}
-
-.prow[data-cursor='true'] {
-  background: color-mix(in srgb, var(--pane-accent) 9%, var(--bg-hover));
-  color: var(--text-primary);
-}
-
-.prow[data-current='true'] {
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .prow__num {
@@ -528,29 +521,123 @@
   color: var(--text-muted);
 }
 
+.sheet__list .prow {
+  position: relative;
+  grid-template-columns: 18px 28px minmax(0, 1fr) auto auto;
+  gap: 10px;
+  height: 42px;
+  padding: 0 10px 0 6px;
+  border-radius: var(--r-sheet-row);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.sheet__list .prow + .prow {
+  margin-top: var(--s-1);
+}
+
+/* Inset: the list scrolls, and a ring outside the row would be clipped. */
+.sheet__list .prow:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
+}
+
+/* Under the pointer, or where the arrow keys have got to. */
+.sheet__list .prow[data-cursor='true'] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sheet__list .prow:active {
+  background: var(--bg-active);
+}
+
+/* The one on screen is the pick in force: a wash, an upright bar at the edge,
+   and (in the row) a tick and the words. */
+.sheet__list .prow[data-current='true'] {
+  background: var(--accent-softer);
+}
+
+.sheet__list .prow[data-current='true'][data-cursor='true'] {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-hover));
+}
+
+.sheet__list .prow[data-current='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  margin-top: -9px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+/* The maker's logo on a round plate, 28px: the badge's own colours, reshaped. */
+.sheet__list .prow__plate {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+
+.sheet__list .prow__plate .agent-badge,
+.sheet__list .prow__plate .chat-mark__plate {
+  width: 28px;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.sheet__list .prow__plate .agent-badge__logo,
+.sheet__list .prow__plate .chat-mark__logo {
+  height: 15px;
+}
+
+/* The row says "Chat" in words; the plate does not need the bubble as well. */
+.sheet__list .prow__plate .chat-mark__bubble {
+  display: none;
+}
+
+.sheet__list .prow__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.sheet__list .prow__name {
+  font-size: 12.5px;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.sheet__list .prow__kind {
+  line-height: 1.25;
+  color: var(--text-dim);
+}
+
 /* The cursor row is a lighter surface; the line steps up to stay over 4.5:1
    there, as the rail's path does on a lit row. */
-.prow[data-cursor='true'] .prow__kind {
-  color: color-mix(in srgb, var(--text-primary) 35%, var(--text-muted));
+.sheet__list .prow[data-cursor='true'] .prow__kind,
+.sheet__list .prow[data-current='true'] .prow__kind {
+  color: var(--text-muted);
 }
 
-.prow__here {
+.sheet__list .prow__here {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: var(--font-display);
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--accent);
-}
-
-/*
- * Accent words on an accent wash, in a light theme: --accent-ink, the accent
- * pulled toward the ink, clears 4.5:1 where the bare accent does not (3.8:1 in
- * Paper). A separate light-only rule rather than a change to the two above,
- * because Forge Web's deck restates those two word for word
- * (scripts/web-deck-check.mjs) and in a dark theme the ink is the accent.
- */
-:root[data-appearance='light'] .sheet__seg > button[data-active='true'],
-:root[data-appearance='light'] .prow__here {
+  white-space: nowrap;
   color: var(--accent-ink);
 }
 
@@ -588,9 +675,10 @@
 
 /* ---------------------------------------------------------- chat tabs
  *
- * The Agents sheet's "Chatbots" group: new chat tabs, apart from the agents.
- * A chat row's sign-in word sits on the sheet, not on the bot's plate, so it
- * takes the sheet's colours rather than the bot's ink.
+ * The Agents sheet's "Chatbots" group: new chat tabs, apart from the agents —
+ * a row of chips, each the bot's mark and name. A chat row's sign-in word sits
+ * on the sheet, not on the bot's plate, so it takes the sheet's colours rather
+ * than the bot's ink.
  */
 
 .sheet__chats {
@@ -599,12 +687,13 @@
   flex-wrap: wrap;
   gap: 6px;
   flex: none;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 16px;
   border-top: 1px solid var(--glass-line);
 }
 
 .sheet__chats .sheet__eyebrow {
-  margin-right: 4px;
+  margin-right: 6px;
+  color: var(--text-dim);
 }
 
 .sheet__chat {
@@ -612,22 +701,36 @@
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 10px 0 6px;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 0 11px 0 7px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--text-secondary);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .sheet__chat:hover {
   color: var(--text-primary);
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.sheet__chat:active {
+  transform: scale(0.96);
 }
 
 .sheet__chat:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 1px;
+  border-radius: var(--r-full);
 }
 
 .prow .prow__signin {
