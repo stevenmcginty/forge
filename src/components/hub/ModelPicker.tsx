@@ -500,7 +500,7 @@ export const ModelPicker = memo(function ModelPicker(): ReactNode {
         <Icon name="chevronDown" size={11} className="apick-chip__chev" />
       </button>
       {hasStrip ? (
-        // Down = fold the strip away below; up = bring it back. A shape, not a colour.
+        // A meter, not a second chevron beside the model's: ringed while the strip shows. A shape, not a colour.
         <button
           type="button"
           className="apick-toggle"
@@ -511,7 +511,7 @@ export const ModelPicker = memo(function ModelPicker(): ReactNode {
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => setStripShown(!shown)}
         >
-          <Icon name="chevronDown" size={11} className="apick-toggle__chev" />
+          <Icon name="meter" size={13} className="apick-toggle__icon" />
         </button>
       ) : null}
       <AgentMenuPopover agent={agent} trigger={chip} menu={menu} />

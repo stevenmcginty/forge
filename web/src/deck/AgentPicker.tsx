@@ -394,7 +394,7 @@ export function DeckAgentPicker(props: DeckPickerProps): ReactNode {
           <Icon name="chevronDown" size={11} className="dk-apick-chip__chev" />
         </button>
         {hasNumbers ? (
-          // Down tucks the usage line away under the bar; up brings it back. A shape, not a colour.
+          // A meter, not a second chevron beside the model's: ringed while the usage line shows. A shape, not a colour.
           <button
             type="button"
             className="dk-apick-toggle"
@@ -405,7 +405,7 @@ export function DeckAgentPicker(props: DeckPickerProps): ReactNode {
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setStripShown(!shown)}
           >
-            <Icon name="chevronDown" size={11} className="dk-apick-toggle__chev" />
+            <Icon name="meter" size={13} className="dk-apick-toggle__icon" />
           </button>
         ) : null}
       </span>

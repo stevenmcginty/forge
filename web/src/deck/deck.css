@@ -16,12 +16,11 @@
   /* The status strip that rides above the bar. */
   --dk-strip-h: 24px;
   --dock-bottom: 8px;
-  /* The dock's resting height, measured (Deck.tsx useDockClearance) as
-     --dk-dock-h; until it is, a guess: the card runs ~8px over --dock-h once
-     its lead is in it, and the status strip rides on top. */
-  --dk-dock-clear: calc(
-    var(--dk-dock-h, calc(var(--dock-h) + 8px + var(--dk-strip-h))) + var(--dock-bottom) + var(--dk-gut)
-  );
+  /* The bar's top edge to the dock's foot, measured (Deck.tsx
+     useDockClearance) as --dk-dock-h; until it is, a guess: the card runs
+     ~8px over --dock-h once its lead is in it. The status strip above the bar
+     floats over the stage, so it is not counted. */
+  --dk-dock-clear: calc(var(--dk-dock-h, calc(var(--dock-h) + 8px)) + var(--dock-bottom) + var(--dk-gut));
   --dk-bar-w: clamp(600px, 72vw, 1240px);
   position: relative;
   isolation: isolate;

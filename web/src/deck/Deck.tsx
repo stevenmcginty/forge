@@ -537,9 +537,10 @@ function FaceSwitch({ paneId, name, compact = false }: { paneId: string; name: s
  * Where the words are written, by where the voice bar is.
  *
  *   bottom  the dock: one bar along the bottom edge (Dock.tsx's) — the voice
- *           bar group leads it, then the words and where they go. It floats
- *           below the stage, so it never covers a terminal: the stage stops
- *           where the dock's resting height says (useDockClearance).
+ *           bar group leads it, then the words and where they go. The stage
+ *           runs down to the bar itself (useDockClearance); the status words
+ *           and voice line above the bar float over the foot of the terminal,
+ *           as on the desktop.
  *   top     the voice bar group is in the top bar, and the words float as a
  *           card over the foot of the stage — only while they are wanted: asked
  *           for (Ctrl+Shift+G, Type, D with no text field focused), while a
@@ -585,9 +586,11 @@ export function DeckDock({ place }: { place: BarPlace }): ReactNode {
 const DOCK_TYPING = '.composer__input:focus, .composer__picks:focus-within, .composer__picks [aria-expanded="true"]'
 
 /**
- * The stage makes room for the dock as it really is, not as a guess: the
- * dock's height at rest, measured, goes on the deck root as `--dk-dock-h`, and
- * deck.css turns it into the stage's clearance. The terminal keys, a voice
+ * The stage makes room for the bar as it really is, not as a guess: from the
+ * bar's top edge to the dock's foot, measured at rest, goes on the deck root as
+ * `--dk-dock-h`, and deck.css turns it into the stage's clearance. What rides
+ * above the bar (the status words, the voice line) does not count: it floats
+ * over the foot of the terminal, so the terminal keeps every row it can. The terminal keys, a voice
  * line, a draft of several lines left in the box — each is the dock's height
  * for as long as it stays, and the panes above refit to it once.
  *
@@ -610,7 +613,8 @@ function useDockClearance(ref: RefObject<HTMLDivElement | null>, on: boolean): v
         if (dock.querySelector(DOCK_TYPING)) return
         // Written only when it really changed: an observer call that leaves the
         // height where it was must not restyle the root and refit every terminal.
-        const next = `${Math.ceil(dock.getBoundingClientRect().height)}px`
+        const bar = dock.querySelector<HTMLElement>('.composer__card, .dk-bar-idle') ?? dock
+        const next = `${Math.ceil(dock.getBoundingClientRect().bottom - bar.getBoundingClientRect().top)}px`
         if (next === written) return
         written = next
         root.style.setProperty('--dk-dock-h', next)

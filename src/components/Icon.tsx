@@ -51,6 +51,7 @@ export type IconName =
   | 'paperclip'
   | 'image'
   | 'sparkle'
+  | 'meter'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -114,6 +115,8 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   chevronDown: <path d="M4.4 6.4L8 10l3.6-3.6" />,
+  // Three rising bars: how much is used. The bar's usage-line toggle.
+  meter: <path d="M4 12.5v-2.5M8 12.5V7M12 12.5v-9" />,
   terminal: (
     <>
       <rect x="2" y="3" width="12" height="10" rx="1.6" />
