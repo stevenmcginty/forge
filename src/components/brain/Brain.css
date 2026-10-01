@@ -195,6 +195,7 @@
   -webkit-app-region: no-drag;
 }
 
+/* A disc, like the menu button beside it (DeckBar.css): open, a raised key. */
 .brainbtn {
   position: relative;
   display: grid;
@@ -202,21 +203,31 @@
   width: 36px;
   height: 28px;
   border-radius: var(--r-full);
-  transition: background var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .brainbtn:hover {
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
 .brainbtn[data-open='true'] {
-  background: var(--accent-softer);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.brainbtn:active {
+  transform: scale(0.94);
 }
 
 .brainbtn:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
+  border-radius: var(--r-full);
 }
 
 .brainbtn:hover .bglyph[data-state='off'] {
@@ -271,11 +282,12 @@
 
 /*
  * Off: the intro, dropped from the icon like the … menu — the sheet surface
- * (it can cover live terminals), the menu's spring, sized to what is in it.
+ * (it can cover live terminals), the menus' one motion (DeckBar.css: 6px down
+ * on the pop spring, back up to leave), sized to what is in it.
  */
 .brainpop {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 7px);
   right: -4px;
   z-index: var(--z-sheet);
   width: min(412px, calc(100vw - 24px));
@@ -285,16 +297,28 @@
   background: var(--sheet-bg);
   border: 1px solid var(--glass-line-strong);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
-  transform-origin: calc(100% - 22px) -8px;
+  transform-origin: calc(100% - 22px) 0;
   animation: brainpop-in var(--dur-pop) var(--spring-pop) both;
   -webkit-app-region: no-drag;
   cursor: default;
 }
 
+.brainpop[data-state='closing'] {
+  animation: brainpop-out var(--dur-exit) var(--ease-in-out) both;
+  pointer-events: none;
+}
+
 @keyframes brainpop-in {
   from {
     opacity: 0;
-    transform: translate3d(0, -10px, 0) scale(0.955);
+    transform: translate3d(0, -6px, 0) scale(0.975);
+  }
+}
+
+@keyframes brainpop-out {
+  to {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0);
   }
 }
 

@@ -23,7 +23,7 @@ import './Dock.css'
 
 /**
  * The top bar's Agents menu: every agent in the project, by name, with its
- * state as a word and a shape, and "here" on the one on screen. Picking one
+ * state as a word and a shape, and a tick and "on screen" on the one that is. Picking one
  * opens it Full screen (bringing the agents back if the browser or the board
  * was up). It replaced the "N agents" count and the wall strip that used to
  * sit over Full screen, so Full screen is one terminal and nothing else.
@@ -236,6 +236,16 @@ function PanesSheet(): ReactNode {
   )
 }
 
+/** The one on screen: a tick and the words, so it is never the row's wash alone. */
+function OnScreen(): ReactNode {
+  return (
+    <span className="prow__here">
+      <Icon name="check" size={10} />
+      on screen
+    </span>
+  )
+}
+
 /** A chat tab in the list: the bot's plate, its name, "Chat", and whether Forge is signed in. */
 function ChatRow({
   chat,
@@ -268,11 +278,15 @@ function ChatRow({
       onClick={onPick}
     >
       <span className="prow__num mono">{index + 1}</span>
-      <ChatMark bot={chat.bot} size="sm" />
-      <span className="prow__name truncate">{entry.name}</span>
-      <span className="prow__kind truncate">Chat</span>
+      <span className="prow__plate">
+        <ChatMark bot={chat.bot} size="sm" />
+      </span>
+      <span className="prow__text">
+        <span className="prow__name truncate">{entry.name}</span>
+        <span className="prow__kind truncate">Chat</span>
+      </span>
+      {current ? <OnScreen /> : null}
       <ChatSignInWord bot={chat.bot} className="chat-signin prow__signin" />
-      {current ? <span className="prow__here">here</span> : null}
     </button>
   )
 }
@@ -313,11 +327,15 @@ function PaneRow({
       onClick={onPick}
     >
       <span className="prow__num mono">{index + 1}</span>
-      <AgentBadge profile={profile} size="sm" />
-      <span className="prow__name truncate">{name}</span>
-      <span className="prow__kind truncate">{profile.name}</span>
+      <span className="prow__plate">
+        <AgentBadge profile={profile} size="sm" />
+      </span>
+      <span className="prow__text">
+        <span className="prow__name truncate">{name}</span>
+        <span className="prow__kind truncate">{profile.name}</span>
+      </span>
+      {current ? <OnScreen /> : null}
       <StateChip activity={activity} />
-      {current ? <span className="prow__here">here</span> : null}
     </button>
   )
 }

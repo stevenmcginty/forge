@@ -163,3 +163,87 @@
   font-size: var(--t-sm);
   line-height: 1.45;
 }
+
+/* ------------------------------------------------------------- on the deck
+ *
+ * On the deck — the desktop, and Forge Web's deck face — every Popover is one
+ * of the chrome's menus (the shared contract's "Popover / menu"): the sheets'
+ * opaque surface and rim, the 16px corner with 10px rows inside it, 32px rows,
+ * and the menus' entrance, which for a panel Popover has measured is a move
+ * and no scale. `body:has(.app.deck) >` because Popover portals to <body>;
+ * the phone face has no `.deck`, so nothing here reaches it. The model
+ * picker (`.apick` / `.dk-apick`) brings its own panel and is left to it.
+ */
+body:has(.app.deck) > .popover:not(:has(> .apick, > .dk-apick)) {
+  padding: var(--sheet-inset);
+  background: var(--sheet-bg);
+  border-color: var(--glass-line-strong);
+  border-radius: var(--r-sheet);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
+  overscroll-behavior: contain;
+  animation: popover-drop var(--dur-pop) var(--spring-pop) both;
+}
+
+@keyframes popover-drop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+body:has(.app.deck) > .popover .popover__eyebrow {
+  padding: var(--s-2) 10px var(--s-3);
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+}
+
+body:has(.app.deck) > .popover .popover__row {
+  position: relative;
+  gap: 10px;
+  min-height: var(--menu-row-h);
+  padding: var(--s-2) 10px;
+  border-radius: var(--r-sheet-row);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+body:has(.app.deck) > .popover .popover__row:active:not([disabled]) {
+  background: var(--bg-active);
+}
+
+/* Inset: a popover scrolls, and a ring outside the row would be clipped. */
+body:has(.app.deck) > .popover .popover__row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
+  background: var(--bg-hover);
+}
+
+/* The pick in force: a wash and an upright bar at the row's edge. */
+body:has(.app.deck) > .popover .popover__row[data-selected='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+body:has(.app.deck) > .popover .popover__divider {
+  margin: var(--s-3) var(--s-2);
+  background: var(--glass-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:has(.app.deck) > .popover:not(:has(> .apick, > .dk-apick)) {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] body:has(.app.deck) > .popover:not(:has(> .apick, > .dk-apick)) {
+  animation: none;
+}

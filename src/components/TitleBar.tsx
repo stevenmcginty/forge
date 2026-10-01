@@ -1,13 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
 import { NEW_TAB_EVENT } from '@/hooks/useShortcuts'
 import { HUB_CHEAT_SHEET_EVENT } from '@/lib/hubnav'
+import { usePresence } from '@/lib/motion'
 import { shellSheet, toolsHost, useShellSheet, useShellMode, useSurfaces } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
-import { useActiveProject, useApp, usePaneCount, useViewMode } from '@/state/AppState'
+import { useActions, useActiveProject, useActiveWorkspace, useAppSelector, usePaneCount, useViewMode } from '@/state/AppState'
 import { AccountChip } from './AccountChip'
 import { CommandKeys } from './hub/KeyRecorder'
-import { Icon } from './Icon'
+import { Icon, type IconName } from './Icon'
 import { ScreenshotTray } from './ScreenshotTray'
 import type { NewTabDetail } from './TerminalGrid'
 import { BrainButton } from './brain/BrainButton'
@@ -35,9 +36,9 @@ import './shell/DeckBar.css'
  * styles are its own, in shell/DeckBar.css.)
  */
 export function TitleBar(): ReactNode {
-  const { state } = useApp()
+  // One slice, not the whole state: the bar does not re-render on unrelated changes.
+  const isDevChannel = useAppSelector((state) => state.info?.channel === 'dev')
   const [focused, setFocused] = useState(true)
-  const isDevChannel = state.info?.channel === 'dev'
 
   useEffect(() => window.forge.window.onState((s) => setFocused(s.focused)), [])
 
@@ -70,16 +71,22 @@ export function TitleBar(): ReactNode {
 export interface DeckMode {
   id: string
   title: string
+  /** The switcher's glyph: the built-in one for a mode Forge knows, else the surface's own. */
+  icon?: IconName
+  glyph?: ReactNode
 }
+
+/** The glyphs Forge Web's deck uses for the same three (web/src/deck/DeckTopBar.tsx). */
+const MODE_ICONS: Record<string, IconName> = { agents: 'terminal', browser: 'globe', board: 'image' }
 
 /** The modes, in switcher order: Agents, then every registered surface. */
 export function useDeckModes(): DeckMode[] {
   const surfaces = useSurfaces()
   return [
-    { id: 'agents', title: 'Agents' },
+    { id: 'agents', title: 'Agents', icon: MODE_ICONS.agents },
     ...[...surfaces]
       .sort((a, b) => (a.order ?? 50) - (b.order ?? 50))
-      .map((s) => ({ id: s.id, title: s.title }))
+      .map((s) => ({ id: s.id, title: s.title, icon: MODE_ICONS[s.id], glyph: s.glyph }))
   ]
 }
 
@@ -90,34 +97,23 @@ export function useDeckMode(): string {
 }
 
 /**
- * Agents, the browser, the board — one keystroke or one
- * click apart, with a lit capsule that glides between them. The capsule is a
- * single element moved by transform, measured off the button it lands on.
+ * Agents, the browser, the board — one keystroke or one click apart, in a well
+ * with one raised key, the lamp, that glides to the mode you are in. The
+ * segments are all one width (DeckBar.css), so the lamp is placed by two
+ * numbers — which segment, of how many — and moved by a transform alone:
+ * nothing is measured, and it cannot slide in from the edge on first paint.
  */
 function ModePill(): ReactNode {
   const modes = useDeckModes()
   const active = useDeckMode()
-  const ref = useRef<HTMLDivElement | null>(null)
-  const lampRef = useRef<HTMLSpanElement | null>(null)
-  const placed = useRef(false)
-
-  useEffect(() => {
-    const root = ref.current
-    const lamp = lampRef.current
-    if (!root || !lamp) return
-    const btn = root.querySelector<HTMLElement>(`[data-mode='${active}']`)
-    if (!btn) return
-    lamp.style.width = `${btn.offsetWidth}px`
-    lamp.style.transform = `translate3d(${btn.offsetLeft}px, 0, 0)`
-    if (!placed.current) {
-      placed.current = true
-      requestAnimationFrame(() => lamp.setAttribute('data-ready', 'true'))
-    }
-  }, [active, modes.length])
+  const index = Math.max(
+    0,
+    modes.findIndex((m) => m.id === active)
+  )
 
   return (
-    <nav className="deckbar__modes" ref={ref} aria-label="Modes">
-      <span className="deckbar__lamp" ref={lampRef} aria-hidden="true" />
+    <nav className="deckbar__modes" aria-label="Modes" style={{ '--i': index, '--n': modes.length } as CSSProperties}>
+      <span className="deckbar__lamp" aria-hidden="true" />
       {modes.map((m) => (
         <button
           key={m.id}
@@ -126,9 +122,11 @@ function ModePill(): ReactNode {
           data-mode={m.id}
           data-active={m.id === active ? 'true' : undefined}
           aria-pressed={m.id === active}
+          title={m.id === active ? `${m.title} — showing now` : m.title}
           onClick={() => uiCommands.run('set-mode', m.id)}
         >
-          {m.title}
+          {m.icon ? <Icon name={m.icon} size={13} /> : (m.glyph ?? null)}
+          <span className="deckbar__modeword">{m.title}</span>
         </button>
       ))}
     </nav>
@@ -159,11 +157,11 @@ function ProjectChip(): ReactNode {
       aria-expanded={open}
       aria-label={`Project ${project.name}${branch ? `, branch ${branch}` : ''}. Switch project`}
       title={project.path}
-      style={{ '--project': project.color } as React.CSSProperties}
+      style={{ '--project': project.color } as CSSProperties}
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => toggleSheet('projects')}
     >
-      <Icon name="folder" size={14} className="deckbar__projectmark" />
+      <Icon name="folder" size={13} className="deckbar__projectmark" />
       <span className="deckbar__projectname truncate">{project.name}</span>
       {branch ? (
         <span className="deckbar__projectbranch">
@@ -179,9 +177,9 @@ function ProjectChip(): ReactNode {
 /* --------------------------------------------------------- agent controls */
 
 /**
- * The Agents menu, the Wall | Full screen switch, the new-agent button (Ctrl+T's
- * chooser anchors on it; it is on screen whichever size the terminals are) and,
- * while the Wall is up, its layout controls — one tray, parted by hairlines.
+ * The Agents menu, the Wall | Full screen switch and the new-agent button
+ * (Ctrl+T's chooser anchors on it; it is on screen whichever size the
+ * terminals are): a menu, a switch and an action, side by side.
  */
 function AgentControls(): ReactNode {
   const project = useActiveProject()
@@ -197,12 +195,16 @@ function AgentControls(): ReactNode {
 }
 
 /**
- * New agent, right beside the Wall switch. Opens Ctrl+T's chooser, anchored
- * on this button, same as the Agents menu's own "New agent" row.
+ * New agent, right beside the Wall switch: the one solid-accent control on the
+ * bar. Opens Ctrl+T's chooser, anchored on this button, same as the Agents
+ * menu's own "New agent" row; while that chooser is up TerminalGrid marks the
+ * button `data-open` and the plus rests as a close mark. In a project with no
+ * agent yet a slow ring invites the first one.
  */
 function NewAgentButton(): ReactNode {
   const { used, max } = usePaneCount()
   const { commands } = useKeymap()
+  const none = useActiveWorkspace().tabs.length === 0
   const combo = commands.find((c) => c.id === 'tab.new')?.keys[0]
   const atLimit = used >= max
   const keys = combo ? ` (${combo})` : ''
@@ -212,15 +214,18 @@ function NewAgentButton(): ReactNode {
       type="button"
       className="deckbar__new"
       data-new-agent=""
+      data-invite={none ? 'true' : undefined}
       aria-label="New agent"
+      aria-haspopup="dialog"
       title={atLimit ? `Session limit reached (${max})` : `New agent${keys}`}
       disabled={atLimit}
       onClick={(e) =>
         window.dispatchEvent(new CustomEvent<NewTabDetail>(NEW_TAB_EVENT, { detail: { anchor: e.currentTarget } }))
       }
     >
+      <span className="deckbar__newsheen" aria-hidden="true" />
       <Icon name="plus" size={13} />
-      New
+      <span className="deckbar__newword">New</span>
     </button>
   )
 }
@@ -228,37 +233,20 @@ function NewAgentButton(): ReactNode {
 /**
  * Wall on or off, shown as the two views it flips between. On: the Wall, every
  * agent at once. Off: Full screen, one terminal. Both words are always there
- * and the one you are in sits in the lit capsule — a word and a shape, not a
- * colour alone — which glides across like the mode pill's lamp. Still one
- * button: a click (or Ctrl+G) flips it, and aria-pressed tells a screen reader
- * whether the Wall is on. Over the browser or the board it brings the agents
- * back, as the Wall.
+ * and the one you are in sits on the lamp — a word and a shape, not a colour
+ * alone — which glides across like the mode switch's. Still one button: a
+ * click (or Ctrl+G) flips it, and aria-pressed tells a screen reader whether
+ * the Wall is on. Over the browser or the board it brings the agents back, as
+ * the Wall. In a narrow window the words give way to their glyphs.
  */
 function WallSwitch(): ReactNode {
-  const { actions } = useApp()
+  const actions = useActions()
   const viewMode = useViewMode()
   const surface = useShellMode()
   const { commands } = useKeymap()
   const combo = commands.find((c) => c.id === 'view.toggle')?.keys[0]
   const on = viewMode === 'mosaic' && !surface
   const keys = combo ? ` (${combo})` : ''
-  const ref = useRef<HTMLButtonElement | null>(null)
-  const thumbRef = useRef<HTMLSpanElement | null>(null)
-  const placed = useRef(false)
-
-  // The capsule is measured off the word it lands on, before paint, and only
-  // animates after its first placement so it never slides in from the edge.
-  useLayoutEffect(() => {
-    const thumb = thumbRef.current
-    const word = ref.current?.querySelector<HTMLElement>(`[data-view='${on ? 'wall' : 'full'}']`)
-    if (!thumb || !word) return
-    thumb.style.width = `${word.offsetWidth}px`
-    thumb.style.transform = `translate3d(${word.offsetLeft}px, 0, 0)`
-    if (!placed.current) {
-      placed.current = true
-      requestAnimationFrame(() => thumb.setAttribute('data-ready', 'true'))
-    }
-  }, [on])
 
   const title = on
     ? `Wall — every agent at once. Click for Full screen, one terminal${keys}`
@@ -268,13 +256,13 @@ function WallSwitch(): ReactNode {
 
   return (
     <button
-      ref={ref}
       type="button"
       className="deckbar__wall"
       data-on={on ? 'true' : undefined}
       aria-pressed={on}
       aria-label="Wall"
       title={title}
+      style={{ '--i': on ? 0 : 1, '--n': 2 } as CSSProperties}
       onClick={() => {
         if (surface) {
           actions.setViewMode('mosaic')
@@ -284,12 +272,14 @@ function WallSwitch(): ReactNode {
         actions.setViewMode(on ? 'tabs' : 'mosaic')
       }}
     >
-      <span className="deckbar__thumb" ref={thumbRef} aria-hidden="true" data-hidden={surface ? 'true' : undefined} />
+      <span className="deckbar__thumb" aria-hidden="true" data-hidden={surface ? 'true' : undefined} />
       <span className="deckbar__view" data-view="wall" data-lit={on ? 'true' : undefined}>
-        Wall
+        <Icon name="wall" size={13} />
+        <span className="deckbar__viewword">Wall</span>
       </span>
       <span className="deckbar__view" data-view="full" data-lit={!on && !surface ? 'true' : undefined}>
-        Full screen
+        <Icon name="expand" size={13} />
+        <span className="deckbar__viewword">Full screen</span>
       </span>
     </button>
   )
@@ -305,13 +295,17 @@ function WallSwitch(): ReactNode {
  *
  * It stays mounted while closed, only hidden, so the tools keep their own
  * state and flyouts; a click inside one of their pop-ups does not close it.
- * A fresh screenshot still announces itself: a count on the "…" button.
+ * Closing, it stays on screen for the length of its exit (DeckBar.css) and is
+ * hidden after. ↑ ↓ Home End move through its rows. A fresh screenshot still
+ * announces itself: a count on the "…" button.
  */
 function DeckMenu(): ReactNode {
-  const { state, actions } = useApp()
+  const actions = useActions()
+  const inSettings = useAppSelector((state) => state.view === 'settings')
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const open = useShellSheet() === 'shelf'
+  const { mounted, closing } = usePresence(open, 160)
   const toggle = (): void => shellSheet.set(shellSheet.get() === 'shelf' ? null : 'shelf')
   useUiCommand('open-shelf', () => shellSheet.set('shelf'))
   useUiCommand('close-shelf', () => {
@@ -372,7 +366,18 @@ function DeckMenu(): ReactNode {
     shellSheet.set(null)
     fn()
   }
-  const inSettings = state.view === 'settings'
+
+  // The rows are a menu: the arrows walk them, Home and End jump to the ends.
+  const onRowKey = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+    if (!step && e.key !== 'Home' && e.key !== 'End') return
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    if (!rows.length) return
+    e.preventDefault()
+    const at = rows.indexOf(document.activeElement as HTMLElement)
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (at + step + rows.length) % rows.length
+    rows[next]?.focus()
+  }
 
   return (
     <span className="deckmenu">
@@ -390,8 +395,8 @@ function DeckMenu(): ReactNode {
         <Icon name="cog" size={16} />
         {fresh > 0 ? <span className="deckbar__badge">{fresh > 9 ? '9+' : fresh}</span> : null}
       </button>
-      <div ref={menuRef} className="deckmenu__panel" data-shell-overlay="" hidden={!open} role="menu" aria-label="Menu">
-        <div className="deckmenu__rows">
+      <div ref={menuRef} className="deckmenu__panel" data-shell-overlay="" data-state={closing ? 'closing' : 'open'} hidden={!mounted} role="menu" aria-label="Menu">
+        <div className="deckmenu__rows" onKeyDown={onRowKey}>
           <button
             type="button"
             role="menuitem"

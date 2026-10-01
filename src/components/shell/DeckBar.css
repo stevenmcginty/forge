@@ -1,15 +1,37 @@
 /*
  * The deck's top bar. No slab: it is a strip of the backdrop you can drag the
- * window by, with three things on it — the mark and the agent count, the mode
- * switcher (the one glass object, centred), and a small cluster of tools
- * beside the native window buttons.
+ * window by, with three things on it — the mark and the agent controls, the
+ * mode switcher (dead centre), and a small cluster of tools beside the native
+ * window buttons.
+ *
+ * One family of parts (the chrome's shared contract, "Machined Capsule"):
+ *
+ *   chip   a lone capsule that opens something (Agents, the project)
+ *   well   a sunken capsule that groups a switch's segments
+ *   lamp   the raised key inside a well, on the segment you are in
+ *   disc   a round icon button (the menu, Forge Brain)
+ *   New    the one solid-accent control on the bar
+ *
+ * Everything is 28px tall in the 38px bar, with 22px parts inside a well.
+ * Nothing is lit in the accent at rest but New and the mode lamp's pilot
+ * light: state is a shape (the raised lamp) and a word, the colour only agrees.
  *
  * Three grid columns, the outer two equal while there is room, so the switch
  * sits dead centre and nothing can ever run into it; the right column never
  * shrinks below what its buttons need (the left gives way first).
+ *
+ * Forge Web's deck face restates this file rule for rule as `.dk-*`
+ * (web/src/deck/DeckTopBar.css); change one, change the other.
  */
 
 .deckbar {
+  /* The shade inside a well and under a lamp: the theme's own scrim, so a
+     light theme gets a light one. */
+  --bar-shade: color-mix(in srgb, var(--bg-scrim) 55%, transparent);
+  --bar-wash: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  --bar-wash-hover: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  --bar-key: color-mix(in srgb, var(--text-primary) 9%, transparent);
+
   position: relative;
   z-index: var(--z-dock);
   display: grid;
@@ -25,11 +47,13 @@
 }
 
 /*
- * --z-dock puts the bar in its own stacking context, so the … menu's
- * --z-sheet only counted inside it and the menu sat under the voice hub's
- * flag. While the menu is open the whole bar steps up to the menu's layer.
+ * --z-dock puts the bar in its own stacking context, so a menu's --z-sheet
+ * only counted inside it and the menu sat under the voice hub's flag. While
+ * the … menu, a sheet or the Brain pop-over (Brain.css) is up, the whole bar
+ * steps up to the menus' layer.
  */
-.deckbar:has(.deckmenu__panel:not([hidden])) {
+.deckbar:has(.deckmenu__panel:not([hidden])),
+.deckbar:has(.sheet) {
   z-index: var(--z-sheet);
 }
 
@@ -41,9 +65,9 @@
 .deckbar__left {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
-  padding-left: 16px;
+  padding-left: 12px;
 }
 
 .deckbar__mark,
@@ -52,158 +76,156 @@
   flex: none;
 }
 
-/*
- * The agent controls: one instrument, not three loose pills. A hairline tray —
- * the project chip's wash and rim — holds the Agents menu, the Wall | Full
- * screen switch and New, parted by short hairlines. Inside it the one lit thing
- * is where you are: the mode pill's accent capsule, rim and all, so the state
- * is a shape and a word, never a colour alone. Parts sit 24px tall in a 28px
- * tray, the mode pill's proportions. (The Wall's Grid | Free switch and Fit
- * live in the … menu's Tools, not here.)
- */
-.deckbar__agents {
-  display: flex;
-  align-items: center;
-  flex: none;
-  height: 28px;
-  margin-left: 6px;
-  padding: 2px;
-  border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line);
-  -webkit-app-region: no-drag;
-}
-
-.deckbar__agents > * + * {
-  position: relative;
-  margin-left: 11px;
-}
-
-.deckbar__agents > * + *::before {
-  content: '';
-  position: absolute;
-  left: -6px;
-  top: 50%;
-  width: 1px;
-  height: 12px;
-  transform: translateY(-50%);
-  background: var(--glass-line-strong);
-  pointer-events: none;
-}
-
-/* New: full ink and an accent plus — the one action here, never lit as a state. */
-.deckbar__new {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 10px 0 8px;
-  border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-primary);
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.deckbar__new:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-}
-
-.deckbar__new svg {
-  color: var(--accent-ink);
-}
-
-.deckbar__new:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
-.deckbar__new:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
+/* The mark: the brand's glyph in the accent, on a neutral plate. */
 .deckbar__mark {
   display: grid;
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: var(--r-md);
+  border-radius: 7px;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  background: var(--bar-wash);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
 }
 
 .deckbar__mark[data-channel='dev'] {
   color: var(--warn);
-  background: var(--warn-soft);
-  box-shadow: inset 0 0 0 1px var(--warn-line);
 }
 
 .deckbar__wordmark {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.34em;
+  letter-spacing: 0.32em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
+/* DEV: a word in a tag, so the channel is never the mark's colour alone. */
 .deckbar__channel {
-  padding: 1px 6px;
-  border-radius: var(--r-full);
+  padding: 2px 6px 1px;
+  border-radius: var(--r-sm);
   font-family: var(--font-display);
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.16em;
+  line-height: 1.2;
   color: var(--warn);
   background: var(--warn-soft);
   box-shadow: inset 0 0 0 1px var(--warn-line);
 }
 
 /*
- * The project chip (ProjectChip): the folder in the project's own colour, the
- * name in full ink, the branch quieter in mono. A capsule like the Agents
- * button beside it. It gives way before anything else on the bar: in a
- * narrower window the branch goes first, then the wordmark beside it, then the
- * name narrows, and at the narrowest the folder alone is left (the name is in
- * its tooltip and on the voice bar's project pill).
+ * The agent controls: the Agents chip, the Wall | Full screen switch and New.
+ * Three objects, three jobs — a menu, a switch, an action — 6px apart.
  */
+.deckbar__agents {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin-left: 4px;
+  -webkit-app-region: no-drag;
+}
+
+/* ------------------------------------------------------------------ chips
+ *
+ * A lone capsule that opens something: the Agents menu, the project sheet.
+ */
+
+.deckbar__agentsbtn,
 .deckbar__project {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: none;
-  height: 26px;
+  height: 28px;
   margin: 0;
-  padding: 0 8px 0 9px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: var(--bar-wash);
   box-shadow: inset 0 0 0 1px var(--glass-line);
   -webkit-app-region: no-drag;
   transition:
+    color var(--dur-fast) var(--ease-out),
     background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
 }
 
+.deckbar__agentsbtn:hover,
+.deckbar__agentsbtn[data-open='true'],
 .deckbar__project:hover,
 .deckbar__project[data-open='true'] {
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+  background: var(--bar-wash-hover);
   box-shadow: inset 0 0 0 1px var(--glass-line-strong);
 }
 
+.deckbar__agentsbtn:active,
+.deckbar__project:active {
+  transform: scale(0.97);
+}
+
+.deckbar__agentsbtn:focus-visible,
 .deckbar__project:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
+  border-radius: var(--r-full);
+}
+
+/* The Agents chip: the word, the count, and a chevron that turns when open. */
+.deckbar__agentsbtn {
+  padding: 0 8px 0 12px;
+}
+
+.deckbar__agentsword {
+  color: var(--text-primary);
+}
+
+.deckbar__agentsn {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--text-primary);
+  background: var(--bar-key);
+}
+
+.deckbar__agentschev,
+.deckbar__projectchev {
+  flex: none;
+  color: var(--text-dim);
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.deckbar__agentsbtn[data-open='true'] .deckbar__agentschev,
+.deckbar__project[data-open='true'] .deckbar__projectchev {
+  transform: rotate(180deg);
+}
+
+/*
+ * The project chip (ProjectChip): the folder in the project's own colour, the
+ * name in full ink, the branch quieter in mono. It gives way before anything
+ * else on the bar: in a narrower window the branch goes first, then the
+ * wordmark beside the mark, then the name narrows, and at the narrowest the
+ * folder alone is left (the name is in its tooltip and on the voice bar's
+ * project pill).
+ */
+.deckbar__project {
+  padding: 0 8px 0 10px;
 }
 
 .deckbar__projectmark {
@@ -218,6 +240,10 @@
 .deckbar__projectname {
   min-width: 0;
   max-width: 180px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  color: var(--text-primary);
 }
 
 .deckbar__projectbranch {
@@ -238,101 +264,291 @@
   flex: none;
 }
 
-.deckbar__projectchev {
-  flex: none;
-  color: var(--text-dim);
-  transition: transform var(--dur-glide) var(--spring-glide);
-}
+/* ----------------------------------------------------- wells and the lamp
+ *
+ * A switch is a well: a sunken capsule whose segments are all one width, with
+ * one raised key — the lamp — on the segment you are in. Equal widths mean the
+ * lamp never changes size, so the whole glide is one transform: `--i` (which
+ * segment) and `--n` (how many) are set inline and nothing is measured.
+ */
 
-.deckbar__project[data-open='true'] .deckbar__projectchev {
-  transform: rotate(180deg);
-}
-
-@media (max-width: 1200px) {
-  .deckbar__projectbranch {
-    display: none;
-  }
-}
-
-@media (max-width: 1100px) {
-  .deckbar:has(.deckbar__project) .deckbar__wordmark {
-    display: none;
-  }
-
-  .deckbar__projectname {
-    max-width: 80px;
-  }
-}
-
-@media (max-width: 1000px) {
-  .deckbar__projectname {
-    display: none;
-  }
-}
-
-/* ------------------------------------------------------------------ modes */
-
-.deckbar__modes {
+.deckbar__modes,
+.deckbar__wall {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 2px;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  flex: none;
   height: 28px;
-  padding: 2px;
+  padding: 3px;
   border-radius: var(--r-full);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  backdrop-filter: blur(16px) saturate(1.3);
-  border: 1px solid var(--glass-line);
-  box-shadow: var(--pill-shadow), inset 0 1px 0 var(--glass-hi);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 2px var(--bar-shade);
   -webkit-app-region: no-drag;
 }
 
-/* The lit capsule: one element that glides from mode to mode. */
-.deckbar__lamp {
+.deckbar__lamp,
+.deckbar__thumb {
   position: absolute;
-  top: 2px;
-  left: 0;
+  top: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--n, 1));
   height: 22px;
   border-radius: var(--r-full);
-  background: var(--accent-soft);
+  background: var(--bar-key);
   box-shadow:
-    inset 0 0 0 1px var(--accent-line),
-    0 0 16px -4px var(--accent-glow);
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi),
+    0 1px 2px var(--bar-shade);
+  transform: translate3d(calc(var(--i, 0) * 100%), 0, 0);
   pointer-events: none;
-}
-
-.deckbar__lamp[data-ready='true'] {
   transition:
     transform var(--dur-glide) var(--spring-glide),
-    width var(--dur-glide) var(--spring-glide);
+    opacity var(--dur-fast) var(--ease-out);
+}
+
+/* The pilot light: the one accent in the switch, and it rides the lamp. */
+.deckbar__lamp::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 12px;
+  height: 2px;
+  margin-left: -6px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+/* Over the browser or the board neither view is the one you are in: no lamp. */
+.deckbar__thumb[data-hidden='true'] {
+  opacity: 0;
+}
+
+.deckbar__mode,
+.deckbar__view {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .deckbar__mode {
-  position: relative;
-  height: 22px;
-  padding: 0 13px;
-  border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: var(--t-sm);
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  transition: color var(--dur-fast) var(--ease-out);
+  padding: 0 12px 0 10px;
 }
 
-.deckbar__mode:hover {
+/* The whole height of the well is the target, not just the 22px drawn. */
+.deckbar__mode::after {
+  content: '';
+  position: absolute;
+  inset: -3px 0;
+}
+
+.deckbar__mode svg,
+.deckbar__view svg {
+  flex: none;
+}
+
+.deckbar__mode > *,
+.deckbar__view > * {
+  display: block;
+  transition: transform var(--dur-instant) var(--ease-out);
+}
+
+.deckbar__mode:hover,
+.deckbar__mode[data-active='true'],
+.deckbar__view[data-lit='true'] {
   color: var(--text-primary);
 }
 
-.deckbar__mode[data-active='true'] {
-  color: var(--accent-ink);
+.deckbar__mode:not([data-active='true']):hover {
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.deckbar__mode:active > *,
+.deckbar__wall:active .deckbar__view > * {
+  transform: scale(0.96);
 }
 
 .deckbar__mode:focus-visible {
   outline: var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--r-full);
+}
+
+/* ---------------------------------------------- Wall | Full screen switch
+ *
+ * One button, two words: the view you are in sits on the lamp, which glides
+ * across when Ctrl+G or a click flips it. Hovering the switch washes the other
+ * word — that is where a click goes. The glyphs are for a narrow window, where
+ * the words drop.
+ */
+
+.deckbar__wall {
+  cursor: pointer;
+}
+
+.deckbar__wall:focus-visible {
+  outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
   border-radius: var(--r-full);
+}
+
+.deckbar__view > svg {
+  display: none;
+}
+
+.deckbar__wall:hover .deckbar__view:not([data-lit='true']) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+/* -------------------------------------------------------------------- New
+ *
+ * The one loud control: a solid accent capsule, so "start an agent" is the
+ * first thing the eye finds on the bar. Hover lights it — the glow widens, the
+ * plus turns, one sheen crosses — and while its chooser is open the plus rests
+ * as a close mark. Everything that moves is a transform or an opacity.
+ */
+
+.deckbar__new {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 28px;
+  padding: 0 13px 0 9px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-on-accent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-bright) 60%, var(--accent)), var(--accent));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-on-accent) 16%, transparent),
+    inset 0 1px 0 var(--accent-bright),
+    0 2px 10px -4px var(--accent-line);
+  -webkit-app-region: no-drag;
+  transition:
+    box-shadow var(--dur-med) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.deckbar__new svg {
+  position: relative;
+  flex: none;
+  stroke-width: 2;
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.deckbar__newword {
+  position: relative;
+}
+
+.deckbar__new:hover:not(:disabled),
+.deckbar__new[data-open='true'] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-on-accent) 16%, transparent),
+    inset 0 1px 0 var(--accent-bright),
+    0 3px 18px -4px var(--accent);
+}
+
+.deckbar__new:hover:not(:disabled) svg {
+  transform: rotate(90deg);
+}
+
+.deckbar__new[data-open='true'] svg,
+.deckbar__new[data-open='true']:hover svg {
+  transform: rotate(135deg);
+}
+
+.deckbar__new:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.deckbar__new:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: var(--r-full);
+}
+
+/* The sheen: one band of the brighter accent, crossing once per hover. */
+.deckbar__newsheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.deckbar__newsheen::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 46%;
+  background: linear-gradient(100deg, transparent, var(--accent-bright), transparent);
+  opacity: 0;
+  transform: translate3d(-110%, 0, 0);
+}
+
+.deckbar__new:hover:not(:disabled) .deckbar__newsheen::before {
+  opacity: 1;
+  transform: translate3d(330%, 0, 0);
+  transition: transform 520ms var(--ease-out);
+}
+
+/* Cannot open one (the session limit): no fill, a dashed rim, and the tooltip says why. */
+.deckbar__new:disabled {
+  color: var(--text-dim);
+  background: none;
+  box-shadow: none;
+  outline: 1px dashed var(--glass-line-strong);
+  outline-offset: -1px;
+  cursor: default;
+}
+
+/* An empty project: a slow ring leaves the button until the first agent exists. */
+.deckbar__new[data-invite='true']:not(:disabled)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: deck-invite 2600ms var(--ease-out) infinite;
+}
+
+@keyframes deck-invite {
+  0% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.2, 1.5);
+  }
 }
 
 /* ------------------------------------------------------------------ tools */
@@ -350,28 +566,45 @@
   -webkit-app-region: no-drag;
 }
 
+/* A disc: the menu button. Open, it is a raised key and the cog has turned. */
 .deckbar__btn {
   position: relative;
   display: grid;
   place-items: center;
-  width: 32px;
+  width: 28px;
   height: 28px;
-  /* A capsule, like the mode pill across the bar and the + beside the count. */
   border-radius: var(--r-full);
   color: var(--text-muted);
   transition:
     background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.deckbar__btn > svg {
+  transition: transform var(--dur-glide) var(--spring-glide);
 }
 
 .deckbar__btn:hover {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--bar-wash-hover);
 }
 
 .deckbar__btn[data-on='true'] {
-  color: var(--accent-ink);
-  background: var(--accent-softer);
+  color: var(--text-primary);
+  background: var(--bar-key);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.deckbar__btn[data-on='true'] > svg {
+  transform: rotate(60deg);
+}
+
+.deckbar__btn:active {
+  transform: scale(0.94);
 }
 
 .deckbar__btn:focus-visible {
@@ -380,10 +613,11 @@
   border-radius: var(--r-full);
 }
 
+/* New screenshots since the menu was last open: a count, in the accent. */
 .deckbar__badge {
   position: absolute;
-  top: 1px;
-  right: 1px;
+  top: -2px;
+  right: -3px;
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
@@ -395,6 +629,15 @@
   text-align: center;
   color: var(--text-on-accent);
   background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-base);
+  animation: deck-badge-in var(--dur-pop) var(--spring-pop) both;
+}
+
+@keyframes deck-badge-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
 }
 
 .deckbar__controls-gap {
@@ -402,18 +645,53 @@
   width: 146px;
 }
 
-/* The shelf drawer: the tray and the account chip, one above the other. */
-.deckbar__shelf {
-  display: flex;
-  flex-direction: column;
-  margin: calc(var(--s-3) * -1);
+/* ------------------------------------------------------- narrow windows
+ *
+ * The window's minimum is 900px. Words go before controls: the branch, the
+ * wordmark, the project's name, then the view switch's words (its glyphs stay).
+ */
+
+@media (max-width: 1380px) {
+  .deckbar__projectbranch {
+    display: none;
+  }
 }
 
-.deckbar__shelf .tray {
-  border-top: 0;
+@media (max-width: 1240px) {
+  .deckbar:has(.deckbar__project) .deckbar__wordmark {
+    display: none;
+  }
+
+  .deckbar__projectname {
+    max-width: 96px;
+  }
 }
 
-/* ------------------------------------------------------------- the … menu */
+@media (max-width: 1100px) {
+  .deckbar {
+    column-gap: 10px;
+  }
+
+  .deckbar__projectname,
+  .deckbar__viewword {
+    display: none;
+  }
+
+  .deckbar__view {
+    padding: 0 9px;
+  }
+
+  .deckbar__view > svg {
+    display: block;
+  }
+}
+
+/* ------------------------------------------------------------- the … menu
+ *
+ * Every drop-down from the bar wears one surface (the sheets' opaque one: a
+ * menu can cover a live terminal), one row, and one motion: it drops 6px out
+ * of the control that opened it on the pop spring, and lifts back up to leave.
+ */
 
 .deckmenu {
   position: relative;
@@ -422,7 +700,7 @@
 
 .deckmenu__panel {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 7px);
   right: 0;
   z-index: var(--z-sheet);
   display: flex;
@@ -430,22 +708,35 @@
   width: 320px;
   max-height: calc(100vh - var(--titlebar-h) - 24px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   border-radius: var(--r-sheet);
   background: var(--sheet-bg);
   border: 1px solid var(--glass-line-strong);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-hi);
-  transform-origin: calc(100% - 16px) 0;
-  animation: deckmenu-in var(--dur-pop) var(--spring-pop) both;
+  transform-origin: calc(100% - 14px) 0;
+  animation: deck-drop-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.deckmenu__panel[data-state='closing'] {
+  animation: deck-drop-out var(--dur-exit) var(--ease-in-out) both;
+  pointer-events: none;
 }
 
 .deckmenu__panel[hidden] {
   display: none;
 }
 
-@keyframes deckmenu-in {
+@keyframes deck-drop-in {
   from {
     opacity: 0;
-    transform: translate3d(0, -8px, 0) scale(0.97);
+    transform: translate3d(0, -6px, 0) scale(0.975);
+  }
+}
+
+@keyframes deck-drop-out {
+  to {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0);
   }
 }
 
@@ -470,8 +761,13 @@
   transition: background var(--dur-fast) var(--ease-out);
 }
 
-.deckmenu__row:hover {
+.deckmenu__row:hover,
+.deckmenu__row:focus-visible {
   background: var(--bg-hover);
+}
+
+.deckmenu__row:active {
+  background: var(--bg-active);
 }
 
 /* Inset: the panel scrolls, and a ring outside the row would be clipped. */
@@ -486,8 +782,9 @@
   transition: color var(--dur-fast) var(--ease-out);
 }
 
-.deckmenu__row:hover svg {
-  color: var(--text-secondary);
+.deckmenu__row:hover svg,
+.deckmenu__row:focus-visible svg {
+  color: var(--text-primary);
 }
 
 .deckmenu__label {
@@ -500,19 +797,19 @@
 .deckmenu__section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   padding: 8px var(--sheet-inset) var(--sheet-inset);
   border-bottom: 1px solid var(--glass-line);
 }
 
 .deckmenu__eyebrow {
-  padding: 2px 10px 0;
+  padding: 2px 10px 4px;
   font-family: var(--font-display);
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-dim);
 }
 
 .deckmenu__tools:has(.deck-tools) .deckmenu__empty {
@@ -521,28 +818,19 @@
 
 .deckmenu__empty {
   display: block;
-  padding: 8px 10px;
+  padding: 6px 10px 8px;
   font-size: var(--t-xs);
   color: var(--text-muted);
 }
 
-.deckmenu__panel .deckbar__shelf {
-  margin: 0;
+/* The shelf drawer: the tray and the account chip, one above the other. */
+.deckbar__shelf {
+  display: flex;
+  flex-direction: column;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .deckmenu__panel {
-    animation: none;
-  }
-}
-
-:root[data-reduced-motion='true'] .deckmenu__panel {
-  animation: none;
-}
-
-/* The bar's own sheet (projects) or the Agents menu is open: step up. */
-.deckbar:has(.sheet) {
-  z-index: var(--z-sheet);
+.deckbar__shelf .tray {
+  border-top: 0;
 }
 
 /* ------------------------------------------------------ the Agents menu */
@@ -553,157 +841,51 @@
   -webkit-app-region: no-drag;
 }
 
-/* The tray's first part: the word, the count, and a chevron that turns when open. */
-.deckbar__agentsbtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 7px 0 10px;
-  border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.deckbar__agentsbtn:hover,
-.deckbar__agentsbtn[data-open='true'] {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-}
-
-.deckbar__agentsbtn:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
-.deckbar__agentsn {
-  min-width: 18px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: var(--r-full);
-  font-size: 10.5px;
-  line-height: 16px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
-}
-
-.deckbar__agentschev {
-  color: var(--text-dim);
-  transition: transform var(--dur-glide) var(--spring-glide);
-}
-
-.deckbar__agentsbtn[data-open='true'] .deckbar__agentschev {
-  transform: rotate(180deg);
-}
-
 /*
- * Sheets opened from the top bar — the Agents menu here, the project sheet
- * out of the voice bar — drop from it instead of rising from the dock.
+ * Sheets opened from the top bar — the Agents menu — drop from it instead of
+ * rising from the dock, on the menus' motion.
  */
 .deckbar .sheet {
-  top: calc(100% + 8px);
+  top: calc(100% + 7px);
   bottom: auto;
-  animation-name: sheet-drop;
+  animation-name: deck-drop-in;
+}
+
+.deckbar .sheet[data-state='closing'] {
+  animation-name: deck-drop-out;
 }
 
 .deckbar .sheet--panes {
   left: 0;
   right: auto;
   max-height: min(620px, calc(100vh - var(--titlebar-h) - 24px));
-  transform-origin: 40px 0;
-}
-
-@keyframes sheet-drop {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -10px, 0) scale(0.965);
-  }
-}
-
-/* ---------------------------------------------- Wall | Full screen switch
- *
- * One button, two words: the view you are in sits in the lit capsule, which
- * glides across (the mode pill's spring) when Ctrl+G or a click flips it.
- * Hovering the switch washes the other word — that is where a click goes.
- */
-
-.deckbar__wall {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0;
-  border-radius: var(--r-full);
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.deckbar__wall:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
-.deckbar__thumb {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  border-radius: var(--r-full);
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-  pointer-events: none;
-}
-
-/* Over the browser or the board neither view is the one you are in: no capsule. */
-.deckbar__thumb[data-hidden='true'] {
-  opacity: 0;
-}
-
-.deckbar__thumb[data-ready='true'] {
-  transition:
-    transform var(--dur-glide) var(--spring-glide),
-    width var(--dur-glide) var(--spring-glide);
-}
-
-.deckbar__view {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  height: 100%;
-  padding: 0 10px;
-  border-radius: var(--r-full);
-  white-space: nowrap;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.deckbar__view[data-lit='true'] {
-  color: var(--accent-ink);
-}
-
-.deckbar__wall:hover .deckbar__view:not([data-lit='true']) {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  transform-origin: 36px 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .deckbar .sheet {
+  .deckmenu__panel,
+  .deckmenu__panel[data-state='closing'],
+  .deckbar .sheet,
+  .deckbar__badge,
+  .deckbar__new[data-invite='true']::after {
     animation: none;
+  }
+
+  .deckbar__new:hover:not(:disabled) .deckbar__newsheen::before {
+    opacity: 0;
+    transition: none;
   }
 }
 
-:root[data-reduced-motion='true'] .deckbar .sheet {
+:root[data-reduced-motion='true'] .deckmenu__panel,
+:root[data-reduced-motion='true'] .deckmenu__panel[data-state='closing'],
+:root[data-reduced-motion='true'] .deckbar .sheet,
+:root[data-reduced-motion='true'] .deckbar__badge,
+:root[data-reduced-motion='true'] .deckbar__new[data-invite='true']::after {
   animation: none;
+}
+
+:root[data-reduced-motion='true'] .deckbar__new:hover:not(:disabled) .deckbar__newsheen::before {
+  opacity: 0;
+  transition: none;
 }

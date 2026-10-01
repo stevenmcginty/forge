@@ -177,3 +177,30 @@
   font-size: var(--t-eyebrow);
   color: var(--text-dim);
 }
+
+/* ------------------------------------------------------------- on the deck
+ *
+ * In the top bar's menu the chip is the menu's last row, not the rail's foot:
+ * the menu's own surface and hairline, its hover, and the display face.
+ */
+.deckmenu__panel .achip {
+  background: transparent;
+  border-top-color: var(--glass-line);
+}
+
+.deckmenu__panel .achip:hover,
+.deckmenu__panel .achip[data-open='true'] {
+  background: var(--bg-hover);
+}
+
+.deckmenu__panel .achip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--r-sheet-row);
+}
+
+.deckmenu__panel .achip__name {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}

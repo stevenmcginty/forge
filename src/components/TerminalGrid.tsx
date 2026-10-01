@@ -100,6 +100,14 @@ export const TerminalGrid = memo(function TerminalGrid({ beside = false }: { bes
     return () => window.removeEventListener(NEW_TAB_EVENT, open)
   }, [project, openChooser])
 
+  // The button the chooser dropped from says so while it is up: the top bar's
+  // New rests its plus as a close mark (DeckBar.css `[data-open]`).
+  useEffect(() => {
+    if (!chooserOpen || !chooserAnchor) return undefined
+    chooserAnchor.setAttribute('data-open', 'true')
+    return () => chooserAnchor.removeAttribute('data-open')
+  }, [chooserOpen, chooserAnchor])
+
   /*
    * Tab text colours reach the terminals from here rather than from
    * TerminalPane, because on the Wall and in the strip there are no panes —

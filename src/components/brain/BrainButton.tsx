@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
+import { usePresence } from '@/lib/motion'
 import { shellSheet, useShellSheet } from '@/lib/shellSlots'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { openBrainMap } from '../brainview'
@@ -18,7 +19,8 @@ import './Brain.css'
  * While it is off the same press opens a small pop-over from the icon instead
  * (BrainIntro): the first time it explains itself, after that it is one line;
  * Turn on takes him straight on to the map. Esc or a click elsewhere puts it
- * away. Off never nags: nothing opens by itself.
+ * away, and it lifts out on the menus' exit. Off never nags: nothing opens by
+ * itself.
  *
  * Talking to it is not here: that is the voice agent box, with Forge Brain
  * picked as the voice agent.
@@ -95,6 +97,9 @@ export function BrainButton(): ReactNode {
     }
   }, [intro])
 
+  // Kept on screen for the length of its exit (Brain.css), then unmounted.
+  const pop = usePresence(intro && !on, 160)
+
   const needs = on && status ? status.state === 'asking' || status.confirms.length > 0 : false
   const stopped = on && status?.state === 'error'
   const glyph = glyphStateOf(status)
@@ -143,8 +148,15 @@ export function BrainButton(): ReactNode {
           </span>
         ) : null}
       </button>
-      {intro && !on ? (
-        <div id={popId} className="brainpop" role="dialog" aria-label="Forge Brain" data-shell-overlay="">
+      {pop.mounted ? (
+        <div
+          id={popId}
+          className="brainpop"
+          data-state={pop.closing ? 'closing' : 'open'}
+          role="dialog"
+          aria-label="Forge Brain"
+          data-shell-overlay=""
+        >
           <BrainIntro
             status={status}
             onOn={() => {

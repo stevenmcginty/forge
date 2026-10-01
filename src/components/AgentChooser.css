@@ -113,3 +113,84 @@
   color: var(--text-dim);
   line-height: 1.4;
 }
+
+/* ------------------------------------------------------------- on the deck
+ *
+ * The New button's chooser, as one of the chrome's menus: each maker's logo on
+ * a round 22px plate (the badge's own colours, reshaped), the name in the
+ * display face, and the project's default — the pick in force — saying so in
+ * a word beside the bar Popover.css gives the row.
+ */
+body:has(.app.deck) > .popover .agent-chooser__name {
+  flex: 0 1 auto;
+  font-family: var(--font-display);
+  font-size: var(--t-md);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+body:has(.app.deck) > .popover .agent-chooser__name + * {
+  margin-left: auto;
+}
+
+body:has(.app.deck) > .popover .agent-chooser__line .agent-badge,
+body:has(.app.deck) > .popover .agent-chooser__line .chat-mark__plate,
+body:has(.app.deck) > .popover .agent-chooser__line .chooser-chatmark {
+  flex: none;
+  width: 22px;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+body:has(.app.deck) > .popover .agent-chooser__line .agent-badge__logo,
+body:has(.app.deck) > .popover .agent-chooser__line .chat-mark__logo {
+  height: 12px;
+}
+
+body:has(.app.deck) > .popover .agent-chooser__line .popover__row[data-selected='true'] .agent-chooser__name::after {
+  content: 'default';
+  margin-left: 8px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
+body:has(.app.deck) > .popover .agent-chooser__cmd {
+  max-width: 110px;
+}
+
+/* Room for the permission-mode chevron, on every row so the commands line up. */
+body:has(.app.deck) > .popover .agent-chooser__line .popover__row {
+  padding-right: 30px;
+}
+
+body:has(.app.deck) > .popover .agent-chooser__modes {
+  top: 6px;
+  border-radius: var(--r-full);
+}
+
+body:has(.app.deck) > .popover .agent-chooser__mode-row {
+  border-radius: var(--r-md);
+}
+
+/* A chatbot's row (the desktop's ChatMark): the same round plate in the bot's
+   own paint. The row says "New chat" in words, so the bubble is not needed. */
+body:has(.app.deck) > .popover .popover__row > .chat-mark .chat-mark__plate {
+  width: 22px;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+body:has(.app.deck) > .popover .popover__row > .chat-mark .chat-mark__logo {
+  height: 12px;
+}
+
+body:has(.app.deck) > .popover .popover__row > .chat-mark .chat-mark__bubble {
+  display: none;
+}
