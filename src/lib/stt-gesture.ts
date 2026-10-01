@@ -146,6 +146,8 @@ export interface TalkKeyEvent {
   metaKey?: boolean
   /** When the key really moved. A late handler's performance.now() is not. */
   timeStamp?: number
+  /** False for a key a web page handed back (replayed by src/components/browser/appKeys.ts). */
+  isTrusted?: boolean
   preventDefault(): void
   stopPropagation(): void
 }
@@ -286,7 +288,8 @@ export function attachTalkKey(
     gesture = next.state
     if (!before.down) say(`up without its down (the press went to another window) listening=${on}`)
     else if (!before.other) {
-      say(`up after ${Math.round(now - before.t0)}ms${before.ptt ? ' (hold)' : ''} listening=${on} -> ${next.intent ?? 'nothing'}`)
+      const via = e.isTrusted === false ? ' (from a page)' : ''
+      say(`up after ${Math.round(now - before.t0)}ms${before.ptt ? ' (hold)' : ''}${via} listening=${on} -> ${next.intent ?? 'nothing'}`)
     }
     if (next.intent) apply(next.intent)
   }

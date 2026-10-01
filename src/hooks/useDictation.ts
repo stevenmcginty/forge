@@ -495,6 +495,38 @@ export function useDictationEngine(): Dictation {
     noticeRef.current(`${formatCombo(clashKey)} is the Agent key, so the Dictate key moved to ${formatCombo(next)}`)
   }, [ready, clashKey, hotkey])
 
+  /**
+   * A stop press that never reaches this page leaves no dictate-key line at
+   * all (2026-10-01: Steve's Right Shift stops vanished). While the mic is
+   * open, say where the keyboard goes, so dev.log shows what took it.
+   */
+  const listeningNow = status.phase === 'listening'
+  useEffect(() => {
+    if (!listeningNow) return undefined
+    const where = (): string => {
+      const el = document.activeElement
+      if (!el || el === document.body) return `body hasFocus=${document.hasFocus()}`
+      const cls = typeof el.className === 'string' ? el.className.trim().split(/\s+/)[0] : ''
+      const label = el.getAttribute('aria-label') ?? el.getAttribute('title') ?? ''
+      return `${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}${label ? ` "${label.slice(0, 40)}"` : ''} hasFocus=${document.hasFocus()}`
+    }
+    const say = (what: string): void => console.info(`[hub] dictation keyboard ${what}: ${where()} t=${Math.round(performance.now())}`)
+    say('at start')
+    const onBlur = (): void => {
+      window.setTimeout(() => say('left the page'), 0)
+    }
+    const onFocus = (): void => say('back on the page')
+    const onFocusIn = (): void => say('moved to')
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('focusin', onFocusIn)
+    return () => {
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('focusin', onFocusIn)
+    }
+  }, [listeningNow])
+
   useEffect(
     () =>
       attachTalkKey(window, hotkey, () => phaseRef.current === 'listening', applyIntent, undefined, (line) =>
