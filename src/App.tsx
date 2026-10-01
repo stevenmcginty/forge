@@ -15,6 +15,7 @@ import { HubLayer } from '@/components/hub/HubLayer'
 import { Backdrop } from '@/components/shell/Backdrop'
 import { ChatRelayBar } from '@/components/shell/ChatRelayBar'
 import { DeckToast } from '@/components/shell/DeckToast'
+import { ShotPop } from '@/components/ShotPop'
 import { Dock } from '@/components/shell/Dock'
 import { SettingsPopup } from '@/components/shell/SettingsPopup'
 import { useBranchReader } from '@/components/shell/useBranch'
@@ -198,6 +199,8 @@ export function App(): ReactNode {
       {/* The voice bar, clipped to the bottom edge. */}
       <Dock />
       <DeckToast />
+      {/* A screenshot the moment you take it, top right, before it tucks into the menu's shelf. */}
+      <ShotPop />
       {/* The Dictate key's dictation, lit where its words land (the pane, the bar, or a band). */}
       <DictationCueHost />
       {/* Forge Brain's expanded map (src/components/brainview): nothing until opened. */}

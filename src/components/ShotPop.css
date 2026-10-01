@@ -1,0 +1,335 @@
+/*
+ * A fresh screenshot, held up for a moment: a proof card at the top right,
+ * just under the cog that keeps the shelf. The toast's chrome (sheet, glass
+ * rim, a breath of accent glow, the diamond mark), with the picture as the
+ * object. It never covers the bar, so the window stays draggable.
+ */
+
+.shotpop {
+  position: fixed;
+  top: calc(var(--titlebar-h) + 10px);
+  right: 14px;
+  z-index: var(--z-toast);
+  width: min(288px, calc(100vw - 28px));
+  animation: shotpop-in var(--dur-pop) var(--spring-pop) both;
+}
+
+/* -------------------------------------------------------------- the stack */
+
+/* More than one shot while it was up: the earlier ones show as card edges
+   behind it — a stack, read by shape and the count in the eyebrow. */
+.shotpop__ghost {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 14px;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.shotpop__ghost--1 {
+  inset: 8px 9px -6px;
+  opacity: 0.9;
+}
+
+.shotpop__ghost--2 {
+  inset: 16px 18px -12px;
+  opacity: 0.65;
+}
+
+.shotpop[data-leaving='true'] .shotpop__ghost {
+  opacity: 0;
+}
+
+/* --------------------------------------------------------------- the card */
+
+.shotpop__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 8px 10px;
+  border-radius: 14px;
+  background: var(--sheet-bg);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--glass-line-strong));
+  box-shadow:
+    0 0 24px -8px var(--accent-glow),
+    var(--glass-shadow),
+    inset 0 1px 0 var(--glass-hi);
+  overflow: hidden;
+  transform-origin: 50% 50%;
+}
+
+.shotpop[data-leaving='true'] .shotpop__card {
+  pointer-events: none;
+}
+
+.shotpop__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+  padding: 0 0 0 4px;
+}
+
+/* A diamond, as on every notice: something to read, whatever colour it is. */
+.shotpop__mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
+  border-radius: 1.5px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.shotpop__eyebrow {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
+.shotpop__meta {
+  font-size: var(--t-eyebrow);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.shotpop__head .shotpop__meta {
+  margin-left: auto;
+}
+
+.shotpop__x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-full);
+  color: var(--text-dim);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.shotpop__x:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.shotpop__x:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* -------------------------------------------------------------- the frame */
+
+/* The picture is the thing you grab: the whole frame drags out as the file. */
+.shotpop__frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: var(--shot-ratio, 1.78);
+  overflow: hidden;
+  border-radius: 9px;
+  border: 1px solid var(--line-hairline);
+  background: var(--bg-sunken);
+  cursor: grab;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.shotpop__frame:hover {
+  border-color: var(--line-strong);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.shotpop__frame:active {
+  cursor: grabbing;
+}
+
+.shotpop__frame:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.shotpop__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  /* The drag is started by the frame, so the image must not claim it. */
+  pointer-events: none;
+  animation: shotpop-develop var(--dur-med) var(--ease-out);
+}
+
+.shotpop__noimg {
+  color: var(--text-muted);
+}
+
+/* Copied: a word and a tick on a scrim over the picture, never a tint alone. */
+.shotpop__copied {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-on-accent);
+  background: var(--accent);
+  box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translate3d(-50%, 6px, 0) scale(0.96);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+.shotpop__frame[data-copied='true'] .shotpop__copied {
+  opacity: 1;
+  transform: translate3d(-50%, 0, 0) scale(1);
+}
+
+/* ------------------------------------------------------------------- foot */
+
+.shotpop__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.shotpop__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.shotpop__dot {
+  color: var(--text-dim);
+}
+
+.shotpop__foot .shotpop__meta {
+  margin-left: auto;
+}
+
+/* The clock: a hairline along the bottom edge that drains over the ten
+   seconds and stops dead while the pointer is on the card — length, not
+   colour, says how long is left. */
+.shotpop__clock {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  overflow: hidden;
+}
+
+.shotpop__drain {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform-origin: 0 50%;
+  animation: shotpop-drain var(--shotpop-ms, 10s) linear forwards;
+}
+
+.shotpop__card[data-held='true'] .shotpop__drain {
+  animation-play-state: paused;
+}
+
+/* --------------------------------------------------------- landing nudge */
+
+/* The cog the card flew into answers with a ring, so the eye follows it home. */
+.deckbar__btn[data-shot-landed='true'] {
+  animation: shotpop-land 600ms var(--ease-out);
+}
+
+/* ------------------------------------------------------------- keyframes */
+
+@keyframes shotpop-in {
+  from {
+    opacity: 0;
+    transform: translate3d(22px, -6px, 0) scale(0.95);
+  }
+}
+
+@keyframes shotpop-develop {
+  from {
+    opacity: 0;
+    filter: brightness(1.6);
+  }
+}
+
+@keyframes shotpop-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes shotpop-land {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.12);
+  }
+  100% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent);
+    transform: scale(1);
+  }
+}
+
+/* --------------------------------------------------------- reduced motion */
+
+/* No slide, no developing flash, no flight, no ring. The clock bar is motion
+   too, so it goes; the card still times out and still holds on hover. */
+@media (prefers-reduced-motion: reduce) {
+  .shotpop,
+  .shotpop__img,
+  .deckbar__btn[data-shot-landed='true'] {
+    animation: none;
+  }
+  .shotpop__clock {
+    display: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .shotpop,
+:root[data-reduced-motion='true'] .shotpop__img,
+:root[data-reduced-motion='true'] .deckbar__btn[data-shot-landed='true'] {
+  animation: none !important;
+}
+
+:root[data-reduced-motion='true'] .shotpop__clock {
+  display: none;
+}

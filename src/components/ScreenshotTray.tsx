@@ -16,7 +16,6 @@ const TOAST_MS = 3500
  */
 export function ScreenshotTray(): ReactNode {
   const { state, actions } = useApp()
-  const tab = useActiveTab()
   const collapsed = state.settings.railCollapsed
 
   const [shots, setShots] = useState<Shot[]>([])
@@ -103,31 +102,12 @@ export function ScreenshotTray(): ReactNode {
     setUnseen((prev) => (prev.length === 0 ? prev : []))
   }, [])
 
+  const copy = useCopyShot()
   const copyShot = useCallback(
     async (shot: Shot) => {
-      const ok = await window.forge.shots.copy(shot.path)
-      if (!ok) {
-        const msg = 'that shot has gone'
-        setToast(msg)
-        actions.setNotice(msg)
-        return
-      }
-      // Land the path in the terminal you were last working in, so an agent can
-      // be pointed at the file without you typing it out.
-      const paneId = tab?.activePaneId ?? null
-      if (paneId) {
-        terminalHost.paste(paneId, `"${shot.path}" `)
-        terminalHost.focus(paneId)
-        const msg = 'Copied — path pasted into pane'
-        setToast(msg)
-        actions.setNotice(msg)
-      } else {
-        const msg = 'Copied — Ctrl+V to paste'
-        setToast(msg)
-        actions.setNotice(msg)
-      }
+      setToast((await copy(shot)).msg)
     },
-    [actions, tab?.activePaneId]
+    [copy]
   )
 
   const removeShot = useCallback(async (shot: Shot) => {
@@ -272,6 +252,46 @@ export function ScreenshotTray(): ReactNode {
   )
 }
 
+/* ------------------------------------------------------- shared gestures */
+
+/**
+ * Click-to-copy, shared by the tray and the pop-up (ShotPop): the PNG goes on
+ * the clipboard, its path lands in the terminal you were last working in (so
+ * an agent can be pointed at the file without you typing it out), and a notice
+ * says so. Returns what it said; `ok` is false when the file has gone.
+ */
+export function useCopyShot(): (shot: Shot) => Promise<{ ok: boolean; msg: string }> {
+  const { actions } = useApp()
+  const tab = useActiveTab()
+  const paneId = tab?.activePaneId ?? null
+  return useCallback(
+    async (shot: Shot) => {
+      const ok = await window.forge.shots.copy(shot.path)
+      let msg = 'that shot has gone'
+      if (ok && paneId) {
+        terminalHost.paste(paneId, `"${shot.path}" `)
+        terminalHost.focus(paneId)
+        msg = 'Copied — path pasted into pane'
+      } else if (ok) {
+        msg = 'Copied — Ctrl+V to paste'
+      }
+      actions.setNotice(msg)
+      return { ok, msg }
+    },
+    [actions, paneId]
+  )
+}
+
+/**
+ * Hand a thumbnail's drag to the OS: startDrag replaces the web drag with a
+ * real shell file drag, which is what makes a drop into a Claude Code pane,
+ * Explorer or a browser work.
+ */
+export function dragShotOut(e: DragEvent, shot: Shot): void {
+  e.preventDefault()
+  window.forge.shots.startDrag(shot.path)
+}
+
 /* ------------------------------------------------------------------ thumb */
 
 function Thumb({
@@ -297,13 +317,7 @@ function Thumb({
         className="shot__btn"
         title={`${shot.name}\n${dims} · ${weight} · ${stamp}\nClick to copy · drag out as a file`}
         draggable
-        onDragStart={(e) => {
-          // Hand the drag to the OS: startDrag replaces the web drag with a real
-          // shell file drag, which is what makes a drop into a Claude Code pane,
-          // Explorer or a browser work.
-          e.preventDefault()
-          window.forge.shots.startDrag(shot.path)
-        }}
+        onDragStart={(e) => dragShotOut(e, shot)}
         onClick={onCopy}
       >
         {shot.thumb ? <img className="shot__img" src={shot.thumb} alt={shot.name} draggable={false} /> : null}
