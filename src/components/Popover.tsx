@@ -113,6 +113,7 @@ export function Popover({
       className="popover"
       role="dialog"
       aria-label={label}
+      onClick={(e) => e.stopPropagation()}
       style={{
         top: pos?.top ?? -9999,
         left: pos?.left ?? -9999,
@@ -143,7 +144,7 @@ export function PopoverRow({
   selected,
   disabled
 }: {
-  onClick?: () => void
+  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void
   children: ReactNode
   danger?: boolean
   selected?: boolean

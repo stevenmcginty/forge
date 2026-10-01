@@ -378,6 +378,10 @@ function ProjectMenu({
   const [repoUrl, setRepoUrl] = useState(project.repoUrl ?? '')
   const [confirmRemove, setConfirmRemove] = useState(false)
 
+  useEffect(() => {
+    if (!open) setConfirmRemove(false)
+  }, [open])
+
   /*
    * The project as of this render, so the effect below can read it without
    * listing every field of it as a dependency. It wants to run when the menu
@@ -546,14 +550,22 @@ function ProjectMenu({
             Removes {project.name} from Forge and closes its shells. The folder itself is untouched.
           </div>
           <div className="popover__actions">
-            <button type="button" className="ghost-btn" onClick={() => setConfirmRemove(false)}>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmRemove(false)
+              }}
+            >
               Cancel
             </button>
             <button
               type="button"
               className="ghost-btn"
               data-danger="true"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation()
                 actions.removeProject(project.id)
                 onClose()
               }}
@@ -563,7 +575,13 @@ function ProjectMenu({
           </div>
         </>
       ) : (
-        <PopoverRow danger onClick={() => setConfirmRemove(true)}>
+        <PopoverRow
+          danger
+          onClick={(e) => {
+            e.stopPropagation()
+            setConfirmRemove(true)
+          }}
+        >
           <Icon name="trash" size={14} />
           <span className="prow__menu-name">Remove project…</span>
         </PopoverRow>

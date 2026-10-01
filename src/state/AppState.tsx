@@ -843,6 +843,7 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'selectProject': {
       if (state.activeProjectId === action.projectId) return state
+      if (!state.projects.some((p) => p.id === action.projectId)) return state
       return {
         ...state,
         activeProjectId: action.projectId,
@@ -2116,6 +2117,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         window.forge.planner.unwatch(id)
         void window.forge.store.deleteWorkspace(id)
         persisted.current.workspaces.delete(id)
+        const remaining = liveStateRef.current.projects.filter((p) => p.id !== id)
+        persisted.current.projects = JSON.stringify(remaining)
+        void window.forge.store.setProjects(remaining)
       },
       moveProject: (from, to) => dispatch({ type: 'moveProject', from, to }),
       selectProject: (id) => dispatch({ type: 'selectProject', projectId: id }),
