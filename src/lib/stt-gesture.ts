@@ -96,7 +96,10 @@ export function modifierUp(
     return { state: idle, intent: shouldStop ? 'ptt-end' : null }
   }
   if (now - state.t0 < MODIFIER_TAP_MS) return { state: idle, intent: 'toggle' }
-  return { state: idle, intent: null }
+  // A long press whose hold timer never got to run (a busy renderer runs the
+  // key-up first). Had it run, the release would close an open mic — so it
+  // does here too, or a stop press made during a slow frame does nothing.
+  return { state: idle, intent: listening ? 'ptt-end' : null }
 }
 
 /** F8 and friends — fire on press, ignore auto-repeat. */
@@ -141,8 +144,15 @@ export interface TalkKeyEvent {
   altKey?: boolean
   shiftKey?: boolean
   metaKey?: boolean
+  /** When the key really moved. A late handler's performance.now() is not. */
+  timeStamp?: number
   preventDefault(): void
   stopPropagation(): void
+}
+
+/** The event's own time, so a slow frame cannot turn a tap into a hold. */
+function eventTime(e: TalkKeyEvent): number {
+  return typeof e.timeStamp === 'number' && e.timeStamp > 0 ? e.timeStamp : performance.now()
 }
 
 /** A modifier OTHER than the talk key's own is already held: Ctrl+Right Shift is a combo. */
@@ -172,18 +182,23 @@ export interface TalkKeyTarget {
  * `cancel` runs when a hold had opened the mic and then turned out to be a
  * combo (Shift held a beat too long before a capital). Without one, that is
  * treated as the hold's release ('ptt-end').
+ *
+ * `trace` hears one line per press that did something or was dropped, so a
+ * press that "did nothing" leaves its reason in dev.log.
  */
 export function attachTalkKey(
   target: TalkKeyTarget,
   code: string,
   listening: () => boolean,
   apply: (intent: GestureIntent) => void,
-  cancel?: () => void
+  cancel?: () => void,
+  trace?: (line: string) => void
 ): (() => void) | undefined {
   if (!code) return undefined
   const modifier = isModifierHotkey(code)
   let gesture: GestureState = idleGesture()
   let holdTimer: ReturnType<typeof setTimeout> | null = null
+  const say = (line: string): void => trace?.(`${code} ${line}`)
 
   const clearHold = (): void => {
     if (holdTimer !== null) {
@@ -193,8 +208,9 @@ export function attachTalkKey(
   }
 
   /** Another key or a mouse press joined the talk key: a combo, so it stands down. */
-  const interrupt = (): void => {
+  const interrupt = (by: string): void => {
     if (!gesture.down) return
+    if (!gesture.other) say(`cancelled by ${by} (combo) listening=${listening()}`)
     clearHold()
     const next = modifierInterrupt(gesture)
     gesture = next.state
@@ -207,6 +223,7 @@ export function attachTalkKey(
     // A "press the new keys" field is recording: the key is its to take, so
     // it is neither swallowed nor allowed to start the mic.
     if (shortcutsSuspended()) {
+      if (e.code === code && !e.repeat) say('ignored: a shortcut field is recording')
       disarm()
       return
     }
@@ -215,7 +232,7 @@ export function attachTalkKey(
       if (e.repeat) return
       e.preventDefault()
       e.stopPropagation()
-      const next = directDown(gesture, performance.now(), listening())
+      const next = directDown(gesture, eventTime(e), listening())
       gesture = next.state
       if (next.intent) apply(next.intent)
       return
@@ -226,13 +243,14 @@ export function attachTalkKey(
       // repeats a fake Left Ctrl alongside Right Alt the whole time it is
       // held; without this, every hold-to-talk ended half a second in.
       if (e.repeat) return
-      interrupt()
+      interrupt(e.code || 'an unnamed key')
       return
     }
     if (e.repeat) return
-    gesture = modifierDown(gesture, performance.now())
+    gesture = modifierDown(gesture, eventTime(e))
     clearHold()
     if (otherModifierHeld(code, e)) {
+      say(`down with another modifier held (combo) listening=${listening()}`)
       gesture = modifierOther(gesture)
       return
     }
@@ -254,21 +272,28 @@ export function attachTalkKey(
     }
     if (!modifier) {
       if (e.code !== code) return
-      const next = directUp(gesture, performance.now(), listening())
+      const next = directUp(gesture, eventTime(e), listening())
       gesture = next.state
       if (next.intent) apply(next.intent)
       return
     }
     if (e.code !== code) return
     clearHold()
-    const next = modifierUp(gesture, performance.now(), listening())
+    const before = gesture
+    const now = eventTime(e)
+    const on = listening()
+    const next = modifierUp(gesture, now, on)
     gesture = next.state
+    if (!before.down) say(`up without its down (the press went to another window) listening=${on}`)
+    else if (!before.other) {
+      say(`up after ${Math.round(now - before.t0)}ms${before.ptt ? ' (hold)' : ''} listening=${on} -> ${next.intent ?? 'nothing'}`)
+    }
     if (next.intent) apply(next.intent)
   }
 
   const onPointer = (): void => {
     if (modifier) {
-      interrupt()
+      interrupt('a mouse press')
       return
     }
     clearHold()
@@ -280,17 +305,22 @@ export function attachTalkKey(
     gesture = idleGesture()
   }
 
+  const onBlur = (): void => {
+    if (gesture.down) say(`dropped: the window lost focus mid-press listening=${listening()}`)
+    disarm()
+  }
+
   const keydown = (e: Event): void => onKeyDown(e as unknown as TalkKeyEvent)
   const keyup = (e: Event): void => onKeyUp(e as unknown as TalkKeyEvent)
   target.addEventListener('keydown', keydown, true)
   target.addEventListener('keyup', keyup, true)
   target.addEventListener('pointerdown', onPointer, true)
-  target.addEventListener('blur', disarm)
+  target.addEventListener('blur', onBlur)
   return () => {
     clearHold()
     target.removeEventListener('keydown', keydown, true)
     target.removeEventListener('keyup', keyup, true)
     target.removeEventListener('pointerdown', onPointer, true)
-    target.removeEventListener('blur', disarm)
+    target.removeEventListener('blur', onBlur)
   }
 }

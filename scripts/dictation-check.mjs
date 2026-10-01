@@ -73,6 +73,11 @@ console.log('\ngesture: modifier tap / hold')
   eq(already.intent, null, 'hold while already listening does not re-start')
   eq(G.modifierUp(already.state, 2000, true).intent, 'ptt-end', '…but release still ends it if the mic is open')
 
+  // A busy renderer can run the key-up before the hold timer: the stop press must still stop.
+  s = G.modifierDown(G.idleGesture(), 1000)
+  eq(G.modifierUp(s, 1600, true).intent, 'ptt-end', 'a long press whose hold timer never ran still closes an open mic')
+  eq(G.modifierUp(s, 1600, false).intent, null, '…and does nothing with the mic shut')
+
   s = G.modifierOther(G.modifierDown(G.idleGesture(), 1000))
   eq(G.modifierUp(s, 1100, false).intent, null, 'Ctrl+C (other key) never toggles')
   eq(G.modifierHeld(s, 1600, false).intent, null, 'Ctrl+C hold never starts PTT')

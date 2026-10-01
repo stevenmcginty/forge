@@ -1,5 +1,12 @@
 # Handoff
 
+## Dictate key (Right Shift) sometimes did not stop (2026-10-01 17:00; master, pushed; desktop renderer only)
+
+- **Asked (Steve, live):** Right Shift starts dictation, but the stop press often does nothing; he has to click the stop button.
+- **Found:** no bug in the stop path itself (key and button both call `stt.stop()`). One real hole in `src/lib/stt-gesture.ts`: a press longer than 450 ms whose hold timer had not run yet (busy renderer, key-up handled first) released to "nothing", even with the mic open. Timings also used the handler's `performance.now()`, so a slow frame could stretch a tap past 450 ms.
+- **Changed:** `modifierUp` closes an open mic on any clean release; timings use the event's own `timeStamp`; `attachTalkKey` takes a `trace` and the Dictate key logs every press to dev.log as `[hub] dictate key ShiftRight ...` (held ms, listening, phase, result, or why it was dropped: combo with which key, mouse press, window lost focus, key-up without its key-down). `npm run dictation:check` 33/33 (2 new cases), typecheck 0, lint:hooks 0. The live dev renderer reloaded with it at 16:59.
+- **NOT proven** to be Steve's cause. **Next:** after the next missed stop, read the `[hub] dictate key` lines in `%APPDATA%\Forge\dev.log` at that time.
+
 ## Forge browser: centred switch + Browser fixes (2026-10-01; 11e9fd4 + 7ef8948; desktop + web)
 
 - **Asked (Steve, testing live):** "Agents | Browser | Board should be central, like the desktop app"; in the Browser "I can't see a cursor", "can't close some of the tabs", "when I click on a tab I can't close it".

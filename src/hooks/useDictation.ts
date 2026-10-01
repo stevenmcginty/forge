@@ -495,7 +495,13 @@ export function useDictationEngine(): Dictation {
     noticeRef.current(`${formatCombo(clashKey)} is the Agent key, so the Dictate key moved to ${formatCombo(next)}`)
   }, [ready, clashKey, hotkey])
 
-  useEffect(() => attachTalkKey(window, hotkey, () => phaseRef.current === 'listening', applyIntent), [hotkey, applyIntent])
+  useEffect(
+    () =>
+      attachTalkKey(window, hotkey, () => phaseRef.current === 'listening', applyIntent, undefined, (line) =>
+        console.info(`[hub] dictate key ${line} phase=${phaseRef.current} agent=${toAgentRef.current}`)
+      ),
+    [hotkey, applyIntent]
+  )
   useEffect(
     () => (agentKey ? attachTalkKey(window, agentKey, () => toAgentRef.current, applyAgentIntent, cancelAgentHold) : undefined),
     [agentKey, applyAgentIntent, cancelAgentHold]
