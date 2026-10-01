@@ -964,7 +964,15 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     })
     const off = window.forge.stt.onStatus((s) => {
       levelRef.current = s.level
-      setStt(s)
+      // The level arrives ten times a second and is read from the ref above;
+      // a status that differs only in its level keeps the old state, so the
+      // provider does not re-render with every syllable.
+      setStt((prev) => {
+        const keys = Object.keys(s) as (keyof SttStatus)[]
+        if (keys.length !== Object.keys(prev).length) return s
+        for (const k of keys) if (k !== 'level' && s[k] !== prev[k]) return s
+        return prev
+      })
     })
     return () => {
       alive = false

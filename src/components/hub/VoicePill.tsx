@@ -1,24 +1,43 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { memo, useRef, useState, type ReactNode } from 'react'
 import { useKeymap } from '@/hooks/useHub'
 import { formatCombo } from '@/lib/keymap'
 import { TALK_AGENT_ID } from '@/lib/shortcutCommands'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
 import { Popover } from '../Popover'
+import type { HubLook } from './hubLook'
 import { listenState, useHubView } from './hubView'
 import { SynthesizerIndicator } from './SynthesizerIndicator'
 import './VoicePill.css'
 
 /**
- * ListenToggle — the microphone half of the cohesive on/off microphone button.
+ * ListenToggle — the Listen key: the one switch for the hands-free conversation
+ * with Forge's voice agent, at the head of the voice well (.vunit).
  *
- * Toggles hands-free listening on/off for Forge's voice agent. Features a built-in
- * synthesizer indicator showing live audio levels and state dynamics in real time.
+ * Three things say the state, none of them a colour alone:
+ *   the key     a round key with the mic on it; lit while Listen is on
+ *   the shape   five bars beside it — dots at rest, an equaliser listening, a
+ *               sweep's peak thinking, wide bars speaking, one bar starting.
+ *               Drawn still here: the bar's edge is the one moving cue
+ *   the word    "Listening", "Thinking", "Speaking", "Starting", "Muted",
+ *               "Not recording" — in the open, beside the bars, while it is on
  *
- * Click toggles listening (Right Shift shortcut).
- * The button never steals focus from the active pane or typing box.
+ * Click toggles listening (the Agent key does too). The button never steals
+ * focus from the active pane or the typing box.
  */
-export function ListenToggle(): ReactNode {
+
+/** The state in one word, for the key. The tooltip and the label keep the full wording. */
+const KEY_WORD: Record<HubLook, string> = {
+  offline: '',
+  error: '',
+  connecting: 'Starting',
+  listening: 'Listening',
+  thinking: 'Thinking',
+  speaking: 'Speaking',
+  muted: 'Muted'
+}
+
+export const ListenToggle = memo(function ListenToggle(): ReactNode {
   const { actions } = useApp()
   const hub = useHubView()
   const km = useKeymap()
@@ -37,6 +56,9 @@ export function ListenToggle(): ReactNode {
     : ls.on
       ? `${said}. Click to stop listening${keyWord}.`
       : `${said}. Click to listen — talk to Forge hands-free${keyWord}.`
+
+  // "Mic on · not recording" wears the muted shape; its word says which it is.
+  const stateWord = ls.on ? (ls.look === 'muted' && !hub.muted ? 'Not recording' : KEY_WORD[ls.look]) : ''
 
   const noFocus = (e: React.MouseEvent): void => e.preventDefault()
 
@@ -67,16 +89,22 @@ export function ListenToggle(): ReactNode {
         onMouseDown={noFocus}
         onClick={() => (ls.on ? hub.stop() : hub.start())}
       >
-        <span className="listen__mic-wrap" aria-hidden="true">
-          <Icon name="mic" size={15} className="listen__mic-icon" />
+        <span className="listen__key" aria-hidden="true">
+          <Icon name="mic" size={16} className="listen__mic-icon" />
         </span>
         <SynthesizerIndicator
           look={ls.look}
           readLevels={hub.readLevels}
           width={24}
           height={14}
+          still
           className="listen__synth"
         />
+        {stateWord ? (
+          <span key={stateWord} className="listen__word" aria-hidden="true">
+            {stateWord}
+          </span>
+        ) : null}
       </button>
 
       {failed ? (
@@ -138,4 +166,4 @@ export function ListenToggle(): ReactNode {
       </Popover>
     </span>
   )
-}
+})

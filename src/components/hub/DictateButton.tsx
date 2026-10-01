@@ -1,7 +1,6 @@
-import type { ReactNode } from 'react'
-import { hotkeyLabel } from '@/hooks/useDictation'
+import { memo, type ReactNode } from 'react'
+import { hotkeyLabel, useQuietDictation } from '@/hooks/useDictation'
 import { useBarDictationPhase } from '@/lib/barDictation'
-import { useDictation } from '@/state/Dictation'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
 import { listenState, useHubPreview, useHubView } from './hubView'
@@ -30,9 +29,10 @@ export type DictateSend = { label: string; title: string; onSend: () => void }
  * square while it records, an arc turning while it transcribes, a mic with a
  * "!" when dictation failed, an arrow to send.
  */
-export function DictateButton({ send = null }: { send?: DictateSend | null }): ReactNode {
+export const DictateButton = memo(function DictateButton({ send = null }: { send?: DictateSend | null }): ReactNode {
   const { state } = useApp()
-  const dictation = useDictation()
+  // The quiet view: this button needs the phase, never the mic level.
+  const dictation = useQuietDictation()
   const hub = useHubView()
   const preview = useHubPreview()
   const intoBar = useBarDictationPhase() !== 'off'
@@ -117,4 +117,4 @@ export function DictateButton({ send = null }: { send?: DictateSend | null }): R
       ) : null}
     </button>
   )
-}
+})

@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { agentLogoFor } from '@shared/agent-logos'
 import type { SavedPrompt, SavedPromptTarget } from '@shared/hub'
 import { paneNameInTab } from '@shared/workspace'
 import { useKeymap, useSavedPrompts } from '@/hooks/useHub'
-import { hotkeyLabel } from '@/hooks/useDictation'
+import { hotkeyLabel, useQuietDictation } from '@/hooks/useDictation'
 import { resolveProfile } from '@/lib/agents'
 import { publishDictationReview, setBarDictationSink, useBarDictationPhase } from '@/lib/barDictation'
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
@@ -17,7 +18,6 @@ import { composerRouteNow } from '@/lib/shellSlots'
 import { findLeaf } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useUiCommand } from '@/lib/uiCommands'
-import { useDictation } from '@/state/Dictation'
 import { useActiveTab, useApp } from '@/state/AppState'
 import type { HubAction, HubCaption } from '@/state/VoiceHubController'
 import { readCueLevels, useBarCue } from '../DictationCue'
@@ -26,8 +26,9 @@ import { DictationEdge } from '../DictationEdge'
 import { Icon } from '../Icon'
 import { setBarTarget, useBarTarget } from './barMode'
 import { ACTION_GLYPH, hubAsk, listenState, useHubPreview, useHubView } from './hubView'
+import { logoStyle, MakerLogo } from './BrainMark'
 import { BrainPicker } from './BrainPicker'
-import { DictateButton } from './DictateButton'
+import { DictateButton, type DictateSend } from './DictateButton'
 import { KeyRecorder, Keys } from './KeyRecorder'
 import { ModelPicker, UsageStrip } from './ModelPicker'
 import { ListenToggle } from './VoicePill'
@@ -118,15 +119,33 @@ const MIC_WORD: Record<CuePhase, { full: string; chip: string }> = {
   sending: { full: 'Sending…', chip: 'Sending' }
 }
 
+/**
+ * What the bar sent, oldest first, for this run of the app: Up in an empty bar
+ * brings the last one back to edit or send again, as a shell does. Kept in
+ * memory only, so nothing typed here is written to disk.
+ */
+const sentHistory: string[] = []
+const HISTORY_MAX = 40
+
+function rememberSent(message: string): void {
+  const at = sentHistory.indexOf(message)
+  if (at >= 0) sentHistory.splice(at, 1)
+  sentHistory.push(message)
+  if (sentHistory.length > HISTORY_MAX) sentHistory.shift()
+}
+
 type PaletteItem =
   | { kind: 'save'; key: string; title: string }
   | { kind: 'prompt'; key: string; prompt: SavedPrompt }
   | { kind: 'command'; key: string; id: string; title: string; group: string; keys: string[] }
 
+const NO_ITEMS: PaletteItem[] = []
+
 export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?: boolean }): ReactNode {
   const { state, actions } = useApp()
   const tab = useActiveTab()
-  const dictation = useDictation()
+  // The quiet view: the bar reads the mic level in its canvas, never through React.
+  const dictation = useQuietDictation()
   const hub = useHubView()
   const preview = useHubPreview()
   const target = useBarTarget()
@@ -185,6 +204,9 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     setTall(h > min + 4)
   }, [text, compact])
 
+  /** Where Up / Down is in what the bar sent; -1 while the words are his own. */
+  const historyAt = useRef(-1)
+
   const focusField = (): void => fieldRef.current?.focus()
   const backToPane = (): void => {
     fieldRef.current?.blur()
@@ -236,14 +258,17 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     const message = raw.replace(/\s+$/, '')
     if (!message.trim()) return
     endReview()
+    historyAt.current = -1
     const route = composerRouteNow()
     if (route?.({ text: message, paneId })) {
+      rememberSent(message)
       setText('')
       endBarWords()
       return
     }
     if (toForge) {
       hubAsk(hub, message, 'typed')
+      rememberSent(message)
       setText('')
       endBarWords()
       if (shellRef.current) fireComet(shellRef.current, shellRef.current.querySelector('.listen') ?? shellRef.current, 'var(--accent)')
@@ -253,6 +278,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       actions.setNotice('That pane has no live shell to send to')
       return
     }
+    rememberSent(message)
     setText('')
     // Sent: the words in the bar are done with. Dictation into the bar ends with the send.
     endBarWords()
@@ -392,6 +418,8 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
   const { prompts } = useSavedPrompts()
   const keymap = useKeymap()
   const items = useMemo<PaletteItem[]>(() => {
+    // Built only while the palette is up: typing in the plain bar builds nothing.
+    if (!showPalette) return NO_ITEMS
     const out: PaletteItem[] = []
     const draft = !slash && text.trim()
     if (draft) out.push({ kind: 'save', key: 'save', title: 'Save this as a prompt' })
@@ -406,7 +434,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       out.push({ kind: 'command', key: `c:${c.id}`, id: c.id, title: c.title, group: c.group, keys: c.keys })
     }
     return out
-  }, [prompts, keymap.commands, query, slash, text])
+  }, [showPalette, prompts, keymap.commands, query, slash, text])
 
   useEffect(() => setCursor(0), [query, showPalette])
 
@@ -470,16 +498,31 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
    * declined on dragover is a drop that never fires. And an unprevented file
    * drop navigates the whole window to the file.
    */
-  const [fileOver, setFileOver] = useState(false)
+  /** How many files are held over the bar; 0 is none. */
+  const [fileOver, setFileOver] = useState(0)
+  /**
+   * A drag that ends without a dragleave (cancelled with Esc, or the window
+   * loses it) must not leave the cover up: dragover repeats while a file is
+   * held over the bar, so a second without one means it has gone.
+   */
+  const dropWatch = useRef(0)
+  useEffect(() => () => window.clearTimeout(dropWatch.current), [])
   const acceptDrop = (e: React.DragEvent): void => {
-    if (!maybeFiles(e) && !e.dataTransfer.types.includes(PATH_DRAG_TYPE)) return
+    const tracked = e.dataTransfer.types.includes(PATH_DRAG_TYPE)
+    if (!maybeFiles(e) && !tracked) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
-    if (!fileOver) setFileOver(true)
+    window.clearTimeout(dropWatch.current)
+    dropWatch.current = window.setTimeout(() => setFileOver(0), 1000)
+    // A drag shows how many it carries, never their names; a count is what there is to say.
+    const held = tracked ? 1 : Array.from(e.dataTransfer.items ?? []).filter((i) => i.kind === 'file').length
+    const n = Math.max(1, held)
+    if (fileOver !== n) setFileOver(n)
   }
   const onDropFiles = (e: React.DragEvent): void => {
     e.preventDefault()
-    setFileOver(false)
+    window.clearTimeout(dropWatch.current)
+    setFileOver(0)
     const tracked = e.dataTransfer.getData(PATH_DRAG_TYPE)
     const paths = tracked ? [tracked] : droppedFilePaths(e)
     if (paths.length === 0) return
@@ -514,6 +557,24 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           ? 'Ask Forge…   ·   Esc for the pane'
           : 'Ask Forge…   ·   / for prompts'
 
+  // The pane's agent, as its maker's mark on the target chip.
+  const paneLogo = profile ? agentLogoFor(profile) : null
+
+  // The end button's job, stable while nothing about it changes, so a keystroke
+  // in the box does not re-render the button.
+  const hasWords = text.trim().length > 0
+  const runHighlighted = useRef<() => void>(() => undefined)
+  runHighlighted.current = () => runItem(items[cursor])
+  const endSend = useMemo<DictateSend | null>(() => {
+    if (!hasWords) return null
+    if (showPalette) return { label: 'Run', title: 'Run the highlighted item (Enter)', onSend: () => runHighlighted.current() }
+    return {
+      label: toForge ? 'Ask Forge' : `Send to ${paneName}`,
+      title: toForge ? 'Ask Forge (Enter)' : `Send to ${paneName} (Enter)`,
+      onSend: () => sendRef.current(textRef.current)
+    }
+  }, [hasWords, showPalette, toForge, paneName])
+
   return (
     <div
       ref={shellRef}
@@ -538,7 +599,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       onDragEnter={acceptDrop}
       onDragOver={acceptDrop}
       onDragLeave={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileOver(false)
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileOver(0)
       }}
       onDrop={onDropFiles}
     >
@@ -592,6 +653,15 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
       {/* What Forge says, and what it did, grow the bar upward. */}
       <CaptionRail captions={hub.captions} actions={hub.actions} />
 
+      {fileOver ? (
+        // A file held over the bar: what a drop will do, in words, over the row.
+        <div className="comp__drop" aria-hidden="true">
+          <Icon name="file" size={15} />
+          <span className="comp__drop-word">{fileOver > 1 ? `Drop ${fileOver} files` : 'Drop the file'}</span>
+          <span className="comp__drop-hint">{fileOver > 1 ? 'their paths go' : 'its path goes'} in at the caret</span>
+        </div>
+      ) : null}
+
       <div className="comp__row">
         {lead}
         {/* Cohesive on/off microphone button with built-in synthesizer indicator and agent picker */}
@@ -643,6 +713,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           onBlur={() => setFocused(false)}
           onPointerDown={reviewing ? undoReview : undefined}
           onChange={(e) => {
+            historyAt.current = -1
             setText(e.target.value)
             if (!e.target.value) setPaletteOpen(false)
           }}
@@ -661,6 +732,25 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
               if (showPalette) runItem(items[cursor])
               else send(text)
               return
+            }
+            // Up in an empty bar: the last thing it sent, to edit or send again;
+            // Up again goes further back, Down comes forward and out to empty.
+            if (!showPalette && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+              const at = historyAt.current
+              if (e.key === 'ArrowUp' && sentHistory.length > 0 && (text === '' || at >= 0)) {
+                e.preventDefault()
+                const next = at < 0 ? sentHistory.length - 1 : Math.max(0, at - 1)
+                historyAt.current = next
+                setText(sentHistory[next]!)
+                return
+              }
+              if (e.key === 'ArrowDown' && at >= 0) {
+                e.preventDefault()
+                const next = at + 1
+                historyAt.current = next < sentHistory.length ? next : -1
+                setText(next < sentHistory.length ? sentHistory[next]! : '')
+                return
+              }
             }
             // The bar's own keys (Ctrl+K, Ctrl+S by default), from Settings › Shortcuts.
             const combo = comboFromEvent(e.nativeEvent)
@@ -682,29 +772,41 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
           }}
         />
 
-        <button
-          type="button"
-          className="dock__target comp__target"
-          data-target={toForge ? 'forge' : 'pane'}
-          disabled={!paneName}
-          title={
-            toForge
-              ? paneName
-                ? `Asking Forge, the main agent (${hub.brainLabel}). Click (or Esc in the bar) to type straight into ${paneName} instead.`
-                : `Asking Forge, the main agent (${hub.brainLabel}).`
-              : `Typing straight into ${paneName}. Click to ask Forge, the main agent, instead.`
-          }
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setBarTarget(toForge ? 'pane' : 'forge')}
-        >
-          <span className="dock__target-arrow" aria-hidden="true">
-            →
-          </span>
-          {toForge ? <Icon name="forge" size={11} className="comp__target-mark" /> : null}
-          <span className="truncate">{toForge ? 'Forge' : paneName}</span>
-        </button>
+        {/* Where the words go: the pane (or Forge), and what that pane's agent runs. One well. */}
+        <span className="comp__dest" data-target={toForge ? 'forge' : 'pane'}>
+          <button
+            type="button"
+            className="dock__target comp__target"
+            data-target={toForge ? 'forge' : 'pane'}
+            disabled={!paneName}
+            title={
+              toForge
+                ? paneName
+                  ? `Asking Forge, the main agent (${hub.brainLabel}). Click (or Esc in the bar) to type straight into ${paneName} instead.`
+                  : `Asking Forge, the main agent (${hub.brainLabel}).`
+                : `Typing straight into ${paneName}. Click to ask Forge, the main agent, instead.`
+            }
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setBarTarget(toForge ? 'pane' : 'forge')}
+          >
+            <span className="dock__target-arrow" aria-hidden="true">
+              →
+            </span>
+            {/* Keyed by where it aims, so a switch glides the new name in. */}
+            <span key={toForge ? 'forge' : 'pane'} className="comp__target-face">
+              {toForge ? (
+                <Icon name="forge" size={12} className="comp__target-mark" />
+              ) : paneLogo ? (
+                <span className="comp__target-plate mplate" style={logoStyle(paneLogo)} aria-hidden="true">
+                  <MakerLogo logo={paneLogo} size={10} />
+                </span>
+              ) : null}
+              <span className="truncate">{toForge ? 'Forge' : paneName}</span>
+            </span>
+          </button>
 
-        <ModelPicker />
+          <ModelPicker />
+        </span>
 
         {review ? (
           // Dictated words, waiting: in words, with the time left and a way out.
@@ -755,19 +857,7 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
         ) : null}
 
         {/* Always last: the mic while the bar is empty, Send once it has words. */}
-        <DictateButton
-          send={
-            text.trim()
-              ? showPalette
-                ? { label: 'Run', title: 'Run the highlighted item (Enter)', onSend: () => runItem(items[cursor]) }
-                : {
-                    label: toForge ? 'Ask Forge' : `Send to ${paneName}`,
-                    title: toForge ? 'Ask Forge (Enter)' : `Send to ${paneName} (Enter)`,
-                    onSend: () => send(text)
-                  }
-              : null
-          }
-        />
+        <DictateButton send={endSend} />
       </div>
 
       {/* The aimed-at pane's context and plan limits, once it has reported them. */}
@@ -812,15 +902,27 @@ function clock(at: number): string {
  * upward to hold it. Pointer-transparent except for the trail's own toggle and
  * list, so a click there always means the trail.
  */
-function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: HubAction[] }): ReactNode {
+const CaptionRail = memo(function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: HubAction[] }): ReactNode {
   const [now, setNow] = useState(() => Date.now())
   const [expanded, setExpanded] = useState(false)
   // Hide: everything up to this moment goes away; anything newer shows again.
   const [hiddenAt, setHiddenAt] = useState(0)
+  // The clock runs only while something on the rail can still expire: from the
+  // newest caption or action until the longest window past it. A quiet bar
+  // ticks nothing.
+  const newest = Math.max(
+    captions.reduce((m, c) => Math.max(m, c.at), 0),
+    actions.reduce((m, a) => Math.max(m, a.at), 0)
+  )
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    if (!newest) return undefined
+    const t = window.setInterval(() => {
+      const at = Date.now()
+      setNow(at)
+      if (at - newest > CAPTION_STUCK_MS + 2000) window.clearInterval(t)
+    }, 1000)
     return () => window.clearInterval(t)
-  }, [])
+  }, [newest])
 
   const lastUser = [...captions].reverse().find((c) => c.role === 'user') ?? null
   const lastBot = [...captions].reverse().find((c) => c.role === 'assistant') ?? null
@@ -911,7 +1013,7 @@ function CaptionRail({ captions, actions }: { captions: HubCaption[]; actions: H
       ) : null}
     </div>
   )
-}
+})
 
 /* ---------------------------------------------------------------- palette */
 

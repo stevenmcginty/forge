@@ -1,23 +1,26 @@
-import { useId, type ReactNode } from 'react'
+import { useId, type CSSProperties, type ReactNode } from 'react'
 import type { AgentBrainId } from '@shared/agent-brain'
+import { AGENT_LOGOS, type AgentLogo } from '@shared/agent-logos'
 import { GYRI, LEFT, RIGHT, RING_FAR, RING_NEAR, SILHOUETTE, TILT } from '../brain/BrainGlyph'
 
 /**
- * Which voice agent, as a mark: one silhouette per maker, so a brain reads at
- * a glance even when the chip has shrunk to its icon.
+ * Which voice agent, as a mark: the maker's own logo, so a brain reads at a
+ * glance even when the chip has shrunk to its icon.
  *
- *   Claude       an eight-ray burst
- *   Gemini       a four-point spark     (Gemini Live, Gemini CLI, Gemini Flash)
- *   OpenAI       a hexagon              (Codex, GPT Realtime, GPT Realtime mini)
- *   Groq         a bolt
- *   OpenRouter   one node branching to two
+ *   Claude       Anthropic's Claude spark   (shared/agent-logos.ts)
+ *   Gemini       Google's Gemini sparkle    (Gemini Live, Gemini CLI, Gemini Flash)
+ *   OpenAI       the OpenAI blossom         (Codex, GPT Realtime, GPT Realtime mini)
+ *   Groq         a bolt        — Forge's drawing: agent-logos.ts carries no Groq mark
+ *   OpenRouter   one node branching to two — Forge's drawing, for the same reason
  *   Forge Brain  the top bar's brain glyph (components/brain/BrainGlyph.tsx),
  *                idle and still: the brain, its ring and its spark
  *
- * The same shapes as Forge Web's voice bar, drawn on the desktop icons' 16px
- * grid. Monochrome on purpose: the mark takes the ink it sits in, so it never
- * fades on a light theme and colour never carries the meaning. The brain's
- * name is always in the row, the title and the accessible name.
+ * The real marks are the ones every terminal's badge wears (AgentBadge), from
+ * the same file, so Claude looks like Claude everywhere. A mark sits on a
+ * round plate (`.mplate`, BrainPicker.css) washed in the maker's colour; the
+ * plate reads that colour from `brandStyle`. Colour is the second cue only:
+ * the shape is the identifier, and the brain's name is always in the row, the
+ * title and the accessible name.
  */
 type Maker = 'claude' | 'gemini' | 'openai' | 'groq' | 'openrouter' | 'forge'
 
@@ -71,24 +74,55 @@ function ForgeBrainMark({ size }: { size: number }): ReactNode {
   )
 }
 
+const MAKER_LOGO: Partial<Record<Maker, AgentLogo>> = {
+  claude: AGENT_LOGOS.claude,
+  openai: AGENT_LOGOS.openai,
+  gemini: AGENT_LOGOS.gemini
+}
+
+/**
+ * A logo's brand colour, as the two custom properties a plate reads
+ * (`--logo-on-dark` / `--logo-on-light`). Undefined for a monochrome brand,
+ * which takes the theme's ink.
+ */
+export function logoStyle(logo: AgentLogo | null | undefined): CSSProperties | undefined {
+  if (!logo?.color) return undefined
+  return { '--logo-on-dark': logo.color.dark, '--logo-on-light': logo.color.light } as CSSProperties
+}
+
+/** The same, for a voice brain's maker. */
+export function brandStyle(brain: AgentBrainId): CSSProperties | undefined {
+  return logoStyle(MAKER_LOGO[MAKER[brain] ?? 'claude'])
+}
+
+/** A maker's real mark (shared/agent-logos.ts), in the ink of the plate it sits on. */
+export function MakerLogo({ logo, size = 14 }: { logo: AgentLogo; size?: number }): ReactNode {
+  return (
+    <svg
+      className="bmark bmark--logo"
+      data-logo={logo.key}
+      width={size}
+      height={size}
+      viewBox={logo.viewBox}
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {logo.paths.map((path, i) => (
+        <path key={i} d={path.d} data-ink={path.ink ? 'true' : undefined} fillRule={logo.evenOdd ? 'evenodd' : undefined} />
+      ))}
+    </svg>
+  )
+}
+
 export function BrainMark({ brain, size = 14 }: { brain: AgentBrainId; size?: number }): ReactNode {
   const maker = MAKER[brain] ?? 'claude'
   if (maker === 'forge') return <ForgeBrainMark size={size} />
+  const logo = MAKER_LOGO[maker]
+  if (logo) return <MakerLogo logo={logo} size={size} />
   return (
     <svg className="bmark" data-maker={maker} width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
-      {maker === 'claude' ? (
-        <path
-          d="M8 1.4V5.6M8 10.4V14.6M1.4 8H5.6M10.4 8H14.6M3.33 3.33 6.3 6.3M9.7 9.7 12.67 12.67M12.67 3.33 9.7 6.3M6.3 9.7 3.33 12.67"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-        />
-      ) : maker === 'gemini' ? (
-        <path d="M8 1C8.6 5.3 10.7 7.4 15 8 10.7 8.6 8.6 10.7 8 15 7.4 10.7 5.3 8.6 1 8 5.3 7.4 7.4 5.3 8 1Z" fill="currentColor" />
-      ) : maker === 'openai' ? (
-        <path d="M8 1.7 13.45 4.85V11.15L8 14.3 2.55 11.15V4.85Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      ) : maker === 'groq' ? (
+      {maker === 'groq' ? (
         <path d="M9.4 1.2 3.2 9.1H7.5L6.6 14.8 12.8 6.9H8.5Z" fill="currentColor" strokeLinejoin="round" />
       ) : (
         <>

@@ -13,26 +13,25 @@
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  margin-bottom: 1px;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
   padding: 0;
   box-sizing: border-box;
   border-radius: var(--r-full);
-  border: 1px solid color-mix(in srgb, var(--d) 75%, transparent);
+  border: 1px solid color-mix(in srgb, var(--d) 55%, transparent);
   color: var(--d);
-  background: color-mix(in srgb, var(--d) 18%, transparent);
+  background: color-mix(in srgb, var(--d) 14%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
   transition:
     background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .dict:hover {
-  background: color-mix(in srgb, var(--d) 28%, transparent);
+  background: color-mix(in srgb, var(--d) 26%, transparent);
   border-color: var(--d);
 }
 
@@ -122,8 +121,11 @@
   color: var(--text-on-accent);
   background: var(--accent);
   border-color: var(--accent);
-  box-shadow: 0 0 18px -6px var(--accent-glow);
+  box-shadow:
+    0 0 0 3px var(--accent-softer),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
+
 
 .dict[data-look='send']:hover {
   background: var(--accent-bright, var(--accent));

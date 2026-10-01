@@ -4,6 +4,19 @@ import type { HubLook } from './hubLook'
 
 const MOVING_LOOKS: ReadonlySet<HubLook> = new Set(['listening', 'speaking', 'thinking', 'connecting'])
 
+/**
+ * Each moving look, held still (heights on the 14px grid): an equaliser while
+ * listening, wider bars speaking, a sweep at its peak thinking, one bar up
+ * while starting. Four shapes, so the state reads with nothing moving — under
+ * reduced motion, and wherever something else is the one animated cue.
+ */
+const STILL_SHAPES: Partial<Record<HubLook, readonly number[]>> = {
+  listening: [5, 9, 13, 8, 4],
+  speaking: [9, 13, 6, 12, 8],
+  thinking: [3, 6, 12, 6, 3],
+  connecting: [10, 2.5, 2.5, 2.5, 2.5]
+}
+
 const BAR_WEIGHTS = [0.65, 1.15, 1.45, 1.1, 0.7]
 const BAR_PHASES = [0.0, 1.3, 2.7, 4.1, 5.5]
 
@@ -14,6 +27,7 @@ export function SynthesizerIndicator({
   height = 14,
   barWidth = 2.4,
   barGap = 2,
+  still: held = false,
   className
 }: {
   look: HubLook
@@ -23,6 +37,8 @@ export function SynthesizerIndicator({
   /** Thicker bars for a bigger indicator (the dictation cue); the defaults are the voice pill's. */
   barWidth?: number
   barGap?: number
+  /** Draw every look as its still shape and run no loop: something else is the moving cue. */
+  still?: boolean
   className?: string
 }): ReactNode {
   const ref = useRef<HTMLCanvasElement | null>(null)
@@ -48,7 +64,7 @@ export function SynthesizerIndicator({
     let levelOut = 0
     let raf = 0
     let running = false
-    const still = reducedMotion()
+    const still = held || reducedMotion()
 
     const barCount = 5
     const barW = barWidth
@@ -70,9 +86,9 @@ export function SynthesizerIndicator({
       if (still && MOVING_LOOKS.has(look)) {
         // Reduced motion: a static equalizer stands in for the moving looks;
         // the resting looks fall through to their dots, so on still reads apart from off.
-        const staticHeights = [4, 8, 12, 7, 4]
+        const staticHeights = STILL_SHAPES[look] ?? [4, 8, 12, 7, 4]
         for (let i = 0; i < barCount; i++) {
-          const bh = Math.min(h - 2, (staticHeights[i] * h) / 14)
+          const bh = Math.min(h - 1, (staticHeights[i]! * h) / 14)
           const x = startX + i * (barW + barGap)
           drawBar(ctx, x, midY - bh / 2, barW, bh)
         }
@@ -167,7 +183,7 @@ export function SynthesizerIndicator({
       document.removeEventListener('visibilitychange', onVisibility)
       canvas.removeEventListener('transitionend', onTransitionEnd)
     }
-  }, [look, width, height, barWidth, barGap])
+  }, [look, width, height, barWidth, barGap, held])
 
   return (
     <canvas

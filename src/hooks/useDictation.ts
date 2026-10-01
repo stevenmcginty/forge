@@ -57,6 +57,42 @@ const DICTATE_ALT_RIGHT_MIGRATED = 'forge.dictateKey.altRight'
 /** Where the Dictate key goes when it lands on the Agent key: its default first. */
 const DICTATE_FALLBACK_KEYS = ['AltRight', 'ControlRight', 'ScrollLock', 'Pause', 'F8', 'F9']
 
+/*
+ * The quiet view: the same Dictation, minus the mic level.
+ *
+ * The sidecar reports its level about ten times a second, and each report is a
+ * new `status`. The voice bar reads the level in its own canvas loop
+ * (readCueLevels), never from React, so it subscribes here instead of to the
+ * context: this value changes only when something other than the level does,
+ * and a sentence being spoken no longer re-renders the bar ten times a second.
+ */
+let quiet: Dictation | null = null
+const quietListeners = new Set<() => void>()
+
+function subscribeQuiet(fn: () => void): () => void {
+  quietListeners.add(fn)
+  return () => {
+    quietListeners.delete(fn)
+  }
+}
+
+/** Two statuses that differ, if at all, only in `level`. */
+function sameButLevel(a: SttStatus, b: SttStatus): boolean {
+  if (a === b) return true
+  const ka = Object.keys(a) as (keyof SttStatus)[]
+  const kb = Object.keys(b) as (keyof SttStatus)[]
+  if (ka.length !== kb.length) return false
+  for (const k of ka) if (k !== 'level' && a[k] !== b[k]) return false
+  return true
+}
+
+/** `useDictation` without the level: for views that must not re-render with the voice. */
+export function useQuietDictation(): Dictation {
+  const d = useSyncExternalStore(subscribeQuiet, () => quiet)
+  if (!d) throw new Error('useQuietDictation must be used inside <DictationProvider>')
+  return d
+}
+
 export interface Dictation {
   status: SttStatus
   /** True when the sidecar needs the user to fix a path before it can work. */
@@ -548,6 +584,28 @@ export function useDictationEngine(): Dictation {
       offAgent()
     }
   }, [applyIntent, applyAgentIntent])
+
+  // The quiet view (above): the last status that differed in more than its level.
+  const quietStatus = useRef(status)
+  if (!sameButLevel(quietStatus.current, status)) quietStatus.current = status
+  const calm = quietStatus.current
+  const quietValue = useMemo<Dictation>(
+    () => ({
+      status: calm,
+      needsSetup: calm.phase === 'error' && !!calm.error && isSttSetupError(calm.error.kind),
+      listening: calm.phase === 'listening',
+      toggle,
+      dictateIntoBar,
+      reload
+    }),
+    [calm, toggle, dictateIntoBar, reload]
+  )
+  // Set while rendering, so a child's first read in this same pass finds it;
+  // subscribers are told once the commit is done.
+  quiet = quietValue
+  useEffect(() => {
+    quietListeners.forEach((fn) => fn())
+  }, [quietValue])
 
   return useMemo<Dictation>(
     () => ({

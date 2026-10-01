@@ -17,15 +17,15 @@
  */
 
 .apick-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 170px;
-  height: 26px;
-  margin-bottom: 4px;
-  padding: 0 7px 0 4px;
+  max-width: 190px;
+  height: 30px;
+  padding: 0 7px 0 5px;
   border-radius: var(--r-full);
   font-family: var(--font-display);
   font-size: 11.5px;
@@ -33,12 +33,12 @@
   letter-spacing: 0.02em;
   color: var(--text-secondary);
   background: transparent;
-  border: 1px solid var(--line-hairline);
+  border: 0;
   cursor: pointer;
   transition:
     background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    transform var(--dur-instant) var(--ease-out);
 }
 
 .apick-chip:hover,
@@ -47,21 +47,24 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
+.apick-chip:active {
+  transform: scale(0.97);
+}
+
 .apick-chip:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 1px;
 }
 
-/* Beside the chip, in the bar's own row: one small chevron that hides the usage
+/* Beside the chip, in the same well: one small chevron that hides the usage
    line under the bar or brings it back. Down = tuck it away, up = bring it back. */
 .apick-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 22px;
-  height: 26px;
-  margin: 0 0 4px -4px;
+  width: 26px;
+  height: 30px;
   padding: 0;
   border: 0;
   border-radius: var(--r-full);
@@ -83,29 +86,31 @@
   outline-offset: 1px;
 }
 
+.apick-toggle__chev {
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
 .apick-toggle[data-shown='false'] .apick-toggle__chev {
   transform: rotate(180deg);
 }
 
-.dock[data-place='top'] .apick-toggle {
-  height: 24px;
-  margin-top: 2px;
-}
-
-/* The voice agent chip's tile, one size down: the model's letter. */
+/* The maker's mark on its plate (BrainPicker.css .mplate). An agent with no
+   logo keeps the model's letter here, in the Model section's violet. */
 .apick-chip__tile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   font-family: var(--font-display);
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
-  /* The model's letter, in the Model section's violet. */
+}
+
+.apick-chip__tile:not(.mplate) {
   color: var(--apick-model);
   background: color-mix(in srgb, var(--apick-model) 16%, transparent);
 }
@@ -118,7 +123,7 @@
   flex: none;
   color: var(--text-dim);
   transition:
-    transform var(--dur-fast) var(--ease-out),
+    transform var(--dur-glide) var(--spring-glide),
     color var(--dur-fast) var(--ease-out);
 }
 
@@ -132,16 +137,27 @@
 }
 
 /* In the top bar: the target chip's shorter height. */
-.dock[data-place='top'] .apick-chip {
+.dock[data-place='top'] .apick-chip,
+.dock[data-place='top'] .apick-toggle {
   height: 24px;
-  margin-top: 2px;
 }
 
-/* Typing up there, the words need the width: the chip keeps its letter and
-   chevron and gives its words back when the bar is empty (as Dock.css does
-   for the voice agent chip). */
+/* Typing up there, the words need the width: the chip keeps its mark and
+   chevron and gives its words back when the bar is empty. */
 .dock[data-place='top'] .comp:not([data-empty='true']) .apick-chip__face {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apick-chip,
+  .apick-chip__chev,
+  .apick-toggle__chev {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.apick-chip, .apick-chip__chev, .apick-toggle__chev) {
+  transition: none;
 }
 
 /* ------------------------------------------------------------------ menu */
@@ -193,6 +209,26 @@
 
 .apick__hint {
   min-width: 0;
+}
+
+.apick__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.apick__who-tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.apick__who-tile:not(.mplate) {
+  display: none;
 }
 
 .apick__section {
@@ -333,7 +369,6 @@
   max-width: 100%;
   border-radius: inherit;
   background: var(--sec, var(--text-secondary));
-  transition: width var(--dur-med) var(--ease-out);
 }
 
 /* Near the end the fill leaves its section colour: amber from 80% ("near
@@ -410,7 +445,7 @@
 :is(.apick__section, .apick__group)[data-sec='effort'] {
   --sec: var(--apick-effort);
 }
-:is(.apick__section, .apick__group)[data-sec='mode'] {
+:is(.apick__section, .apick__group, .ustrip__item)[data-sec='mode'] {
   --sec: var(--apick-mode);
 }
 
@@ -550,21 +585,26 @@
 /* ------------------------------------------------------------ the strip */
 
 /*
- * Under the row, the bar's instrument line: a hairline, then each reading
- * as a word, a small bar and its number. Quiet by default (muted ink, no
- * fill), in the ink when pressed or near a limit. The strip is its own
- * container, so as the bar narrows the least pressing readings go first.
+ * Under the row, the bar's instrument line: how full the pane's context is,
+ * how close each plan-limit window is, what the session has cost and the mode
+ * it is in. First-class read-outs, not small print: each is a label (small
+ * caps, quiet), a short meter in its section's colour, and its number in the
+ * ink, in tabular figures, so "Context 41%" reads at a glance. A hairline
+ * divides one reading from the next. Near a limit the reading also says so in
+ * words ("near limit", "almost full", "full") and its meter is striped: never
+ * the colour alone. The strip is its own container, so as the bar narrows the
+ * least pressing readings go first.
  */
 .ustrip {
   container: ustrip / inline-size;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 0;
   width: auto;
   min-width: 0;
-  height: 24px;
-  margin: 5px 2px 0 6px;
-  padding: 3px 6px 0 8px;
+  height: 26px;
+  margin: 5px 3px 0 8px;
+  padding: 3px 4px 0 4px;
   overflow: hidden;
   border: 0;
   border-top: 1px solid var(--glass-line);
@@ -573,16 +613,18 @@
   font-size: 11px;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
+  animation: ustrip-in var(--dur-glide) var(--spring-glide) both;
 }
 
-.ustrip:hover,
-.ustrip[data-open='true'] {
-  color: var(--text-secondary);
+@keyframes ustrip-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
 }
 
 .ustrip:focus-visible {
@@ -591,31 +633,53 @@
 }
 
 .ustrip__item {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex: none;
   min-width: 0;
+  padding: 0 14px;
+}
+
+.ustrip__item:first-child {
+  padding-left: 4px;
+}
+
+/* The hairline between two readings. */
+.ustrip__item + .ustrip__item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  background: var(--glass-line);
 }
 
 .ustrip__label {
-  color: var(--text-dim);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .ustrip:hover .ustrip__label,
 .ustrip[data-open='true'] .ustrip__label {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .ustrip__bar {
   position: relative;
   display: block;
   flex: none;
-  width: 34px;
+  width: 44px;
   height: 4px;
   overflow: hidden;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--sec, var(--text-primary)) 16%, transparent);
+  background: color-mix(in srgb, var(--sec, var(--text-primary)) 18%, transparent);
 }
 
 /* The same colour as the menu's section for the same reading. */
@@ -625,29 +689,44 @@
   max-width: 100%;
   border-radius: inherit;
   background: var(--sec, currentColor);
-  transition: width var(--dur-med) var(--ease-out);
 }
 
+/* The number: the reading itself, in the ink. */
 .ustrip__pct {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--text-primary);
 }
 
-.ustrip__item[data-level='warn'],
-.ustrip__item[data-level='full'] {
+/* A reading that is a word (the mode). */
+.ustrip__val {
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
 .ustrip__word {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  color: var(--text-primary);
+  border: 1px solid var(--warn-line-strong);
+}
+
+.ustrip__item[data-level='full'] .ustrip__word {
+  border-style: double;
+  border-width: 3px;
+  padding: 0 4px;
 }
 
 .ustrip__reset {
-  color: var(--text-dim);
+  font-size: 10.5px;
+  color: var(--text-muted);
 }
 
 .ustrip__reset::before {
@@ -660,39 +739,62 @@
   gap: 4px;
   flex: none;
   margin-left: auto;
-  color: var(--text-dim);
+  padding-left: 12px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .ustrip:hover .ustrip__more,
 .ustrip[data-open='true'] .ustrip__more {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .ustrip__chev {
   transform: rotate(180deg);
-  transition: transform var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur-glide) var(--spring-glide);
 }
 
 .ustrip[data-open='true'] .ustrip__chev {
   transform: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .ustrip {
+    animation: none;
+  }
+
+  .ustrip__label,
+  .ustrip__more,
+  .ustrip__chev {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .ustrip {
+  animation: none;
+}
+
+:root[data-reduced-motion='true'] :is(.ustrip__label, .ustrip__more, .ustrip__chev) {
+  transition: none;
+}
+
 /* Narrowing: reset times, then cost and the word "Details", then the other
    windows, then context. The most-used window always stays. */
-@container ustrip (max-width: 700px) {
+@container ustrip (max-width: 780px) {
   .ustrip__reset {
     display: none;
   }
 }
 
-@container ustrip (max-width: 540px) {
+@container ustrip (max-width: 620px) {
   .ustrip__item[data-rank='3'],
   .ustrip__more-word {
     display: none;
   }
 }
 
-@container ustrip (max-width: 420px) {
+@container ustrip (max-width: 460px) {
   .ustrip__item[data-rank='2'] {
     display: none;
   }

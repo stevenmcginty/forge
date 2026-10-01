@@ -1,10 +1,48 @@
 /*
- * The voice agent picker — integrated into the cohesive microphone button.
+ * The voice agent picker: the right half of the voice well (.vunit,
+ * VoicePill.css), after a hairline seam. The agent's mark on a round plate and
+ * a chevron; a press opens the BrainMenu popover.
  *
- * Sits as the right segment of the capsule (.vunit), cleanly separated from
- * the microphone toggle by a hairline seam. Displays the active agent mark
- * and dropdown chevron, opening the BrainMenu popover on click.
+ * Also here, because every menu in the bar wears them: the maker plate
+ * (.mplate) and the menu rows (.bpick__*), which the model menu reuses
+ * (ModelPicker.css).
  */
+
+/* --------------------------------------------------------- the maker plate
+ *
+ * A round plate that carries a maker's logo (BrainMark.tsx). It is washed and
+ * rimmed in the maker's own colour, read from --logo-on-dark / --logo-on-light
+ * (set inline from shared/agent-logos.ts); a monochrome brand, and Forge's own
+ * drawn marks, take the theme's ink. The shape is the identifier; the colour
+ * is only a second cue.
+ */
+.mplate {
+  --logo-brand: var(--logo-on-dark, var(--text-primary));
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  color: var(--logo-brand);
+  background: color-mix(in srgb, var(--logo-brand) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--logo-brand) 34%, transparent);
+}
+
+:root[data-appearance='light'] .mplate {
+  --logo-brand: var(--logo-on-light, var(--text-primary));
+}
+
+.bmark {
+  display: block;
+  flex: none;
+}
+
+/* The ink half of a two-tone mark. */
+.bmark--logo path[data-ink='true'] {
+  fill: var(--text-primary);
+}
+
+/* ------------------------------------------------------------------ chip */
 
 .bpick-chip {
   position: relative;
@@ -13,7 +51,8 @@
   gap: 3px;
   flex: none;
   height: 30px;
-  padding: 0 6px 0 5px;
+  margin-left: 3px;
+  padding: 0 5px 0 4px;
   border-radius: var(--r-full);
   background: transparent;
   border: 0;
@@ -21,16 +60,16 @@
   outline: none;
   transition:
     background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    transform var(--dur-instant) var(--ease-out);
 }
 
-/* Hairline seam between microphone toggle and agent selector */
+/* The seam between the Listen key and the agent. */
 .bpick-chip::before {
   content: '';
   position: absolute;
-  left: -1px;
-  top: 6px;
-  bottom: 6px;
+  left: -2px;
+  top: 7px;
+  bottom: 7px;
   width: 1px;
   background: var(--glass-line);
   pointer-events: none;
@@ -41,36 +80,21 @@
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
+.bpick-chip:active {
+  transform: scale(0.96);
+}
+
 .bpick-chip:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 1px;
 }
 
 .bpick-chip__tile {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
-  transition:
-    box-shadow var(--dur-med) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+  width: 22px;
+  height: 22px;
 }
 
-/* When listening is ON: the agent tile lights up subtly with accent */
-.vunit:has(.listen[data-on='true']) .bpick-chip__tile {
-  box-shadow: inset 0 0 0 1px var(--accent-line);
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
-}
-
-/* Fallback diamond indicator */
+/* A fallback (the picked brain could not answer): a warn diamond on the mark. */
 .bpick-chip__mark {
   position: absolute;
   top: -1px;
@@ -83,7 +107,7 @@
   transform: rotate(45deg);
 }
 
-/* Hidden in the compact button to conserve maximum space for typing */
+/* The name is in the tooltip, the label and the menu; the chip keeps the mark. */
 .bpick-chip__name {
   display: none;
 }
@@ -92,7 +116,7 @@
   flex: none;
   color: var(--text-dim);
   transition:
-    transform var(--dur-fast) var(--ease-out),
+    transform var(--dur-glide) var(--spring-glide),
     color var(--dur-fast) var(--ease-out);
 }
 
@@ -109,7 +133,7 @@
 
 .bpick__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--s-4);
   padding: var(--s-2) var(--s-4) var(--s-4);
@@ -121,6 +145,7 @@
 }
 
 .bpick__row {
+  position: relative;
   gap: 10px;
   min-height: 42px;
   padding: 5px var(--s-4) 5px 6px;
@@ -129,6 +154,33 @@
 .bpick__row:focus-visible {
   outline: var(--focus-ring);
   outline-offset: -2px;
+}
+
+/* The pick in force, by shape before colour: an upright bar at the row's left
+   edge, a ring round its plate, the name in bold, the tick and the words. */
+.bpick__row::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-glide) var(--spring-glide);
+}
+
+.bpick__row[data-selected='true']::before {
+  opacity: 1;
+  transform: none;
+}
+
+.bpick__row[data-selected='true'] .bpick__name {
+  font-weight: 600;
 }
 
 .bpick__tile {
@@ -141,9 +193,7 @@
   border-radius: 50%;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--text-primary) 7%, transparent);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 
 .bpick__row:hover:not([disabled]) .bpick__tile {
@@ -151,15 +201,35 @@
   background: color-mix(in srgb, var(--text-primary) 11%, transparent);
 }
 
-/* The brain in use: the tile inverts — a solid disc, whatever the theme. */
-.bpick__tile[data-look='use'],
-.bpick__row:hover .bpick__tile[data-look='use'] {
+/* A maker's plate keeps the maker's colour. */
+.bpick__tile.mplate,
+.bpick__row:hover:not([disabled]) .bpick__tile.mplate {
+  color: var(--logo-brand);
+  background: color-mix(in srgb, var(--logo-brand) 14%, transparent);
+}
+
+.bpick__row:hover:not([disabled]) .bpick__tile.mplate {
+  background: color-mix(in srgb, var(--logo-brand) 22%, transparent);
+}
+
+/* In use: a second ring, outside the plate's own. */
+.bpick__tile.mplate[data-look='use'] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--logo-brand) 34%, transparent),
+    0 0 0 2px var(--sheet-bg, var(--bg-panel-raised)),
+    0 0 0 3.5px var(--accent);
+}
+
+/* The model menu's pick in force (no maker plate there): the tile inverts. */
+.bpick__tile:not(.mplate)[data-look='use'],
+.bpick__row:hover .bpick__tile:not(.mplate)[data-look='use'] {
   color: var(--bg-panel-raised);
   background: var(--text-primary);
 }
 
 /* Cannot be picked: an empty, dashed ring. */
-.bpick__tile[data-look='off'] {
+.bpick__tile[data-look='off'],
+.bpick__row .bpick__tile.mplate[data-look='off'] {
   color: var(--text-dim);
   background: none;
   box-shadow: none;
@@ -170,6 +240,7 @@
 .bpick__tile[data-look='plain'] {
   color: var(--text-muted);
   background: none;
+  box-shadow: none;
 }
 
 .bpick__text {
@@ -256,4 +327,17 @@
 
 .bpick__settings {
   min-height: 34px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bpick-chip,
+  .bpick-chip__chev,
+  .bpick__row::before,
+  .bpick__tile {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.bpick-chip, .bpick-chip__chev, .bpick__row::before, .bpick__tile) {
+  transition: none;
 }

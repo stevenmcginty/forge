@@ -1,12 +1,15 @@
 /*
- * Cohesive On/Off Microphone Button with Built-in Synthesizer Indicator.
+ * The voice well: the Listen key and the voice agent chip, as one group.
  *
- * Merges the agent selection pop-up (BrainPicker.css) and the listening toggle
- * into a single, cohesive capsule button (.vunit).
+ * A well is a sunken pocket in the bar that holds controls that belong
+ * together (the design contract: one rhythm, 36px outside, 30px inside). On
+ * the left the Listen key, a raised round key with the mic on it; then five
+ * bars and, while Listen is on, the state as a word; then a seam and the voice
+ * agent's mark (BrainPicker.css).
  *
- * Left segment:  Microphone on/off switch with built-in dynamic synthesizer
- *                indicator that actively dances to voice and audio levels.
- * Right segment: Integrated voice agent selector tile + dropdown chevron.
+ * Calm at rest: no accent anywhere. On, the key lights (a lamp layer fading in
+ * by opacity) and the word says what the agent is doing. The well itself does
+ * not glow: the bar's edge (DictationEdge) is the one moving cue.
  */
 
 .vunit {
@@ -15,46 +18,29 @@
   align-items: center;
   gap: 0;
   flex: none;
-  height: 34px;
-  padding: 2px 3px 2px 3px;
+  height: 36px;
+  padding: 3px;
   border-radius: var(--r-full);
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line);
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-med) var(--ease-out);
-}
-
-.vunit:hover {
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
-}
-
-/* Listening ON: The entire cohesive button illuminates */
-.vunit:has(.listen[data-on='true']) {
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
   box-shadow:
-    inset 0 0 0 1.5px var(--accent-line),
-    0 0 18px -4px var(--accent-glow);
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 2px var(--well-shade, rgba(0, 0, 0, 0.35));
 }
 
-/* Actively capturing speech */
-.vunit:has(.listen[data-recording='true']) {
+/* On: the well's rim takes the accent. A shape change too: the key fills. */
+.vunit[data-listening='true'] {
   box-shadow:
-    inset 0 0 0 1.5px var(--accent-line),
-    0 0 0 2px var(--accent-softer),
-    0 0 24px -3px var(--accent-glow);
+    inset 0 0 0 1px var(--accent-line),
+    inset 0 1px 2px var(--well-shade, rgba(0, 0, 0, 0.35));
 }
 
-/* Error state */
-.vunit:has(.listen[data-look='error']) {
-  background: color-mix(in srgb, var(--warn) 10%, transparent);
+.vunit[data-look='error'] {
   box-shadow:
-    inset 0 0 0 1.5px var(--warn-line),
-    0 0 14px -4px var(--warn-glow);
+    inset 0 0 0 1px var(--warn-line),
+    inset 0 1px 2px var(--well-shade, rgba(0, 0, 0, 0.35));
 }
 
-/* ---------------------------------------------------------------- microphone */
+/* ---------------------------------------------------------------- the key */
 
 .listen {
   --lamp: var(--accent);
@@ -63,7 +49,7 @@
   align-items: center;
   gap: 2px;
   flex: none;
-  height: 100%;
+  height: 30px;
 }
 
 .listen[data-look='error'] {
@@ -73,23 +59,20 @@
 .listen__btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   height: 30px;
-  padding: 0 6px 0 7px;
+  padding: 0 9px 0 0;
   border-radius: var(--r-full);
   color: var(--text-secondary);
   background: transparent;
   border: 0;
   cursor: pointer;
   outline: none;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .listen__btn:hover {
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
 }
 
 .listen__btn:focus-visible {
@@ -97,61 +80,108 @@
   outline-offset: 1px;
 }
 
-/* On: active accent fill and color */
-.listen[data-on='true'] .listen__btn {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-.listen[data-look='error'] .listen__btn {
-  color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 16%, transparent);
-}
-
-.listen__mic-wrap {
+/* The key: raised, round, the mic on it. */
+.listen__key {
+  position: relative;
   display: inline-grid;
   place-items: center;
   flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 0 var(--glass-hi);
+  transition:
+    transform var(--dur-instant) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.listen__btn:hover .listen__key {
+  background: color-mix(in srgb, var(--text-primary) 14%, transparent);
+}
+
+.listen__btn:active .listen__key {
+  transform: scale(0.94);
+}
+
+/* The lamp: the accent, under the mic, faded in by opacity when Listen is on. */
+.listen__key::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--lamp);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--lamp) 16%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  opacity: 0;
+  transform: scale(0.82);
+  transition:
+    opacity var(--dur-med) var(--ease-out),
+    transform var(--dur-pop) var(--spring-pop);
+}
+
+.listen[data-on='true'] .listen__key::before,
+.listen[data-look='error'] .listen__key::before {
+  opacity: 1;
+  transform: none;
 }
 
 .listen__mic-icon {
+  position: relative;
   flex: none;
-  transition:
-    transform var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
-.listen[data-on='true'] .listen__mic-icon {
-  color: var(--accent);
-  transform: scale(1.06);
+.listen[data-on='true'] .listen__mic-icon,
+.listen[data-look='error'] .listen__mic-icon {
+  color: var(--lamp-ink);
 }
 
-/* ---------------------------------------------------- synthesizer indicator */
+/* ---------------------------------------------------------- bars and word */
 
 .listen__synth {
   display: block;
   flex: none;
-  color: var(--text-muted);
-  opacity: 0.5;
-  transition:
-    color var(--dur-fast) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
+  color: var(--text-dim);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .listen__btn:hover .listen__synth {
-  opacity: 0.8;
   color: var(--text-secondary);
 }
 
 .listen[data-on='true'] .listen__synth {
-  opacity: 1;
-  color: var(--accent);
-  filter: drop-shadow(0 0 4px var(--accent-glow));
+  color: var(--accent-ink);
 }
 
 .listen[data-look='error'] .listen__synth {
-  opacity: 0.9;
   color: var(--warn);
+}
+
+/* The state, in a word. A fixed floor, so the text box does not jump as the
+   word changes between Listening, Thinking and Speaking. */
+.listen__word {
+  min-width: 64px;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--accent-ink);
+  animation: listen-word-in var(--dur-glide) var(--spring-glide) both;
+}
+
+@keyframes listen-word-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-5px, 0, 0);
+  }
 }
 
 /* --------------------------------------------------------------- error badge */
@@ -162,7 +192,7 @@
   flex: none;
   width: 18px;
   height: 18px;
-  margin-left: 2px;
+  margin: 0 4px 0 0;
   border-radius: 50%;
   font-family: var(--font-display);
   font-size: 11px;
@@ -172,7 +202,6 @@
   background: var(--warn);
   border: 0;
   cursor: pointer;
-  box-shadow: 0 0 6px var(--warn-glow);
   transition: transform var(--dur-fast) var(--ease-out);
 }
 
@@ -186,11 +215,8 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px 16px;
-  background: var(--sheet-bg);
-  border-radius: var(--r-popover);
-  border: 1px solid var(--glass-line-strong);
-  box-shadow: var(--glass-shadow);
+  /* The popover is the surface; the card is only its contents. */
+  padding: 10px 10px 8px;
 }
 
 .vcard__head {
@@ -263,23 +289,35 @@
   font-size: var(--t-xs);
 }
 
-/* Light appearance adjustments */
-:root[data-appearance='light'] .vunit:has(.listen[data-on='true']) {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-:root[data-appearance='light'] .listen[data-on='true'] .listen__btn {
-  color: var(--accent-ink);
-}
-
-:root[data-appearance='light'] .listen[data-on='true'] .listen__synth {
-  color: var(--accent-ink);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .vunit,
   .listen__btn,
+  .listen__key,
+  .listen__key::before,
   .listen__synth {
     transition: none;
+  }
+
+  .listen__word {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.listen__btn, .listen__key, .listen__key::before, .listen__synth) {
+  transition: none;
+}
+
+:root[data-reduced-motion='true'] .listen__word {
+  animation: none;
+}
+
+/* A narrow window: the word gives its room back to the text box; the key, the
+   bars and the tooltip still say the state. */
+@media (max-width: 1180px) {
+  .listen__word {
+    display: none;
+  }
+
+  .listen__btn {
+    padding-right: 7px;
   }
 }

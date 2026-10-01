@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   agentModels,
   effortLevels,
@@ -17,6 +17,7 @@ import {
   type EffortLevelSpec,
   type PermissionModeSpec
 } from '@shared/agents'
+import { agentLogoFor } from '@shared/agent-logos'
 import type { AgentProfile, ClaudePermissionMode } from '@shared/types'
 import { paneNameInTab } from '@shared/workspace'
 import { resolveProfile } from '@/lib/agents'
@@ -26,6 +27,7 @@ import { terminalHost } from '@/lib/terminals'
 import { useActiveTab, useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
 import { Popover } from '../Popover'
+import { logoStyle, MakerLogo } from './BrainMark'
 // The menu wears the voice agent picker's rows (.bpick__*): one menu style in the bar.
 import './BrainPicker.css'
 import './ModelPicker.css'
@@ -465,7 +467,7 @@ function AgentMenuPopover({
 
 /* ---------------------------------------------------------------- chip */
 
-export function ModelPicker(): ReactNode {
+export const ModelPicker = memo(function ModelPicker(): ReactNode {
   const agent = usePaneAgent()
   const [chip, setChip] = useState<HTMLButtonElement | null>(null)
   const menu = useAgentMenu(agent?.paneId ?? null, chip)
@@ -490,9 +492,10 @@ export function ModelPicker(): ReactNode {
         onMouseDown={(e) => e.preventDefault()}
         onClick={menu.toggle}
       >
-        <span className="apick-chip__tile" aria-hidden="true">
+        {/* Whose model it is: the maker's own mark. The model's name is the words beside it. */}
+        <MakerTile profile={agent.profile} className="apick-chip__tile" size={11}>
           {agent.model ? monogram(agent.model.label) : agent.modelName ? monogram(agent.modelName) : <Icon name="sparkle" size={10} />}
-        </span>
+        </MakerTile>
         <span className="apick-chip__face truncate">{agent.face}</span>
         <Icon name="chevronDown" size={11} className="apick-chip__chev" />
       </button>
@@ -513,6 +516,37 @@ export function ModelPicker(): ReactNode {
       ) : null}
       <AgentMenuPopover agent={agent} trigger={chip} menu={menu} />
     </>
+  )
+})
+
+/**
+ * The maker's logo on its plate (BrainPicker.css `.mplate`), for the agent a
+ * pane runs. An agent Forge has no logo for keeps `children` (the model's
+ * letter) on the plain tile.
+ */
+function MakerTile({
+  profile,
+  className,
+  size,
+  children
+}: {
+  profile: AgentProfile
+  className: string
+  size: number
+  children?: ReactNode
+}): ReactNode {
+  const logo = agentLogoFor(profile)
+  if (!logo || logo.key === 'shell') {
+    return (
+      <span className={className} aria-hidden="true">
+        {children}
+      </span>
+    )
+  }
+  return (
+    <span className={`${className} mplate`} style={logoStyle(logo)} aria-hidden="true">
+      <MakerLogo logo={logo} size={size} />
+    </span>
   )
 }
 
@@ -585,7 +619,7 @@ function hasStripNumbers(usage: PaneUsage | null): boolean {
  * As the bar narrows, the least pressing go first — reset times, then cost,
  * then the other windows, then context — and the most-used window stays.
  */
-export function UsageStrip(): ReactNode {
+export const UsageStrip = memo(function UsageStrip(): ReactNode {
   const agent = usePaneAgent()
   const [strip, setStrip] = useState<HTMLButtonElement | null>(null)
   const menu = useAgentMenu(agent?.paneId ?? null, strip)
@@ -610,9 +644,14 @@ export function UsageStrip(): ReactNode {
     })
   }
 
+  // The mode the pane's own footer names, as a word (the menu's "now …").
+  const modeWord =
+    agent.rung === 'auto' ? 'Auto' : agent.rung ? (permissionSpec(agent.command, agent.rung)?.label ?? null) : null
+
   const summary = [
     ...items.map((it) => `${it.label} ${it.pct}% used${levelWord(it.pct) ? `, ${levelWord(it.pct)}` : ''}`),
-    typeof costUsd === 'number' ? `session cost ${fmtCost(costUsd)}` : null
+    typeof costUsd === 'number' ? `session cost ${fmtCost(costUsd)}` : null,
+    modeWord ? `mode ${modeWord}` : null
   ]
     .filter(Boolean)
     .join('; ')
@@ -658,6 +697,12 @@ export function UsageStrip(): ReactNode {
             <span className="ustrip__pct">{fmtCost(costUsd)}</span>
           </span>
         ) : null}
+        {modeWord ? (
+          <span className="ustrip__item" data-rank={3} data-sec="mode" aria-hidden="true">
+            <span className="ustrip__label">Mode</span>
+            <span className="ustrip__val">{modeWord}</span>
+          </span>
+        ) : null}
         <span className="ustrip__more" aria-hidden="true">
           <span className="ustrip__more-word">Details</span>
           <Icon name="chevronDown" size={11} className="ustrip__chev" />
@@ -666,7 +711,7 @@ export function UsageStrip(): ReactNode {
       <AgentMenuPopover agent={agent} trigger={strip} menu={menu} />
     </>
   )
-}
+})
 
 /* ---------------------------------------------------------------- menu */
 
@@ -744,8 +789,11 @@ function AgentMenu({
       // A click picks without taking focus from the bar or the pane.
       onMouseDown={(e) => e.preventDefault()}
     >
-      <div className="bpick__head">
-        <span className="eyebrow truncate">{agent.profile.name}</span>
+      <div className="bpick__head apick__head">
+        <span className="apick__who">
+          <MakerTile profile={agent.profile} className="apick__who-tile" size={11} />
+          <span className="eyebrow truncate">{agent.profile.name}</span>
+        </span>
         <span className="bpick__hint apick__hint truncate">sends to {paneName}</span>
       </div>
 

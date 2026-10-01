@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   agentBrainSpec,
   isForgeBrainAgent,
@@ -17,7 +17,7 @@ import { BrainIntro } from '../brain/BrainIntro'
 import { brainSnapshot, startBrainFeed, useBrain } from '../brain/brainStore'
 import { Icon } from '../Icon'
 import { Popover } from '../Popover'
-import { BrainMark } from './BrainMark'
+import { BrainMark, brandStyle } from './BrainMark'
 import { listenState, useHubView } from './hubView'
 import '../brain/Brain.css'
 import './BrainPicker.css'
@@ -48,7 +48,7 @@ import './BrainPicker.css'
  * from the keyboard, the menu takes focus, the arrows move through it, and
  * Escape brings focus back to the chip.
  */
-export function BrainPicker(): ReactNode {
+export const BrainPicker = memo(function BrainPicker(): ReactNode {
   const { state, actions } = useApp()
   const s = state.settings
   const hub = useHubView()
@@ -95,8 +95,8 @@ export function BrainPicker(): ReactNode {
           setOpen((v) => !v)
         }}
       >
-        <span className="bpick-chip__tile" aria-hidden="true">
-          <BrainMark brain={resolved.brain} size={13} />
+        <span className="bpick-chip__tile mplate" style={brandStyle(resolved.brain)} aria-hidden="true">
+          <BrainMark brain={resolved.brain} size={isForgeBrainAgent(resolved.brain) ? 16 : 12} />
           {/* A fallback: a warn diamond on the mark, and the words say why. */}
           {fellBack ? <span className="bpick-chip__mark" /> : null}
         </span>
@@ -128,7 +128,7 @@ export function BrainPicker(): ReactNode {
       </Popover>
     </>
   )
-}
+})
 
 const ITEMS = '[role^="menuitem"]:not(:disabled)'
 
@@ -218,8 +218,8 @@ function BrainMenu({
         title={probes[spec.id]?.result?.reason}
         onClick={() => onPick(spec.id)}
       >
-        <span className="bpick__tile" data-look={inUse ? 'use' : off ? 'off' : undefined} aria-hidden="true">
-          <BrainMark brain={spec.id} size={14} />
+        <span className="bpick__tile mplate" data-look={inUse ? 'use' : off ? 'off' : undefined} style={brandStyle(spec.id)} aria-hidden="true">
+          <BrainMark brain={spec.id} size={isForgeBrainAgent(spec.id) ? 20 : 14} />
         </span>
         <span className="bpick__text">
           <span className="bpick__name">{spec.label}</span>
