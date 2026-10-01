@@ -19,6 +19,7 @@ import {
   disposeBrain,
   freshStartBrain,
   initBrain,
+  notePaneBusy,
   onBrainSays,
   onBrainStatus,
   sendToBrain,
@@ -34,6 +35,8 @@ import {
  * MAIN_OWNED_SETTINGS): a surface changes them only through `enable`,
  * `disable` and `setEngine` here or Forge Web's brain ops, so a renderer's
  * stale settings copy can never switch the brain off behind a browser's back.
+ * `brainModel` is an ordinary renderer setting; `applyBrainModel` is what
+ * electron/main.ts calls when it changed.
  */
 
 let target: BrowserWindow | null = null
@@ -66,6 +69,11 @@ export function setBrainEngine(engine: BrainEngine): Promise<BrainStatus> {
   return applyBrainSettings()
 }
 
+/** The model setting changed: a running Claude brain restarts on it, keeping its conversation. */
+export function applyBrainModel(): void {
+  void applyBrainSettings()
+}
+
 export function registerBrainHandlers(): void {
   ipcMain.handle(IPC.brainStatus, (): BrainStatus => brainStatus())
   ipcMain.handle(IPC.brainEnable, (): Promise<BrainStatus> => setBrainEnabled(true))
@@ -85,6 +93,12 @@ export function registerBrainHandlers(): void {
   ipcMain.handle(IPC.brainTranscriptStop, (): void => stopBrainTranscript())
   unsubscribe ??= onBrainStatus((status) => send(IPC.brainState, status))
   unsubscribeSays ??= onBrainSays((event) => send(IPC.brainSays, event))
+  // The renderer's busy light, heard beside Forge Web's own listener
+  // (electron/web-host.ts): how the brain knows a pane it opened has stopped.
+  ipcMain.on(IPC.webBusy, (_e, payload: { sessionId?: string; busy?: boolean }) => {
+    const paneId = String(payload?.sessionId ?? '')
+    if (paneId) notePaneBusy(paneId, Boolean(payload?.busy))
+  })
   // Starts the pane when the brain was on at the last quit; nothing at all when it is off.
   initBrain()
 }

@@ -10,7 +10,7 @@ import {
   RETIRED_BUILTIN_PROFILE_IDS
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
-import { BRAIN_CONTEXT_WARN_PCT, BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject } from '@shared/brain'
+import { BRAIN_CONTEXT_WARN_PCT, BRAIN_MODEL_DEFAULT, BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject, sanitiseBrainModel } from '@shared/brain'
 import { isEdgeVoice } from '@shared/tts'
 import {
   DEFAULT_AGENT_BRAIN,
@@ -329,6 +329,7 @@ function defaultSettings(): Settings {
     // Forge Brain: off until Steve turns it on; Claude when he does.
     brainEnabled: false,
     brainEngine: 'claude',
+    brainModel: BRAIN_MODEL_DEFAULT,
     brainIntroSeen: false,
     brainVoice: BRAIN_VOICE_DEFAULT,
     brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
@@ -916,6 +917,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // field, and every existing user stays off until they turn it on.
     brainEnabled: s.brainEnabled === true,
     brainEngine: isBrainEngine(s.brainEngine) ? s.brainEngine : DEFAULT_SETTINGS.brainEngine,
+    brainModel: sanitiseBrainModel(s.brainModel),
     brainIntroSeen: s.brainIntroSeen === true,
     brainVoice: typeof s.brainVoice === 'string' && isEdgeVoice(s.brainVoice) ? s.brainVoice.trim() : BRAIN_VOICE_DEFAULT,
     brainContextWarnPct:

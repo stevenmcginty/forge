@@ -75,7 +75,7 @@ import {
 } from './browser-panes/ipc'
 import { disposeChatPanes, pruneChatViews, registerChatPanes, setChatWindow } from './chat-panes/ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
-import { disposeBrainIpc, registerBrainHandlers, setBrainTarget } from './brain/ipc'
+import { applyBrainModel, disposeBrainIpc, registerBrainHandlers, setBrainTarget } from './brain/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import {
   applyMobileSettings,
@@ -1055,6 +1055,9 @@ function registerAppHandlers(): void {
     ) {
       applyWebSettings()
     }
+    // Forge Brain's model is on its command line, so a new one means a restart
+    // (the same conversation, resumed). Nothing happens while the brain is off.
+    if (before.brainModel !== next.brainModel) applyBrainModel()
     return next
   })
   ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => {

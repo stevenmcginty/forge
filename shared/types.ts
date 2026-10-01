@@ -1904,6 +1904,12 @@ export interface Settings {
   brainEnabled: boolean
   /** Which CLI runs Forge Brain. Claude by default. */
   brainEngine: BrainEngine
+  /**
+   * The Claude model Forge Brain runs on (Claude engine only): one of
+   * `BRAIN_MODELS` (shared/brain.ts), `BRAIN_MODEL_DEFAULT` until Steve picks.
+   * Pinned on the brain's command line, so it never follows his own default.
+   */
+  brainModel: string
   /** The first-open pop-up that explains the brain has been seen. */
   brainIntroSeen: boolean
   /**

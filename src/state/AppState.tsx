@@ -57,7 +57,7 @@ import {
 import { EMPTY_WORKSPACE, makeTab, newTabName, nextTextColor, withPrunedMosaic } from '@shared/workspace'
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { defaultVoiceMenu } from '@shared/agent-brain'
-import { BRAIN_CONTEXT_WARN_PCT, BRAIN_VOICE_DEFAULT } from '@shared/brain'
+import { BRAIN_CONTEXT_WARN_PCT, BRAIN_MODEL_DEFAULT, BRAIN_VOICE_DEFAULT } from '@shared/brain'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
@@ -307,6 +307,7 @@ const FALLBACK_SETTINGS: Settings = {
   // Mirrors electron/store.ts: Forge Brain off until turned on.
   brainEnabled: false,
   brainEngine: 'claude',
+  brainModel: BRAIN_MODEL_DEFAULT,
   brainIntroSeen: false,
   brainVoice: BRAIN_VOICE_DEFAULT,
   brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,

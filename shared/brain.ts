@@ -7,7 +7,7 @@
  * `Project`), in a Forge-owned home folder under the data dir, with Forge's
  * tools as an MCP server (bridge/brain-mcp.mjs over the brain link). It sees
  * every project, delegates real work to agent panes, and is told when a pane it
- * opened finishes or when any pane needs Steve.
+ * opened stops or when any pane needs Steve.
  *
  * Three surfaces draw this — the desktop, Forge Web's phone face and the deck —
  * so the shapes live here. Plain JSON only, like shared/foreman.ts: these
@@ -33,6 +33,23 @@ export const BRAIN_ENGINE_NAME: Record<BrainEngine, string> = {
   codex: 'Codex',
   gemini: 'Gemini CLI',
   local: 'Local model (Ollama)'
+}
+
+/**
+ * The Claude models the brain may run on (`Settings.brainModel`), cheapest
+ * first. The id goes on the brain's command line as `--model <id>`.
+ */
+export const BRAIN_MODELS: ReadonlyArray<{ id: string; name: string; note: string }> = [
+  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', note: 'fastest' },
+  { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', note: 'default' },
+  { id: 'claude-opus-5-5', name: 'Opus 5.5', note: 'smartest' }
+]
+
+export const BRAIN_MODEL_DEFAULT = 'claude-sonnet-5-5'
+
+/** A saved `brainModel` as one of `BRAIN_MODELS`; anything else is the default. */
+export function sanitiseBrainModel(value: unknown): string {
+  return BRAIN_MODELS.some((m) => m.id === value) ? (value as string) : BRAIN_MODEL_DEFAULT
 }
 
 /** The hidden project's id. Fixed, so every surface can recognise it without a lookup. */

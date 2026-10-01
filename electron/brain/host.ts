@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
@@ -18,27 +18,42 @@ import {
   type BrainSaysEvent,
   type BrainSendResult,
   type BrainState,
-  type BrainStatus
+  type BrainStatus,
+  sanitiseBrainModel
 } from '@shared/brain'
 import type { ChatUpdate } from '@shared/chat'
 import type { PaneLeaf, Workspace } from '@shared/types'
 import { makeId } from '@shared/ids'
 import { newSessionId } from '@shared/session'
+import { findLeaf } from '@shared/splitTree'
 import { stripAnsi } from '@shared/ansi'
 import { onAttention, type AttentionEvent } from '../attention-bus'
 import { addPtySink, createPaneSession, getManager, killPane, liveSessions } from '../pty-host'
 import { getBrainProject, getDataDir, getProjects, getSettings, getWorkspace, setBrainProject, setWorkspace } from '../store'
 import { resolveBridgeScript } from '../bridge/mcp-config'
 import { tomlLiteralSafe } from '../bridge/cli-register'
-import { transcriptPath } from '../bridge/claude-transcripts'
+import { claudeHome, transcriptPath } from '../bridge/claude-transcripts'
 import { nudgeTranscript, stopTranscript, watchTranscript } from '../web/transcript-watcher'
 import { findWindowsLaunchable } from '../cli-launch'
 import { whichCommand } from '../which'
 import type { BrowserLink } from '../browser-panes/link'
 import { createBrainLink, type LinkToolHost } from '../voice-agent/brain-link'
 import { brainToolHost } from '../voice-agent/ipc'
-import { claudeMcpConfig, prepareBrainHome, BRAIN_MCP_SERVER, type BrainMcpServer } from './home'
-import { setBrainLaunch, type BrainLaunch } from './launch'
+import {
+  askingIsNoise,
+  askingNote,
+  claudeMcpConfig,
+  isQuietReply,
+  paneWords,
+  prepareBrainHome,
+  statusLineFrom,
+  stopIsNews,
+  stopNote,
+  BRAIN_MCP_SERVER,
+  STOP_SETTLE_MS,
+  type BrainMcpServer
+} from './home'
+import { claudeBrainCommand, setBrainLaunch, type BrainLaunch } from './launch'
 
 /**
  * Forge Brain, the main-process half: one CLI agent for the whole app, in a
@@ -64,6 +79,13 @@ import { setBrainLaunch, type BrainLaunch } from './launch'
  * every call passes through `toolHost` below first — where the panes it opens
  * are noted, and where a confirm gate belongs (`requestConfirm`).
  *
+ * ## What it starts with
+ *
+ * Claude starts slim (./launch.ts `claudeBrainCommand`): a pinned model
+ * (`Settings.brainModel`) at low effort, the home's own settings and no others,
+ * and only the MCP servers Forge names — not Steve's user config, which it
+ * used to load whole, on whatever model his default was.
+ *
  * ## Knowing when it can be typed into
  *
  * There is no API into a TUI, only its screen — and, for Claude, its
@@ -78,6 +100,16 @@ import { setBrainLaunch, type BrainLaunch } from './launch'
  * notes queue while it is not idle; notes that arrive together go in as one
  * line. The home folder's trust prompt is answered by Forge, because Forge owns
  * the folder; nothing else on the brain's screen ever is.
+ *
+ * ## Notes, and who hears the answer
+ *
+ * A "[Forge]" note is pane news: a pane asking for Steve, or a pane the brain
+ * opened that has stopped — told only once it has stayed stopped for
+ * `STOP_SETTLE_MS`, because a turn ending is not a job ending, and with the
+ * pane's last words so the brain rarely has to go and read it. Nobody asked for
+ * a note, so nobody is waiting for the reply: Forge reads Claude's reply to it
+ * from the transcript when the turn ends and says it through the voice agents
+ * (`brainSays`), unless the brain answered `[quiet]` or spoke for itself.
  */
 
 /** No output for this long = the screen has settled. The TUIs animate a spinner while they work. */
@@ -143,6 +175,8 @@ const SHELL_PROMPT_RE = /(?:^|\n)PS [A-Za-z]:\\[^\r\n>]*> ?$/
 
 interface Running {
   engine: BrainEngine
+  /** Claude: the model on its command line. Null for the other engines. */
+  model: string | null
   paneId: string
   sessionId: string | null
   startedAt: number
@@ -193,14 +227,41 @@ interface PendingConfirm {
   timer: ReturnType<typeof setTimeout>
 }
 
+/** Claude: the note that is in, from the moment it is typed until its turn is over. */
+interface NoteTurn {
+  r: Running
+  /** `Running.prompts` and the transcript's size when it was typed: where its reply starts. */
+  prompts: number
+  offset: number
+  /** The brain spoke for itself during the turn (say_to_voice_agent). */
+  said: boolean
+}
+
+/**
+ * One pane's work, from the renderer's busy light (`notePaneBusy`). A run that
+ * picks up again within `STOP_SETTLE_MS` of stopping is the same run.
+ */
+interface PaneRun {
+  startedAt: number
+  endedAt: number
+  busy: boolean
+}
+
+/** How much of a pane's transcript end a stop note is written from. */
+const PANE_TAIL_BYTES = 512 * 1024
+
 let running: Running | null = null
 let state: BrainState = 'off'
 let lastError: string | null = null
 const queue: QueueItem[] = []
 let lastNoteAt = 0
 const noted = new Map<string, number>()
-/** Panes the brain opened: their `done` is news to it. */
+let noteTurn: NoteTurn | null = null
+/** Panes the brain opened: their stopping is news to it. */
 const opened = new Set<string>()
+const runs = new Map<string, PaneRun>()
+/** Stops waiting out `STOP_SETTLE_MS`, by pane. */
+const stops = new Map<string, ReturnType<typeof setTimeout>>()
 let openWindowUntil = 0
 const confirms = new Map<string, PendingConfirm>()
 const listeners = new Set<(status: BrainStatus) => void>()
@@ -322,6 +383,8 @@ const toolHost: LinkToolHost = {
       return { content: [{ type: 'text', text: `${name} is the voice agents' way to reach you; you are Forge Brain.` }], isError: true }
     }
     if (opensPane(name, args)) openWindowUntil = Date.now() + OPEN_WINDOW_MS
+    // It spoke for itself in a note's turn: Forge does not say its reply as well.
+    if (name === 'say_to_voice_agent' && noteTurn) noteTurn.said = true
     const result = (await brainToolHost().callLinkTool(name, args)) as CallToolResult
     for (const block of result?.content ?? []) {
       if (block.type !== 'text') continue
@@ -361,7 +424,7 @@ function codexFragment(server: BrainMcpServer): string | null {
   )
 }
 
-function buildLaunch(engine: BrainEngine, leaf: PaneLeaf, server: BrainMcpServer): BrainLaunch | string {
+function buildLaunch(engine: BrainEngine, leaf: PaneLeaf, server: BrainMcpServer, model: string | null): BrainLaunch | string {
   const base = {
     paneId: leaf.id,
     cwd: brainHomeDir(),
@@ -373,7 +436,7 @@ function buildLaunch(engine: BrainEngine, leaf: PaneLeaf, server: BrainMcpServer
   if (engine === 'claude') {
     const config = join(brainDir(), 'mcp.json')
     writeFileSync(config, `${JSON.stringify(claudeMcpConfig(server), null, 2)}\n`, 'utf8')
-    return { ...base, command: 'claude', ...(leaf.sessionId ? { sessionId: leaf.sessionId } : {}), claudeMcpConfig: config }
+    return { ...base, command: claudeBrainCommand(model ?? ''), ...(leaf.sessionId ? { sessionId: leaf.sessionId } : {}), claudeMcpConfig: config }
   }
   if (engine === 'gemini') {
     // The home's .gemini/settings.json is a workspace setting, read only in a
@@ -396,12 +459,17 @@ function profileFor(engine: BrainEngine): string {
  * The brain's one pane, from its saved layout when it was running this engine
  * (so Claude resumes its conversation), else a new one saved in its place.
  * `fresh` always makes a new one: a new pane id and a new conversation.
+ * `repane` keeps the saved conversation under a new pane id, for restarting a
+ * pane that is still running: the PTY host reports the killed process's exit
+ * by pane id, after the new session exists, and would take the new one down
+ * with it.
  */
-function ensureLeaf(engine: BrainEngine, fresh = false): PaneLeaf {
+function ensureLeaf(engine: BrainEngine, fresh = false, repane = false): PaneLeaf {
   const title = BRAIN_ENGINE_NAME[engine]
   const saved = getWorkspace(BRAIN_PROJECT_ID)?.tabs[0]?.root
-  if (!fresh && saved?.type === 'leaf' && saved.profileId === profileFor(engine) && saved.title === title && saved.sessionId) return saved
-  const leaf: PaneLeaf = { type: 'leaf', id: makeId('pane'), profileId: profileFor(engine), title, sessionId: newSessionId() }
+  const kept = !fresh && saved?.type === 'leaf' && saved.profileId === profileFor(engine) && saved.title === title && saved.sessionId ? saved : null
+  if (kept && !repane) return kept
+  const leaf: PaneLeaf = { type: 'leaf', id: makeId('pane'), profileId: profileFor(engine), title, sessionId: kept?.sessionId ?? newSessionId() }
   const tabId = makeId('tab')
   const workspace: Workspace = {
     tabs: [{ id: tabId, title: BRAIN_PROJECT_NAME, root: leaf, activePaneId: leaf.id }],
@@ -434,9 +502,11 @@ function nodePath(): string {
 /**
  * Start the brain's pane. `fresh` (a fresh start, `freshStartBrain`) starts a
  * new conversation in a new pane and keeps the panes it opened before: their
- * report-back is main's to remember, not the conversation's.
+ * report-back is main's to remember, not the conversation's. `resumed` (a
+ * model switch on a running brain) keeps them too, and keeps the conversation:
+ * the same session, in a new pane (`ensureLeaf`).
  */
-async function start(engine: BrainEngine, fresh = false): Promise<void> {
+async function start(engine: BrainEngine, fresh = false, resumed = false): Promise<void> {
   const why = unavailableEngines()[engine]
   if (why) {
     setState('error', why)
@@ -456,10 +526,13 @@ async function start(engine: BrainEngine, fresh = false): Promise<void> {
   }
   const server: BrainMcpServer = { node: nodePath(), script, linkFile }
   mkdirSync(brainHomeDir(), { recursive: true })
-  prepareBrainHome(brainHomeDir(), server, forgeDocsDir())
+  // The slim launch leaves Steve's user settings out, and his status line
+  // command with them — which is what the context ring is drawn from.
+  prepareBrainHome(brainHomeDir(), server, forgeDocsDir(), statusLineFrom(join(claudeHome(), 'settings.json')))
   ensureProject()
-  const leaf = ensureLeaf(engine, fresh)
-  const launch = buildLaunch(engine, leaf, server)
+  const leaf = ensureLeaf(engine, fresh, resumed)
+  const model =engine === 'claude' ? sanitiseBrainModel(getSettings().brainModel) : null
+  const launch = buildLaunch(engine, leaf, server, model)
   if (typeof launch === 'string') {
     setState('error', launch)
     return
@@ -468,6 +541,7 @@ async function start(engine: BrainEngine, fresh = false): Promise<void> {
   const now = Date.now()
   running = {
     engine,
+    model,
     paneId: leaf.id,
     sessionId: engine === 'claude' ? leaf.sessionId ?? null : null,
     startedAt: now,
@@ -490,7 +564,7 @@ async function start(engine: BrainEngine, fresh = false): Promise<void> {
     transcriptCarry: Buffer.alloc(0),
     exited: false
   }
-  if (!fresh) opened.clear()
+  if (!fresh && !resumed) opened.clear()
   setState('starting')
   const result = createPaneSession({ id: leaf.id, cwd: launch.cwd, cols: 120, rows: 40, bootstrapCommand: launch.command })
   if (!result.ok) {
@@ -504,6 +578,7 @@ async function start(engine: BrainEngine, fresh = false): Promise<void> {
 function stop(): void {
   const r = running
   running = null
+  noteTurn = null
   setBrainLaunch(null)
   if (r) {
     if (transcriptSink && transcriptArmedFor === r.paneId) stopTranscript(r.paneId, transcriptSink)
@@ -515,9 +590,9 @@ function stop(): void {
 }
 
 /**
- * Bring the brain in line with settings: on or off, and on the chosen engine.
- * Serialised, so a double click cannot start two panes. Also the way back from
- * `error`: applying again restarts it.
+ * Bring the brain in line with settings: on or off, on the chosen engine, and
+ * (Claude) on the chosen model. Serialised, so a double click cannot start two
+ * panes. Also the way back from `error`: applying again restarts it.
  */
 export function applyBrainSettings(): Promise<BrainStatus> {
   reconciling = reconciling
@@ -526,13 +601,20 @@ export function applyBrainSettings(): Promise<BrainStatus> {
       if (!settings.brainEnabled) {
         stop()
         queue.length = 0
+        forgetStops()
         for (const id of [...confirms.keys()]) answerConfirm({ id, allow: false })
         setState('off')
         return
       }
-      if (running && running.engine === settings.brainEngine && state !== 'error') return
+      const r = running
+      const sameEngine = !!r && r.engine === settings.brainEngine
+      const sameModel = !r || r.engine !== 'claude' || r.model === sanitiseBrainModel(settings.brainModel)
+      if (sameEngine && sameModel && state !== 'error') return
+      // A model switch alone resumes the same conversation, so the panes it
+      // opened are still its own.
+      const resumed = sameEngine && !sameModel && state !== 'error'
       stop()
-      await start(settings.brainEngine)
+      await start(settings.brainEngine, false, resumed)
     })
     .catch((err) => {
       console.error('[brain] could not apply the settings:', err)
@@ -612,6 +694,10 @@ function onPaneExit(id: string): void {
     return
   }
   opened.delete(id)
+  runs.delete(id)
+  const pending = stops.get(id)
+  if (pending) clearTimeout(pending)
+  stops.delete(id)
 }
 
 function onPaneSpawn(id: string): void {
@@ -675,6 +761,8 @@ function tick(): void {
     return
   }
   if (state !== 'idle' || lastError !== r.notice) setState('idle', r.notice)
+  // Before the next message goes in: a note's reply ends where the next prompt starts.
+  speakNoteReply(r)
   flush(r, now)
 }
 
@@ -837,6 +925,8 @@ function flush(r: Running, now: number): void {
     const notes: string[] = []
     while (queue[0]?.kind === 'note') notes.push(queue.shift()!.text)
     text = `[Forge] ${notes.join(' ')}`
+    // Only Claude's reply can be read back (`speakNoteReply`).
+    if (r.engine === 'claude' && r.sessionId) noteTurn = { r, prompts: r.prompts, offset: transcriptSize(r.sessionId), said: false }
   } else {
     const item = queue.shift()!
     text = item.text
@@ -1043,7 +1133,7 @@ function mtimeOf(file: string): number {
 
 /**
  * What main knows, below the brain's own note: the panes it opened that are
- * still up (Forge keeps telling it when they finish), and the notes waiting
+ * still up (Forge keeps telling it when they stop), and the notes waiting
  * for it. Kept here, not in the conversation, so a fresh start loses neither.
  */
 function forgeHandoff(): string {
@@ -1053,7 +1143,7 @@ function forgeHandoff(): string {
   return [
     `## From Forge (${new Date().toISOString()})`,
     '',
-    'Panes you opened that are still up. Forge still tells you when they finish:',
+    'Panes you opened that are still up. Forge still tells you when they stop:',
     ...(panes.length ? panes : ['- none']),
     '',
     'Notes from Forge waiting for you:',
@@ -1118,10 +1208,6 @@ export async function freshStartBrain(): Promise<BrainFreshStartResult> {
 
 /* ------------------------------------------------------------ report-back */
 
-function sentence(text: string): string {
-  return /[.?!:]$/.test(text) ? text : `${text}.`
-}
-
 /** "Zeb in car-harness", from the PTY host's names and main's project list. */
 function paneLabel(paneId: string, projectId?: string): string {
   const live = liveSessions().find((s) => s.id === paneId)
@@ -1136,25 +1222,143 @@ function addNote(text: string): void {
   emit()
 }
 
+/** Once noted, the same pane and state is not noted again for `NOTE_REPEAT_MS`. True = go ahead. */
+function noteOnce(paneId: string, kind: 'asking' | 'done'): boolean {
+  const key = `${paneId}:${kind}`
+  const now = Date.now()
+  if (now - (noted.get(key) ?? 0) < NOTE_REPEAT_MS) return false
+  noted.set(key, now)
+  return true
+}
+
 /**
- * Pane news from the attention bus. Anything asking for Steve, anywhere, is
- * news; a pane finishing is news only when the brain opened it.
+ * The renderer's busy light for one pane (`IPC.webBusy`, wired in ./ipc.ts).
+ * Its two edges are how main knows how long a pane worked, when it stopped, and
+ * whether it has gone back to work since.
+ */
+export function notePaneBusy(paneId: string, busy: boolean): void {
+  const now = Date.now()
+  const run = runs.get(paneId)
+  if (busy) {
+    if (run?.busy) return
+    // Back at work before its stop was weighed: the same run, still going.
+    const same = !!run && now - run.endedAt < STOP_SETTLE_MS
+    runs.set(paneId, { startedAt: same ? run.startedAt : now, endedAt: 0, busy: true })
+    dropStop(paneId)
+    return
+  }
+  if (!run?.busy) return
+  run.busy = false
+  run.endedAt = now
+  if (opened.has(paneId)) weighStopLater(paneId)
+}
+
+function dropStop(paneId: string): void {
+  const pending = stops.get(paneId)
+  if (pending) clearTimeout(pending)
+  stops.delete(paneId)
+}
+
+function forgetStops(): void {
+  for (const timer of stops.values()) clearTimeout(timer)
+  stops.clear()
+}
+
+/** A Claude pane's transcript, from the saved layout that holds the pane: the project's folder and the leaf's session. */
+function paneTranscript(paneId: string): string | null {
+  for (const project of getProjects()) {
+    for (const tab of getWorkspace(project.id)?.tabs ?? []) {
+      const leaf = findLeaf(tab.root, paneId)
+      if (!leaf) continue
+      if (!leaf.sessionId) return null
+      const file = transcriptPath(project.path, leaf.sessionId)
+      return existsSync(file) ? file : null
+    }
+  }
+  return null
+}
+
+/** The last `bytes` of a file as text, or '' when it cannot be read. */
+function readTail(file: string, bytes: number): string {
+  try {
+    const fd = openSync(file, 'r')
+    try {
+      const size = fstatSync(fd).size
+      const length = Math.min(size, bytes)
+      const chunk = Buffer.alloc(length)
+      readSync(fd, chunk, 0, length, size - length)
+      return chunk.toString('utf8')
+    } finally {
+      closeSync(fd)
+    }
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * A pane the brain opened has stopped working. That is news only once it has
+ * stayed stopped for `STOP_SETTLE_MS`: every turn of a long job ends in a
+ * stop, and the brain used to be told "finished" for each one. Going back to
+ * work drops the wait (`notePaneBusy`); a newer stop takes this one's place.
+ * The note says how long it worked and, for a Claude pane, what it last said.
+ */
+function weighStopLater(paneId: string): void {
+  dropStop(paneId)
+  stops.set(
+    paneId,
+    setTimeout(() => {
+      stops.delete(paneId)
+      const run = runs.get(paneId)
+      // No run on record: the renderer's `done` vouched for this stop instead.
+      const workedMs = run ? run.endedAt - run.startedAt : null
+      if (!stopIsNews(workedMs, run?.busy === true)) return
+      if ((!running && !freshStarting) || !opened.has(paneId) || !noteOnce(paneId, 'done')) return
+      const file = paneTranscript(paneId)
+      addNote(stopNote(paneLabel(paneId), workedMs, file ? paneWords(readTail(file, PANE_TAIL_BYTES)) : null))
+    }, STOP_SETTLE_MS)
+  )
+}
+
+/**
+ * Pane news from the attention bus: a pane asking for Steve, anywhere. The
+ * renderer takes any screen line ending in "?" for a question, so one that is
+ * the pane's own input line, or a CLI's idle placeholder, is not passed on.
+ *
+ * A pane stopping is told from its busy light (`notePaneBusy`), not from
+ * `done` — `done` fires at every turn end, and is never sent for a pane that
+ * settled on something the renderer took for a question. It is only the way in
+ * for a pane whose busy light main never saw.
  */
 function onPaneAttention(event: AttentionEvent): void {
   const r = running
   if (!r || event.paneId === r.paneId || event.state === 'idle') return
-  if (event.state === 'done' && !opened.has(event.paneId)) return
-  const key = `${event.paneId}:${event.state}`
-  const now = Date.now()
-  if (now - (noted.get(key) ?? 0) < NOTE_REPEAT_MS) return
-  noted.set(key, now)
-  const label = paneLabel(event.paneId, event.projectId)
   if (event.state === 'done') {
-    addNote(`${label} finished.`)
+    if (opened.has(event.paneId) && !runs.has(event.paneId)) weighStopLater(event.paneId)
     return
   }
   const question = clean(String(event.prompt ?? '').split(/\r?\n/)[0] ?? '')
-  addNote(sentence(question ? `${label} needs Steve: ${question}` : `${label} needs Steve`))
+  if (askingIsNoise(question)) return
+  // A real question is the news; "it stopped" as well would say it twice.
+  dropStop(event.paneId)
+  if (!noteOnce(event.paneId, 'asking')) return
+  addNote(askingNote(paneLabel(event.paneId, event.projectId), question))
+}
+
+/**
+ * A note's turn is over, and nobody asked for it, so nobody is waiting for the
+ * reply: Forge says it to Steve through the voice agents. Not when the reply is
+ * the silent marker, nor when the brain spoke for itself during the turn. Only
+ * notes: a message from Steve or a voice agent has its own listener (`askBrain`).
+ */
+function speakNoteReply(r: Running): void {
+  const turn = noteTurn
+  if (!turn) return
+  noteTurn = null
+  // Never taken (the send was given up on), or typed into a pane since restarted: nothing to say.
+  if (turn.r !== r || !r.sessionId || r.prompts <= turn.prompts || turn.said) return
+  const reply = replyAfter(r.sessionId, turn.offset)
+  if (reply && !isQuietReply(reply)) brainSays(reply, true)
 }
 
 /* --------------------------------------------------------------- confirms */
@@ -1270,9 +1474,12 @@ export function disposeBrain(): void {
   // Not `stop()`: killing the pane is the PTY host's own disposal, and asking
   // it to kill after that would bring a fresh session manager into being.
   running = null
+  noteTurn = null
   setBrainLaunch(null)
   if (tickTimer) clearInterval(tickTimer)
   tickTimer = null
+  forgetStops()
+  runs.clear()
   for (const id of [...confirms.keys()]) answerConfirm({ id, allow: false })
   unsubscribeSink?.()
   unsubscribeSink = null

@@ -30,6 +30,28 @@ export interface BrainLaunch {
   env: Record<string, string>
 }
 
+/**
+ * Claude's command for the brain pane, before the PTY host's transforms: a
+ * pinned model at low effort, the home's own settings only, and no MCP server
+ * but the ones Forge names. A bare `claude` loaded Steve's whole user config
+ * (his CLAUDE.md, plugins, hooks, every MCP server) on whatever model his
+ * default was. Measured on Claude Code 2.1.287 in a copy of the home, first
+ * turn: about 37,000 tokens bare, about 20,000 like this with Forge's tools
+ * connected. Flags checked against that version's `--help`.
+ *
+ * Forge's tools still sit behind ToolSearch (Claude Code defers MCP tools by
+ * default). ENABLE_TOOL_SEARCH=false would load them up front, with every
+ * built-in beside them: about 44,000 tokens a turn, so it is left alone.
+ *
+ * None of these is variadic, so the PTY host's `--disallowedTools` and
+ * `--mcp-config` still come after them and `--mcp-config` stays last. The
+ * model id is typed into a shell: anything that is not a plain id is left out.
+ */
+export function claudeBrainCommand(model: string): string {
+  const pinned = /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(model) ? ` --model ${model}` : ''
+  return `claude${pinned} --effort low --setting-sources "project,local" --strict-mcp-config`
+}
+
 let current: BrainLaunch | null = null
 
 /** Set by ./host.ts before it spawns the pane; null when the brain is stopped. */

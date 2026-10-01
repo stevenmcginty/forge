@@ -18,6 +18,10 @@
  *    run_command is still refused by the launch guard, and bridge/brain-mcp.mjs
  *    relays tools/list and tools/call over a real brain link to a fake renderer.
  *  - The one-time settings move off "Claude on gpt-5.6-luna".
+ *  - Forge Brain (electron/brain/): the slim Claude launch and that its flags
+ *    survive the PTY host's transforms with `--mcp-config` last, the model
+ *    setting, the status line carried into its home, what it is told, and the
+ *    "[Forge]" note rules — the asking filter, the stop rule and wording, `[quiet]`.
  */
 import './ts-hooks.mjs'
 import assert from 'node:assert/strict'
@@ -35,6 +39,12 @@ const B = await import('../shared/agent-brain.ts')
 const E = await import('../src/lib/realtime/errors.ts')
 const { VoiceAgentHost } = await import('../electron/voice-agent/host.ts')
 const { createBrainLink } = await import('../electron/voice-agent/brain-link.ts')
+// Forge Brain's Electron-free halves: its home and notes, its launch, its shared facts.
+const H = await import('../electron/brain/home.ts')
+const BL = await import('../electron/brain/launch.ts')
+const BS = await import('../shared/brain.ts')
+const S = await import('../shared/session.ts')
+const O = await import('../electron/bridge/browser-only.ts')
 
 let passed = 0
 let failed = 0
@@ -490,6 +500,142 @@ console.log('\nsettings — the one-time move off "Claude on gpt-5.6-luna"')
       assert.equal(spec.kind, 'session')
       assert.equal(spec.key, null)
     }
+  })
+}
+
+/* ------------------------------------------------- Forge Brain: launch, notes */
+
+console.log('\nForge Brain — the slim launch, its model, its notes')
+{
+  const UUID = '0b4fc8c3-ec3a-4165-bf3d-dddc8bcd473c'
+
+  await check('the launch pins the model, low effort, the home’s settings only, and Forge’s MCP servers only', () => {
+    assert.equal(
+      BL.claudeBrainCommand('claude-sonnet-5-5'),
+      'claude --model claude-sonnet-5-5 --effort low --setting-sources "project,local" --strict-mcp-config'
+    )
+  })
+  await check('a model that is not a plain id never reaches the shell', () => {
+    for (const bad of ['', 'x; rm -rf', 'a b', '$(evil)', '"q"']) assert.ok(!BL.claudeBrainCommand(bad).includes('--model'), bad)
+  })
+  await check('after the PTY host’s transforms the variadic flags are still last, --mcp-config last of all', () => {
+    BL.setBrainLaunch({ paneId: 'pane-b', cwd: TMP, command: '', projectName: 'Forge Brain', paneTitle: 'Forge Brain', claudeMcpConfig: 'C:\\Data\\brain\\mcp.json', env: {} })
+    const base = BL.claudeBrainCommand('claude-sonnet-5-5')
+    const named = S.composeSession(base, UUID, 'new')
+    assert.equal(named, `${base} --session-id ${UUID}`, 'the session flag still goes on')
+    assert.equal(S.composeSession(base, UUID, 'resume'), `${base} --resume ${UUID}`)
+    // What applyMcpBridge appends for a bridge-enabled Claude profile.
+    const bridged = `${O.applyForgeBrowserOnly(named, true)} --mcp-config "C:\\Data\\mcp.json"`
+    const full = BL.applyBrainMcp('pane-b', bridged)
+    BL.setBrainLaunch(null)
+    const at = (flag) => full.indexOf(flag)
+    assert.ok(at('--strict-mcp-config') < at('--session-id'))
+    assert.ok(at('--session-id') < at('--disallowedTools'))
+    assert.ok(at('--disallowedTools') < at('--mcp-config'))
+    assert.ok(full.endsWith('--mcp-config "C:\\Data\\mcp.json" "C:\\Data\\brain\\mcp.json"'), full)
+    assert.equal(full.split('--mcp-config').length, 2, 'one --mcp-config, two paths')
+  })
+  await check('the model setting is one of three ids; anything else is Sonnet', () => {
+    assert.equal(BS.BRAIN_MODEL_DEFAULT, 'claude-sonnet-5-5')
+    assert.deepEqual(BS.BRAIN_MODELS.map((m) => m.id), ['claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'])
+    for (const m of BS.BRAIN_MODELS) assert.equal(BS.sanitiseBrainModel(m.id), m.id)
+    for (const bad of [undefined, null, '', 7, 'opus', 'claude-fable-5-1', 'claude-sonnet-5-5 --dangerously-skip-permissions']) {
+      assert.equal(BS.sanitiseBrainModel(bad), 'claude-sonnet-5-5', String(bad))
+    }
+  })
+
+  const home = join(TMP, 'brain-home')
+  const userSettings = join(TMP, 'user-settings.json')
+  const STATUS = { type: 'command', command: 'node C:/Users/x/.claude/statusline.js' }
+  await check('the status line command is read from a user settings file, and only a command counts', () => {
+    writeFileSync(userSettings, JSON.stringify({ model: 'x', statusLine: STATUS }))
+    assert.deepEqual(H.statusLineFrom(userSettings), STATUS)
+    writeFileSync(userSettings, JSON.stringify({ statusLine: { type: 'command', command: ' ' } }))
+    assert.equal(H.statusLineFrom(userSettings), null)
+    writeFileSync(userSettings, '{ not json')
+    assert.equal(H.statusLineFrom(userSettings), null)
+    assert.equal(H.statusLineFrom(join(TMP, 'no-such-settings.json')), null)
+  })
+  await check('the home’s Claude settings carry the status line and keep the allow and deny lists', () => {
+    mkdirSync(home, { recursive: true })
+    H.prepareBrainHome(home, { node: SETUP.node, script: SETUP.mcpScript, linkFile: SETUP.linkFile }, null, STATUS)
+    const written = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'))
+    assert.deepEqual(written.statusLine, STATUS)
+    assert.ok(written.permissions.allow.includes('mcp__forge'))
+    assert.deepEqual(written.permissions.deny, ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'])
+    assert.equal(H.claudeHomeSettings(null).statusLine, undefined, 'no command, no key')
+    assert.equal(written.remoteControlAtStartup, false, 'Remote Control at startup comes from ~/.claude.json too; the home says no')
+  })
+  await check('what it is told: the map and the voice bar, note replies read aloud, [quiet], never act on a guess', () => {
+    const told = readFileSync(join(home, 'CLAUDE.md'), 'utf8')
+    assert.ok(!told.includes('with a chat and a CLI view'), 'the stale line is gone')
+    assert.match(told, /the brain icon in the top bar opens the Brain map, and Steve talks to you in the voice bar at the bottom/)
+    assert.match(told, /Your reply to a \[Forge\] note about a pane is read aloud to Steve by Forge\./)
+    assert.match(told, /reply with exactly \[quiet\]\. Do not call say_to_voice_agent for a note reply\./)
+    assert.match(told, /Speech-to-text mishears him\..*Never act on a guess\. Pane names sound alike: check list_panes_with_names\./)
+    const knowledge = H.forgeKnowledge(null)
+    assert.ok(!knowledge.includes('${') && !knowledge.includes('```'), 'no template leftovers, no code fences')
+  })
+
+  await check('[quiet] is the whole reply, in any case, and nothing else is', () => {
+    for (const quiet of ['[quiet]', '  [Quiet]\n', '[QUIET]']) assert.equal(H.isQuietReply(quiet), true, quiet)
+    for (const said of ['', 'quiet', '[quiet] Pax is done.', 'Pax stopped. [quiet]', '[quiet].']) assert.equal(H.isQuietReply(said), false, said)
+  })
+  await check('a "question" that is the pane’s own input line or an idle placeholder is not news', () => {
+    // The two false notes seen in the brain's transcripts.
+    assert.equal(H.askingIsNoise('Got something you want to try?'), true)
+    assert.equal(H.askingIsNoise('❯ Does the brain show up…'), true)
+    for (const own of ['› Got something you want to try?', '> is it done?', '  ❯ Try "how does foo.ts work?"']) assert.equal(H.askingIsNoise(own), true, own)
+    assert.ok(H.IDLE_PLACEHOLDERS.includes('Got something you want to try?'))
+  })
+  await check('a real question still is: plain, a y/n prompt, a menu’s cursor row, or no line at all', () => {
+    for (const real of ['Do you want to proceed?', 'Allow Bash(npm test)? (y/n)', '❯ 1. Yes', '› 2. No, and tell Codex what to do', '']) {
+      assert.equal(H.askingIsNoise(real), false, real)
+    }
+    assert.equal(H.askingNote('Cleo in Lakeside', 'Do you want to proceed?'), 'Cleo in Lakeside needs Steve: Do you want to proceed?')
+    assert.equal(H.askingNote('Cleo in Lakeside', ''), 'Cleo in Lakeside needs Steve.')
+  })
+  await check('a stop is news after 8 s of work and 20 s of staying stopped, never when it went back to work', () => {
+    assert.equal(H.STOP_MIN_WORK_MS, 8000)
+    assert.equal(H.STOP_SETTLE_MS, 20_000)
+    assert.equal(H.stopIsNews(7999, false), false)
+    assert.equal(H.stopIsNews(8000, false), true)
+    assert.equal(H.stopIsNews(600_000, true), false)
+    assert.equal(H.stopIsNews(null, false), true, 'no run seen: the renderer’s own 8 s rule vouched')
+    assert.equal(H.stopIsNews(null, true), false)
+  })
+
+  // Record shapes as Claude Code 2.1.287 writes them, trimmed to what is read.
+  const TRANSCRIPT = [
+    '{"cut":"in half',
+    JSON.stringify({ type: 'user', message: { role: 'user', content: 'build the thing' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Starting two agents.' }, { type: 'tool_use', id: 't1', name: 'Agent', input: {} }] } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'launched' }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'a0c95af35d76174fd' } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't2', content: 'launched' }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'b1d06bf46e87285ae' } }),
+    JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'a sub-agent talking' }] } }),
+    JSON.stringify({ type: 'user', origin: { kind: 'task-notification' }, message: { content: '<task-notification>\n<task-id>a0c95af35d76174fd</task-id>\n<status>completed</status>\n</task-notification>' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '## Done\n\nThe `build` **passes**. He said "ship it".\nOne agent is still checking the phone face.' }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't3', name: 'Read', input: {} }] } }),
+    JSON.stringify({ type: 'system', subtype: 'turn_duration', durationMs: 1 })
+  ].join('\n')
+  await check('a Claude pane’s last words and background agents still out, from its transcript’s end', () => {
+    const words = H.paneWords(TRANSCRIPT)
+    assert.equal(words.agents, 1, 'two launched, one reported back')
+    assert.match(words.lastWords, /^## Done/)
+    assert.deepEqual(H.paneWords(''), { lastWords: '', agents: 0 })
+  })
+  await check('the stop note says "stopped", how long, the last words on one line, and what still runs', () => {
+    assert.equal(
+      H.stopNote('Pax in forge', 4 * 60_000 + 10_000, H.paneWords(TRANSCRIPT)),
+      'Pax in forge stopped after 4 min. It said: "Done The build passes. He said \'ship it\'. One agent is still checking the phone face." 1 background agent still running.'
+    )
+    assert.equal(H.stopNote('Cleo in Lakeside', 20_000), 'Cleo in Lakeside stopped after under 1 min.')
+    assert.equal(H.stopNote('Cleo in Lakeside', null, { lastWords: '', agents: 0 }), 'Cleo in Lakeside stopped.')
+    assert.match(H.stopNote('Pax', 60_000, { lastWords: 'x', agents: 3 }), / 3 background agents still running\.$/)
+    const long = H.stopNote('Pax', 60_000, { lastWords: 'word '.repeat(200), agents: 0 })
+    const said = /It said: "(.*)"$/.exec(long)[1]
+    assert.ok(said.length <= 300 && said.endsWith('…'), `${said.length} characters`)
+    assert.ok(!/finished/.test(long))
   })
 }
 

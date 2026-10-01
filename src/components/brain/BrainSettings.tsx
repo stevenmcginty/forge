@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { BRAIN_CONTEXT_WARN_PCT, BRAIN_ENGINE_NAME } from '@shared/brain'
+import { BRAIN_CONTEXT_WARN_PCT, BRAIN_ENGINE_NAME, BRAIN_MODELS, sanitiseBrainModel } from '@shared/brain'
 import { useKeymap } from '@/hooks/useHub'
 import { useApp, type SettingsSection } from '@/state/AppState'
 import { openBrainMap } from '../brainview'
@@ -119,6 +119,23 @@ export function BrainSettings(): ReactNode {
         hint="Switching while it is on starts it again on the new one, with a new conversation. An option this PC cannot run says why."
       >
         <EnginePicker value={engine} unavailable={status?.unavailable ?? {}} disabled={!status} onPick={(e) => void pickBrainEngine(e)} />
+        {engine === 'claude' ? (
+          <Row label="Model" hint="Changing it while the brain is on restarts it on that model and keeps the conversation." htmlFor="brain-model">
+            <select
+              id="brain-model"
+              className="select"
+              value={sanitiseBrainModel(state.settings.brainModel)}
+              onKeyDown={(e) => e.stopPropagation()}
+              onChange={(e) => actions.patchSettings({ brainModel: e.target.value })}
+            >
+              {BRAIN_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {`${m.name} — ${m.note}`}
+                </option>
+              ))}
+            </select>
+          </Row>
+        ) : null}
       </Card>
       <Card title="Voice" hint="Replies are spoken in this voice when Forge Brain is your voice agent.">
         <BrainVoicePicker />
