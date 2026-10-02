@@ -165,6 +165,18 @@ export const IPC = {
   voiceOpenRouter: 'voice:openrouter',
   voiceGroq: 'voice:groq',
   voiceImportKey: 'voice:import-key',
+  /**
+   * Check a pasted Groq key with Groq and save it as the speech-to-text key
+   * (the "Turn on dictation" card). Answers SpeechKeyResult, never the key.
+   */
+  voiceSaveSpeechKey: 'voice:save-speech-key',
+  /**
+   * Main → renderer, no payload: a Groq key was saved in main (the card, or a
+   * phone's `speech-key-set`). The renderer re-reads it from the store and
+   * patches its own settings, or its next whole-object save would post the
+   * old, empty key back over it.
+   */
+  voiceSpeechKeySaved: 'voice:speech-key-saved',
 
   // media generation (M6) — the same REST calls the MCP bridge makes, so the
   // voice agent's executor can generate images too.

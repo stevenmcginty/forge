@@ -1,0 +1,29 @@
+/*
+  "Turn on dictation" (SpeechKeyPrompt). Everything else is Onboarding.css's
+  `.onboard` card; these are the few things a paste box needs on top.
+*/
+
+/* The Show button sits in the row beside the box, not under it like a step's ghost. */
+.speechkey .onboard__row .onboard__ghost {
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
+.speechkey .onboard__row .cta-btn {
+  flex: 0 0 auto;
+}
+
+/* Every state is a sentence ("Checking the key…", "Saved…", Groq's refusal); colour only backs it up. */
+.speechkey__status {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.speechkey__status[data-tone='saved'] {
+  color: var(--accent);
+}
+
+.speechkey__status[data-tone='error'] {
+  color: var(--warn);
+}

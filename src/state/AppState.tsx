@@ -309,6 +309,7 @@ const FALLBACK_SETTINGS: Settings = {
   brainEngine: 'claude',
   brainModel: BRAIN_MODEL_DEFAULT,
   brainIntroSeen: false,
+  speechKeyReminderOff: false,
   brainVoice: BRAIN_VOICE_DEFAULT,
   brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
   memoryLlmSummarize: false,
@@ -2554,6 +2555,23 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       // these ops itself: a tab opened from away into a project nobody here is
       // looking at is a tab nobody at the desk can see.
       dispatch({ type: 'selectProject', projectId })
+    })
+  }, [])
+
+  /**
+   * A Groq key saved in main — the "Turn on dictation" card, or a phone's
+   * `speech-key-set`. The nudge carries no key, so it is read back from the
+   * store and patched into state, so the debounced whole-settings save above
+   * carries it instead of posting this window's old, empty key back over it.
+   * Optional-chained for the same stale-preload reason as above.
+   */
+  useEffect(() => {
+    return window.forge?.voice?.onSpeechKeySaved?.(() => {
+      void window.forge.store.snapshot().then(({ settings }) => {
+        const groqKey = settings?.groqKey
+        if (typeof groqKey !== 'string' || !groqKey.trim()) return
+        dispatch({ type: 'patchSettings', patch: { groqKey } })
+      })
     })
   }, [])
 

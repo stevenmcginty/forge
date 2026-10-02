@@ -331,6 +331,7 @@ function defaultSettings(): Settings {
     brainEngine: 'claude',
     brainModel: BRAIN_MODEL_DEFAULT,
     brainIntroSeen: false,
+    speechKeyReminderOff: false,
     brainVoice: BRAIN_VOICE_DEFAULT,
     brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
     // Heuristic memory is free and predictable; letting a model rewrite the
@@ -919,6 +920,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     brainEngine: isBrainEngine(s.brainEngine) ? s.brainEngine : DEFAULT_SETTINGS.brainEngine,
     brainModel: sanitiseBrainModel(s.brainModel),
     brainIntroSeen: s.brainIntroSeen === true,
+    speechKeyReminderOff: s.speechKeyReminderOff === true,
     brainVoice: typeof s.brainVoice === 'string' && isEdgeVoice(s.brainVoice) ? s.brainVoice.trim() : BRAIN_VOICE_DEFAULT,
     brainContextWarnPct:
       typeof s.brainContextWarnPct === 'number' && Number.isFinite(s.brainContextWarnPct)

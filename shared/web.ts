@@ -675,6 +675,17 @@ export const WEB_FEATURE_PASSKEY = 'passkey'
 export const WEB_FEATURE_DICTATE_STREAM = 'dictate-stream'
 
 /**
+ * The `hello-ok.features` entry that says this desktop answers
+ * `speech-key-status` and `speech-key-set` — "is a speech-to-text key set?",
+ * and pasting a free Groq key from the phone. Absent (an older desktop) → the
+ * page cannot ask, and must not offer the paste box.
+ */
+export const WEB_FEATURE_SPEECH_KEY = 'speech-key'
+
+/** The longest `speech-key-set` key the desktop will look at. Real Groq keys are ~56 characters. */
+export const MAX_SPEECH_KEY_CHARS = 300
+
+/**
  * The `hello-ok.features` entry that says this desktop answers `project-files`
  * and `project-file` — a read-only look inside a project's folder. Absent → the
  * page browses files in GitHub mode only, as it always has.
@@ -1372,6 +1383,20 @@ export type WebRequest =
   | { kind: 'dictate-stream'; op: 'done'; dictationId: string; chunks: number }
   | { kind: 'dictate-stream'; op: 'cancel'; dictationId: string }
   /**
+   * "Can this desktop turn speech into text?" — only when `hello-ok.features`
+   * carries WEB_FEATURE_SPEECH_KEY. Answered `{ kind: 'speech-key', ready }`,
+   * ready when a Groq or a Gemini key is set. Never any part of a key.
+   */
+  | { kind: 'speech-key-status' }
+  /**
+   * A Groq key pasted on the phone — only when `hello-ok.features` carries
+   * WEB_FEATURE_SPEECH_KEY. Trimmed and capped at MAX_SPEECH_KEY_CHARS; the
+   * desktop asks Groq whether the key works before it saves it. Answered
+   * `{ kind: 'speech-key', ready: true }`, or `{ kind: 'failed' }` with a
+   * plain sentence for the person holding the phone.
+   */
+  | { kind: 'speech-key-set'; key: string }
+  /**
    * One folder inside a project, read-only — only when `hello-ok.features`
    * carries WEB_FEATURE_FILES.
    *
@@ -1745,7 +1770,7 @@ export interface WebHelloOkFrame {
   /**
    * Optional capabilities this desktop has, by name — WEB_FEATURE_PASSKEY,
    * WEB_FEATURE_DICTATE_STREAM, WEB_FEATURE_FILES, WEB_FEATURE_PROJECT_REMOVE,
-   * WEB_FEATURE_USAGE. A page uses a feature only when its name is here; absent (an older
+   * WEB_FEATURE_USAGE, WEB_FEATURE_SPEECH_KEY. A page uses a feature only when its name is here; absent (an older
    * desktop) means none.
    */
   features?: string[]
@@ -2221,6 +2246,8 @@ export type WebResult =
   | { kind: 'folder'; folder: WebFolder }
   /** The words the desktop heard in a `dictate` recording — empty when it heard nothing. */
   | { kind: 'dictation'; text: string }
+  /** The answer to `speech-key-status` and to a good `speech-key-set`. */
+  | { kind: 'speech-key'; ready: boolean }
   /** One folder inside a project — the answer to `project-files`. `path` is the folder as listed, '' for the top. */
   | { kind: 'project-files'; projectId: string; path: string; entries: WebProjectEntry[]; truncated: boolean }
   /**

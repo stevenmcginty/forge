@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -16,6 +16,7 @@ import type {
   GroqCallResult,
   OpenRouterCallRequest,
   OpenRouterCallResult,
+  SpeechKeyResult,
   VoiceSpeakRequest,
   VoiceSpeakResult
 } from '@shared/types'
@@ -23,7 +24,7 @@ import { editImage, makeImage, makeVideo, type MediaResult } from './gemini-medi
 import { speak as speakGemini } from './gemini-tts'
 import { speakEdge } from './edge-tts'
 import { adoptShotFiles } from './shots-watcher'
-import { getDataDir, getSettings } from './store'
+import { getDataDir, getSettings, setSettings } from './store'
 
 /**
  * The voice agent's only door to the outside world.
@@ -409,7 +410,62 @@ export async function transcribeAudio(
   if (!bytes.length) return { ok: false, error: 'The recording was empty.' }
   if (groq) return transcribeWithGroq(bytes, mime, groq)
   if (gemini) return transcribeWithGemini(bytes, mime, gemini, settings.geminiModel)
-  return { ok: false, error: 'No speech-to-text key. Add a Groq or Gemini key in Settings → Voice on the desktop.' }
+  return { ok: false, error: 'No speech-to-text key. Add a Groq or Gemini key in Settings → Keys on the desktop.' }
+}
+
+/** Groq's keys all start this way; anything else was copied from somewhere else. */
+const GROQ_KEY_PREFIX = 'gsk_'
+const GROQ_CHECK_TIMEOUT_MS = 10_000
+
+/**
+ * Does Groq take this key? Shape first, then one cheap authenticated read
+ * (`GET /models`: 200 for a good key, 401 for a bad one). The errors are plain
+ * sentences for whoever pasted the key, desk or phone, and none of them can
+ * carry the key: nothing the provider says is passed through.
+ */
+export async function checkGroqKey(raw: string): Promise<SpeechKeyResult> {
+  const key = String(raw ?? '').trim()
+  if (!key.startsWith(GROQ_KEY_PREFIX) || !KEY_SHAPE.test(key)) {
+    return { ok: false, error: 'That does not look like a Groq key.' }
+  }
+  let status: number
+  try {
+    const res = await fetch(`${GROQ_HOST}/models`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(GROQ_CHECK_TIMEOUT_MS)
+    })
+    status = res.status
+    // Drain it: the list of models is not wanted, the connection is.
+    await res.arrayBuffer().catch(() => undefined)
+  } catch {
+    return { ok: false, error: 'Could not reach Groq. Check the internet on the computer.' }
+  }
+  if (status === 401 || status === 403) return { ok: false, error: 'Groq refused this key. Copy it again.' }
+  if (status < 200 || status >= 300) {
+    return { ok: false, error: `Groq could not check the key just now (error ${status}). Try again in a minute.` }
+  }
+  return { ok: true }
+}
+
+/**
+ * Check a Groq key, then make it the speech-to-text key — the one door for the
+ * desktop's "Turn on dictation" card and the phone's `speech-key-set`.
+ *
+ * Saved here, in main, so it then has to be told to every window: the renderer
+ * posts its whole `settings` back 200ms after any change (AppState's
+ * persistence effect), and a renderer that never heard of this key would post
+ * its empty `groqKey` straight back over it. The nudge carries no key — some
+ * windows host other people's pages — so the renderer reads it from its store.
+ */
+export async function saveSpeechKey(raw: string): Promise<SpeechKeyResult> {
+  const key = String(raw ?? '').trim()
+  const checked = await checkGroqKey(key)
+  if (!checked.ok) return checked
+  setSettings({ groqKey: key })
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(IPC.voiceSpeechKeySaved)
+  }
+  return { ok: true }
 }
 
 /** `audio/webm;codecs=opus` → `webm`: the suffix the provider wants on the upload's name. */
@@ -515,6 +571,10 @@ export function registerVoiceHandlers(): void {
     async (_e, req: OpenRouterCallRequest): Promise<OpenRouterCallResult> => callChat(req, OPENROUTER)
   )
   ipcMain.handle(IPC.voiceGroq, async (_e, req: GroqCallRequest): Promise<GroqCallResult> => callChat(req, GROQ))
+  ipcMain.handle(
+    IPC.voiceSaveSpeechKey,
+    async (_e, key: unknown): Promise<SpeechKeyResult> => saveSpeechKey(typeof key === 'string' ? key.slice(0, 300) : '')
+  )
 
   ipcMain.handle(IPC.voiceMakeImage, async (_e, req: MakeImageRequest): Promise<MediaCallResult> => {
     const settings = getSettings()

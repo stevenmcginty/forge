@@ -107,8 +107,11 @@ export function ModelsSection(): ReactNode {
           }
           note={
             <>
-              Free at <span className="mono">console.groq.com</span> — no card. Sent only to{' '}
-              <span className="mono">api.groq.com</span>, and only while Groq answers.
+              Used for dictation from your phone. Free, no card needed.{' '}
+              <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer noopener">
+                Get a free key
+              </a>
+              . Sent only to <span className="mono">api.groq.com</span>, and only while Groq answers.
             </>
           }
         />
