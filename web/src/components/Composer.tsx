@@ -1203,9 +1203,37 @@ function controlCode(letter: string): string {
  * Back hides a phone's keyboard but leaves the field focused, and Chrome
  * raises the keyboard again on any tap while a text field has the focus.
  */
-function dropTextFocus(): void {
+function dropTextFocus(): boolean {
   const active = document.activeElement
-  if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) active.blur()
+  if (!(active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement)) return false
+  active.blur()
+  return true
+}
+
+/**
+ * Eats the click that ends a disc press when it lands off the disc.
+ *
+ * Dropping the focus closes the keyboard, and the page grows with it
+ * (`interactive-widget=resizes-content`), so the disc slides down while the
+ * finger is still on the glass. Chrome sends the tap's click to whatever is
+ * under the finger when it lifts — the terminal, whose click focuses it and
+ * brings the keyboard straight back. Only pointer clicks (`detail` > 0); the
+ * next press anywhere ends the watch, so no later tap is ever eaten.
+ */
+function swallowStrayClick(disc: HTMLElement): void {
+  const end = (): void => {
+    window.removeEventListener('click', onClick, true)
+    window.removeEventListener('pointerdown', end, true)
+  }
+  const onClick = (event: globalThis.MouseEvent): void => {
+    if (event.detail === 0) return
+    end()
+    if (event.target instanceof Node && disc.contains(event.target)) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  window.addEventListener('click', onClick, true)
+  window.addEventListener('pointerdown', end, true)
 }
 
 /* --------------------------------------------------------------------- mic */
@@ -1260,7 +1288,7 @@ function MicButton({
     if (disabled || (event.pointerType === 'mouse' && event.button !== 0)) return
     // The phone's disc talks; it does not type. The press below keeps the
     // focus where it is, so a box left focused would bring the keyboard back.
-    if (primary) dropTextFocus()
+    if (primary && dropTextFocus()) swallowStrayClick(event.currentTarget)
     if (phase !== 'idle' && phase !== 'recording') return
     event.preventDefault()
     try {
