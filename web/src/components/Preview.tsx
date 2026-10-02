@@ -11,7 +11,7 @@ import { AnswerCard, registerAnswerScreen } from './AnswerCard'
 import { ChatView } from './ChatView'
 import { Composer } from './Composer'
 import { Feed } from './Feed'
-import { ListenUnit, VoiceFan } from './PhoneListen'
+import { ListenLine, ListenUnit, VoiceFan } from './PhoneListen'
 import { PowerDrawView } from './PowerDraw'
 import type { WebVoiceState } from '../deck/voiceAgent'
 import type { WebVoiceAgent } from '../deck/voice-words'
@@ -45,42 +45,76 @@ const PREVIEW_VOICE = {
   undo: () => undefined
 }
 
-/** The phone's agent disc and its slide-out, on a voice that goes nowhere. `&agent=on` shows it talking. */
-function PreviewListen(): ReactNode {
-  const [agent, setAgent] = useState<WebVoiceAgent>('gemini-live')
-  const [open, setOpen] = useState(() => new URLSearchParams(location.search).get('fan') === '1')
+/*
+ * The phone's agent round and its slide-out, on a voice that goes nowhere.
+ * The two are drawn apart (the round in the box, the slide-out in the row),
+ * so they share a little store. `&agent=on` shows it talking, `&fan=1` open.
+ */
+const previewVoice = {
+  agent: 'gemini-live' as WebVoiceAgent,
+  open: new URLSearchParams(location.search).get('fan') === '1',
+  subs: new Set<() => void>()
+}
+
+function setPreviewVoice(next: Partial<Pick<typeof previewVoice, 'agent' | 'open'>>): void {
+  Object.assign(previewVoice, next)
+  previewVoice.subs.forEach((fn) => fn())
+}
+
+function usePreviewVoice(): { voice: WebVoiceState; open: boolean } {
+  const [, bump] = useState(0)
+  useEffect(() => {
+    const fn = (): void => bump((n) => n + 1)
+    previewVoice.subs.add(fn)
+    return () => {
+      previewVoice.subs.delete(fn)
+    }
+  }, [])
   const on = new URLSearchParams(location.search).get('agent') === 'on'
-  const voice: WebVoiceState = {
-    phase: on ? 'listening' : 'off',
-    error: null,
-    ended: null,
-    muted: false,
-    agent,
-    caption: null,
-    lastAction: null
+  return {
+    open: previewVoice.open,
+    voice: {
+      phase: on ? 'listening' : 'off',
+      error: null,
+      ended: null,
+      muted: false,
+      agent: previewVoice.agent,
+      caption: null,
+      lastAction: null
+    }
   }
+}
+
+function PreviewListen(): ReactNode {
+  const { voice, open } = usePreviewVoice()
   return (
-    <>
-      <ListenUnit
-        voice={voice}
-        live
-        supported
-        onToggle={() => undefined}
-        onOpenPicker={() => setOpen((v) => !v)}
-        onRefused={() => undefined}
-        pickerOpen={open}
-      />
-      <VoiceFan
-        open={open}
-        voice={voice}
-        onClose={() => setOpen(false)}
-        onPick={(next) => {
-          setAgent(next)
-          setOpen(false)
-        }}
-        onOff={() => setOpen(false)}
-      />
-    </>
+    <ListenUnit
+      voice={voice}
+      live
+      supported
+      onToggle={() => undefined}
+      onOpenPicker={() => setPreviewVoice({ open: !previewVoice.open })}
+      onRefused={() => undefined}
+      pickerOpen={open}
+    />
+  )
+}
+
+function PreviewLine(): ReactNode {
+  const { voice } = usePreviewVoice()
+  return <ListenLine voice={{ ...voice, caption: voice.phase === 'listening' ? { role: 'assistant', text: 'Which file should I open?' } : null }} endedShown={false} onPick={() => undefined} />
+}
+
+function PreviewFan(): ReactNode {
+  const { voice, open } = usePreviewVoice()
+  return (
+    <VoiceFan
+      open={open}
+      voice={voice}
+      onClose={() => setPreviewVoice({ open: false })}
+      onPick={(agent) => setPreviewVoice({ agent, open: false })}
+      onOff={() => setPreviewVoice({ open: false })}
+    />
   )
 }
 
@@ -551,6 +585,8 @@ function PreviewPane({
           autoFocus={false}
           voice={mobile ? PREVIEW_VOICE : undefined}
           listen={mobile ? <PreviewListen /> : undefined}
+          listenMenu={mobile ? <PreviewFan /> : undefined}
+          listenLine={mobile ? <PreviewLine /> : undefined}
           onStop={mobile && PREVIEW_PARAMS.get('busy') === '1' ? () => undefined : undefined}
         />
         {mobile ? <PreviewDrawer /> : null}

@@ -159,7 +159,7 @@ function useLive(): boolean {
 
 /* --------------------------------------------------------------- Listen */
 
-/** Listen, wired: the cohesive capsule button at the front of the row and the picker it opens. */
+/** Listen, wired: the small blue round at the front of the box. Its agents slide out from PhoneListenFan. */
 export function PhoneListen(): ReactNode {
   const voice = useWebVoice()
   const live = useLive()
@@ -167,30 +167,36 @@ export function PhoneListen(): ReactNode {
   const open = usePickerOpen()
   useYourTurnBuzz(lookOf(voice))
   return (
-    <>
-      <ListenUnit
-        voice={voice}
-        live={live}
-        supported={webVoiceSupported()}
-        onToggle={toggleWebVoice}
-        onOpenPicker={() => setPicker(!pickerOpen)}
-        onRefused={actions.setNotice}
-        pickerOpen={open}
-      />
-      <VoiceFan
-        open={open}
-        voice={voice}
-        onClose={() => setPicker(false)}
-        onPick={(agent) => {
-          setPicker(false)
-          setWebVoiceAgent(agent)
-        }}
-        onOff={() => {
-          setPicker(false)
-          stopWebVoice()
-        }}
-      />
-    </>
+    <ListenUnit
+      voice={voice}
+      live={live}
+      supported={webVoiceSupported()}
+      onToggle={toggleWebVoice}
+      onOpenPicker={() => setPicker(!pickerOpen)}
+      onRefused={actions.setNotice}
+      pickerOpen={open}
+    />
+  )
+}
+
+/** The agents, slid out above the bar: drawn in the row, outside the box that clips. */
+export function PhoneListenFan(): ReactNode {
+  const voice = useWebVoice()
+  const open = usePickerOpen()
+  return (
+    <VoiceFan
+      open={open}
+      voice={voice}
+      onClose={() => setPicker(false)}
+      onPick={(agent) => {
+        setPicker(false)
+        setWebVoiceAgent(agent)
+      }}
+      onOff={() => {
+        setPicker(false)
+        stopWebVoice()
+      }}
+    />
   )
 }
 
@@ -217,18 +223,18 @@ function useYourTurnBuzz(look: HubLook): void {
 }
 
 /**
- * The agent disc: the dictation disc's twin at the other end of the row, the
- * same 56px round, in the voice agent's own blue, so the dock reads
- * symmetrical — talk to the agent on the left, dictate on the right.
+ * The agent round: a small 40px button in the voice agent's own blue, inside
+ * the box at its very front (then a hairline, then the paperclip) — there, but
+ * second to the dictation disc, which is the voice used most.
  *
  * The disc is a switch — tap to talk, tap again to stop — whose glyph IS the
  * state, one silhouette each, readable at arm's length and without colour: an
  * outline mic (off), a turning ring (connecting), a solid mic (your turn),
  * three dots (thinking), a speaker with waves (its turn), a slashed mic
  * (held), a warning triangle (failed). A halo breathes round it on your turn
- * and ripples out while the agent speaks. The agent's mark sits on its rim as
- * a small badge; a tap on the badge slides the agents out above the disc. A
- * switch that cannot start stays tappable (aria-disabled), so the tap can say why.
+ * and ripples out while the agent speaks. A small chevron sits on its corner;
+ * a tap on it slides the agents out above the bar. A switch that cannot start
+ * stays tappable (aria-disabled), so the tap can say why.
  */
 export function ListenUnit({
   voice,
@@ -315,7 +321,7 @@ export function ListenUnit({
         onClick={handleOpenPicker}
       >
         <span className="plisten__agent-tile" aria-hidden="true">
-          <AgentMark agent={voice.agent} size={12} />
+          <Icon name="chevronDown" size={10} />
         </span>
       </button>
     </span>

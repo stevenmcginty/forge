@@ -136,6 +136,7 @@ export function Composer({
   bar = false,
   voiceKey,
   listen,
+  listenMenu,
   listenLine,
   edge,
   picker
@@ -249,10 +250,15 @@ export function Composer({
   /** The dictation's key on the deck ("Right Alt"), for the mic's title and name. */
   voiceKey?: string
   /**
-   * The phone's Listen (PhoneListen.tsx): the voice agent's capsule (mic + agent chip), at
-   * the front of the row — a conversation, where the disc is dictation.
+   * The phone's Listen (PhoneListen.tsx): the voice agent's small blue round,
+   * inside the box at its front — a conversation, where the disc is dictation.
    */
   listen?: ReactNode
+  /**
+   * What Listen opens (the agents, slid out above the bar). Drawn in the row,
+   * outside the box, because the box clips what leaves it.
+   */
+  listenMenu?: ReactNode
   /**
    * Listen's voice line, drawn on the box's face while the box is empty and
    * no dictation runs; the first letter typed, or a dictation, takes it back.
@@ -656,6 +662,8 @@ export function Composer({
       setOpenPick(null)
       input?.click()
     }
+    /** Listen at the box's front, unless a dictation has the box. */
+    const front = listen !== undefined && listen !== null && !live && !reviewing
     return (
       <form
         className="composer"
@@ -704,7 +712,7 @@ export function Composer({
           />
         ) : null}
         <div className="composer__row">
-          {listen}
+          {listenMenu}
           {onShowChat ? (
             <button
               type="button"
@@ -718,7 +726,16 @@ export function Composer({
             </button>
           ) : null}
           {/* The box's front always holds one thing: "+", or Stop while an agent works, or Cancel / Undo / Retry for a dictation. */}
-          <div className="composer__field" data-phase={phase}>
+          <div className="composer__field" data-phase={phase} data-front={front ? 'agent' : undefined}>
+            {/* Listen lives in the box, at its very front: a small blue round,
+                then a hairline, then the paperclip. It steps out while a
+                dictation has the box. */}
+            {front ? (
+              <span className="composer__front">
+                {listen}
+                <span className="composer__seam" aria-hidden="true" />
+              </span>
+            ) : null}
             {live ? (
               <button
                 type="button"
@@ -802,7 +819,7 @@ export function Composer({
                 title="Attach a photo, image or file"
                 aria-label="Attach"
               >
-                <Icon name="plus" size={20} />
+                <Icon name="paperclip" size={20} />
               </button>
             )}
             {live ? (

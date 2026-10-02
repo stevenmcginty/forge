@@ -51,7 +51,7 @@ import { AgentStatus } from './AgentStatus'
 import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
 import { ModelChip } from './ModelChip'
-import { PhoneListen, PhoneListenLine, usePhoneVoice } from './PhoneListen'
+import { PhoneListen, PhoneListenFan, PhoneListenLine, usePhoneVoice } from './PhoneListen'
 
 /**
  * The one text box for this browser, with the agent's status strip over it.
@@ -1260,6 +1260,7 @@ export function SessionComposer({
         lead={face === 'deck' ? lead : undefined}
         voiceKey={face === 'deck' ? dictationKeyName(dKey) : undefined}
         listen={face === 'deck' ? undefined : <PhoneListen />}
+        listenMenu={face === 'deck' ? undefined : <PhoneListenFan />}
         listenLine={face === 'deck' ? undefined : <PhoneListenLine />}
         picker={deckPicker}
         edge={

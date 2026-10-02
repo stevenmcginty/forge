@@ -264,6 +264,47 @@
   display: none;
 }
 
+/*
+ * Listen at the box's very front: the small blue round, centred on the
+ * pill's 56px line, then a hairline, then the paperclip. Above the voice line
+ * (which covers the box's face while Listen talks), so it can always be
+ * tapped off. 7 + 40 + 8 + 1 = 56px of front.
+ */
+.app[data-mobile] .composer__front {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  height: 54px;
+  padding-left: 7px;
+}
+
+.app[data-mobile] .composer__seam {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  background: var(--p-line-strong);
+}
+
+.app[data-mobile] .composer__field[data-front='agent'] .composer__lead {
+  position: relative;
+  z-index: 2;
+  margin-left: 2px;
+}
+
+.app[data-mobile] .composer__field[data-front='agent'] .composer__hint {
+  left: calc(56px + 2px + var(--p-hit) + 8px);
+}
+
+/* While Listen talks the voice line has the box and the paperclip steps aside
+   (PhoneListen.css); the line's words start just past the round and its hairline. */
+.app[data-mobile] .composer__field[data-front='agent'] .plisten-line__body {
+  padding-left: calc(56px + var(--p-3));
+}
+
 /* The box's front button: "+", or Cancel while it listens, or Undo. */
 .app[data-mobile] .composer__lead {
   flex: none;

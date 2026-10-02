@@ -35,8 +35,8 @@
   position: relative;
   display: inline-grid;
   flex: none;
-  width: 56px;
-  height: 56px;
+  width: 40px;
+  height: 40px;
   margin: 0;
   touch-action: manipulation;
   user-select: none;
@@ -55,8 +55,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 40px;
+  height: 40px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -68,7 +68,7 @@
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #ffffff 35%, transparent),
     inset 0 -2px 6px color-mix(in srgb, #000000 18%, transparent),
-    0 6px 16px -6px var(--plisten-glow);
+    0 4px 12px -4px var(--plisten-glow);
   cursor: pointer;
   outline: none;
   touch-action: manipulation;
@@ -93,9 +93,9 @@
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, #ffffff 40%, transparent),
     inset 0 -2px 6px color-mix(in srgb, #000000 18%, transparent),
-    0 0 0 2px var(--p-bg),
+    0 0 0 2px var(--p-raised),
     0 0 0 3.5px var(--plisten-a),
-    0 8px 22px -6px var(--plisten-glow);
+    0 4px 14px -4px var(--plisten-glow);
 }
 
 /* The halo: still at rest; breathing on your turn; rippling out while the agent talks or thinks. */
@@ -122,8 +122,8 @@
     transform: scale(1.06);
   }
   to {
-    opacity: 0.7;
-    transform: scale(1.2);
+    opacity: 0.75;
+    transform: scale(1.16);
   }
 }
 
@@ -134,7 +134,7 @@
   }
   to {
     opacity: 0;
-    transform: scale(1.4);
+    transform: scale(1.3);
   }
 }
 
@@ -157,19 +157,18 @@
   display: inline-grid;
   place-items: center;
   flex: none;
-  transform: scale(1.15);
 }
 
-/* The agent's badge, on the disc's rim at the top right: tap it for the agents. */
+/* The chevron on the round's corner, bottom right: tap it for the agents. */
 .app[data-mobile] .plisten__agent-btn {
   position: absolute;
   z-index: 1;
-  top: -6px;
-  right: -6px;
+  right: -4px;
+  bottom: -3px;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -179,11 +178,11 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* A 40px reach round a 24px badge, out past the disc so it never steals the disc's own taps. */
+/* A bigger reach than its face, out to the right and down, never over the round's own middle. */
 .app[data-mobile] .plisten__agent-btn::before {
   content: '';
   position: absolute;
-  inset: -10px -10px -4px -4px;
+  inset: -4px -8px -6px -2px;
 }
 
 .app[data-mobile] .plisten__agent-btn:focus-visible {
@@ -194,26 +193,21 @@
 .app[data-mobile] .plisten__agent-tile {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  color: var(--p-ink);
+  color: var(--p-ink-2);
   background: var(--p-raised);
-  box-shadow:
-    0 0 0 2px var(--p-bg),
-    0 2px 6px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 1.5px var(--p-raised), 0 1px 3px rgba(0, 0, 0, 0.35);
   transition:
     transform var(--p-dur-glide) var(--p-glide),
-    box-shadow var(--p-dur) var(--p-ease);
+    color var(--p-dur) var(--p-ease);
 }
 
 .app[data-mobile] .plisten__agent-btn:active .plisten__agent-tile,
 .app[data-mobile] .plisten__agent-btn[aria-expanded='true'] .plisten__agent-tile {
-  transform: scale(1.12);
-  box-shadow:
-    0 0 0 2px var(--p-bg),
-    0 0 0 3.5px var(--plisten-a),
-    0 2px 8px rgba(0, 0, 0, 0.3);
+  transform: scale(1.15) rotate(180deg);
+  color: var(--plisten-a);
 }
 
 /*
