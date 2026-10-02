@@ -18,6 +18,7 @@ import { ProjectSheet } from './ProjectSheet'
 import { Rail } from './Rail'
 import { SessionComposer } from './SessionComposer'
 import { SplitView } from './Panes'
+import { SpeechKeyCard } from './SpeechKeyCard'
 import { TabStrip } from './TabStrip'
 import { TopBar } from './TopBar'
 import { UpdateBanner } from './UpdateBanner'
@@ -414,6 +415,8 @@ export function Workspace(): ReactNode {
                 />
               )}
               {mobile ? notice : null}
+              {/* No speech-to-text key on the desktop: under the banner and the Brain's card. */}
+              {mobile && !offline ? <SpeechKeyCard /> : null}
               {mobile ? <AskBanner /> : null}
               {/* Forge Brain waiting on a yes: over the display's top, and over the banner. */}
               {mobile && !offline ? <BrainConfirm face="phone" /> : null}
