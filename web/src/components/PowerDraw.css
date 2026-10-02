@@ -13,7 +13,20 @@
  * which the CSS turns into the lift of the name and the fade of the line
  * under it. Amber is only the "!" of an asking pane, and always carries the
  * mark and the word.
+ *
+ * The card is frosted glass (Steve: "a little bit transparent and a little bit
+ * nicer"): the app shows through it blurred, light catches its top edge, and
+ * behind the lens a soft glow takes the colour of the project in the middle,
+ * fading from one project's colour to the next as the drum turns. It goes
+ * solid where the browser cannot blur, or the phone asks for less transparency.
  */
+
+/* The glow's colour, registered so it can fade from one project to the next. */
+@property --pdraw-tint {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: transparent;
+}
 
 /* ---------------------------------------------------------------- handle */
 
@@ -130,10 +143,16 @@
   pointer-events: none;
 }
 
+/* Lighter on the left, where the app stays in view, deeper behind the glass. */
 .pdraw__scrim {
   position: absolute;
   inset: 0;
-  background: var(--p-scrim);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--p-scrim) 50%, transparent) 0%,
+    color-mix(in srgb, var(--p-scrim) 80%, transparent) 45%,
+    var(--p-scrim) 100%
+  );
   opacity: 0;
   transition: opacity var(--p-dur-sheet) var(--p-ease);
 }
@@ -159,11 +178,25 @@
   flex-direction: column;
   width: min(344px, calc(100% - 52px - env(safe-area-inset-right, 0px)));
   max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
-  background: var(--p-raised);
-  border: 1px solid var(--p-line);
+  /* Glass: the raised surface, thinned, over a blur of the app. */
+  --pdraw-glass: color-mix(in srgb, var(--p-raised) 60%, transparent);
+  --pdraw-sheen: color-mix(in srgb, var(--p-ink) 7%, transparent);
+  --pdraw-edge: color-mix(in srgb, var(--p-ink) 16%, transparent);
+  --pdraw-rim: color-mix(in srgb, var(--p-ink) 11%, transparent);
+  /* The lens: a brighter pane of the same glass. */
+  --pdraw-lens: color-mix(in srgb, var(--p-ink) 6%, transparent);
+  /* How strongly the project's colour lights the glass round the lens. */
+  --pdraw-glow: 24%;
+  background:
+    linear-gradient(180deg, var(--pdraw-sheen), transparent 132px),
+    var(--pdraw-glass);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  border: 1px solid var(--pdraw-rim);
   border-radius: var(--p-r-sheet);
   box-shadow:
-    0 20px 56px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 var(--pdraw-edge),
+    0 24px 64px rgba(0, 0, 0, 0.34),
     0 2px 8px rgba(0, 0, 0, 0.14);
   transform: translateX(calc(100% + 24px));
   transition: transform var(--p-dur-sheet) var(--p-ease-sheet);
@@ -181,6 +214,35 @@
 
 .pdraw-layer[data-dragging='true'] .pdraw {
   transition: none;
+}
+
+/* On a light theme the glass is milk, not smoke: a white rim, a softer shadow. */
+:root[data-appearance='light'] .pdraw {
+  --pdraw-glass: color-mix(in srgb, var(--p-raised) 66%, transparent);
+  --pdraw-sheen: color-mix(in srgb, var(--p-raised) 60%, transparent);
+  --pdraw-lens: color-mix(in srgb, var(--p-raised) 72%, transparent);
+  --pdraw-glow: 20%;
+  --pdraw-edge: var(--p-raised);
+  --pdraw-rim: color-mix(in srgb, var(--p-ink) 9%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--pdraw-edge),
+    0 24px 60px rgba(0, 0, 0, 0.16),
+    0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* No blur to read through, or the phone asks for less: the card goes solid. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .pdraw,
+  :root[data-appearance='light'] .pdraw {
+    --pdraw-glass: var(--p-raised);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pdraw,
+  :root[data-appearance='light'] .pdraw {
+    --pdraw-glass: var(--p-raised);
+  }
 }
 
 /* ---------------------------------------------------------------- header */
@@ -263,7 +325,35 @@
   cursor: grabbing;
 }
 
-/* "This one": a fixed lens in the middle that the rows turn through. */
+/*
+ * Light behind the lens, in the colour of the project in the middle
+ * (PowerDraw.tsx sets `--pdraw-tint`): it spills a little above and below,
+ * fades to the next project's colour as the drum turns, and in from nothing
+ * as the card opens.
+ */
+.pdraw__glow {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background:
+    radial-gradient(
+      70% 30% at 50% 50%,
+      color-mix(in srgb, var(--pdraw-tint) var(--pdraw-glow), transparent),
+      transparent
+    ),
+    radial-gradient(
+      110% 58% at 50% 50%,
+      color-mix(in srgb, var(--pdraw-tint) calc(var(--pdraw-glow) / 2.5), transparent),
+      transparent
+    );
+  transition: --pdraw-tint calc(var(--p-dur-sheet) * 2) var(--p-ease);
+  pointer-events: none;
+}
+
+/*
+ * "This one": a fixed lens in the middle that the rows turn through, a
+ * brighter pane of the glass ringed in the accent.
+ */
 .pdraw__band {
   position: absolute;
   z-index: 0;
@@ -272,16 +362,25 @@
   right: var(--p-2);
   height: var(--pdraw-band);
   margin-top: calc(var(--pdraw-band) / -2);
-  background: color-mix(in srgb, var(--p-act) 12%, var(--p-raised));
+  background-color: var(--pdraw-lens);
+  background-image: linear-gradient(180deg, var(--pdraw-sheen), transparent 70%);
   border-radius: var(--p-r-row);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--p-act) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--p-act) 60%, transparent),
+    0 10px 28px -12px rgba(0, 0, 0, 0.45);
   transition: background-color var(--p-dur-fast) var(--p-ease);
   pointer-events: none;
 }
 
+:root[data-appearance='light'] .pdraw__band {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--p-act) 60%, transparent),
+    0 10px 28px -12px rgba(0, 0, 0, 0.2);
+}
+
 /* A finger down on the lens: it takes the press, as a button would. */
 .pdraw[data-press='true'] .pdraw__band {
-  background: color-mix(in srgb, var(--p-act) 22%, var(--p-raised));
+  background-color: color-mix(in srgb, var(--p-act) 18%, transparent);
 }
 
 /*

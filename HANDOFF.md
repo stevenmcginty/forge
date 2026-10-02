@@ -1,5 +1,11 @@
 # Handoff
 
+## PowerDraw card becomes frosted glass (2026-10-02; branch `claude/forge-mobile-background-design-ggtmwm`; web only)
+
+- **Asked (Steve):** on Forge browser mobile, make the project drum's background "a little bit transparent and a little bit nicer", "a real beautiful design"; the scrolling of the projects is fine and stays as it is.
+- **Built:** `web/src/components/PowerDraw.css` + one element in `PowerDraw.tsx`. The card is frosted glass: the raised surface at 60% (light themes 66%) over `backdrop-filter: blur(18px) saturate(1.6)`, a sheen down from the top, a lit top edge, a softer rim. Behind the lens, a new `.pdraw__glow` lights the glass in the colour of the project in the middle (`--pdraw-tint`, a registered `<color>`, so it fades from one project to the next as the drum turns, and in from nothing on open). The lens is now a brighter pane of the glass with the accent ring (no lime fill, which muddied with the glow); a press still washes it in the accent. The scrim is lighter on the left, where the app stays in view. The card goes solid without `backdrop-filter` or under `prefers-reduced-transparency`. The drum engine is not touched.
+- **Checked:** typecheck 0, eslint 0, web:build 0; `?preview=powerdraw` screenshots at 390 in Volt, Paper, WA dark/light, over the plain terminal and over coloured chat bubbles; a wheel turn moves the glow from red to blue with no page errors. Headless Chromium draws no backdrop blur without `--use-angle=swiftshader --enable-unsafe-swiftshader --enable-gpu`; a real phone composites on the GPU. NOT seen on the real phone.
+
 ## Agent bar + top bar redesign, "Machined Capsule" (2026-10-01 late; master c4c110f, pushed 22:01 with 326ebe1)
 
 - **Asked (Steve):** make the bottom agent bar beautiful, animated and fast, the same on Forge desktop and Forge browser (deck face); then the top bar and every drop-down "slicker, more professional", with a New button that stands out. Fable agents only. Hard limits from him: the bar keeps its position, its overlap of the terminal and its grow-when-talking; the context-window / usage read-outs stay on show; the in-app Browser view is not touched. He cut the mock-up step ("just build it") and the heavy verify list ("all this testing is ridiculous").

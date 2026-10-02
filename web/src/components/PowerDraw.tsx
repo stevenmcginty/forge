@@ -781,6 +781,11 @@ export function PowerDrawView({
                 style={{ height: wheelHeight(geo.half) }}
                 data-testid="powerdraw-wheel"
               >
+                <div
+                  className="pdraw__glow"
+                  aria-hidden="true"
+                  style={{ '--pdraw-tint': projects[centre]?.color } as CSSProperties}
+                />
                 <div className="pdraw__band" aria-hidden="true" />
                 {projects.map((project, index) => {
                   const focused = index === centre
