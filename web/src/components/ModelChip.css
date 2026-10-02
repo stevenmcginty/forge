@@ -251,93 +251,131 @@
 }
 
 /*
- * The side drawer's face (variant "tiles"): Model, Effort and Mode as three
- * glass tiles side by side, each its name over what is in force. Any of the
- * three opens the one sheet. Bypass in force carries the warning triangle and
- * the danger tint, as the chip's mode line does.
+ * The side drawer's face (variant "pill"): one small glass capsule, centred —
+ * a spark, the model in full ink, the effort quieter, a hairline, the mode
+ * with its dot, a chevron. Bypass in force turns the mode red behind the
+ * warning triangle, and the capsule's rim with it.
  */
-.mtiles {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--p-2);
+.mpill-row {
+  display: flex;
+  justify-content: center;
 }
 
-.mtile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 4px;
+.mpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
   min-width: 0;
-  min-height: 60px;
+  height: var(--p-hit);
   margin: 0;
-  padding: var(--p-2) 10px;
+  padding: 0 14px 0 6px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--p-r-pill);
   background:
-    linear-gradient(180deg, var(--pdraw-sheen, transparent), transparent 80%),
-    color-mix(in srgb, var(--p-raised) 55%, transparent);
+    linear-gradient(180deg, var(--pdraw-sheen, transparent), transparent 85%),
+    color-mix(in srgb, var(--p-raised) 60%, transparent);
   box-shadow:
     inset 0 0 0 1px var(--pdraw-rim, var(--p-line)),
-    inset 0 1px 0 var(--pdraw-edge, transparent);
+    inset 0 1px 0 var(--pdraw-edge, transparent),
+    0 6px 18px -10px rgba(0, 0, 0, 0.5);
   color: var(--p-ink);
-  font: inherit;
-  text-align: left;
+  font: 600 var(--p-t-label) / 1 var(--p-font);
+  white-space: nowrap;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition:
     transform var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur) var(--p-ease),
     background var(--p-dur-fast) var(--p-ease);
 }
 
-.mtile:active:not(:disabled),
-.mtile[data-open='true'] {
+.mpill:active:not(:disabled),
+.mpill[data-open='true'] {
   transform: scale(0.97);
-  background: color-mix(in srgb, var(--p-ink) 8%, transparent);
+  background: color-mix(in srgb, var(--p-ink) 9%, transparent);
 }
 
-.mtile:focus-visible {
+.mpill:focus-visible {
   outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
-.mtile:disabled {
+.mpill:disabled {
   cursor: default;
   opacity: 0.55;
 }
 
-.mtile__title {
-  font: 600 var(--p-t-small) / 1 var(--p-font);
+/* The spark: a small lit disc in the accent, the pill's one bit of colour at rest. */
+.mpill__spark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--p-act-ink);
+  background:
+    radial-gradient(120% 90% at 30% 15%, color-mix(in srgb, #ffffff 30%, transparent), transparent 60%),
+    var(--p-act);
+  box-shadow: inset 0 -2px 4px color-mix(in srgb, #000000 15%, transparent);
+}
+
+.mpill__model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mpill__effort {
+  flex: none;
+  font-weight: 500;
+  color: var(--p-ink-2);
+}
+
+.mpill__sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--pdraw-rim, var(--p-line-strong));
+}
+
+.mpill__mode {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  color: var(--p-ink-2);
+}
+
+.mpill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--p-ink-3);
+}
+
+.mpill__mode[data-mode='plan'] .mpill__dot {
+  background: var(--info, #7fd1ff);
+}
+
+.mpill__mode[data-mode='acceptEdits'] .mpill__dot {
+  background: var(--ok, #5ee6a8);
+}
+
+.mpill__chev {
+  flex: none;
   color: var(--p-ink-3);
 }
 
-.mtile__value {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
+.mpill[data-warn='true'] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--p-danger) 50%, transparent),
+    inset 0 1px 0 var(--pdraw-edge, transparent),
+    0 6px 18px -10px color-mix(in srgb, var(--p-danger) 60%, transparent);
 }
 
-.mtile__word {
-  display: -webkit-box;
-  overflow: hidden;
-  font: 650 var(--p-t-label) / 1.2 var(--p-font);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow-wrap: anywhere;
-}
-
-.mtile[data-warn='true'] {
-  background: color-mix(in srgb, var(--p-danger) 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-danger) 45%, transparent);
-}
-
-.mtile[data-warn='true'] .mtile__value {
+.mpill[data-warn='true'] .mpill__mode {
   color: var(--p-danger);
-}
-
-.mtile .mchip__warn {
-  flex: none;
 }

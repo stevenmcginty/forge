@@ -67,11 +67,8 @@ export function ModelChip({
   modeText?: string
   onMode?: (id: ClaudePermissionMode) => void
   disabled: boolean
-  /**
-   * `tiles`: the side drawer's face — Model, Effort and Mode as three tiles
-   * side by side, each naming what is in force, each opening the same sheet.
-   */
-  variant?: 'chip' | 'tiles'
+  /** `pill`: the side drawer's face, one small capsule centred in the drawer. */
+  variant?: 'chip' | 'pill'
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const [pickedModel, setPickedModel] = useState<Record<string, string>>({})
@@ -105,40 +102,48 @@ export function ModelChip({
 
   const stop = (event: MouseEvent | KeyboardEvent): void => event.stopPropagation()
 
+  /*
+   * The side drawer's face: one small capsule in the middle of the drawer —
+   * the model and the effort, a hairline, then the mode with its dot (the
+   * warning triangle and red when it is Bypass) — and a chevron. A tap opens
+   * the one sheet for all three.
+   */
   const face =
-    variant === 'tiles' ? (
-      <div className="mtiles" role="group" aria-label={`${agentName}: model, effort and mode`}>
-        {(
-          [
-            { key: 'model', title: 'Model', value: modelWord ?? 'Pick', warn: false },
-            { key: 'effort', title: 'Effort', value: effortWord ?? (hasEffort ? 'Pick' : 'None'), warn: false },
-            { key: 'mode', title: 'Mode', value: modeWord ?? 'Pick', warn: bypass }
-          ] as const
-        ).map((tile) => (
-          <button
-            key={tile.key}
-            type="button"
-            className="mtile"
-            data-kind={tile.key}
-            data-warn={tile.warn ? 'true' : undefined}
-            data-open={open ? 'true' : undefined}
-            disabled={disabled}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-label={`${tile.title}: ${tile.value} — change model, effort or mode`}
-            onClick={(event) => {
-              stop(event)
-              setOpen(true)
-            }}
-            onKeyDown={stop}
-          >
-            <span className="mtile__title">{tile.title}</span>
-            <span className="mtile__value">
-              {tile.warn ? <WarnMark size={13} /> : null}
-              <span className="mtile__word">{tile.value}</span>
-            </span>
-          </button>
-        ))}
+    variant === 'pill' ? (
+      <div className="mpill-row">
+        <button
+          type="button"
+          className="mpill"
+          data-open={open ? 'true' : undefined}
+          data-warn={bypass ? 'true' : undefined}
+          disabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`${[...words, modeWord].filter(Boolean).join(', ') || 'Model'} — change model, effort or mode`}
+          onClick={(event) => {
+            stop(event)
+            setOpen(true)
+          }}
+          onKeyDown={stop}
+        >
+          <span className="mpill__spark" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true" focusable="false">
+              <path d="M7 .8c.4 2.9 1.9 4.4 4.8 4.8v.8C8.9 6.8 7.4 8.3 7 11.2h-.8C5.8 8.3 4.3 6.8 1.4 6.4v-.8C4.3 5.2 5.8 3.7 6.2.8z" transform="translate(.4 .9)" />
+            </svg>
+          </span>
+          <span className="mpill__model">{modelWord ?? 'Model'}</span>
+          {effortWord ? <span className="mpill__effort">{effortWord}</span> : null}
+          {modeWord ? (
+            <>
+              <span className="mpill__sep" aria-hidden="true" />
+              <span className="mpill__mode" data-mode={currentModeId ?? undefined}>
+                {bypass ? <WarnMark size={12} /> : <span className="mpill__dot" aria-hidden="true" />}
+                {modeWord}
+              </span>
+            </>
+          ) : null}
+          <Icon name="chevronDown" size={12} className="mpill__chev" />
+        </button>
       </div>
     ) : null
 

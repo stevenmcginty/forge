@@ -62,7 +62,7 @@ function DemoPane(): ReactNode {
           currentModeId={mode}
           onMode={setMode}
           disabled={false}
-          variant="tiles"
+          variant="pill"
         />
       }
     />,
