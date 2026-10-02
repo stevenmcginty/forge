@@ -266,7 +266,7 @@
 
 /*
  * Listen at the box's very front: the small blue round, centred on the
- * pill's 56px line, then a hairline, then the paperclip. Above the voice line
+ * pill's 56px line, then a hairline before the words (or Stop). Above the voice line
  * (which covers the box's face while Listen talks), so it can always be
  * tapped off. 7 + 40 + 8 + 1 = 56px of front.
  */
@@ -305,13 +305,37 @@
   left: calc(56px + 2px + var(--p-hit) + 8px);
 }
 
+/* Listen and nothing else at the front: the words start a step past the hairline. */
+.app[data-mobile] .composer__field[data-front='agent'][data-lead='none'] .composer__input {
+  padding-left: var(--p-3);
+}
+
+.app[data-mobile] .composer__field[data-front='agent'][data-lead='none'] .composer__hint {
+  left: calc(56px + var(--p-3));
+}
+
+/* The paperclip at the box's right end, on the thumb's side: the front
+   button's mirror, held to the box's bottom line as the disc is when the
+   words run to several lines. The words stop short of it. */
+.app[data-mobile] .composer .composer__lead.composer__clip {
+  margin: 5px 5px 5px 0;
+}
+
+.app[data-mobile] .composer__field:has(> .composer__clip) .composer__input {
+  padding-right: var(--p-1);
+}
+
+.app[data-mobile] .composer__field:has(> .composer__clip) .composer__hint {
+  right: calc(var(--p-hit) + 5px + var(--p-1));
+}
+
 /* While Listen talks the voice line has the box and the paperclip steps aside
    (PhoneListen.css); the line's words start just past the round and its hairline. */
 .app[data-mobile] .composer__field[data-front='agent'] .plisten-line__body {
   padding-left: calc(56px + var(--p-3));
 }
 
-/* The box's front button: "+", or Cancel while it listens, or Undo. */
+/* The box's buttons: Cancel while it listens, Undo, Retry, Stop at the front; the paperclip at the end. */
 .app[data-mobile] .composer__lead {
   flex: none;
   display: inline-flex;
@@ -713,7 +737,7 @@
   }
 }
 
-/* No "+" at the box's front: the words start a normal margin in. */
+/* Nothing at the box's front (no Listen round, no lead): the words start a normal margin in. */
 .app[data-mobile] .composer__field[data-lead='none'] .composer__input {
   padding-left: var(--p-4);
 }

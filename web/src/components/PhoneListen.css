@@ -162,8 +162,7 @@
 /*
  * The chevron on the round's top-left shoulder, pointing up at where the
  * agents slide out (the fan rises from this corner). The right of the round
- * stays clear, so the round, the hairline and the paperclip read as one calm
- * row. It rides the round's rim, 2px clear of the box's curved end.
+ * stays clear, so the round and the hairline read as one calm row. It rides the round's rim, 2px clear of the box's curved end.
  */
 .app[data-mobile] .plisten__agent-btn {
   position: absolute;
@@ -319,7 +318,7 @@
 
 /* ------------------------------------------------------- the voice line */
 
-/* The line has the box: its "+" steps aside so a tap anywhere reaches the words field. */
+/* The line has the box: its front button and the paperclip step aside so a tap anywhere reaches the words field. */
 .app[data-mobile] .composer__field:has(> .plisten-line) .composer__lead,
 .app[data-mobile] .composer__field:has(> .plisten-line) .composer__hint {
   display: none;

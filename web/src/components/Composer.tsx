@@ -644,12 +644,12 @@ export function Composer({
   )
 
   /*
-   * The phone: one row — the box with "+" at its front, and the 56px disc at
-   * the bottom right, under the thumb. The disc is the mic while there is
-   * nothing to send and Send the moment there is — and stays so while an agent
-   * works, so a follow-up can still be dictated. Stop is a smaller round button
-   * just left of the disc; "+" gives it its room, so the box keeps its width.
-   * A dictation takes the box over in place
+   * The phone: one row — the box, with the paperclip at its right end, and the
+   * 56px disc at the bottom right, so both sit under the thumb. The disc is the
+   * mic while there is nothing to send and Send the moment there is — and stays
+   * so while an agent works, so a follow-up can still be dictated. Stop is a
+   * round at the box's front while an agent works; the paperclip keeps its own
+   * place, so the box keeps its width. A dictation takes the box over in place
    * (Cancel, what it hears, the clock) and never makes it taller, because a
    * taller dock is a shorter terminal and a real PTY resize. The key row sits
    * above, and only the Terminal view shows it — in the status strip's place.
@@ -664,6 +664,10 @@ export function Composer({
     }
     /** Listen at the box's front, unless a dictation has the box. */
     const front = listen !== undefined && listen !== null && !live && !reviewing
+    /** Something in the front slot: Cancel, Undo, Retry or Stop. */
+    const lead = live || (reviewing && voiceControls !== undefined) || (onVoiceRetry !== undefined && phase === 'idle') || phoneStop
+    /** The paperclip at the box's right end, unless a dictation has the box. */
+    const clip = !live && !reviewing
     return (
       <form
         className="composer"
@@ -725,10 +729,15 @@ export function Composer({
               <span>Chat</span>
             </button>
           ) : null}
-          {/* The box's front always holds one thing: "+", or Stop while an agent works, or Cancel / Undo / Retry for a dictation. */}
-          <div className="composer__field" data-phase={phase} data-front={front ? 'agent' : undefined}>
+          {/* The box's front holds Stop while an agent works, or Cancel / Undo / Retry for a dictation, or nothing; the paperclip is at its right end. */}
+          <div
+            className="composer__field"
+            data-phase={phase}
+            data-front={front ? 'agent' : undefined}
+            data-lead={lead ? undefined : 'none'}
+          >
             {/* Listen lives in the box, at its very front: a small blue round,
-                then a hairline, then the paperclip. It steps out while a
+                then a hairline before the words. It steps out while a
                 dictation has the box. */}
             {front ? (
               <span className="composer__front">
@@ -768,7 +777,7 @@ export function Composer({
               </button>
             ) : onVoiceRetry && phase === 'idle' ? (
               // The desktop could not hear the last recording: the same audio,
-              // kept in memory, goes again on a tap. "+" is back once it lands.
+              // kept in memory, goes again on a tap. It leaves once it lands.
               <button
                 type="button"
                 className="composer__lead"
@@ -804,24 +813,7 @@ export function Composer({
                 {stopping ? <span className="composer__stop-ring" aria-hidden="true" /> : null}
                 <span className="composer__stop-square" aria-hidden="true" />
               </button>
-            ) : (
-              // While the agent works "+" gives its room to Stop; a pasted
-              // image still attaches, and "+" is back when the agent is done.
-              <button
-                ref={attachRef}
-                type="button"
-                className="composer__lead"
-                data-kind="attach"
-                disabled={disabled}
-                aria-haspopup="dialog"
-                aria-expanded={openPick === 'attach'}
-                onClick={() => setOpenPick((v) => (v === 'attach' ? null : 'attach'))}
-                title="Attach a photo, image or file"
-                aria-label="Attach"
-              >
-                <Icon name="paperclip" size={20} />
-              </button>
-            )}
+            ) : null}
             {live ? (
               <VoiceStrip state={voiceState} analyser={voiceLevel?.analyser ?? null} cancelArmed={cancelArmed} />
             ) : null}
@@ -853,6 +845,25 @@ export function Composer({
               <span className="composer__hint" aria-hidden="true" style={{ '--hint-accent': placeholderTint } as CSSProperties}>
                 Talk to <span>{tintedPlaceholder}</span>…
               </span>
+            ) : null}
+            {clip ? (
+              // The paperclip, at the box's right end on the thumb's side. It
+              // stays while an agent works (a pasted image attaches then too)
+              // and steps aside while a dictation or Listen's voice line has the box.
+              <button
+                ref={attachRef}
+                type="button"
+                className="composer__lead composer__clip"
+                data-kind="attach"
+                disabled={disabled}
+                aria-haspopup="dialog"
+                aria-expanded={openPick === 'attach'}
+                onClick={() => setOpenPick((v) => (v === 'attach' ? null : 'attach'))}
+                title="Attach a photo, image or file"
+                aria-label="Attach"
+              >
+                <Icon name="paperclip" size={20} />
+              </button>
             ) : null}
             {voiceState.phase === 'review' ? (
               <span className="composer__sr" role="status">

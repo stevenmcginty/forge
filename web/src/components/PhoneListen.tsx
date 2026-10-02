@@ -224,7 +224,7 @@ function useYourTurnBuzz(look: HubLook): void {
 
 /**
  * The agent round: a small 40px button in the voice agent's own blue, inside
- * the box at its very front (then a hairline, then the paperclip) — there, but
+ * the box at its very front (then a hairline, then the words) — there, but
  * second to the dictation disc, which is the voice used most.
  *
  * The disc is a switch — tap to talk, tap again to stop — whose glyph IS the
@@ -234,7 +234,7 @@ function useYourTurnBuzz(look: HubLook): void {
  * (held), a warning triangle (failed). A halo breathes round it on your turn
  * and ripples out while the agent speaks. A small chevron sits on its top-left
  * shoulder, pointing up at where the agents slide out above the bar — away
- * from the hairline and the paperclip on its right. A switch that cannot start
+ * from the hairline on its right. A switch that cannot start
  * stays tappable (aria-disabled), so the tap can say why.
  */
 export function ListenUnit({
