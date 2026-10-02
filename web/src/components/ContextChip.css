@@ -2,15 +2,15 @@
  * The context chip in the phone's top bar, and the panel it drops
  * (ContextChip.tsx). Tokens from phone-tokens.css.
  *
- * The chip is a small machined capsule — the drawer's model pill in little:
- * a raised, faintly lit surface with a hairline rim, the ring on the left, the
- * figure in full ink and, under it in small print, the pane's setup: the
- * mode's shape, the model, the effort. The hit is the bar's 44px; the capsule
- * drawn inside it is 40px, so the bar keeps its height. The level is never
- * colour alone: warn makes the figure heavy and tints the capsule, full fills
- * it solid and turns the ring over to the page colour. Bypass is never colour
- * alone either: a solid warning triangle leads the small print, and the rim
- * goes red round it.
+ * The closed chip is one mark with one thing big: the context ring, a dial
+ * with the figure in its hole. Everything else is small, or worn on the ring:
+ * the state on the arc's head, the mode on its shoulder, the model and the
+ * effort in a quiet caption beside it, no capsule. The hit is the bar's 44px;
+ * the mark drawn inside it is 40px at most, so the bar keeps its height.
+ *
+ * The level is never colour alone: warn draws the ring and the figure heavier,
+ * full fills the mark solid. Bypass is never colour alone either: a solid
+ * warning triangle on the mark's shoulder, and a red rim round it.
  *
  * The panel is the drawer's frosted glass, hung from the bar: it grows out of
  * the chip (its transform origin is the chip's centre) and folds back into it.
@@ -22,7 +22,9 @@
   flex: none;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   height: var(--p-hit);
+  min-width: var(--p-hit);
   margin: 0;
   padding: 0;
   color: var(--p-ink);
@@ -37,28 +39,15 @@
   cursor: default;
 }
 
-/* Two lines in the capsule: the ring, the figure and the mode's shape on top,
-   the small print under them from the ring's edge. Held to a floor width, so
-   a shell's dashes and an agent's model nudge the bar by a few pixels at most
-   as the tabs change; past the ceiling the model's name goes to an ellipsis. */
 .pctx__face {
+  position: relative;
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 1px;
+  align-items: center;
+  gap: 7px;
   box-sizing: border-box;
-  min-width: 80px;
-  max-width: 108px;
   height: 40px;
-  padding: 0 11px 0 8px;
+  padding: 0 8px 0 4px;
   border-radius: var(--p-r-pill);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--p-ink) 6%, transparent), transparent 80%),
-    var(--p-surface);
-  box-shadow:
-    inset 0 0 0 1px var(--p-line-strong),
-    inset 0 1px 0 color-mix(in srgb, var(--p-ink) 8%, transparent);
   transition:
     transform var(--p-dur-fast) var(--p-ease),
     background-color var(--p-dur) var(--p-ease),
@@ -66,19 +55,10 @@
     color var(--p-dur) var(--p-ease);
 }
 
-:root[data-appearance='light'] .pctx__face {
-  background:
-    linear-gradient(180deg, var(--p-raised), transparent 85%),
-    var(--p-surface);
-  box-shadow:
-    inset 0 0 0 1px var(--p-line-strong),
-    0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
 .pctx:active:not(:disabled) .pctx__face,
 .pctx[data-open='true'] .pctx__face {
   transform: scale(0.96);
-  background: var(--p-press);
+  background-color: var(--p-press);
 }
 
 .pctx:focus-visible {
@@ -94,97 +74,169 @@
   opacity: 0.5;
 }
 
-/* The ring, its state's shape in the hole (StatusLine's StateMark). */
-.pctx__ring {
-  flex: none;
-  display: grid;
-  place-items: center;
-}
+/* ------------------------------------------------------------ the parts */
 
-.pctx__ring > * {
-  grid-area: 1 / 1;
-}
-
-.pctx__ring .pstat__mark-in {
-  width: 8px;
-  height: 8px;
-  color: var(--p-ink-2);
-}
-
-.pctx__top {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 20px;
-}
-
-.pctx__num {
-  font: 700 16px / 17px var(--p-font);
+/* The figure: tabular, tight, its "%" a size down and lifted. */
+.pctx__fig {
+  display: inline-flex;
+  align-items: flex-start;
+  font: 800 13px / 1 var(--p-font);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.03em;
   color: var(--p-ink);
 }
 
-.pctx__unit {
-  margin-left: 1px;
+.pctx__fig[data-wide] {
   font-size: 11px;
-  font-weight: 650;
+}
+
+.pctx__pc {
+  margin: 0.5px 0 0 0.5px;
+  font-size: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0;
   color: var(--p-ink-2);
 }
 
-.pctx__num--none {
-  font-weight: 600;
-  color: var(--p-ink-3);
+/* Nothing to say, drawn: a short rounded bar on the centre line. */
+.pctx__dash {
+  display: block;
+  flex: none;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--p-ink-3);
 }
 
-/* The small print, a size under anything else in the bar: the model, then the
-   effort's meter. One line, never two. */
-.pctx__setup {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  height: 13px;
-  font: 600 10.5px / 13px var(--p-font);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  color: var(--p-ink-2);
-}
-
-.pctx__model {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.pctx__model--none {
+/* A shell's prompt, where the figure would be. */
+.pctx__prompt {
+  display: block;
+  flex: none;
   color: var(--p-ink-3);
 }
 
 .pctx__meter {
   flex: none;
-  margin-bottom: 1px;
-  color: var(--p-ink);
+  color: var(--p-ink-2);
 }
 
 .pctx__glyph {
   flex: none;
-  color: var(--p-ink);
+  display: block;
 }
 
-/* Bypass: the solid triangle and the rim, in the danger red. */
-.pctx[data-mode='bypass'] .pctx__glyph {
-  color: var(--p-danger);
-}
-
-.pctx[data-mode='bypass'] .pctx__face,
-:root[data-appearance='light'] .pctx[data-mode='bypass'] .pctx__face {
+/* The mode on the shoulder: a coin for Plan, Accept edits and Auto ... */
+.pctx__badge {
+  position: absolute;
+  z-index: 1; /* over Bypass's rim, so its disc cuts the rim clear of the triangle */
+  top: -3px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  color: var(--p-ink-2);
+  background: var(--p-surface);
   box-shadow:
-    inset 0 0 0 1.5px var(--p-danger),
-    inset 0 1px 0 color-mix(in srgb, var(--p-ink) 6%, transparent);
+    inset 0 0 0 1px var(--p-line-strong),
+    0 0 0 2px var(--p-bg);
 }
 
-/* State in the hole: working speaks in the agent's colour, as on the desk. */
+/* ... and for Bypass the solid triangle, bigger, cut out of what is under it by a disc of the bar's colour; up and in a
+   little, clear of the caption. */
+.pctx__badge[data-mark='bypass'] {
+  top: -6px;
+  right: -5px;
+  width: 19px;
+  height: 19px;
+  color: var(--p-danger);
+  background: var(--p-bg);
+  box-shadow: none;
+}
+
+.pctx__badge[data-mark='bypass'] .pctx__glyph {
+  width: 15px;
+  height: 14px;
+  margin-top: -1px;
+}
+
+/* On the left shoulder while the arc's head runs under the right one (ContextChip's SHOULDER_CLEAR_PCT). */
+.pctx__badge[data-side='left'] {
+  right: auto;
+  left: -5px;
+}
+
+.pctx__badge[data-side='left'][data-mark='bypass'] {
+  right: auto;
+  left: -6px;
+}
+
+/* The ring, its hole and what sits in it. */
+.pctx__dial {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+}
+
+.pctx__dial > :is(.pring, .pctx__hole, .pctx__core) {
+  grid-area: 1 / 1;
+}
+
+.pctx__dial > .pring {
+  width: 100%;
+  height: 100%;
+}
+
+.pctx__hole {
+  width: calc(100% - 9px);
+  height: calc(100% - 9px);
+  border-radius: 50%;
+  transition: background-color var(--p-dur) var(--p-ease);
+}
+
+.pctx__core {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+/* Bypass's rim, round the ring. */
+.pctx[data-mode='bypass'] .pctx__dial::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--p-danger);
+  pointer-events: none;
+}
+
+/* The state's shape, riding the arc's head. */
+.pctx .pstat__mark-in {
+  color: var(--p-ink-2);
+}
+
+.pctx__head {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--p-bg);
+  transform: translate(-50%, -50%);
+}
+
+.pctx__head .pstat__mark-in {
+  width: 8px;
+  height: 8px;
+}
+
 .pctx[data-state='working'] .pstat__mark-in {
   color: color-mix(in srgb, var(--pane-accent, var(--p-ink)) 72%, var(--p-ink));
 }
@@ -197,61 +249,90 @@
   color: var(--p-ink);
 }
 
-/* Warn, from 80%: amber ring, a heavy figure, a tinted capsule with an amber rim. */
-.pctx[data-level='warn'] .pctx__face {
-  background: var(--p-attn-soft);
-  box-shadow:
-    inset 0 0 0 1.5px var(--p-attn-line),
-    inset 0 1px 0 color-mix(in srgb, var(--p-ink) 6%, transparent);
-}
-
+/* Warn, from 80%: the ring heavier (ContextChip draws it so) and amber, the figure heavier still. */
 .pctx[data-level='warn'] .pring__arc {
   stroke: var(--p-attn);
 }
 
-.pctx[data-level='warn'] :is(.pctx__num, .pctx__unit) {
+.pctx[data-level='warn'] :is(.pctx__fig, .pctx__pc) {
   color: var(--p-attn);
-  font-weight: 850;
+  font-weight: 900;
 }
 
-/* Full, from 92%: the capsule fills solid, the figure and the ring turn to the page colour. */
-.pctx[data-level='full'] .pctx__face {
-  background: var(--p-danger);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-ink) 18%, transparent);
-}
-
-.pctx[data-level='full'] :is(.pctx__num, .pctx__unit, .pstat__mark-in) {
-  color: var(--p-bg);
-  font-weight: 850;
-}
-
-.pctx[data-level='full'] :is(.pctx__setup, .pctx__model--none, .pctx__meter, .pctx__glyph) {
-  color: var(--p-bg);
-}
-
+/* Full, from 92%: the hole fills solid, the figure turns to the page colour. */
 .pctx[data-level='full'] .pring__arc {
-  stroke: var(--p-bg);
+  stroke: var(--p-danger);
 }
 
-.pctx[data-level='full'] .pring__track {
-  stroke: color-mix(in srgb, var(--p-bg) 35%, transparent);
+.pctx[data-level='full'] .pctx__hole {
+  background-color: var(--p-danger);
 }
 
-/* Bypass over warn: the amber tint stays, the rim is Bypass's. */
-.pctx[data-mode='bypass'][data-level='warn'] .pctx__face {
-  box-shadow: inset 0 0 0 1.5px var(--p-danger);
+.pctx[data-level='full'] .pctx__core :is(.pctx__fig, .pctx__pc) {
+  color: var(--p-bg);
+  font-weight: 900;
+}
+
+/* ---------------------------------------------------------- the caption */
+
+/* The caption: the family over its version and the effort, a step quieter each line. */
+.pctx__cap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-width: 34px;
+  max-width: 52px;
+}
+
+.pctx__fam {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 650 12px / 14px var(--p-font);
+  letter-spacing: -0.005em;
+  color: var(--p-ink-2);
+}
+
+.pctx__fam--none {
+  font-weight: 550;
+  color: var(--p-ink-3);
+}
+
+.pctx__sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: 600 10px / 11px var(--p-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--p-ink-3);
 }
 
 /* The narrowest phones: a little tighter, so the project name keeps its room. */
 @media (max-width: 374px) {
   .pctx__face {
-    min-width: 72px;
-    max-width: 92px;
-    padding: 0 9px 0 7px;
+    gap: 5px;
+    padding: 0 4px 0 3px;
   }
 
-  .pctx__top {
-    gap: 4px;
+  .pctx__fam {
+    font-size: 11px;
+  }
+
+  .pctx__dial {
+    width: 34px;
+    height: 34px;
+  }
+
+  /* The smaller ring brings its arc's head nearer the shoulder: Bypass's triangle out a pixel, clear of it at 100%. */
+  .pctx__badge[data-mark='bypass'] {
+    right: -6px;
+  }
+
+  .pctx__fig {
+    font-size: 12px;
   }
 }
 

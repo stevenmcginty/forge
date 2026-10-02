@@ -16,29 +16,28 @@ import { CONDITION, PaneDetails, placeOf, Ring, StateMark, stateSaid } from './S
 import './ContextChip.css'
 
 /**
- * The pane's context read-out, always on show in the phone's top bar: a small
- * capsule beside the link dot and "⋯" — the context ring with the state's
- * shape in its hole, and how full the window is in plain figures. It follows
- * the tab on screen, so the number changes as the tabs do.
+ * The pane's context read-out, always on show in the phone's top bar beside
+ * the link dot and "⋯": a dial — the context ring with how full the window is
+ * in plain figures in its hole, and the state's shape riding the head of the
+ * arc. It follows the tab on screen, so the number changes as the tabs do.
  *
  * Tapped, a panel drops from under the bar (not a bottom sheet: it belongs to
  * the chip it hangs from) with what the pane's sheet holds — the state and its
  * clock, the context window, the plan limits, Copy screen and the raw footer.
  * Out by an outside tap, Back, Esc, or the chip again.
  *
- * Never colour alone: the number is always there, warn (80%) turns it heavy
- * and tints the capsule, full (92%) fills the capsule solid; the panel says
- * the level in words. No reading yet, or a shell, is a dash in the same slot,
- * so the bar never jumps between tabs.
+ * Never colour alone: the number is always there, warn (80%) draws the ring and
+ * the figure heavier, full (92%) fills the mark solid; the panel says the level
+ * in words. No reading yet is a drawn dash in the figure's slot; a shell says
+ * "Shell" where the model goes, so the bar never jumps between tabs.
  *
- * Beside the number, the permission mode as a shape: a solid warning triangle
- * for Bypass (the capsule's rim goes red round it), Claude's own two bars for
- * Plan and chevron pair for Accept edits, nothing for Default. Under it, in
- * small print, the model, and the effort picked from this phone as a five-step
- * meter (Low one bar, Max all five) — the bar is a phone's, and a word would
- * cost the project name its room. The panel opens on the three pickers that
- * change them (ModelChip's SetupPicks, through the same senders and the same
- * pick store as the drawer's pill), above the context and the limits.
+ * The mode is a shape: a solid warning triangle for Bypass (and a red rim),
+ * Claude's own two bars for Plan, the chevron pair for Accept edits, nothing
+ * for Default, worn on the ring's shoulder. The model and the effort picked
+ * from this phone (a five-step meter) sit small in a caption beside the ring,
+ * no capsule round it. The panel opens on the three pickers that change them
+ * (ModelChip's SetupPicks, through the same senders and the same pick store as
+ * the drawer's pill), above the context and the limits.
  */
 
 /** The effort's step on the chip's meter. */
@@ -82,7 +81,7 @@ function setupRead(setup: PaneSetup): SetupRead {
 /** The effort as five rising bars, the ones up to its step filled. Shape and fill, no hue. */
 function EffortMeter({ step }: { step: number }): ReactNode {
   return (
-    <svg className="pctx__meter" width="14" height="10" viewBox="0 0 14 10" aria-hidden="true" focusable="false">
+    <svg className="pctx__meter" width="12" height="9" viewBox="0 0 14 10" aria-hidden="true" focusable="false">
       {[0, 1, 2, 3, 4].map((i) => (
         <rect
           key={i}
@@ -100,7 +99,7 @@ function EffortMeter({ step }: { step: number }): ReactNode {
 }
 
 /**
- * The mode's shape, beside the number. Bypass's is the warning triangle, drawn solid with the "!" cut out of it: at this size the sheet's
+ * The mode's shape. Bypass's is the warning triangle, drawn solid with the "!" cut out of it: at this size the sheet's
  * outlined WarnMark is a hairline, and this one has to be seen at arm's length.
  */
 function ModeGlyph({ mark }: { mark: ModeMark }): ReactNode {
@@ -116,7 +115,7 @@ function ModeGlyph({ mark }: { mark: ModeMark }): ReactNode {
       </svg>
     )
   return (
-    <svg className="pctx__glyph" width="9" height="9" viewBox="0 0 9 9" aria-hidden="true" focusable="false">
+    <svg className="pctx__glyph" width="8" height="8" viewBox="0 0 9 9" aria-hidden="true" focusable="false">
       {mark === 'plan' ? (
         <>
           <rect x="1.4" y="1" width="2.1" height="7" rx="0.6" fill="currentColor" />
@@ -135,6 +134,71 @@ function ModeGlyph({ mark }: { mark: ModeMark }): ReactNode {
         <circle cx="4.5" cy="4.5" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
       )}
     </svg>
+  )
+}
+
+/**
+ * Under this much context the arc's head runs under the ring's right shoulder, where the mode is worn, so the mode
+ * moves to the left shoulder until the head has passed. The head only reaches the left shoulder from about 74%.
+ */
+const SHOULDER_CLEAR_PCT = 30
+
+/**
+ * The mode worn on the mark's shoulder: Bypass a solid red triangle, the others a small coin with their shape. Default
+ * wears none. The right shoulder, or the left while the arc's head is under the right one.
+ */
+function ModeBadge({ mark, pct }: { mark: ModeMark; pct: number }): ReactNode {
+  if (mark === null) return null
+  return (
+    <span className="pctx__badge" data-mark={mark} data-side={pct < SHOULDER_CLEAR_PCT ? 'left' : undefined} aria-hidden="true">
+      <ModeGlyph mark={mark} />
+    </span>
+  )
+}
+
+/** The model's name in its parts: "Claude Sonnet 4.6" is family "Sonnet", version "4.6". */
+function modelParts(name: string | null): { family: string; version: string } | null {
+  if (!name) return null
+  const plain = name.replace(/^claude[\s-]+/i, '').trim()
+  const match = /^(.*?)[\s-]*(\d+(?:\.\d+)*)/.exec(plain)
+  const family = (match?.[1] ? match[1] : plain).trim() || plain
+  return { family, version: match?.[1] ? match[2] : '' }
+}
+
+/**
+ * The figure: the percent, its sign a size down. A shell, which has no context window, shows a prompt instead;
+ * a pane with no reading yet a drawn dash, centred, never a stray glyph.
+ */
+function Figure({ pct, shell }: { pct: number | null; shell: boolean }): ReactNode {
+  if (shell)
+    return (
+      <svg className="pctx__prompt" width="13" height="11" viewBox="0 0 13 11" aria-hidden="true" focusable="false">
+        <path d="M1.6 2 5.4 5.5 1.6 9M7.2 9.4h4.4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  if (pct === null) return <span className="pctx__dash" aria-hidden="true" />
+  return (
+    <span className="pctx__fig" data-wide={pct >= 100 ? 'true' : undefined}>
+      {pct}
+      <span className="pctx__pc">%</span>
+    </span>
+  )
+}
+
+/**
+ * The state's shape riding the head of the context arc, on a disc of the bar's colour that cuts the ring under it.
+ * Ready draws nothing: the ring alone is Ready.
+ */
+function ArcHead({ pct, size, stroke, state, paneId }: { pct: number; size: number; stroke: number; state: DeckAgentState; paneId: string | null }): ReactNode {
+  if (state === 'idle') return null
+  const r = (size - stroke) / 2
+  const turn = (Math.max(0, Math.min(100, pct)) / 100) * 2 * Math.PI
+  // In percent of the dial, so the dial can be drawn a size smaller on a narrow phone and the head still lands on the arc.
+  const style = { left: `${50 + (100 * r * Math.sin(turn)) / size}%`, top: `${50 - (100 * r * Math.cos(turn)) / size}%` } as CSSProperties
+  return (
+    <span className="pctx__head" style={style} aria-hidden="true">
+      <StateMark state={state} paneId={paneId} />
+    </span>
   )
 }
 
@@ -183,6 +247,10 @@ export function ContextChip({ paneId, profile }: { paneId: string | null; profil
   // Model, effort and mode, and their senders: the drawer pill's own (SessionComposer).
   const setup = usePaneSetup(paneId, profile)
   const read = setupRead(setup)
+  const parts = shell ? null : modelParts(read.model)
+  const pct = context?.usedPct ?? null
+  // From warn up the ring is drawn heavier, so the level has a weight as well as a hue.
+  const warm = level === 'warn' || level === 'full'
   const picks = setup.agent && (setup.roster.length > 0 || setup.levels.length > 0 || setup.ladder.length > 0)
 
   /* ------------------------------------------------------------ the drop */
@@ -315,27 +383,32 @@ export function ContextChip({ paneId, profile }: { paneId: string | null; profil
         style={accent ? ({ '--pane-accent': accent } as CSSProperties) : undefined}
       >
         <span className="pctx__face">
-          <span className="pctx__top">
-            <span className="pctx__ring">
-              <Ring pct={context?.usedPct ?? 0} size={20} stroke={2.5} />
-              <StateMark state={pane.state} paneId={paneId} />
+          <span className="pctx__dial">
+            <span className="pctx__hole" />
+            <Ring pct={pct ?? 0} size={36} stroke={warm ? 4 : 3} />
+            <span className="pctx__core" aria-hidden="true">
+              <Figure pct={pct} shell={shell} />
             </span>
-            {context ? (
-              <span className="pctx__num">
-                {context.usedPct}
-                <span className="pctx__unit">%</span>
-              </span>
-            ) : (
-              <span className="pctx__num pctx__num--none" aria-hidden="true">
-                –
-              </span>
-            )}
-            <ModeGlyph mark={read.mark} />
+            <ArcHead pct={pct ?? 0} size={36} stroke={warm ? 4 : 3} state={pane.state} paneId={paneId} />
+            <ModeBadge mark={read.mark} pct={pct ?? 0} />
           </span>
-          {/* The setup in small print, under the lot. A shell, or a pane yet to print its model, keeps the line with a dash. */}
-          <span className="pctx__setup" aria-hidden="true">
-            <span className={read.model ? 'pctx__model' : 'pctx__model pctx__model--none'}>{read.model ?? '–'}</span>
-            {read.step ? <EffortMeter step={read.step} /> : null}
+          {/* The model, quietly: its family over its version and the effort. A shell says so; a pane yet to print one keeps a dash. */}
+          <span className="pctx__cap" aria-hidden="true">
+            {shell ? (
+              <span className="pctx__fam pctx__fam--none">Shell</span>
+            ) : parts ? (
+              <>
+                <span className="pctx__fam">{parts.family}</span>
+                {parts.version || read.step ? (
+                  <span className="pctx__sub">
+                    {parts.version ? <span>{parts.version}</span> : null}
+                    {read.step ? <EffortMeter step={read.step} /> : null}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span className="pctx__dash" />
+            )}
           </span>
         </span>
       </button>
