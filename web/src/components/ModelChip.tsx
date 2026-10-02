@@ -1,7 +1,8 @@
-import { useEffect, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { Icon } from '@/components/Icon'
+import { pickEffort, pickModel, useEffortPicked, useModelPicked, type PaneSetup } from '../lib/pane-setup'
 import { BottomSheet, SheetSection } from './BottomSheet'
 import './ModelChip.css'
 
@@ -27,13 +28,11 @@ import './ModelChip.css'
  * Bypass — was the first thing an ellipsis ate. Stacked, each line truncates on
  * its own: effort gives way before the model, and the mode keeps a line.
  */
-/**
- * The effort picked from this phone, per pane. Kept outside the chip: the
- * side drawer mounts it only while the drawer is out, and no CLI prints the
- * effort back, so a pick held in the chip's own state would be gone the next
- * time the drawer opened.
+/*
+ * The picks themselves live in lib/pane-setup.ts, outside the chip: the side
+ * drawer mounts it only while the drawer is out, no CLI prints the effort
+ * back, and the top bar's context chip shows the same picks.
  */
-const effortPicked = new Map<string, EffortLevel>()
 
 export function ModelChip({
   paneId,
@@ -71,22 +70,12 @@ export function ModelChip({
   variant?: 'chip' | 'pill'
 }): ReactNode {
   const [open, setOpen] = useState(false)
-  const [pickedModel, setPickedModel] = useState<Record<string, string>>({})
-  const [pickedEffort, setPickedEffort] = useState<Record<string, EffortLevel>>(() => Object.fromEntries(effortPicked))
+  // The pane's own reading wins once it moves: a pick only stands in for it.
+  const pickedModel = useModelPicked(paneId, currentModelId)
+  const effortId = useEffortPicked(paneId)
 
-  // The pane's own reading wins once it moves: a pick was only standing in for it.
-  useEffect(() => {
-    setPickedModel((all) => {
-      if (!(paneId in all)) return all
-      const next = { ...all }
-      delete next[paneId]
-      return next
-    })
-  }, [paneId, currentModelId])
-
-  const modelId = pickedModel[paneId] ?? currentModelId
+  const modelId = pickedModel ?? currentModelId
   const model = modelId ? (models.find((m) => m.id === modelId) ?? null) : null
-  const effortId = pickedEffort[paneId] ?? null
   const effort = effortId ? (effortLevels.find((l) => l.id === effortId) ?? null) : null
   const mode = currentModeId ? (modes.find((m) => m.id === currentModeId) ?? null) : null
   const bypass = currentModeId === 'bypass'
@@ -206,7 +195,7 @@ export function ModelChip({
                     current={m.id === modelId}
                     onPick={() => {
                       setOpen(false)
-                      setPickedModel((all) => ({ ...all, [paneId]: m.id }))
+                      pickModel(paneId, m.id, currentModelId)
                       onModel?.(m.id)
                     }}
                   />
@@ -228,8 +217,7 @@ export function ModelChip({
                     title={level.note}
                     onClick={() => {
                       setOpen(false)
-                      effortPicked.set(paneId, level.id)
-                      setPickedEffort((all) => ({ ...all, [paneId]: level.id }))
+                      pickEffort(paneId, level.id)
                       onEffort?.(level.id)
                     }}
                   >
@@ -262,6 +250,120 @@ export function ModelChip({
         </BottomSheet>
       </span>
     </>
+  )
+}
+
+/**
+ * The same three picks, laid out to sit in the top bar's context panel above
+ * its context and limits: the sheet's segmented effort control, used for all
+ * three — the model and the mode as two-up grids, the effort as its one row of
+ * five. The one in force is filled with ink, `aria-checked` says it; Bypass in
+ * force fills red behind its warning triangle and its word.
+ *
+ * A pick goes out through the pill's own senders (`usePaneSetup`) and is
+ * remembered in the same store, so the chip and the pill both show it at once.
+ * `onPicked` folds the panel, as a pick closes the sheet: a second pick fired
+ * before the first one's Enter would land in the same line of the TUI.
+ */
+export function SetupPicks({
+  paneId,
+  setup,
+  onPicked
+}: {
+  paneId: string
+  setup: PaneSetup
+  onPicked: () => void
+}): ReactNode {
+  const { roster, levels, ladder, modelId, currentModelId, modelText, currentModeId, modeText, effortId, canType } = setup
+  const effort = effortId ? (levels.find((l) => l.id === effortId) ?? null) : null
+  const mode = currentModeId ? (ladder.find((m) => m.id === currentModeId) ?? null) : null
+  const offRoster = !modelId && modelText ? modelText : null
+
+  return (
+    <div className="msetup" data-live={canType ? 'true' : 'false'}>
+      {roster.length ? (
+        <SheetSection title="Model">
+          <div className="mseg mseg--grid" role="radiogroup" aria-label="Model">
+            {roster.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className="mseg__opt"
+                role="radio"
+                aria-checked={m.id === modelId}
+                title={m.note}
+                disabled={!canType}
+                onClick={() => {
+                  onPicked()
+                  pickModel(paneId, m.id, currentModelId)
+                  void setup.sendModel(m.id)
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {offRoster ? <p className="mseg__note">Running {offRoster}, which this list does not name.</p> : null}
+        </SheetSection>
+      ) : null}
+      {levels.length ? (
+        <SheetSection title="Effort">
+          <div className="mseg" role="radiogroup" aria-label="Effort">
+            {levels.map((level) => (
+              <button
+                key={level.id}
+                type="button"
+                className="mseg__opt"
+                role="radio"
+                aria-checked={level.id === effortId}
+                title={level.note}
+                disabled={!canType}
+                onClick={() => {
+                  onPicked()
+                  pickEffort(paneId, level.id)
+                  void setup.sendEffort(level.id)
+                }}
+              >
+                {level.label}
+              </button>
+            ))}
+          </div>
+          <p className="mseg__note">{effort ? effort.note : 'Not set from this phone yet.'}</p>
+        </SheetSection>
+      ) : null}
+      {ladder.length ? (
+        <SheetSection title="Permission mode">
+          <div className="mseg mseg--grid" role="radiogroup" aria-label="Permission mode">
+            {ladder.map((m) => {
+              const current = m.id === currentModeId
+              const warn = m.danger === true && current
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  className="mseg__opt"
+                  role="radio"
+                  aria-checked={current}
+                  data-warn={warn ? 'true' : undefined}
+                  title={m.note}
+                  disabled={!canType}
+                  onClick={() => {
+                    onPicked()
+                    void setup.sendMode(m.id)
+                  }}
+                >
+                  {warn ? <WarnMark size={15} /> : null}
+                  {m.label}
+                </button>
+              )
+            })}
+          </div>
+          <p className="mseg__note" data-warn={mode?.danger ? 'true' : undefined}>
+            {mode ? `${mode.label}: ${mode.note}.` : modeText ? `${modeText}: chosen on the pane.` : 'The pane has not printed its mode yet.'}
+          </p>
+        </SheetSection>
+      ) : null}
+    </div>
   )
 }
 

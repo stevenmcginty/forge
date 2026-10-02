@@ -3,11 +3,14 @@
  * (ContextChip.tsx). Tokens from phone-tokens.css.
  *
  * The chip is a small machined capsule — the drawer's model pill in little:
- * a raised, faintly lit surface with a hairline rim, the ring on the left and
- * the figure in full ink. The hit is the bar's 44px; the capsule drawn inside
- * it is 34px, like the waiting pill beside it. The level is never colour
- * alone: warn makes the figure heavy and tints the capsule, full fills it
- * solid and turns the ring over to the page colour.
+ * a raised, faintly lit surface with a hairline rim, the ring on the left, the
+ * figure in full ink and, under it in small print, the pane's setup: the
+ * mode's shape, the model, the effort. The hit is the bar's 44px; the capsule
+ * drawn inside it is 40px, so the bar keeps its height. The level is never
+ * colour alone: warn makes the figure heavy and tints the capsule, full fills
+ * it solid and turns the ring over to the page colour. Bypass is never colour
+ * alone either: a solid warning triangle leads the small print, and the rim
+ * goes red round it.
  *
  * The panel is the drawer's frosted glass, hung from the bar: it grows out of
  * the chip (its transform origin is the chip's centre) and folds back into it.
@@ -34,13 +37,21 @@
   cursor: default;
 }
 
+/* Two lines in the capsule: the ring, the figure and the mode's shape on top,
+   the small print under them from the ring's edge. Held to a floor width, so
+   a shell's dashes and an agent's model nudge the bar by a few pixels at most
+   as the tabs change; past the ceiling the model's name goes to an ellipsis. */
 .pctx__face {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
   box-sizing: border-box;
-  height: 34px;
-  padding: 0 11px 0 6px;
+  min-width: 80px;
+  max-width: 108px;
+  height: 40px;
+  padding: 0 11px 0 8px;
   border-radius: var(--p-r-pill);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--p-ink) 6%, transparent), transparent 80%),
@@ -95,19 +106,22 @@
 }
 
 .pctx__ring .pstat__mark-in {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   color: var(--p-ink-2);
 }
 
-/* The figure, held to the width of "88%" (the dash too), so 9% → 10%, or a
-   shell's dash → an agent's number, never nudges the bar. */
+.pctx__top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+}
+
 .pctx__num {
-  min-width: 27px;
-  font: 700 15px / 1 var(--p-font);
+  font: 700 16px / 17px var(--p-font);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
-  text-align: right;
   color: var(--p-ink);
 }
 
@@ -119,9 +133,55 @@
 }
 
 .pctx__num--none {
-  text-align: center;
   font-weight: 600;
   color: var(--p-ink-3);
+}
+
+/* The small print, a size under anything else in the bar: the model, then the
+   effort's meter. One line, never two. */
+.pctx__setup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 13px;
+  font: 600 10.5px / 13px var(--p-font);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: var(--p-ink-2);
+}
+
+.pctx__model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pctx__model--none {
+  color: var(--p-ink-3);
+}
+
+.pctx__meter {
+  flex: none;
+  margin-bottom: 1px;
+  color: var(--p-ink);
+}
+
+.pctx__glyph {
+  flex: none;
+  color: var(--p-ink);
+}
+
+/* Bypass: the solid triangle and the rim, in the danger red. */
+.pctx[data-mode='bypass'] .pctx__glyph {
+  color: var(--p-danger);
+}
+
+.pctx[data-mode='bypass'] .pctx__face,
+:root[data-appearance='light'] .pctx[data-mode='bypass'] .pctx__face {
+  box-shadow:
+    inset 0 0 0 1.5px var(--p-danger),
+    inset 0 1px 0 color-mix(in srgb, var(--p-ink) 6%, transparent);
 }
 
 /* State in the hole: working speaks in the agent's colour, as on the desk. */
@@ -165,6 +225,10 @@
   font-weight: 850;
 }
 
+.pctx[data-level='full'] :is(.pctx__setup, .pctx__model--none, .pctx__meter, .pctx__glyph) {
+  color: var(--p-bg);
+}
+
 .pctx[data-level='full'] .pring__arc {
   stroke: var(--p-bg);
 }
@@ -173,11 +237,21 @@
   stroke: color-mix(in srgb, var(--p-bg) 35%, transparent);
 }
 
+/* Bypass over warn: the amber tint stays, the rim is Bypass's. */
+.pctx[data-mode='bypass'][data-level='warn'] .pctx__face {
+  box-shadow: inset 0 0 0 1.5px var(--p-danger);
+}
+
 /* The narrowest phones: a little tighter, so the project name keeps its room. */
 @media (max-width: 374px) {
   .pctx__face {
+    min-width: 72px;
+    max-width: 92px;
+    padding: 0 9px 0 7px;
+  }
+
+  .pctx__top {
     gap: 4px;
-    padding: 0 8px 0 5px;
   }
 }
 
@@ -467,6 +541,27 @@
 
 :root[data-reduced-motion='true'] .pctx-note[data-condition='reconnecting'] .pctx-note__mark {
   animation: none;
+}
+
+/* ----------------------------------------------------------- the setup */
+
+/* The three pickers (ModelChip's SetupPicks) on the glass, above the context
+   and limits, a rim between them. */
+.pctx-setup {
+  margin-bottom: var(--p-1);
+  padding-bottom: var(--p-2);
+  border-bottom: 1px solid var(--pdraw-rim);
+}
+
+.pctx-setup .bssec + .bssec {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.pctx-setup .mseg {
+  border-color: var(--pdraw-rim);
+  background: color-mix(in srgb, var(--p-bg) 40%, transparent);
 }
 
 /* ------------------------------------------------------------ the body */

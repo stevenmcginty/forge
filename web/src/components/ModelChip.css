@@ -251,6 +251,53 @@
 }
 
 /*
+ * The same control for all three picks in the top bar's context panel
+ * (SetupPicks): the model and the mode as two-up grids, the effort as its row.
+ * A long model name wraps inside its 44px cell rather than pushing it wider.
+ */
+.mseg--grid {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mseg--grid .mseg__opt {
+  padding: 0 var(--p-2);
+  white-space: normal;
+  line-height: 1.15;
+}
+
+.mseg__opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.mseg__opt:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.mseg__opt:disabled:active {
+  background: transparent;
+}
+
+/* Bypass in force: filled red behind its triangle and its word, not the ink. */
+.mseg__opt[data-warn='true'][aria-checked='true'] {
+  background: var(--p-danger);
+  color: var(--p-bg);
+}
+
+.mseg__opt .mchip__warn {
+  flex: none;
+}
+
+.mseg__note[data-warn='true'] {
+  font-weight: 600;
+  color: var(--p-danger);
+}
+
+/*
  * The side drawer's face (variant "pill"): one small glass capsule, centred —
  * a spark, the model in full ink, the effort quieter, a hairline, the mode
  * with its dot, a chevron. Bypass in force turns the mode red behind the

@@ -3,6 +3,7 @@ import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import type { Project, Workspace } from '@shared/types'
 import { useDeckTheme } from '../deck/theme'
 import { publishScreenPane, type ScreenPane } from '../lib/pane-screen'
+import { pickEffort } from '../lib/pane-setup'
 import { publishPaneStatus } from '../lib/pane-status'
 import { publishUsage } from '../lib/usage'
 import { ForgeContext, type ForgeActions, type ForgeState, type Picture } from '../state'
@@ -20,7 +21,9 @@ import './ChatPreview.css'
  * The strip on top is harness chrome, not product: the four phone themes,
  * the context reading, the tab on screen and the pane's condition.
  * URL: `&theme=<id>`, `&pct=<0-100|none>`, `&tab=claude|codex|shell`,
- * `&cond=waiting|reconnecting|frozen`, `&waiting=0` (nobody asking).
+ * `&cond=waiting|reconnecting|frozen`, `&waiting=0` (nobody asking),
+ * `&mode=default|plan|accept-edits|bypass|auto` (the Claude pane's mode),
+ * `&model=<what its status line prints>`, `&effort=low|medium|high|xhigh|max`.
  */
 
 const PROJECT: Project = {
@@ -60,6 +63,7 @@ const ACTIONS = new Proxy(
 ) as ForgeActions
 
 type Cond = ScreenPane['condition']
+type Mode = 'default' | 'plan' | 'accept-edits' | 'bypass' | 'auto'
 
 function param(name: string): string | null {
   return new URLSearchParams(location.search).get(name)
@@ -82,6 +86,14 @@ export function PhoneTopBarPreview(): ReactNode {
   const [tab, setTab] = useState<TabKey>(() => (param('tab') as TabKey | null) ?? 'claude')
   const [cond, setCond] = useState<Cond>(() => (param('cond') as Cond) ?? null)
   const asking = param('waiting') !== '0'
+  const [mode, setMode] = useState<Mode>(() => (param('mode') as Mode | null) ?? 'plan')
+  const model = param('model') ?? 'Opus 5.5'
+  const [effortSeeded, setEffortSeeded] = useState(false)
+  if (!effortSeeded) {
+    setEffortSeeded(true)
+    const effort = param('effort')
+    if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh' || effort === 'max') pickEffort('p1', effort)
+  }
   const pane = PANES[tab]
 
   const state = useMemo(() => {
@@ -136,16 +148,16 @@ export function PhoneTopBarPreview(): ReactNode {
   // same stores the live client writes.
   useEffect(() => {
     publishPaneStatus('p1', {
-      model: 'Opus 5.5',
-      mode: 'plan',
+      model,
+      mode,
       busy: true,
       activity: 'Working',
       cwd: 'C:\\Users\\steve\\Desktop\\forge',
       branch: 'master',
-      footer: ['  ⏵⏵ plan mode on (shift+tab to cycle)', '  Opus 5.5 · forge · master · 5h 31% · week 34%']
+      footer: [`  ⏵⏵ ${mode} mode on (shift+tab to cycle)`, `  ${model} · forge · master · 5h 31% · week 34%`]
     })
     publishPaneStatus('p2', { model: 'gpt-6', mode: 'default', busy: false, cwd: 'C:\\Users\\steve\\Desktop\\forge', footer: [] })
-  }, [])
+  }, [mode, model])
 
   useEffect(() => {
     const now = Math.floor(Date.now() / 1000)
@@ -196,6 +208,7 @@ export function PhoneTopBarPreview(): ReactNode {
             {[null, 9, 42, 84, 95].map((n) => button(pct === n, n === null ? '—' : `${n}%`, () => setPct(n)))}
             {(['claude', 'codex', 'shell'] as TabKey[]).map((k) => button(tab === k, k, () => setTab(k)))}
             {([null, 'waiting', 'reconnecting', 'frozen'] as Cond[]).map((c) => button(cond === c, c ?? 'ok', () => setCond(c)))}
+            {(['default', 'plan', 'accept-edits', 'bypass', 'auto'] as Mode[]).map((m) => button(mode === m, m, () => setMode(m)))}
           </div>
         </div>
         <div className="app" data-mobile="true" data-ready="true" data-shell="app" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
