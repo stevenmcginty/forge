@@ -1,5 +1,11 @@
 # Handoff
 
+## Phone: context chip in the top bar; paperclip to the right (2026-10-02; master c167b67 + d44ed57; web only; NOT pushed at write time)
+
+- **Asked (Steve):** the context read-out only showed inside the PowerDraw; put it top right, left of the green dot and the "⋯", always there, for the tab on screen, and drop a panel down on a tap. Then: the paperclip should sit on the right of the box, in thumb reach of the dictation disc.
+- **Built (foreman → designer for the chip, builder for the clip):** `ContextChip.tsx/.css` in `TopBar.tsx` `.ptop__right` (mobile only), follows `useScreenPane()` then the active pane; the drop-down uses `PaneDetails` (now shared with `PaneSheet` in `StatusLine.tsx`). Warn = "Getting full" tag, full = solid red capsule, conditions carry a word/shape. Drawer's `pdpane__top` removed. `--p-ring-*` self-referencing tokens fixed (gauge arc drew nothing before). At ≤430px the waiting pill drops its word. Preview `?preview=phonetop` (`theme`, `pct`, `tab`, `cond`, `waiting`). Composer phone branch: Attach is its own `composer__clip` slot after the words; the front holds only Cancel/Undo/Retry/Stop; clip stays visible while an agent works, hides under dictation and Listen's voice line.
+- **Checked:** typecheck 0, lint:hooks 0, Playwright tap check 12/12 (open, outside tap, Esc, Back, chip again, ⋯), clip tap opens the attach sheet; screenshots at 360/390 in Volt, Paper, WA dark/light. NOT seen on the Pixel.
+
 ## Phone: Listen bar cue, chevron moved, voice taps keep the keyboard shut (2026-10-02; master; web only)
 
 - **Asked (Steve):** when Listen (agent) is on, "a different colour bar, very similar to what we've got for the dictation ... obvious it's listening"; the agent selector "gets in the way", put it somewhere better on the button; tapping the green disc or blue round (and flipping projects) should not raise the keyboard; only the text box or the terminal should. He chose to keep terminal taps opening the keyboard (option 2).
