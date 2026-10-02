@@ -232,8 +232,9 @@ function useYourTurnBuzz(look: HubLook): void {
  * outline mic (off), a turning ring (connecting), a solid mic (your turn),
  * three dots (thinking), a speaker with waves (its turn), a slashed mic
  * (held), a warning triangle (failed). A halo breathes round it on your turn
- * and ripples out while the agent speaks. A small chevron sits on its corner;
- * a tap on it slides the agents out above the bar. A switch that cannot start
+ * and ripples out while the agent speaks. A small chevron sits on its top-left
+ * shoulder, pointing up at where the agents slide out above the bar — away
+ * from the hairline and the paperclip on its right. A switch that cannot start
  * stays tappable (aria-disabled), so the tap can say why.
  */
 export function ListenUnit({

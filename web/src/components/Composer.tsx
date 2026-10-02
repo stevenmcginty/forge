@@ -1198,6 +1198,16 @@ function controlCode(letter: string): string {
   return String.fromCharCode(letter.toUpperCase().charCodeAt(0) - 64)
 }
 
+/**
+ * Takes the focus off a text field — the box, or a terminal's hidden one.
+ * Back hides a phone's keyboard but leaves the field focused, and Chrome
+ * raises the keyboard again on any tap while a text field has the focus.
+ */
+function dropTextFocus(): void {
+  const active = document.activeElement
+  if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) active.blur()
+}
+
 /* --------------------------------------------------------------------- mic */
 
 /**
@@ -1248,6 +1258,9 @@ function MicButton({
 
   const onPointerDown = (event: PointerEvent<HTMLButtonElement>): void => {
     if (disabled || (event.pointerType === 'mouse' && event.button !== 0)) return
+    // The phone's disc talks; it does not type. The press below keeps the
+    // focus where it is, so a box left focused would bring the keyboard back.
+    if (primary) dropTextFocus()
     if (phase !== 'idle' && phase !== 'recording') return
     event.preventDefault()
     try {

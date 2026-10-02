@@ -9,8 +9,9 @@
  *     two differ in shape as well as colour.
  *  2. Dictating: the box your words are going into is ringed in violet and
  *     breathes while it listens, beside the word "Listening" and the live
- *     waveform. The voice agent's cue (PhoneListen.css) is the lesser one: a
- *     thin, slow lime ring and the word "Agent".
+ *     waveform. The voice agent's cue (PhoneListen.css) is its twin in weight:
+ *     a lime rim and inner light that pools from the Listen round, and the
+ *     word "Agent".
  *
  * Only transform and opacity move. The comet rides the card's edge on
  * `offset-distance` — it is moved, never repainted — and exists only while

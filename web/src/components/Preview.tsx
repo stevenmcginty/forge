@@ -45,10 +45,14 @@ const PREVIEW_VOICE = {
   undo: () => undefined
 }
 
+/** `&dictate=1`: the box as a dictation has it (the strip), to set beside Listen's cue. */
+const PREVIEW_DICTATING = { phase: 'recording', mode: 'tap', startedAt: Date.now() } as const
+
 /*
  * The phone's agent round and its slide-out, on a voice that goes nowhere.
  * The two are drawn apart (the round in the box, the slide-out in the row),
- * so they share a little store. `&agent=on` shows it talking, `&fan=1` open.
+ * so they share a little store. `&agent=on` shows it listening (or `speaking`,
+ * `thinking`, `connecting`, `muted`), `&fan=1` open.
  */
 const previewVoice = {
   agent: 'gemini-live' as WebVoiceAgent,
@@ -70,14 +74,21 @@ function usePreviewVoice(): { voice: WebVoiceState; open: boolean } {
       previewVoice.subs.delete(fn)
     }
   }, [])
-  const on = new URLSearchParams(location.search).get('agent') === 'on'
+  // `agent=on` (or `listening`) is his turn; `speaking`, `thinking`, `connecting` and `muted` the rest.
+  const asked = new URLSearchParams(location.search).get('agent')
+  const phase: WebVoiceState['phase'] =
+    asked === 'on' || asked === 'listening' || asked === 'muted'
+      ? 'listening'
+      : asked === 'speaking' || asked === 'thinking' || asked === 'connecting'
+        ? asked
+        : 'off'
   return {
     open: previewVoice.open,
     voice: {
-      phase: on ? 'listening' : 'off',
+      phase,
       error: null,
       ended: null,
-      muted: false,
+      muted: asked === 'muted',
       agent: previewVoice.agent,
       caption: null,
       lastAction: null
@@ -584,6 +595,7 @@ function PreviewPane({
           onMode={ladder.length ? () => undefined : undefined}
           autoFocus={false}
           voice={mobile ? PREVIEW_VOICE : undefined}
+          voiceState={mobile && PREVIEW_PARAMS.get('dictate') === '1' ? PREVIEW_DICTATING : undefined}
           listen={mobile ? <PreviewListen /> : undefined}
           listenMenu={mobile ? <PreviewFan /> : undefined}
           listenLine={mobile ? <PreviewLine /> : undefined}

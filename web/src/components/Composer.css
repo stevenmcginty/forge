@@ -282,6 +282,12 @@
   padding-left: 7px;
 }
 
+/* Listen's agent chevron reaches out past the box's rim into the row's gutter
+   (PhoneListen.css), so a thumb finds it without taking the round's middle. */
+.app[data-mobile] .composer__field[data-front='agent'] {
+  overflow: visible;
+}
+
 .app[data-mobile] .composer__seam {
   flex: none;
   width: 1px;

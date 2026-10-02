@@ -285,7 +285,10 @@ export function PowerDrawView({
     const opener = openerRef.current
     openerRef.current = null
     const active = document.activeElement
-    if ((!active || active === document.body) && opener instanceof HTMLElement && opener.isConnected) {
+    // Never back into a text field (the box, a terminal's hidden one): on a
+    // phone that focus raises the keyboard, and only a tap in the field should.
+    const typing = opener instanceof HTMLTextAreaElement || opener instanceof HTMLInputElement
+    if ((!active || active === document.body) && opener instanceof HTMLElement && opener.isConnected && !typing) {
       opener.focus({ preventScroll: true })
     }
   }, [mounted])
