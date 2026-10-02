@@ -90,6 +90,7 @@ const CHECKS = [
   // esbuild-bundle-and-drive checks (one esbuild service process, temp dirs)
   { name: 'discovery:check', lane: 'fast', note: 'UDP on 127.0.0.1' },
   { name: 'input:check', lane: 'fast' },
+  { name: 'ask-ledger:check', lane: 'fast', note: 'the phone drops a question answered while its socket was down' },
   { name: 'memory:smoke', lane: 'fast' },
   { name: 'mirror:check', lane: 'fast' },
   { name: 'mobile:auth', lane: 'fast' },

@@ -27,7 +27,8 @@ import type { HandoffTargetWire } from '@shared/handoffview'
 import { collectLeaves } from '@/lib/splitTree'
 import { ALLOW_LOOPBACK, devLoopbackHost, loadConfig, type WebClientConfig } from './config'
 import { Auth, isSignedOutError, type Session } from './lib/auth'
-import { ForgeClient, type Connection } from './lib/client'
+import { ForgeClient, type Connection, type ForgeHandlers } from './lib/client'
+import { AskLedger } from './lib/ask-ledger'
 import { hearBrainSays } from './deck/voiceAgent'
 import {
   clearSnapshot,
@@ -599,8 +600,13 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    * The asking set as the client handlers see it, kept in step with `asking`
    * frame by frame. A ref because those handlers are built once, and because
    * the buzz below needs "was it already asking" before React has rendered.
+   * A ledger rather than a bare set so a reconnect can put away the panes
+   * that stopped asking while the socket was down (lib/ask-ledger.ts).
    */
-  const askingNow = useRef(new Set<string>())
+  const askLedger = useRef(new AskLedger())
+  const askingNow = useRef(askLedger.current.now)
+  /** The beat-late settle after a `hello-ok`. See `onPicture`. */
+  const askSettle = useRef(0)
   /**
    * Where the waiting pill last jumped, and which pane was on screen when it
    * did. Until the desk's push moves the screen, a second tap cycles on from
@@ -679,7 +685,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
 
   const clientRef = useRef<ForgeClient | null>(null)
   if (!clientRef.current) {
-    clientRef.current = new ForgeClient({
+    const handlers: ForgeHandlers = {
       onConnection: (next) => {
         setConnection(next)
         // A shutdown frame is the one route from a live socket into the frozen
@@ -747,6 +753,16 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         // Only the first picture chooses; a reconnect keeps what is on screen.
         // See `landingProject` for why this lands on a project and not a tab.
         setProjectId((current) => current ?? landingProject(frame.projects, frame.workspaces, askingNow.current))
+        // The desktop re-states every pane still asking straight after this
+        // frame, and never mentions one that stopped while the socket was
+        // down — its `idle` went to a dead link. A beat later, whatever was
+        // held over and not re-stated is put away the way an `idle` frame
+        // would have done it, or the card and the pill stay up for good.
+        askLedger.current.hello()
+        window.clearTimeout(askSettle.current)
+        askSettle.current = window.setTimeout(() => {
+          for (const sessionId of askLedger.current.settle()) handlers.onAttention(sessionId, false, '')
+        }, STALE_SWEEP_MS)
         // Absent means this desktop cannot push — an older build, or one whose
         // keys would not generate. The bell stays either way, because it is
         // still the switch for the tab-local notification; only the sentence
@@ -818,9 +834,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         )
       },
       onAttention: (sessionId, isAsking, prompt) => {
-        const was = askingNow.current.has(sessionId)
-        if (isAsking) askingNow.current.add(sessionId)
-        else askingNow.current.delete(sessionId)
+        const was = askLedger.current.attention(sessionId, isAsking)
         // The in-tab half of the notification below: somebody looking at the
         // page gets one short buzz on the edge into asking — not on a prompt
         // line that merely changed — and the pill says the rest. When the pane
@@ -921,7 +935,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setSession(null)
         setStage({ kind: 'signed-out', error: 'That sign-in is no longer valid. Sign in again.' })
       }
-    })
+    }
+    clientRef.current = new ForgeClient(handlers)
   }
   const client = clientRef.current
 

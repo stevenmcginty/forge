@@ -1,5 +1,19 @@
 # Handoff
 
+## Phone answer card stuck after a reconnect (2026-10-02; NOT committed, NOT deployed)
+
+- **Asked (Steve):** the "Claude Code is asking" card stayed up after he picked No and Claude had finished; "real bad problems with this pop-up".
+- **Cause (debugger, evidence in `dev.log` + the pane transcript):** the phone clears a pane's asking state only on an `asking:false` frame. The desktop's `idle` went to a dead socket (the phone drops often, 1006), and on `hello-ok` the desktop re-states only panes *still* asking (`electron/web/server.ts` ~2536), so the phone kept the old question forever. The desktop detector was fine.
+- **Fix (web only):** `web/src/lib/ask-ledger.ts` (new `AskLedger`); `web/src/state.tsx` opens a window on `hello-ok` and, after `STALE_SWEEP_MS` (1.5 s), clears every held-over pane not re-stated, through the normal idle path. Check `scripts/ask-ledger-check.mjs` (`npm run ask-ledger:check`, in the fast lane).
+- **Checked:** check fails 3 before the fix, 15/15 after; typecheck 0. Reaches the phone on a web deploy (push); no Forge restart.
+- **Open:** the phone's `busyNow` has the same reconnect gap; the server's `askingNow` goes stale after a renderer reload (desktop-side).
+
+## Desktop paperclip moves to the agent bar (2026-10-02; NOT committed)
+
+- **Asked (Steve):** the paperclip belongs in the desktop agent bar, not at the top right of the Terminal view. "Quick fix."
+- **Built:** `src/components/hub/Composer.tsx` has an `AttachButton` (`comp__act`, 13 px) just left of the pane chip (e.g. "Jonah"); picked paths go in at the caret through `insertPaths`, the same path as a file dropped on the bar. `src/components/TerminalPane.tsx` loses its paperclip (file drop on the pane still works). `AttachButton` gains a `title` prop. Wall tiles keep their paperclip.
+- **Checked:** typecheck 0. Not seen on screen.
+
 ## Phone context chip: model, effort, mode + pickers (2026-10-02; merged to master and pushed; web only)
 
 - **Asked (Steve):** make the top-right context chip a little bigger, with small text under it showing the model, effort and Bypass, the bar height unchanged; put the model / effort / permission pickers in its drop-down; follows the tab. He said "build it now" (no mock-ups), then "push".
