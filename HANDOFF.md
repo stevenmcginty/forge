@@ -1,5 +1,12 @@
 # Handoff
 
+## Phone context chip: model, effort, mode + pickers (2026-10-02; merged to master and pushed; web only)
+
+- **Asked (Steve):** make the top-right context chip a little bigger, with small text under it showing the model, effort and Bypass, the bar height unchanged; put the model / effort / permission pickers in its drop-down; follows the tab. He said "build it now" (no mock-ups), then "push".
+- **Built (designer via foreman, worktree `C:\Users\steve\Desktop\forge-ctxchip`, commit 308c726):** `web/src/lib/pane-setup.ts` `usePaneSetup` (senders and pick data lifted out of `SessionComposer.tsx` unchanged) and a shared pick store, so a pick in the PowerDraw pill or the chip shows in both. `ContextChip` is two lines: ring + percent (+ warning triangle and red rim on Bypass), then the model and a five-bar effort meter. The panel has Model / Effort / Permission mode segments above the context window. `ModelChip.tsx` gains `SetupPicks`. `PhoneTopBarPreview.tsx` takes mode/model/effort params.
+- **Checked:** typecheck 0, lint:hooks 0, web:build 0; six preview screenshots at 390 and 360 (in `forge-ctxchip\shots\`). NOT seen on the Pixel.
+- **Known:** at 360 with the waiting pill, the project name shortens to "f…". Effort is a meter in the chip (the word only in the panel). The shell chip's dash looks a bit like an underscore. A model picked on the phone now lasts across drawer opens until the pane reports another.
+
 ## Dictation key reminder, desktop + phone (2026-10-02; merged to master and pushed; Forge NOT restarted)
 
 - **Asked (Steve):** phone dictation is "crucial", but a fresh install has no Groq or Gemini key, so it fails for friends. Remind them at every launch until a key is set; X closes it for now; "Don't remind me again" stops it. He picked: show it on the computer AND the phone, with a paste box on both.
