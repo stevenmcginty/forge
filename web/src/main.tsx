@@ -45,6 +45,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { PhoneTopBarPreview } from './components/PhoneTopBarPreview'
 import { PowerDrawPreview } from './components/PowerDrawPreview'
 import { Preview } from './components/Preview'
+import { SpeechKeyCardPreview } from './components/SpeechKeyCardPreview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
 import { watchAppViewport } from './lib/viewport'
@@ -104,6 +105,8 @@ createRoot(host).render(
       <AskBannerPreview />
     ) : preview === 'cloud' ? (
       <CloudLaunchPreview />
+    ) : preview === 'speechkey' ? (
+      <SpeechKeyCardPreview />
     ) : preview === 'decktop' ? (
       <TopBarPreview />
     ) : preview === 'phonetop' ? (

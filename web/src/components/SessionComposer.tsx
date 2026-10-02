@@ -52,6 +52,7 @@ import { AnswerCard } from './AnswerCard'
 import { BACK_TAB, Composer, type VoiceControls } from './Composer'
 import { ModelChip } from './ModelChip'
 import { PhoneListen, PhoneListenFan, PhoneListenLine, usePhoneVoice } from './PhoneListen'
+import { openSpeechKeyCard } from './SpeechKeyCard'
 
 /**
  * The one text box for this browser, with the agent's status strip over it.
@@ -600,6 +601,8 @@ export function SessionComposer({
         if (stillMine() || moved()) {
           setFailedVoice({ pane, audio })
           const why = (err instanceof Error && err.message ? err.message : 'Dictation failed.').replace(/\.?$/, '.')
+          // No key on the desktop: the card that takes one, even if it was closed.
+          if (why.includes('No speech-to-text key')) openSpeechKeyCard()
           actions.setNotice(
             stillMine()
               ? `${why} Tap ↻ in the box to send the same recording again.`

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { DictationCueHost } from '@/components/DictationCue'
 import { AccountPrompt } from '@/components/AccountPrompt'
+import { SpeechKeyPrompt } from '@/components/SpeechKeyPrompt'
 import { BrainConfirm } from '@/components/brain/BrainConfirm'
 import { BrainMapHost } from '@/components/brainview'
 import { Onboarding } from '@/components/Onboarding'
@@ -218,6 +219,8 @@ export function App(): ReactNode {
       <HubLayer />
       <Onboarding />
       <AccountPrompt />
+      {/* Phone dictation needs a speech-to-text key here; waits behind the three above. */}
+      <SpeechKeyPrompt />
       <WhatsNew />
       {/* The Forge Mobile pairing prompt — asked over whatever else is up. */}
       <ApprovalPrompt />

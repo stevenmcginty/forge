@@ -1064,6 +1064,9 @@ export type ImportedKeyResult =
   | { ok: true; key: string; last4: string; source: string }
   | { ok: false; error: string }
 
+/** `voice:save-speech-key`: the key was checked with Groq and saved, or a plain sentence why not. */
+export type SpeechKeyResult = { ok: true } | { ok: false; error: string }
+
 /* ------------------------------------------------------------------ themes */
 
 /**
@@ -1912,6 +1915,13 @@ export interface Settings {
   brainModel: string
   /** The first-open pop-up that explains the brain has been seen. */
   brainIntroSeen: boolean
+  /**
+   * "Don't remind me again" on the launch card that asks for a speech-to-text
+   * key (SpeechKeyPrompt). Until then the card returns at every launch while
+   * neither `groqKey` nor `geminiKey` is set, because phone dictation cannot
+   * work without one.
+   */
+  speechKeyReminderOff: boolean
   /**
    * The Edge neural voice Forge Brain's spoken replies use — its own, apart
    * from the voice agents' (`voiceEdgeVoice`), so Steve can hear who is

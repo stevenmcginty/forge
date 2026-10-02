@@ -75,6 +75,7 @@ import type {
   ToolLatest,
   ToolProbe,
   SourceUpdateStatus,
+  SpeechKeyResult,
   StaleStatus,
   UpdateStatus,
   VoiceAgentEvent,
@@ -389,6 +390,17 @@ export interface ForgeApi {
     speak(req: VoiceSpeakRequest): Promise<VoiceSpeakResult>
     /** Abort an in-flight `speak`. Unknown ids are a no-op, never an error. */
     cancelSpeak(requestId: string): Promise<boolean>
+    /**
+     * Check a pasted Groq key with Groq, then save it as the speech-to-text
+     * key. Optional because a stale preload bundle has none: callers use `?.`.
+     */
+    saveSpeechKey?(key: string): Promise<SpeechKeyResult>
+    /**
+     * A Groq key was saved in main — by `saveSpeechKey` or from a phone. No
+     * payload: the key is not broadcast; the renderer re-reads it from
+     * `store.snapshot()` and patches its settings. Optional, like `saveSpeechKey`.
+     */
+    onSpeechKeySaved?(cb: () => void): () => void
   }
 
   /**

@@ -22,7 +22,9 @@ import {
   WEB_FEATURE_FILES,
   WEB_FEATURE_PASSKEY,
   WEB_FEATURE_PROJECT_REMOVE,
+  WEB_FEATURE_SPEECH_KEY,
   WEB_FEATURE_USAGE,
+  MAX_SPEECH_KEY_CHARS,
   WEB_PROTO,
   WEB_SUBPROTOCOL,
   WEB_WS_PATH,
@@ -505,6 +507,17 @@ export interface WebServerHost {
    * inbox savers are: a host without it answers `unsupported`.
    */
   transcribeAudio?: (bytes: Uint8Array, mime: string) => Promise<{ ok: true; text: string } | { ok: false; error: string }>
+  /**
+   * Whether `transcribeAudio` has a key to work with — a Groq or a Gemini key
+   * is set. Never the key itself. With `saveSpeechKey`, announces
+   * WEB_FEATURE_SPEECH_KEY; a host with only one of the two does not.
+   */
+  speechKeyReady?: () => boolean
+  /**
+   * Check a pasted Groq key with Groq, then save it. `error` is a plain
+   * sentence for the phone, and never contains the key.
+   */
+  saveSpeechKey?: (key: string) => Promise<{ ok: true } | { ok: false; error: string }>
 
   /* ---------------------------------------------------- the chat transcript
    *
@@ -2473,6 +2486,7 @@ export class WebServer {
       ...(this.host.projectRoot ? [WEB_FEATURE_FILES] : []),
       ...(this.host.projectRemove && this.host.projectRemovePreview ? [WEB_FEATURE_PROJECT_REMOVE] : []),
       ...(this.host.usage ? [WEB_FEATURE_USAGE] : []),
+      ...(this.host.speechKeyReady && this.host.saveSpeechKey ? [WEB_FEATURE_SPEECH_KEY] : []),
       ...(this.host.chatMirror ? [CHAT_MIRROR_FEATURE] : []),
       ...(this.host.browserMirror ? [BROWSER_MIRROR_FEATURE] : []),
       ...(this.host.boardMirror ? [BOARD_MIRROR_FEATURE] : [])
@@ -2638,6 +2652,37 @@ export class WebServer {
           }
           this.host.claim?.(id, client.viewer)
           answer({ kind: 'ok' })
+          return
+        }
+        /*
+         * The phone's "set up dictation" card. Status is a yes/no and nothing
+         * more; a key goes one way only, phone to desktop, and is never logged
+         * or said back. See `WebRequest`'s `speech-key-status`.
+         */
+        case 'speech-key-status': {
+          if (!this.host.speechKeyReady || !this.host.saveSpeechKey) {
+            failed('unsupported', 'This Forge cannot set up dictation from a browser.')
+            return
+          }
+          answer({ kind: 'speech-key', ready: this.host.speechKeyReady() })
+          return
+        }
+        case 'speech-key-set': {
+          if (!this.host.speechKeyReady || !this.host.saveSpeechKey) {
+            failed('unsupported', 'This Forge cannot set up dictation from a browser.')
+            return
+          }
+          const key = typeof request.key === 'string' ? request.key.trim() : ''
+          if (!key || key.length > MAX_SPEECH_KEY_CHARS) {
+            failed('failed', 'That does not look like a Groq key.')
+            return
+          }
+          const saved = await this.host.saveSpeechKey(key)
+          if (!saved.ok) {
+            failed('failed', saved.error)
+            return
+          }
+          answer({ kind: 'speech-key', ready: true })
           return
         }
         case 'layout': {

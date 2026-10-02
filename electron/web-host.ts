@@ -48,7 +48,7 @@ import type {
 import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxFile, saveInboxImage } from './web/inbox'
-import { transcribeAudio } from './voice-bridge'
+import { saveSpeechKey, transcribeAudio } from './voice-bridge'
 import { speakEdge } from './edge-tts'
 import { openWebVoiceAgent } from './voice-agent/ipc'
 import { connectOpenAI, mintGeminiToken } from './realtime/tokens'
@@ -1579,13 +1579,19 @@ async function start(): Promise<void> {
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
     saveInboxFile: (bytes, name) => Promise.resolve(saveInboxFile(join(getDataDir(), 'web-inbox'), bytes, name)),
     transcribeAudio: (bytes, mime) => transcribeAudio(bytes, mime),
+    // The phone's "set up dictation" card: a yes/no, and a Groq key in.
+    speechKeyReady: () => {
+      const settings = getSettings()
+      return Boolean(settings.groqKey?.trim() || settings.geminiKey?.trim())
+    },
+    saveSpeechKey: (key) => saveSpeechKey(key),
     // A browser's voice agent. The key is checked here so "no key" is said at
     // once; the bundle is the renderer's, built with the voice hub's functions.
     voiceSetup: async (provider, carryover) => {
       const settings = getSettings()
       // Claude hears through this desktop's speech-to-text: the same keys dictation uses.
       if (provider === 'claude' && !settings.groqKey?.trim() && !settings.geminiKey?.trim()) {
-        return { ok: false, error: 'No speech-to-text key — add a Groq or Gemini key in Settings → Voice on the desktop' }
+        return { ok: false, error: 'No speech-to-text key — add a Groq or Gemini key in Settings → Keys on the desktop' }
       }
       if (provider === 'gemini-live' && !settings.geminiKey?.trim()) {
         return { ok: false, error: 'No Gemini key is set — add one in Settings → Models & APIs' }

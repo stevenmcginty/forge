@@ -1,0 +1,258 @@
+/*
+ * "Turn on dictation" (SpeechKeyCard.tsx): the desktop has no speech-to-text
+ * key, and a free Groq key can be pasted here.
+ *
+ * At the top of the phone's display, where AskBanner and the Brain confirm sit,
+ * and under both of them (5): those are a question waiting now, this one can
+ * wait. Over the feed, never over the box below. Lime is only Save, the one
+ * "act here"; every state is said in words (✓ Saved, × and the reason, "Checking").
+ * Tokens only, with fallbacks for the harness.
+ */
+
+.speechkey {
+  position: absolute;
+  top: var(--p-2, 8px);
+  right: var(--p-3, 12px);
+  left: var(--p-3, 12px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-3, 12px);
+  box-sizing: border-box;
+  /* A short display (the keyboard is up): the card scrolls rather than spill. */
+  max-height: calc(100% - var(--p-4, 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--p-3, 12px) var(--p-2, 8px) var(--p-2, 8px) var(--p-4, 16px);
+  color: var(--p-ink, var(--text-primary));
+  background: var(--p-raised, var(--bg-panel-raised));
+  border: 1px solid var(--p-line-strong, var(--line-strong));
+  border-radius: var(--p-r-sheet, 20px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  font-family: var(--p-font, inherit);
+  animation: speechkey-drop var(--p-dur-sheet, 280ms) var(--p-ease-sheet, ease-out);
+}
+
+@keyframes speechkey-drop {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-100% - var(--p-2, 8px)));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.speechkey__head {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3, 12px);
+  margin: calc(-1 * var(--p-1, 4px)) 0 0;
+}
+
+/* The mic in a ring: the card's shape, apart from AskBanner's "!" and the Brain's triangle. */
+.speechkey__mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: var(--p-ink, var(--text-primary));
+  border: 2px solid var(--p-line-strong, var(--line-strong));
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.speechkey__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--p-t-title, 17px);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* A 44px hit area; the cross drawn inside it. */
+.speechkey__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--p-hit, 44px);
+  height: var(--p-hit, 44px);
+  margin: 0;
+  padding: 0;
+  color: var(--p-ink-2, var(--text-secondary));
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row, 12px);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.speechkey__close:active {
+  color: var(--p-ink, var(--text-primary));
+  background: var(--p-press, var(--bg-active));
+}
+
+.speechkey__text,
+.speechkey__label {
+  margin: 0;
+  padding-right: var(--p-2, 8px);
+  color: var(--p-ink-2, var(--text-secondary));
+  font-size: var(--p-t-label, 14px);
+  line-height: 1.4;
+}
+
+.speechkey__label {
+  display: block;
+  color: var(--p-ink, var(--text-primary));
+}
+
+/* A link drawn as a button: outlined, so Save stays the only lime on the card. */
+.speechkey__get {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--p-2, 8px);
+  min-height: var(--p-hit, 44px);
+  padding: 0 var(--p-4, 16px);
+  box-sizing: border-box;
+  color: var(--p-ink, var(--text-primary));
+  border: 1px solid var(--p-line-strong, var(--line-strong));
+  border-radius: var(--p-r-pill, 999px);
+  font-size: var(--p-t-chrome, 15px);
+  font-weight: 600;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.speechkey__get:active {
+  background: var(--p-press, var(--bg-active));
+}
+
+.speechkey__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-2, 8px);
+  margin: 0;
+  padding-right: var(--p-2, 8px);
+}
+
+.speechkey__row {
+  display: flex;
+  gap: var(--p-2, 8px);
+}
+
+.speechkey__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--p-hit, 44px);
+  margin: 0;
+  padding: 0 var(--p-3, 12px);
+  box-sizing: border-box;
+  color: var(--p-ink, var(--text-primary));
+  background: var(--p-surface, var(--bg-panel));
+  border: 1px solid var(--p-line-strong, var(--line-strong));
+  border-radius: var(--p-r-row, 12px);
+  font-family: var(--p-mono, monospace);
+  /* 16px or more, or iOS zooms the page when the box takes focus. */
+  font-size: 16px;
+  outline: none;
+}
+
+.speechkey__input::placeholder {
+  color: var(--p-ink-3, var(--text-dim));
+}
+
+.speechkey__input:focus {
+  border-color: var(--p-ink-2, var(--text-secondary));
+}
+
+.speechkey__input:disabled {
+  opacity: 0.6;
+}
+
+.speechkey__save {
+  flex: none;
+  min-width: 76px;
+  min-height: var(--p-hit, 44px);
+  margin: 0;
+  padding: 0 var(--p-4, 16px);
+  color: var(--p-act-ink, var(--text-on-accent));
+  background: var(--p-act, var(--accent));
+  border: 0;
+  border-radius: var(--p-r-row, 12px);
+  font: inherit;
+  font-size: var(--p-t-chrome, 15px);
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.speechkey__save:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.speechkey__save:active:not(:disabled) {
+  opacity: 0.8;
+}
+
+.speechkey__status {
+  margin: 0;
+  padding-right: var(--p-2, 8px);
+  color: var(--p-ink, var(--text-primary));
+  font-size: var(--p-t-label, 14px);
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.speechkey__status[data-state='checking'] {
+  color: var(--p-ink-2, var(--text-secondary));
+  font-weight: 400;
+}
+
+/* A quiet text button, still a full thumb tall. */
+.speechkey__never {
+  align-self: flex-start;
+  min-height: var(--p-hit, 44px);
+  margin: calc(-1 * var(--p-2, 8px)) 0 calc(-1 * var(--p-1, 4px)) calc(-1 * var(--p-2, 8px));
+  padding: 0 var(--p-2, 8px);
+  color: var(--p-ink-2, var(--text-secondary));
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row, 12px);
+  font: inherit;
+  font-size: var(--p-t-label, 14px);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.speechkey__never:active {
+  background: var(--p-press, var(--bg-active));
+}
+
+.speechkey__close:focus-visible,
+.speechkey__get:focus-visible,
+.speechkey__save:focus-visible,
+.speechkey__never:focus-visible {
+  outline: 2px solid var(--p-ink, var(--text-primary));
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speechkey {
+    animation: none !important;
+  }
+}
+
+:root[data-reduced-motion='true'] .speechkey {
+  animation: none !important;
+}
