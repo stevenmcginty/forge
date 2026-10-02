@@ -1,6 +1,12 @@
 import { useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import { useDeckTheme } from '../deck/theme'
+import { useDrawerSlot } from '../lib/drawer-slot'
+import type { PaneFace } from '../lib/pane-status'
+import { ModelChip } from './ModelChip'
 import { PowerDrawView, type DrumProject } from './PowerDraw'
+import { StatusLine } from './StatusLine'
 import './ChatPreview.css'
 
 /**
@@ -17,8 +23,46 @@ import './ChatPreview.css'
  * and light through the real theme path; "1st", "mid" and "end" move the open
  * project; "remove" takes the last project away, even while the drum is open.
  * URL: `&n=<count>` trims the list, `&current=<index>` picks the open project,
- * `&open=1` starts with the drum out, `&ask=0` has nobody asking.
+ * `&open=1` starts with the drum out, `&ask=0` has nobody asking, `&view=`
+ * (chat, feed, term) the face the demo pane in the drawer shows.
  */
+
+/** The open pane's controls, as the session composer portals them into the drawer. */
+function DemoPane(): ReactNode {
+  const slot = useDrawerSlot()
+  const [view, setView] = useState<PaneFace>(() => (new URLSearchParams(location.search).get('view') as PaneFace) || 'chat')
+  const [keys, setKeys] = useState(false)
+  if (!slot) return null
+  const profile = BUILTIN_AGENT_PROFILES.find((p) => /claude/i.test(p.name)) ?? BUILTIN_AGENT_PROFILES[0]!
+  return createPortal(
+    <StatusLine
+      variant="drawer"
+      profile={profile}
+      status={{ model: 'Opus 4.1', mode: 'plan', context: '42%', busy: true, activity: 'Working', footer: [] }}
+      live
+      view={view}
+      onFlipView={() => {}}
+      onPickView={setView}
+      keysShown={keys}
+      onToggleKeys={() => setKeys((k) => !k)}
+      chip={
+        <ModelChip
+          paneId="demo"
+          agentName={profile.name}
+          models={[]}
+          currentModelId={null}
+          modelText="Opus 4.1"
+          effortLevels={[]}
+          modes={[]}
+          currentModeId="plan"
+          modeText="Plan"
+          disabled={false}
+        />
+      }
+    />,
+    slot.el
+  )
+}
 
 const FIXTURES: DrumProject[] = [
   { id: 'chat', name: 'Chat', path: 'C:\\Users\\steve\\Desktop\\chat', color: '#8a94a6', panes: 1, asking: false },
@@ -126,6 +170,7 @@ export function PowerDrawPreview(): ReactNode {
             </p>
           ))}
         </div>
+        <DemoPane />
         <PowerDrawView
           projects={projects}
           currentId={current}

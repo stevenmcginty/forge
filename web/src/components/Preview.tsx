@@ -11,6 +11,56 @@ import { AnswerCard, registerAnswerScreen } from './AnswerCard'
 import { ChatView } from './ChatView'
 import { Composer } from './Composer'
 import { Feed } from './Feed'
+import { ListenUnit, VoiceFan } from './PhoneListen'
+import type { WebVoiceState } from '../deck/voiceAgent'
+import type { WebVoiceAgent } from '../deck/voice-words'
+
+const PREVIEW_VOICE = {
+  start: () => undefined,
+  mode: () => undefined,
+  stop: () => undefined,
+  cancel: () => undefined,
+  undo: () => undefined
+}
+
+/** The phone's agent disc and its slide-out, on a voice that goes nowhere. `&agent=on` shows it talking. */
+function PreviewListen(): ReactNode {
+  const [agent, setAgent] = useState<WebVoiceAgent>('gemini-live')
+  const [open, setOpen] = useState(() => new URLSearchParams(location.search).get('fan') === '1')
+  const on = new URLSearchParams(location.search).get('agent') === 'on'
+  const voice: WebVoiceState = {
+    phase: on ? 'listening' : 'off',
+    error: null,
+    ended: null,
+    muted: false,
+    agent,
+    caption: null,
+    lastAction: null
+  }
+  return (
+    <>
+      <ListenUnit
+        voice={voice}
+        live
+        supported
+        onToggle={() => undefined}
+        onOpenPicker={() => setOpen((v) => !v)}
+        onRefused={() => undefined}
+        pickerOpen={open}
+      />
+      <VoiceFan
+        open={open}
+        voice={voice}
+        onClose={() => setOpen(false)}
+        onPick={(next) => {
+          setAgent(next)
+          setOpen(false)
+        }}
+        onOff={() => setOpen(false)}
+      />
+    </>
+  )
+}
 
 function liveRung(mode: PermissionMode | undefined): ClaudePermissionMode | null {
   if (mode === 'default' || mode === 'plan' || mode === 'bypass') return mode
@@ -340,7 +390,11 @@ export function Preview(): ReactNode {
   const shown = mobile ? [PANES[which]!] : PANES.filter((p) => p.key !== 'claude')
 
   return (
-    <div className="preview" data-mobile={mobile ? 'true' : undefined}>
+    <div
+      className={mobile ? "preview app" : "preview"}
+      data-mobile={mobile ? "true" : undefined}
+      data-ready={mobile ? "true" : undefined}
+    >
       {mobile ? (
         <div className="preview__switch">
           {PANES.map((p, i) => (
@@ -444,7 +498,8 @@ function PreviewPane({
         </div>
       </section>
       <div className="session-composer" data-view={view}>
-        <AgentStatus profile={profile} status={status} live={live} />
+        {/* The phone draws these in the side drawer now (PowerDraw). */}
+        {mobile ? null : <AgentStatus profile={profile} status={status} live={live} />}
         {mobile && asking ? (
           <AnswerCard
             paneId={askId}
@@ -472,6 +527,8 @@ function PreviewPane({
           currentModeId={liveRung(status.mode)}
           onMode={ladder.length ? () => undefined : undefined}
           autoFocus={false}
+          voice={mobile ? PREVIEW_VOICE : undefined}
+          listen={mobile ? <PreviewListen /> : undefined}
         />
       </div>
     </div>

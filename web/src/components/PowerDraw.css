@@ -564,3 +564,275 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------------- the pane */
+
+/*
+ * The open pane's controls, portalled in by the session composer (see
+ * lib/drawer-slot.ts): a tray of slightly deeper glass under the drum, set
+ * off by a hairline that fades at its ends. Its state and model on one line,
+ * the view switch under them, and in Terminal view the keys as a switch. It
+ * rises in a beat after the card, so the eye lands on the drum first.
+ */
+.pdraw__pane {
+  position: relative;
+  flex: none;
+  padding: var(--p-3) var(--p-3) var(--p-3);
+  background: color-mix(in srgb, var(--p-bg) 22%, transparent);
+}
+
+.pdraw__pane::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--p-4);
+  right: var(--p-4);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--pdraw-rim) 18%, var(--pdraw-rim) 82%, transparent);
+}
+
+.pdraw__pane:empty {
+  display: none;
+}
+
+:root[data-appearance='light'] .pdraw__pane {
+  background: color-mix(in srgb, var(--p-bg) 30%, transparent);
+}
+
+.pdpane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-3);
+  animation: pdpane-in calc(var(--p-dur-sheet) + 60ms) var(--p-ease-sheet) 70ms both;
+}
+
+@keyframes pdpane-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.pdpane__top {
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  min-height: var(--p-hit);
+  padding: 0 0 0 var(--p-1);
+}
+
+.app[data-mobile] .pdpane .mchip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 64%;
+}
+
+/* The view switch: three faces, each its shape over its name, and a lamp of
+   brighter glass that glides to the one on screen in that face's colour. */
+.pdpane .pseg[data-labelled] {
+  --lamp: var(--p-ink-2);
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  height: 64px;
+  padding: 4px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--p-bg) 45%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--pdraw-rim),
+    inset 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+
+.pdpane .pseg[data-labelled]:has(.pseg__btn[data-face='chat'][data-on='true']) {
+  --lamp: var(--info, #7fd1ff);
+}
+
+.pdpane .pseg[data-labelled]:has(.pseg__btn[data-face='feed'][data-on='true']) {
+  --lamp: var(--warn, #ffb347);
+}
+
+.pdpane .pseg[data-labelled]:has(.pseg__btn[data-face='term'][data-on='true']) {
+  --lamp: var(--ok, #5ee6a8);
+}
+
+.pdpane .pseg__lamp {
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / 3);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, var(--pdraw-sheen), transparent 80%),
+    color-mix(in srgb, var(--lamp) 16%, color-mix(in srgb, var(--p-raised) 85%, transparent));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--lamp) 50%, transparent),
+    inset 0 1px 0 var(--pdraw-edge),
+    0 6px 18px -8px rgba(0, 0, 0, 0.5);
+  transform: translateX(calc(var(--seg-at, 0) * 100%));
+  transition:
+    transform var(--p-dur-glide) var(--p-glide),
+    background-color var(--p-dur) var(--p-ease),
+    box-shadow var(--p-dur) var(--p-ease);
+  pointer-events: none;
+}
+
+:root[data-appearance='light'] .pdpane .pseg__lamp {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--lamp) 55%, transparent),
+    0 6px 16px -8px rgba(0, 0, 0, 0.22);
+}
+
+.pdpane .pseg[data-labelled] .pseg__btn {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border-radius: 14px;
+}
+
+.pdpane .pseg[data-labelled] .pseg__face {
+  width: 24px;
+  height: 24px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  transition: transform var(--p-dur-glide) var(--p-glide);
+}
+
+.pdpane .pseg[data-labelled] .pseg__btn[data-on='true'] .pseg__face {
+  background: none;
+  box-shadow: none;
+  transform: translateY(-1px) scale(1.08);
+}
+
+.pdpane .pseg[data-labelled] .pseg__btn[data-on='false']:active .pseg__face {
+  background: none;
+  transform: scale(0.92);
+}
+
+.pseg__label {
+  font: 600 var(--p-t-small) / 1 var(--p-font);
+  letter-spacing: 0;
+  color: var(--p-ink-3);
+  transition: color var(--p-dur) var(--p-ease);
+}
+
+.pseg__btn[data-on='true'] .pseg__label {
+  color: var(--p-ink);
+}
+
+.pdpane .pseg[data-labelled] .pseg__btn:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.pdpane .pseg[data-labelled] .pseg__btn:focus-visible .pseg__face {
+  outline: none;
+}
+
+/* The keys: a row with a switch, not a lone icon, so it says what it does. */
+.pdkeys {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  width: 100%;
+  min-height: 56px;
+  margin: 0;
+  padding: var(--p-2) var(--p-3) var(--p-2) var(--p-2);
+  border: 0;
+  border-radius: var(--p-r-row);
+  background: transparent;
+  color: var(--p-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--p-dur-fast) var(--p-ease);
+}
+
+.pdkeys:active {
+  background: color-mix(in srgb, var(--p-ink) 6%, transparent);
+}
+
+.pdkeys:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.pdkeys__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--ok, #5ee6a8);
+  background: color-mix(in srgb, var(--ok, #5ee6a8) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok, #5ee6a8) 30%, transparent);
+}
+
+.pdkeys__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pdkeys__label {
+  font-size: var(--p-t-chrome);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.pdkeys__sub {
+  overflow: hidden;
+  font-size: var(--p-t-small);
+  line-height: 1.3;
+  color: var(--p-ink-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pdkeys__track {
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 28px;
+  border-radius: var(--p-r-pill);
+  background: color-mix(in srgb, var(--p-ink) 14%, transparent);
+  box-shadow: inset 0 0 0 1px var(--pdraw-rim);
+  transition: background var(--p-dur) var(--p-ease);
+}
+
+.pdkeys__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--p-ink);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition:
+    transform var(--p-dur-glide) var(--p-glide),
+    background var(--p-dur) var(--p-ease);
+}
+
+.pdkeys[aria-checked='true'] .pdkeys__track {
+  background: var(--p-act);
+  box-shadow: none;
+}
+
+.pdkeys[aria-checked='true'] .pdkeys__thumb {
+  background: var(--p-act-ink);
+  transform: translateX(18px);
+}

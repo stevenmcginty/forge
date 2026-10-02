@@ -1,11 +1,18 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode
+} from 'react'
 import { Icon } from '@/components/Icon'
 import { BrainGlyphMark } from './BrainGlyph'
-import { SynthesizerIndicator } from '@/components/hub/SynthesizerIndicator'
 import type { HubLook } from '@/components/hub/hubLook'
 import {
   holdWebVoiceMic,
-  readWebVoiceLevels,
   setVoiceLink,
   setVoiceNavigator,
   setWebVoiceAgent,
@@ -16,6 +23,7 @@ import {
   type WebVoiceState
 } from '../deck/voiceAgent'
 import { voiceAgentWord, voiceHint, voicePhaseWord, WEB_VOICE_AGENTS, type WebVoiceAgent } from '../deck/voice-words'
+import { useBackClose } from '../lib/back-stack'
 import { withAgentSends } from '../lib/pane-sent'
 import { useForge, useWorkspace } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
@@ -165,10 +173,11 @@ export function PhoneListen(): ReactNode {
         live={live}
         supported={webVoiceSupported()}
         onToggle={toggleWebVoice}
-        onOpenPicker={() => setPicker(true)}
+        onOpenPicker={() => setPicker(!pickerOpen)}
         onRefused={actions.setNotice}
+        pickerOpen={open}
       />
-      <VoicePicker
+      <VoiceFan
         open={open}
         voice={voice}
         onClose={() => setPicker(false)}
@@ -208,17 +217,18 @@ function useYourTurnBuzz(look: HubLook): void {
 }
 
 /**
- * The capsule: two buttons, each a full touch target, in one pill.
+ * The agent disc: the dictation disc's twin at the other end of the row, the
+ * same 56px round, in the voice agent's own blue, so the dock reads
+ * symmetrical — talk to the agent on the left, dictate on the right.
  *
- * Left: a switch — tap to talk, tap again to stop — whose glyph IS the state,
- * one silhouette each, readable at arm's length and without colour: an outline
- * mic (off), a turning ring (connecting), a solid mic (your turn), three dots
- * (thinking), a speaker with waves (its turn), a slashed mic (held), a warning
- * triangle (failed). Beside it the equalizer moves with whoever is talking.
- * Right: the agent's mark and a chevron, which opens the picker. The rim says
- * it a second way: a hairline at rest, solid while on, a halo on your turn,
- * dashed when it failed or cannot start. A switch that cannot start stays
- * tappable (aria-disabled), so the tap can say why.
+ * The disc is a switch — tap to talk, tap again to stop — whose glyph IS the
+ * state, one silhouette each, readable at arm's length and without colour: an
+ * outline mic (off), a turning ring (connecting), a solid mic (your turn),
+ * three dots (thinking), a speaker with waves (its turn), a slashed mic
+ * (held), a warning triangle (failed). A halo breathes round it on your turn
+ * and ripples out while the agent speaks. The agent's mark sits on its rim as
+ * a small badge; a tap on the badge slides the agents out above the disc. A
+ * switch that cannot start stays tappable (aria-disabled), so the tap can say why.
  */
 export function ListenUnit({
   voice,
@@ -226,7 +236,8 @@ export function ListenUnit({
   supported,
   onToggle,
   onOpenPicker,
-  onRefused
+  onRefused,
+  pickerOpen = false
 }: {
   voice: WebVoiceState
   live: boolean
@@ -234,6 +245,8 @@ export function ListenUnit({
   onToggle: () => void
   onOpenPicker: () => void
   onRefused: (words: string) => void
+  /** The agents are slid out above the disc. */
+  pickerOpen?: boolean
 }): ReactNode {
   const on = isOn(voice)
   const failed = voice.phase === 'error'
@@ -265,6 +278,7 @@ export function ListenUnit({
       data-recording={look === 'listening' ? 'true' : undefined}
       data-look={look}
       data-blocked={blocked ? 'true' : undefined}
+      data-agent={voice.agent}
       aria-label="Agent voice controls"
     >
       <button
@@ -285,29 +299,24 @@ export function ListenUnit({
         aria-disabled={blocked ? true : undefined}
         onClick={handleToggle}
       >
+        <span className="plisten__halo" aria-hidden="true" />
         <span className="plisten__mic-wrap" aria-hidden="true">
           <ListenGlyph key={look} look={look} />
         </span>
-        <SynthesizerIndicator
-          look={look}
-          readLevels={readWebVoiceLevels}
-          width={22}
-          height={14}
-          className="plisten__synth"
-        />
       </button>
 
       <button
         type="button"
         className="plisten__agent-btn"
+        aria-haspopup="menu"
+        aria-expanded={pickerOpen}
         title={`Voice agent: ${agent} — tap to pick Gemini, ChatGPT, Claude or Forge Brain`}
         aria-label={`Voice agent: ${agent}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
         onClick={handleOpenPicker}
       >
         <span className="plisten__agent-tile" aria-hidden="true">
-          <AgentMark agent={voice.agent} size={13} />
+          <AgentMark agent={voice.agent} size={12} />
         </span>
-        <Icon name="chevronDown" size={10} className="plisten__chev" />
       </button>
     </span>
   )
@@ -562,6 +571,121 @@ function WhoMark({ who }: { who: 'you' | 'agent' | 'action' }): ReactNode {
         <path d="M5 1.4A3.6 3.6 0 1 1 1.4 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       ) : null}
     </svg>
+  )
+}
+
+
+/* ------------------------------------------------------------------ fan */
+
+/**
+ * The agents, slid out above the agent disc: a small glass panel that rises
+ * from the disc, its rows following one after another — the agent's mark, its
+ * name, a tick and "In use" on the one Listen talks to — and, while a
+ * conversation is open or failed, a way to turn it off. A pick mid-
+ * conversation closes the live one and opens the new agent in its place. A
+ * tap anywhere else, Back or Esc puts it away.
+ */
+export function VoiceFan({
+  open,
+  voice,
+  onClose,
+  onPick,
+  onOff
+}: {
+  open: boolean
+  voice: WebVoiceState
+  onClose: () => void
+  onPick: (agent: WebVoiceAgent) => void
+  onOff: () => void
+}): ReactNode {
+  const on = isOn(voice)
+  const ref = useRef<HTMLDivElement | null>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useBackClose(open, onClose)
+
+  useEffect(() => {
+    if (!open) return undefined
+    const away = (e: PointerEvent): void => {
+      const target = e.target as Element | null
+      if (!target || ref.current?.contains(target) || target.closest('.plisten__agent-btn')) return
+      closeRef.current()
+    }
+    const esc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') closeRef.current()
+    }
+    document.addEventListener('pointerdown', away, true)
+    document.addEventListener('keydown', esc)
+    return () => {
+      document.removeEventListener('pointerdown', away, true)
+      document.removeEventListener('keydown', esc)
+    }
+  }, [open])
+
+  return (
+    <div
+      ref={ref}
+      className="plisten-fan"
+      data-open={open ? 'true' : 'false'}
+      role="menu"
+      aria-label="Voice agent"
+      aria-hidden={open ? undefined : true}
+      data-testid="voice-agent-fan"
+    >
+      <div className="plisten-fan__head" aria-hidden="true">
+        Talk to
+      </div>
+      {WEB_VOICE_AGENTS.map((id, i) => {
+        const here = id === voice.agent
+        return (
+          <button
+            key={id}
+            type="button"
+            className="plisten-fan__row"
+            role="menuitemradio"
+            aria-checked={here}
+            tabIndex={open ? 0 : -1}
+            data-current={here ? 'true' : undefined}
+            data-agent={id}
+            style={{ '--i': i } as CSSProperties}
+            onClick={() => onPick(id)}
+          >
+            <span className="plisten-fan__mark">
+              <AgentMark agent={id} size={18} />
+            </span>
+            <span className="plisten-fan__text">
+              <span className="plisten-fan__name">{voiceAgentWord(id)}</span>
+              {here ? (
+                <span className="plisten-fan__sub">
+                  In use{on || voice.phase === 'error' ? ` · ${voicePhaseWord(voice.phase, voice.muted)}` : ''}
+                </span>
+              ) : null}
+            </span>
+            <span className="plisten-fan__tick" aria-hidden="true">
+              {here ? <Icon name="check" size={16} /> : null}
+            </span>
+          </button>
+        )
+      })}
+      {on || voice.phase === 'error' ? (
+        <button
+          type="button"
+          className="plisten-fan__row"
+          data-kind="off"
+          role="menuitem"
+          tabIndex={open ? 0 : -1}
+          style={{ '--i': WEB_VOICE_AGENTS.length } as CSSProperties}
+          onClick={onOff}
+        >
+          <span className="plisten-fan__mark">
+            <Icon name="close" size={16} />
+          </span>
+          <span className="plisten-fan__text">
+            <span className="plisten-fan__name">Turn Listen off</span>
+          </span>
+        </button>
+      ) : null}
+    </div>
   )
 }
 

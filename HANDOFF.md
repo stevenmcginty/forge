@@ -1,5 +1,17 @@
 # Handoff
 
+## Phone bottom bar cleared; pane controls move into PowerDraw; agent disc (2026-10-02; same branch, PR #5; web only)
+
+- **Asked (Steve):** on Forge browser mobile, keep only the text entry and the voice buttons at the bottom; put the view buttons (Terminal / Cards / Chat), the keyboard button and the rest into the PowerDraw, "beautifully sculpted", animated; get rid of the status box; make the agent mic symmetrical with the dictation disc on the right, in a different colour, with its options sliding out above it.
+- **Built:**
+  - `web/src/lib/drawer-slot.ts`: PowerDraw registers a pane slot while it is out; `SessionComposer` portals the pane's `AgentStatus` into it (`variant="drawer"`) on the phone, and no longer draws the status row at the bottom. React events from the portal bubble to the composer, not the drum, so the drum's gestures are untouched.
+  - `StatusLine.tsx` drawer variant: state ring/words (or the condition) and the model chip on one line; the view switch full width with icons over labels and a lamp that glides (`--p-glide`) in the face's colour; in Terminal view a "Terminal keys" row with a switch. A view pick closes the drawer. Styles in `PowerDraw.css` ("the pane").
+  - Composer: the Chat face button in the row is gone on the phone (the drawer's switch does it).
+  - `PhoneListen`: the Listen capsule is now a 56px disc in its own blue gradient at the front of the row, the dictation disc's twin; the agent's mark is a badge on its rim that slides a glass panel of agents out above it (`VoiceFan`, outside tap / Back / Esc close it). Halo breathes on your turn, ripples while the agent talks. The old sheet `VoicePicker` stays exported but unused.
+  - `styles.css`: landscape no longer puts the keys into the status row (it is gone); they float above the box as upright.
+  - Previews: `?preview=powerdraw` has a demo pane (`&view=term`); `?preview=feed&phone` shows the new bottom (`&fan=1`, `&agent=on`).
+- **Checked:** typecheck 0, lint:hooks 0, web:build 0; screenshots at 390 (drawer in Volt / WA dark / WA light, bottom row at rest, on, fan open); Playwright taps: a segment tap switches the view and leaves the drum alone, the keys switch toggles, the fan opens, picks and closes on an outside tap. `test:ci` here fails 11 lanes that need Windows paths / pwsh / network (voice:check is a `C:\` path assertion); none touch these files. NOT seen on the real phone.
+
 ## PowerDraw card becomes frosted glass (2026-10-02; branch `claude/forge-mobile-background-design-ggtmwm`; web only)
 
 - **Asked (Steve):** on Forge browser mobile, make the project drum's background "a little bit transparent and a little bit nicer", "a real beautiful design"; the scrolling of the projects is fine and stays as it is.

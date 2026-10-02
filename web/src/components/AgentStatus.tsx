@@ -65,7 +65,9 @@ export function AgentStatus({
   onFlipView,
   keysShown,
   onToggleKeys,
-  chip
+  chip,
+  variant,
+  onPicked
 }: {
   profile: AgentProfile
   /**
@@ -86,6 +88,9 @@ export function AgentStatus({
    * words, so where it is given it stands in for the mode readout.
    */
   chip?: ReactNode
+  /** The phone only: drawn in the PowerDraw's pane slot (see StatusLine). */
+  variant?: 'row' | 'drawer'
+  onPicked?: () => void
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const mobile = useMobile()
@@ -102,6 +107,8 @@ export function AgentStatus({
         keysShown={keysShown}
         onToggleKeys={onToggleKeys}
         chip={chip}
+        variant={variant}
+        onPicked={onPicked}
       />
     )
   }

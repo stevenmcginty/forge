@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { ClaudePermissionMode, LayoutNode, PaneLeaf } from '@shared/types'
 import type { EffortLevel } from '@shared/agents'
 import {
@@ -34,6 +35,7 @@ import {
 import { useLendDictation, type DictationSeat } from '../lib/dictation-seat'
 import { readDrafts, writeDraft } from '../lib/drafts'
 import { isImageFile, uploadFileChunks } from '../lib/file'
+import { useDrawerSlot } from '../lib/drawer-slot'
 import { buzz, type Buzz } from '../lib/haptics'
 import { packImage } from '../lib/image'
 import { useMobile } from '../lib/mobile'
@@ -143,6 +145,9 @@ export function SessionComposer({
   const workspace = useWorkspace()
   const profiles = useProfiles()
   const mobile = useMobile()
+  // The phone keeps only the box and the two voice discs at the bottom; the
+  // pane's own controls are drawn in the side drawer while it is out.
+  const drawer = useDrawerSlot()
 
   const offline = state.stage.kind === 'offline'
   const live = !offline && state.connection.state === 'live'
@@ -1145,8 +1150,9 @@ export function SessionComposer({
     // it, so the phone's key row and status strip trade places on the same face
     // the pane shows — never on a guess.
     <div className="session-composer" data-view={activeView} data-keys={keysShown ? 'shown' : 'hidden'}>
-      {/* Not on the deck: the pane header, the bar and its usage line already say all of it. */}
-      {profile && !deck ? (
+      {/* Not on the deck: the pane header, the bar and its usage line already say all of it.
+          On the phone it lives in the side drawer (PowerDraw), and only while the drawer is out. */}
+      {profile && !deck && !mobile ? (
         <AgentStatus
           profile={profile}
           tab={paneName ?? undefined}
@@ -1159,6 +1165,24 @@ export function SessionComposer({
           chip={chip}
         />
       ) : null}
+      {profile && !deck && mobile && drawer
+        ? createPortal(
+            <AgentStatus
+              profile={profile}
+              tab={paneName ?? undefined}
+              status={status}
+              live={canType}
+              view={activeView}
+              onFlipView={isAgent ? onFlipView : undefined}
+              keysShown={keysShown}
+              onToggleKeys={toggleKeys}
+              chip={chip}
+              variant="drawer"
+              onPicked={drawer.close}
+            />,
+            drawer.el
+          )
+        : null}
       {(mobile || face === 'deck') && asking && paneId ? (
         <AnswerCard
           // A new question is a new card: the sent state belongs to the old one.
@@ -1230,7 +1254,7 @@ export function SessionComposer({
         onVoiceRetry={!deck && failedVoice && failedVoice.pane === paneId ? () => void retryVoice() : undefined}
         voiceState={voice}
         voiceLevel={voiceLevel}
-        onShowChat={isAgent && activeView === 'term' ? onFlipView : undefined}
+        onShowChat={isAgent && activeView === 'term' && !mobile ? onFlipView : undefined}
         bar={face === 'deck'}
         lead={face === 'deck' ? lead : undefined}
         voiceKey={face === 'deck' ? dictationKeyName(dKey) : undefined}

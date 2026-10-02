@@ -95,7 +95,10 @@ export function StatusLine({
   onFlipView,
   keysShown = false,
   onToggleKeys,
-  chip
+  chip,
+  variant = 'row',
+  onPickView,
+  onPicked
 }: {
   profile: AgentProfile
   status?: PaneStatus
@@ -105,6 +108,16 @@ export function StatusLine({
   keysShown?: boolean
   onToggleKeys?: () => void
   chip?: ReactNode
+  /**
+   * `drawer`: drawn in the PowerDraw's pane slot instead of under the
+   * conversation — the state and the model on one line, the view switch
+   * full width under them, the terminal keys as a switch.
+   */
+  variant?: 'row' | 'drawer'
+  /** Where a view pick goes when there is no screen pane to take it (the preview). */
+  onPickView?: (face: PaneFace) => void
+  /** After a view is picked in the drawer: the drawer goes, so the view can be seen. */
+  onPicked?: () => void
 }): ReactNode {
   const screen = useScreenPane()
   const shell = isShellProfile(profile)
@@ -210,6 +223,66 @@ export function StatusLine({
     </button>
   )
 
+  const sheetEl = (
+    <PaneSheet
+      open={sheet}
+      onClose={() => setSheet(false)}
+      profile={profile}
+      place={place}
+      usage={shell ? { context: null, limits: null } : usage}
+      footer={status?.footer ?? []}
+      screen={screen}
+    />
+  )
+
+  if (variant === 'drawer') {
+    const pickView = screen?.showView ?? onPickView
+    const face = view ?? 'chat'
+    return (
+      <section
+        className="pdpane"
+        aria-label={`This pane: ${profile.name}`}
+        data-busy={status?.busy ? 'true' : 'false'}
+        data-live={live ? 'true' : 'false'}
+        data-shell={shell ? 'true' : undefined}
+        data-condition={condition ?? undefined}
+        style={{ '--pane-accent': badgeColor(profile) } as CSSProperties}
+      >
+        <div className="pdpane__top">
+          {condition ? (
+            <button
+              type="button"
+              className="pstat__cond"
+              data-condition={condition}
+              title={CONDITION[condition].title}
+              aria-label={`${CONDITION[condition].word} — ${CONDITION[condition].title}. Details`}
+              onClick={() => setSheet(true)}
+            >
+              <span className="pstat__mark" aria-hidden="true">
+                {CONDITION[condition].mark}
+              </span>
+              <span className="pstat__word">{CONDITION[condition].word}</span>
+            </button>
+          ) : (
+            lead
+          )}
+          <span className="pstat__gap" />
+          {chip && !condition && (shell || pane.state !== 'dormant') ? chip : null}
+        </div>
+        {!shell && onFlipView && pickView ? <Segments
+            view={face}
+            labelled
+            onPick={(next) => {
+              pickView(next)
+              onPicked?.()
+            }}
+          /> : null}
+        {onToggleKeys && face === 'term' ? <KeysSwitch shown={keysShown} onClick={onToggleKeys} /> : null}
+        {sheetEl}
+      </section>
+    )
+  }
+
   return (
     <div
       className="astatus pstat"
@@ -261,15 +334,7 @@ export function StatusLine({
         {chip && !condition && (shell || pane.state !== 'dormant') ? chip : null}
       </div>
 
-      <PaneSheet
-        open={sheet}
-        onClose={() => setSheet(false)}
-        profile={profile}
-        place={place}
-        usage={shell ? { context: null, limits: null } : usage}
-        footer={status?.footer ?? []}
-        screen={screen}
-      />
+      {sheetEl}
     </div>
   )
 }
@@ -327,9 +392,29 @@ export function KeysToggle({
 
 /* -------------------------------------------------------------- segments */
 
-function Segments({ view, onPick }: { view: PaneFace; onPick: (face: PaneFace) => void }): ReactNode {
+function Segments({
+  view,
+  onPick,
+  labelled = false
+}: {
+  view: PaneFace
+  onPick: (face: PaneFace) => void
+  /** The drawer's switch: each face named under its shape, and a lamp that slides to the one on screen. */
+  labelled?: boolean
+}): ReactNode {
+  const at = Math.max(
+    0,
+    FACES.findIndex((f) => f.face === view)
+  )
   return (
-    <div className="pseg" role="radiogroup" aria-label="Show this pane as">
+    <div
+      className="pseg"
+      role="radiogroup"
+      aria-label="Show this pane as"
+      data-labelled={labelled ? 'true' : undefined}
+      style={labelled ? ({ '--seg-at': at } as CSSProperties) : undefined}
+    >
+      {labelled ? <span className="pseg__lamp" aria-hidden="true" /> : null}
       {FACES.map(({ face, label, icon }) => (
         <button
           key={face}
@@ -350,9 +435,31 @@ function Segments({ view, onPick }: { view: PaneFace; onPick: (face: PaneFace) =
               {icon}
             </svg>
           </span>
+          {labelled ? <span className="pseg__label">{label}</span> : null}
         </button>
       ))}
     </div>
+  )
+}
+
+/** The drawer's keys control: the toggle's keyboard, its name, and a switch that says on or off. */
+function KeysSwitch({ shown, onClick }: { shown: boolean; onClick: () => void }): ReactNode {
+  return (
+    <button type="button" role="switch" aria-checked={shown} className="pdkeys" onClick={onClick}>
+      <span className="pdkeys__icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" focusable="false">
+          <rect x="2.5" y="5" width="15" height="10" rx="2.5" />
+          <path d="M6 8.25h.01M8.67 8.25h.01M11.33 8.25h.01M14 8.25h.01M7 12h6" />
+        </svg>
+      </span>
+      <span className="pdkeys__text">
+        <span className="pdkeys__label">Terminal keys</span>
+        <span className="pdkeys__sub">Esc, Tab, Ctrl and arrows</span>
+      </span>
+      <span className="pdkeys__track" aria-hidden="true">
+        <span className="pdkeys__thumb" />
+      </span>
+    </button>
   )
 }
 

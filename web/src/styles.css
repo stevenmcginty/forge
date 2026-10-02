@@ -4489,8 +4489,8 @@ button.astatus__mode:not(:disabled):hover {
  * buys a grid that cannot depend on which face is up. Every pane, shells too:
  * a shell shows the keys as well.
  *
- * Landscape has no band: there the keys sit inside the status line's own row
- * (see the `max-height: 500px` block), which is the same height in every view.
+ * Landscape keeps the band too: the status line the keys once shared a row
+ * with there now lives in the side drawer.
  */
 .app[data-mobile] .pane .pane__terminal .xterm {
   padding-bottom: calc(52px + var(--s-2));
@@ -5639,59 +5639,11 @@ button.astatus__mode:not(:disabled):hover {
 }
 
 /*
- * Landscape: the Terminal view's keys join the status line's row, at its right
- * end, so the terminal needs no band for them and the row is the same height
- * in every view. "Landscape" is short *and* wide: a portrait phone with the
- * keyboard up is short too, but 390px has no room for the keys beside the view
- * switch, so there they float above the dock as they do upright.
+ * Landscape used to set the Terminal view's keys into the status line's row.
+ * The status line now lives in the side drawer (PowerDraw), so the keys float
+ * above the box in landscape as they do upright, over the band the terminal
+ * keeps free for them.
  */
-@media (max-height: 500px) and (min-width: 600px) {
-  .app[data-mobile] .pane .pane__terminal .xterm {
-    padding-bottom: var(--s-2);
-  }
-
-  .app[data-mobile] .session-composer .composer__keys {
-    top: 0;
-    right: var(--p-3);
-    bottom: auto;
-    left: auto;
-    width: 352px;
-    height: 48px;
-    padding: 2px 0;
-    background: transparent;
-    box-shadow: none;
-  }
-
-  .app[data-mobile] .session-composer[data-view='term'] .pstat .pstat__row {
-    padding-right: calc(352px + var(--p-3) * 2);
-  }
-
-  .app[data-mobile] .session-composer[data-view='term'] .astatus.pstat {
-    display: block;
-  }
-
-  .app[data-mobile] .session-composer[data-view='term'] .pstat__row > :not(.pkeys-toggle) {
-    visibility: hidden;
-  }
-
-  .app[data-mobile] .session-composer[data-view='term'] .pkeys-toggle {
-    visibility: visible;
-  }
-
-  /* Typing mode keeps this row in Terminal view: a command typed in the box
-     still wants Esc and the arrows beside it. */
-  .app[data-mobile]:has(.session-composer .composer__input:focus) .session-composer[data-view='term'] .astatus.pstat {
-    height: 48px;
-    opacity: 1;
-  }
-}
-
-/* A landscape too narrow for the chip beside the keys; Chat and Cards have it. */
-@media (max-height: 500px) and (min-width: 600px) and (max-width: 799px) {
-  .app[data-mobile] .session-composer[data-view='term'] .pstat .mchip {
-    display: none;
-  }
-}
 
 /*
  * Landscape puts the notch or the punch-hole on a long edge. The top and the

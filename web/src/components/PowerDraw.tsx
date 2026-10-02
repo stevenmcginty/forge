@@ -15,6 +15,7 @@ import type { Project } from '@shared/types'
 import { collectLeaves } from '@/lib/splitTree'
 import { Icon } from '@/components/Icon'
 import { useBackClose } from '../lib/back-stack'
+import { setDrawerSlot } from '../lib/drawer-slot'
 import { shortPath } from '../lib/paths'
 import { useForge } from '../state'
 import { openSheetCount } from './BottomSheet'
@@ -290,6 +291,21 @@ export function PowerDrawView({
   }, [mounted])
 
   useBackClose(open, onClose)
+
+  /*
+   * The pane slot: the open pane's controls (view, keys, state, model) are
+   * portalled in here by the session composer while the card is out.
+   */
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  const [closeSlot] = useState(() => () => closeRef.current())
+  useEffect(() => {
+    const el = paneRef.current
+    if (!mounted || !el) return undefined
+    setDrawerSlot({ el, close: closeSlot })
+    return () => setDrawerSlot(null)
+  }, [mounted, closeSlot])
 
   /* ---------------------------------------------------------- the drum */
 
@@ -852,6 +868,9 @@ export function PowerDrawView({
                 })}
               </div>
             )}
+
+            {/* The open pane's controls land here (SessionComposer portals them in). */}
+            <div ref={paneRef} className="pdraw__pane" data-testid="powerdraw-pane" />
           </div>
         </div>
       ) : null}
