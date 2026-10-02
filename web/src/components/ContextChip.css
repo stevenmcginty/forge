@@ -2,13 +2,11 @@
  * The context chip in the phone's top bar, and the panel it drops
  * (ContextChip.tsx). Tokens from phone-tokens.css.
  *
- * The closed chip is one mark with one thing big: the context ring. Everything
- * else is small, or worn on the ring — the model, the effort, the mode. Three
- * faces are on trial (`data-face`): the dial (the figure in the ring, a quiet
- * caption beside, no capsule), the medallion (the ring alone, everything
- * folded into it) and the lockup (the capsule, the ring large with the state
- * in its hole, the figure big beside it). The hit is the bar's 44px; the mark
- * drawn inside it is 40px at most, so the bar keeps its height.
+ * The closed chip is one mark with one thing big: the context ring, a dial
+ * with the figure in its hole. Everything else is small, or worn on the ring:
+ * the state on the arc's head, the mode on its shoulder, the model and the
+ * effort in a quiet caption beside it, no capsule. The hit is the bar's 44px;
+ * the mark drawn inside it is 40px at most, so the bar keeps its height.
  *
  * The level is never colour alone: warn draws the ring and the figure heavier,
  * full fills the mark solid. Bypass is never colour alone either: a solid
@@ -45,8 +43,10 @@
   position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 7px;
   box-sizing: border-box;
   height: 40px;
+  padding: 0 8px 0 4px;
   border-radius: var(--p-r-pill);
   transition:
     transform var(--p-dur-fast) var(--p-ease),
@@ -74,7 +74,7 @@
   opacity: 0.5;
 }
 
-/* ------------------------------------------------ the parts the faces share */
+/* ------------------------------------------------------------ the parts */
 
 /* The figure: tabular, tight, its "%" a size down and lifted. */
 .pctx__fig {
@@ -84,6 +84,10 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.03em;
   color: var(--p-ink);
+}
+
+.pctx__fig[data-wide] {
+  font-size: 11px;
 }
 
 .pctx__pc {
@@ -124,6 +128,7 @@
 /* The mode on the shoulder: a coin for Plan, Accept edits and Auto ... */
 .pctx__badge {
   position: absolute;
+  z-index: 1; /* over Bypass's rim, so its disc cuts the rim clear of the triangle */
   top: -3px;
   right: -5px;
   display: grid;
@@ -138,10 +143,11 @@
     0 0 0 2px var(--p-bg);
 }
 
-/* ... and for Bypass the solid triangle, bigger, cut out of what is under it by a disc of the bar's colour. */
+/* ... and for Bypass the solid triangle, bigger, cut out of what is under it by a disc of the bar's colour; up and in a
+   little, clear of the caption. */
 .pctx__badge[data-mark='bypass'] {
-  top: -5px;
-  right: -7px;
+  top: -6px;
+  right: -5px;
   width: 19px;
   height: 19px;
   color: var(--p-danger);
@@ -155,17 +161,28 @@
   margin-top: -1px;
 }
 
+/* On the left shoulder while the arc's head runs under the right one (ContextChip's SHOULDER_CLEAR_PCT). */
+.pctx__badge[data-side='left'] {
+  right: auto;
+  left: -5px;
+}
+
+.pctx__badge[data-side='left'][data-mark='bypass'] {
+  right: auto;
+  left: -6px;
+}
+
 /* The ring, its hole and what sits in it. */
-.pctx__dial,
-.pctx__ring {
+.pctx__dial {
   position: relative;
   flex: none;
   display: grid;
   place-items: center;
+  width: 36px;
+  height: 36px;
 }
 
-.pctx__dial > :is(.pring, .pctx__hole, .pctx__core),
-.pctx__ring > * {
+.pctx__dial > :is(.pring, .pctx__hole, .pctx__core) {
   grid-area: 1 / 1;
 }
 
@@ -199,14 +216,9 @@
   pointer-events: none;
 }
 
-/* The state's shape: in the lockup's hole, or riding the dial's arc head. */
+/* The state's shape, riding the arc's head. */
 .pctx .pstat__mark-in {
   color: var(--p-ink-2);
-}
-
-.pctx__ring .pstat__mark-in {
-  width: 9px;
-  height: 9px;
 }
 
 .pctx__head {
@@ -256,32 +268,12 @@
   background-color: var(--p-danger);
 }
 
-.pctx[data-level='full'] .pctx__core :is(.pctx__fig, .pctx__pc, .pctx__pips) {
+.pctx[data-level='full'] .pctx__core :is(.pctx__fig, .pctx__pc) {
   color: var(--p-bg);
   font-weight: 900;
 }
 
-/* ------------------------------------------------------------- the dial */
-
-.pctx[data-face='dial'] .pctx__face {
-  gap: 7px;
-  padding: 0 8px 0 4px;
-}
-
-.pctx[data-face='dial'] .pctx__dial {
-  width: 36px;
-  height: 36px;
-}
-
-/* Bypass's triangle up and in a little, clear of the caption. */
-.pctx[data-face='dial'] .pctx__badge[data-mark='bypass'] {
-  top: -6px;
-  right: -5px;
-}
-
-.pctx[data-face='dial'] .pctx__fig[data-wide] {
-  font-size: 11px;
-}
+/* ---------------------------------------------------------- the caption */
 
 /* The caption: the family over its version and the effort, a step quieter each line. */
 .pctx__cap {
@@ -318,216 +310,29 @@
   color: var(--p-ink-3);
 }
 
-/* -------------------------------------------------------- the medallion */
-
-.pctx[data-face='medallion'] .pctx__face {
-  justify-content: center;
-  width: 52px;
-}
-
-.pctx[data-face='medallion'] .pctx__dial {
-  width: 40px;
-  height: 40px;
-}
-
-.pctx[data-face='medallion'] .pctx__fig {
-  font-size: 13.5px;
-}
-
-.pctx[data-face='medallion'] .pctx__fig[data-wide] {
-  font-size: 11.5px;
-}
-
-.pctx__pips {
-  display: block;
-  color: var(--p-ink);
-}
-
-.pctx[data-face='medallion'] .pctx__badge {
-  top: -1px;
-  right: -6px;
-}
-
-.pctx[data-face='medallion'] .pctx__badge[data-mark='bypass'] {
-  top: -3px;
-  right: -8px;
-}
-
-/* The model's letter on a coin at the ring's foot. */
-.pctx__coin {
-  position: absolute;
-  right: -5px;
-  bottom: -3px;
-  display: grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  font: 800 9px / 1 var(--p-font);
-  color: var(--p-ink);
-  background: var(--p-surface);
-  box-shadow:
-    inset 0 0 0 1px var(--p-line-strong),
-    0 0 0 2px var(--p-bg);
-}
-
-/* ----------------------------------------------------------- the lockup */
-
-.pctx[data-face='lockup'] .pctx__face {
-  gap: 6px;
-  min-width: 78px;
-  padding: 0 9px 0 5px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--p-ink) 6%, transparent), transparent 80%),
-    var(--p-surface);
-  box-shadow:
-    inset 0 0 0 1px var(--p-line-strong),
-    inset 0 1px 0 color-mix(in srgb, var(--p-ink) 8%, transparent);
-}
-
-:root[data-appearance='light'] .pctx[data-face='lockup'] .pctx__face {
-  background:
-    linear-gradient(180deg, var(--p-raised), transparent 85%),
-    var(--p-surface);
-  box-shadow:
-    inset 0 0 0 1px var(--p-line-strong),
-    0 1px 2px rgba(0, 0, 0, 0.06);
-}
-
-.pctx__stack {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 2px;
-  min-width: 0;
-}
-
-.pctx[data-face='lockup'] .pctx__ring > .pring {
-  width: 28px;
-  height: 28px;
-}
-
-.pctx[data-face='lockup'] .pctx__fig {
-  font-size: 16px;
-  letter-spacing: -0.02em;
-}
-
-.pctx[data-face='lockup'] .pctx__stack > .pctx__dash {
-  width: 12px;
-  height: 2.5px;
-  margin: 6px 0 6px 1px;
-}
-
-.pctx[data-face='lockup'] .pctx__stack > .pctx__prompt {
-  margin: 2px 0 1px 1px;
-}
-
-.pctx__small {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  max-width: 50px;
-}
-
-.pctx__small .pctx__meter {
-  width: 10px;
-  height: 8px;
-}
-
-.pctx__small .pctx__fam {
-  font-size: 10px;
-  line-height: 12px;
-  font-weight: 600;
-  color: var(--p-ink-3);
-}
-
-.pctx__small > .pctx__dash {
-  width: 8px;
-  margin: 5px 0;
-}
-
-.pctx[data-face='lockup'] .pctx__badge {
-  top: -4px;
-  right: -4px;
-}
-
-.pctx[data-face='lockup'] .pctx__badge[data-mark='bypass'] {
-  top: -5px;
-  right: -7px;
-}
-
-.pctx[data-face='lockup'][data-mode='bypass'] .pctx__face,
-:root[data-appearance='light'] .pctx[data-face='lockup'][data-mode='bypass'] .pctx__face {
-  box-shadow:
-    inset 0 0 0 1.5px var(--p-danger),
-    inset 0 1px 0 color-mix(in srgb, var(--p-ink) 6%, transparent);
-}
-
-:root .pctx[data-face='lockup'][data-level='warn'] .pctx__face {
-  /* :root, to outweigh the light theme's capsule above. */
-  background: var(--p-attn-soft);
-  box-shadow: inset 0 0 0 1.5px var(--p-attn-line);
-}
-
-:root .pctx[data-face='lockup'][data-mode='bypass'][data-level='warn'] .pctx__face {
-  box-shadow: inset 0 0 0 1.5px var(--p-danger);
-}
-
-:root .pctx[data-face='lockup'][data-level='full'] .pctx__face {
-  background: var(--p-danger);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-ink) 18%, transparent);
-}
-
-.pctx[data-face='lockup'][data-level='full'] :is(.pctx__fig, .pctx__pc, .pctx__fam, .pctx__meter, .pstat__mark-in) {
-  color: var(--p-bg);
-}
-
-.pctx[data-face='lockup'][data-level='full'] .pring__arc {
-  stroke: var(--p-bg);
-}
-
-.pctx[data-face='lockup'][data-level='full'] .pring__track {
-  stroke: color-mix(in srgb, var(--p-bg) 35%, transparent);
-}
-
 /* The narrowest phones: a little tighter, so the project name keeps its room. */
 @media (max-width: 374px) {
-  .pctx[data-face='dial'] .pctx__face {
+  .pctx__face {
     gap: 5px;
     padding: 0 4px 0 3px;
   }
 
-  .pctx[data-face='dial'] .pctx__fam {
+  .pctx__fam {
     font-size: 11px;
   }
 
-  .pctx[data-face='dial'] .pctx__dial {
+  .pctx__dial {
     width: 34px;
     height: 34px;
   }
 
-  .pctx[data-face='dial'] .pctx__fig {
+  /* The smaller ring brings its arc's head nearer the shoulder: Bypass's triangle out a pixel, clear of it at 100%. */
+  .pctx__badge[data-mark='bypass'] {
+    right: -6px;
+  }
+
+  .pctx__fig {
     font-size: 12px;
-  }
-
-  .pctx[data-face='medallion'] .pctx__face {
-    width: 48px;
-  }
-
-  .pctx[data-face='lockup'] .pctx__face {
-    gap: 5px;
-    min-width: 72px;
-    padding: 0 6px 0 3px;
-  }
-
-  .pctx[data-face='lockup'] .pctx__ring > .pring {
-    width: 26px;
-    height: 26px;
-  }
-
-  .pctx[data-face='lockup'] .pctx__fig {
-    font-size: 15px;
   }
 }
 

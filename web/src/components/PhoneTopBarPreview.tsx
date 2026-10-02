@@ -7,7 +7,6 @@ import { pickEffort } from '../lib/pane-setup'
 import { publishPaneStatus } from '../lib/pane-status'
 import { publishUsage } from '../lib/usage'
 import { ForgeContext, type ForgeActions, type ForgeState, type Picture } from '../state'
-import { setChipFace, type ChipFace } from './ContextChip'
 import { TopBar } from './TopBar'
 import './ChatPreview.css'
 
@@ -24,8 +23,7 @@ import './ChatPreview.css'
  * URL: `&theme=<id>`, `&pct=<0-100|none>`, `&tab=claude|codex|shell`,
  * `&cond=waiting|reconnecting|frozen`, `&waiting=0` (nobody asking),
  * `&mode=default|plan|accept-edits|bypass|auto` (the Claude pane's mode),
- * `&model=<what its status line prints>`, `&effort=low|medium|high|xhigh|max`,
- * `&face=a|b|c` (the context chip's dial, medallion or lockup).
+ * `&model=<what its status line prints>`, `&effort=low|medium|high|xhigh|max`.
  */
 
 const PROJECT: Project = {
@@ -73,8 +71,6 @@ function param(name: string): string | null {
 
 const HOUR = 3600
 
-const FACES: Record<string, ChipFace> = { a: 'dial', b: 'medallion', c: 'lockup' }
-
 export function PhoneTopBarPreview(): ReactNode {
   const { themeId, setTheme } = useDeckTheme(true)
   const [seeded, setSeeded] = useState(false)
@@ -98,8 +94,6 @@ export function PhoneTopBarPreview(): ReactNode {
     const effort = param('effort')
     if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'xhigh' || effort === 'max') pickEffort('p1', effort)
   }
-  const face = FACES[param('face') ?? '']
-  if (face) setChipFace(face)
   const pane = PANES[tab]
 
   const state = useMemo(() => {
