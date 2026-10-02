@@ -2090,6 +2090,22 @@ body {
   outline-offset: -2px;
 }
 
+/*
+ * The context chip (ContextChip.css) takes a seat in this row on every pane,
+ * so on a phone-width bar the waiting pill keeps its "!" and its count and
+ * gives its word to the project name — as it already does under 375px. The
+ * pill's label still says "N waiting" to a screen reader.
+ */
+@media (max-width: 430px) {
+  .ptop__right:has(.pctx) .waitpill__word {
+    display: none;
+  }
+
+  .ptop__right:has(.pctx) .waitpill__face {
+    padding-right: 10px;
+  }
+}
+
 /* The asleep dot sits a touch smaller; the other three are drawn in ConnectionSheet.css. */
 .ptop__link .linkdot {
   width: 11px;

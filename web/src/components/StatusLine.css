@@ -290,17 +290,13 @@
   transition: stroke-dasharray var(--p-dur) var(--p-ease);
 }
 
-:is(.pstat, .pgauge, .bsheet-layer) {
-  --p-ring-sky: var(--p-ring-sky, #63b8ff);
-  --p-ring-blue: var(--p-ring-blue, #547bd8);
-  --p-ring-amber: var(--p-ring-amber, #e6a23c);
-  --p-ring-red: var(--p-ring-red, #f06a57);
-}
-
-.pring__arc--q1 { stroke: var(--p-ring-sky); }
-.pring__arc--q2 { stroke: var(--p-ring-blue); }
-.pring__arc--q3 { stroke: var(--p-ring-amber); }
-.pring__arc--q4 { stroke: var(--p-ring-red); }
+/* The quarters' colours come from phone-tokens.css, with the dark values as a
+   fallback. (A `--p-ring-sky: var(--p-ring-sky, …)` re-declaration here was a
+   cycle, which made the token invalid and left the sheet's gauge arcless.) */
+.pring__arc--q1 { stroke: var(--p-ring-sky, #63b8ff); }
+.pring__arc--q2 { stroke: var(--p-ring-blue, #547bd8); }
+.pring__arc--q3 { stroke: var(--p-ring-amber, #e6a23c); }
+.pring__arc--q4 { stroke: var(--p-ring-red, #f06a57); }
 
 :is(.pstat__ctx, .pgauge)[data-level='warn'] .pring__arc {
   stroke: var(--p-attn);
@@ -630,6 +626,24 @@
 
 .pgauge[data-level='full'] .pgauge__big {
   color: var(--p-danger);
+}
+
+/* The level in words beside the figure (the top bar's drop-down): a bordered
+   tag, so warn and full read without the colour. */
+.pgauge__tag {
+  display: inline-block;
+  margin-left: var(--p-2);
+  padding: 3px 8px;
+  vertical-align: 2px;
+  border: 1px solid currentColor;
+  border-radius: var(--p-r-pill);
+  font: 700 12px / 1 var(--p-font);
+}
+
+.pgauge[data-level='full'] .pgauge__tag {
+  color: var(--p-bg);
+  background: var(--p-danger);
+  border-color: var(--p-danger);
 }
 
 .pgauge__sub {

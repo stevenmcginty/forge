@@ -69,11 +69,11 @@ export const FACES: { face: PaneFace; label: string; icon: ReactNode }[] = [
 ]
 
 /** The pane's condition in one word, when it has one worth a word. */
-type Condition = 'waiting' | 'reconnecting' | 'frozen'
+export type Condition = 'waiting' | 'reconnecting' | 'frozen'
 
 /* "Needs you", not "Waiting": the desktop's StateChip word for the same state,
    so the phone and the desk say one thing for it. */
-const CONDITION: Record<Condition, { word: string; mark: string; title: string }> = {
+export const CONDITION: Record<Condition, { word: string; mark: string; title: string }> = {
   waiting: { word: 'Needs you', mark: '!', title: 'This pane has settled on a question and is waiting on an answer' },
   reconnecting: {
     word: 'Reconnecting',
@@ -248,26 +248,9 @@ export function StatusLine({
         data-condition={condition ?? undefined}
         style={{ '--pane-accent': badgeColor(profile) } as CSSProperties}
       >
-        <div className="pdpane__top">
-          {condition ? (
-            <button
-              type="button"
-              className="pstat__cond"
-              data-condition={condition}
-              title={CONDITION[condition].title}
-              aria-label={`${CONDITION[condition].word} — ${CONDITION[condition].title}. Details`}
-              onClick={() => setSheet(true)}
-            >
-              <span className="pstat__mark" aria-hidden="true">
-                {CONDITION[condition].mark}
-              </span>
-              <span className="pstat__word">{CONDITION[condition].word}</span>
-            </button>
-          ) : (
-            lead
-          )}
-        </div>
-        {/* Model, effort and permission mode: always on show in the drawer,
+        {/* The pane's state and context ring live in the phone's top bar now
+            (ContextChip), always on show; the drawer starts at the model.
+            Model, effort and permission mode: always on show in the drawer,
             greyed while the pane cannot take a pick. */}
         {chip ?? null}
         {!shell && onFlipView && pickView ? (
@@ -281,7 +264,6 @@ export function StatusLine({
           />
         ) : null}
         {onToggleKeys && face === 'term' ? <KeysSwitch shown={keysShown} onClick={onToggleKeys} /> : null}
-        {sheetEl}
       </section>
     )
   }
@@ -469,7 +451,7 @@ function KeysSwitch({ shown, onClick }: { shown: boolean; onClick: () => void })
 /* ----------------------------------------------------------------- state */
 
 /** "Working, 12m" for a screen reader; the row shows the same in a word and a shape. */
-function stateSaid(pane: PhonePaneState): string {
+export function stateSaid(pane: PhonePaneState): string {
   return pane.clock ? `${pane.word}, ${pane.clock}` : pane.word
 }
 
@@ -496,7 +478,7 @@ const PULSE_HOLD_MS = 620
  * a class put straight on the node, no render per burst, and no listener at
  * all unless the pane is working.
  */
-function StateMark({ state, paneId }: { state: DeckAgentState; paneId: string | null }): ReactNode {
+export function StateMark({ state, paneId }: { state: DeckAgentState; paneId: string | null }): ReactNode {
   const { actions } = useForge()
   const ref = useRef<SVGSVGElement | null>(null)
   const working = state === 'working'
@@ -548,7 +530,7 @@ function StateMark({ state, paneId }: { state: DeckAgentState; paneId: string | 
  * A ring filled to `pct`. The number always sits beside it in words — the
  * colour is the third signal, never the first.
  */
-function Ring({ pct, size, stroke = 2.5 }: { pct: number; size: number; stroke?: number }): ReactNode {
+export function Ring({ pct, size, stroke = 2.5 }: { pct: number; size: number; stroke?: number }): ReactNode {
   const r = (size - stroke) / 2
   const fill = Math.max(0, Math.min(100, pct))
   return (
@@ -595,26 +577,57 @@ function PaneSheet({
   footer: string[]
   screen: ScreenPane | null
 }): ReactNode {
-  const [showFooter, setShowFooter] = useState(false)
-  const { context, limits } = usage
   return (
     <BottomSheet
       open={open}
-      onClose={() => {
-        setShowFooter(false)
-        onClose()
-      }}
+      onClose={onClose}
       label={`${profile.name} details`}
       title={profile.name}
       subtitle={place ? <span className="mono">{place}</span> : undefined}
       testId="pane-sheet"
     >
+      <PaneDetails usage={usage} footer={footer} screen={screen} onDone={onClose} />
+    </BottomSheet>
+  )
+}
+
+/** How a context level is said in words, beside its colour and the number. */
+const LEVEL_WORD = { warn: 'Getting full', full: 'Nearly full' } as const
+
+/**
+ * What the pane's sheet holds, below its heading: the context window, the
+ * plan limits, Copy screen and the raw footer. Drawn by the bottom sheet here
+ * and by the top bar's drop-down (ContextChip), so the two say one thing.
+ * `levelWord` adds the level in words ("Getting full") beside the gauge.
+ */
+export function PaneDetails({
+  usage,
+  footer,
+  screen,
+  onDone,
+  levelWord = false
+}: {
+  usage: PaneUsage
+  footer: string[]
+  screen: ScreenPane | null
+  /** After Copy screen: whatever holds this goes. */
+  onDone: () => void
+  levelWord?: boolean
+}): ReactNode {
+  const [showFooter, setShowFooter] = useState(false)
+  const { context, limits } = usage
+  const level = context ? usageLevel(context.usedPct) : 'calm'
+  return (
+    <>
       {context ? (
         <SheetSection title="Context window">
-          <div className="pgauge" data-level={usageLevel(context.usedPct)}>
+          <div className="pgauge" data-level={level}>
             <Ring pct={context.usedPct} size={48} stroke={4} />
             <div className="pgauge__text">
-              <span className="pgauge__big">{context.usedPct}% used</span>
+              <span className="pgauge__big">
+                {context.usedPct}% used
+                {levelWord && level !== 'calm' ? <span className="pgauge__tag">{LEVEL_WORD[level]}</span> : null}
+              </span>
               <span className="pgauge__sub">
                 {context.from === 'frame'
                   ? context.usedTokens !== undefined && context.windowTokens
@@ -640,7 +653,7 @@ function PaneSheet({
           disabled={!screen}
           onClick={() => {
             screen?.copyScreen()
-            onClose()
+            onDone()
           }}
           testId="copy-screen"
         />
@@ -654,7 +667,7 @@ function PaneSheet({
         ) : null}
         {showFooter && footer.length ? <pre className="psheet__footer mono">{footer.join('\n')}</pre> : null}
       </SheetSection>
-    </BottomSheet>
+    </>
   )
 }
 
@@ -684,7 +697,7 @@ function LimitRow({ label, limit }: { label: string; limit: UsageLimit }): React
 
 /* --------------------------------------------------------------- helpers */
 
-function placeOf(status: PaneStatus | undefined): string {
+export function placeOf(status: PaneStatus | undefined): string {
   if (status?.branch && status?.cwd) return `${shortPath(status.cwd)} · ${status.branch}`
   if (status?.branch) return status.branch
   if (status?.cwd) return shortPath(status.cwd)

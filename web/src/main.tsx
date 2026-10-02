@@ -42,6 +42,7 @@ import { AskBannerPreview } from './components/AskBannerPreview'
 import { ChatPreview } from './components/ChatPreview'
 import { CloudLaunchPreview } from './components/CloudLaunchPreview'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { PhoneTopBarPreview } from './components/PhoneTopBarPreview'
 import { PowerDrawPreview } from './components/PowerDrawPreview'
 import { Preview } from './components/Preview'
 import { RepoProvider } from './lib/repo'
@@ -105,6 +106,8 @@ createRoot(host).render(
       <CloudLaunchPreview />
     ) : preview === 'decktop' ? (
       <TopBarPreview />
+    ) : preview === 'phonetop' ? (
+      <PhoneTopBarPreview />
     ) : (
       <ForgeProvider>
         <RepoProvider>

@@ -8,9 +8,11 @@ import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget 
 import type { TerminalTab } from '@shared/types'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
 import { ConnectionSheet, LinkDot, linkStateOf, linkWord, useTrackLastHeard } from './ConnectionSheet'
+import { ContextChip } from './ContextChip'
 import { HandoffMenu } from './HandoffMenu'
 import { MoreSheet } from './MoreSheet'
 import { DeckTopBar, type DeckMenuRow } from '../deck/DeckTopBar'
+import { useScreenPane } from '../lib/pane-screen'
 import type { BarPlace, DeckView } from '../deck/view'
 import { WaitingBadge, WaitingPill } from './WaitingPill'
 import { rustDeskLink } from './Workspace'
@@ -185,6 +187,15 @@ export function TopBar({
   }, [paneId])
 
   /* ------------------------------------------------------------ the phone */
+  /**
+   * The context chip reads the pane on screen — the focused one, which the
+   * pane itself publishes (lib/pane-screen.ts) and re-publishes on a tab
+   * change — and falls back to the active pane before any has published.
+   */
+  const screenPane = useScreenPane()
+  const shownLeaf =
+    (screenPane ? workspace.tabs.flatMap((t) => collectLeaves(t.root)).find((l) => l.id === screenPane.paneId) : undefined) ?? pane
+  const shownProfile = shownLeaf ? resolveProfile(profiles, shownLeaf.profileId) : null
   const moreBtnRef = useRef<HTMLButtonElement | null>(null)
   /** The deck face's "…": the hand-off menu hangs from it, as it hangs from ⋯ on a phone. */
   const deckMenuRef = useRef<HTMLButtonElement | null>(null)
@@ -313,6 +324,8 @@ export function TopBar({
 
           <div className="ptop__right">
             {offline ? null : <WaitingPill />}
+            {/* The pane's context, always on show; a tap drops its details from the bar. */}
+            <ContextChip paneId={shownLeaf?.id ?? null} profile={shownProfile} />
             <button
               type="button"
               className="ptop__btn ptop__link"

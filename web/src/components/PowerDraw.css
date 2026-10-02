@@ -570,8 +570,9 @@
 /*
  * The open pane's controls, portalled in by the session composer (see
  * lib/drawer-slot.ts): a tray of slightly deeper glass under the drum, set
- * off by a hairline that fades at its ends. Its state and model on one line,
- * the view switch under them, and in Terminal view the keys as a switch. It
+ * off by a hairline that fades at its ends. The model pill, the view switch
+ * under it, and in Terminal view the keys as a switch (the pane's state and
+ * context ring are in the top bar, ContextChip). It
  * rises in a beat after the card, so the eye lands on the drum first.
  */
 .pdraw__pane {
@@ -614,14 +615,6 @@
     opacity: 0;
     transform: translateY(10px);
   }
-}
-
-.pdpane__top {
-  display: flex;
-  align-items: center;
-  gap: var(--p-2);
-  min-height: var(--p-hit);
-  padding: 0 0 0 var(--p-1);
 }
 
 .app[data-mobile] .pdpane .mchip {
