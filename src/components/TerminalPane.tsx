@@ -25,7 +25,6 @@ import { ActivityDot } from './ActivityDot'
 import { DictationCue } from './DictationCue'
 import { AgentBadge } from './AgentBadge'
 import { AgentChooser } from './AgentChooser'
-import { AttachButton } from './AttachButton'
 import { ForemanFooter, ForemanSeed, ForemanToggle } from './ForemanBar'
 import { HandoffMenu } from './HandoffMenu'
 import { Icon } from './Icon'
@@ -411,7 +410,7 @@ export const TerminalPane = memo(function TerminalPane({
     onAttach(tracked ? [tracked] : droppedFilePaths(e))
   }
 
-  /** Files dropped on the pane or picked with its paperclip: their quoted paths, typed in. */
+  /** Files dropped on the pane: their quoted paths, typed in. */
   const onAttach = (paths: string[]): void => {
     const quoted = paths.map((p) => `"${p}"`)
     if (quoted.length === 0) return
@@ -612,7 +611,6 @@ export const TerminalPane = memo(function TerminalPane({
               <Icon name="restart" size={13} />
             </button>
           ) : null}
-          <AttachButton name={name} className="ghost-btn pane__action" size={13} onPaths={onAttach} />
           {handoffAble ? (
             <button
               ref={handoffBtnRef}

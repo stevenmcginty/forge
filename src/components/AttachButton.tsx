@@ -3,7 +3,7 @@ import { filePaths } from '@/lib/paths'
 import { Icon } from './Icon'
 
 /**
- * The paperclip on a pane's bar: pick files, and their paths go to the pane
+ * The paperclip on a Wall tile's bar and the agent bar: pick files, and their paths go to the pane
  * exactly as a file dropped on it would. The dialog is the browser's own file
  * box; the preload turns each pick into its real path, so nothing is copied
  * or uploaded anywhere — the agent reads the file where it already sits.
@@ -12,12 +12,15 @@ export function AttachButton({
   name,
   className,
   size,
+  title = 'Attach a file — its path goes into this terminal',
   onPaths
 }: {
   /** The pane's name, for the label. */
   name: string
   className: string
   size: number
+  /** The tooltip: where the path will go. */
+  title?: string
   onPaths: (paths: string[]) => void
 }): ReactNode {
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -27,7 +30,7 @@ export function AttachButton({
         type="button"
         className={className}
         aria-label={`Attach a file to ${name}`}
-        title="Attach a file — its path goes into this terminal"
+        title={title}
         onClick={(e) => {
           e.stopPropagation()
           inputRef.current?.click()

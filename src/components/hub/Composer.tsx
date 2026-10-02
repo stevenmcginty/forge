@@ -22,6 +22,7 @@ import { useActiveTab, useApp } from '@/state/AppState'
 import type { HubAction, HubCaption } from '@/state/VoiceHubController'
 import { readCueLevels, useBarCue } from '../DictationCue'
 import { CueGlyph, type CuePhase } from '../DictationCueView'
+import { AttachButton } from '../AttachButton'
 import { DictationEdge } from '../DictationEdge'
 import { Icon } from '../Icon'
 import { setBarTarget, useBarTarget } from './barMode'
@@ -524,7 +525,10 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     window.clearTimeout(dropWatch.current)
     setFileOver(0)
     const tracked = e.dataTransfer.getData(PATH_DRAG_TYPE)
-    const paths = tracked ? [tracked] : droppedFilePaths(e)
+    insertPaths(tracked ? [tracked] : droppedFilePaths(e))
+  }
+  /** Files dropped on the bar or picked with its paperclip: their quoted paths, at the caret. */
+  const insertPaths = (paths: string[]): void => {
     if (paths.length === 0) return
     const quoted = paths.map((p) => `"${p}"`).join(' ')
     const field = fieldRef.current
@@ -770,6 +774,15 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
               else backToPane()
             }
           }}
+        />
+
+        {/* Pick files: their paths go into the words, as a drop on the bar does. */}
+        <AttachButton
+          name="the bar"
+          className="comp__act"
+          size={13}
+          title="Attach a file — its path goes into the bar"
+          onPaths={insertPaths}
         />
 
         {/* Where the words go: the pane (or Forge), and what that pane's agent runs. One well. */}
