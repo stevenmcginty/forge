@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
+import { agentModels, BUILTIN_AGENT_PROFILES, effortLevels, permissionModes } from '@shared/agents'
+import type { ClaudePermissionMode } from '@shared/types'
 import { useDeckTheme } from '../deck/theme'
 import { useDrawerSlot } from '../lib/drawer-slot'
 import type { PaneFace } from '../lib/pane-status'
@@ -32,6 +33,9 @@ function DemoPane(): ReactNode {
   const slot = useDrawerSlot()
   const [view, setView] = useState<PaneFace>(() => (new URLSearchParams(location.search).get('view') as PaneFace) || 'chat')
   const [keys, setKeys] = useState(false)
+  const [mode, setMode] = useState<ClaudePermissionMode>(() =>
+    new URLSearchParams(location.search).get('bypass') === '1' ? 'bypass' : 'plan'
+  )
   if (!slot) return null
   const profile = BUILTIN_AGENT_PROFILES.find((p) => /claude/i.test(p.name)) ?? BUILTIN_AGENT_PROFILES[0]!
   return createPortal(
@@ -49,14 +53,16 @@ function DemoPane(): ReactNode {
         <ModelChip
           paneId="demo"
           agentName={profile.name}
-          models={[]}
-          currentModelId={null}
-          modelText="Opus 4.1"
-          effortLevels={[]}
-          modes={[]}
-          currentModeId="plan"
-          modeText="Plan"
+          models={agentModels(profile.command)}
+          currentModelId={agentModels(profile.command)[0]?.id ?? null}
+          onModel={() => undefined}
+          effortLevels={effortLevels(profile.command)}
+          onEffort={() => undefined}
+          modes={permissionModes(profile.command)}
+          currentModeId={mode}
+          onMode={setMode}
           disabled={false}
+          variant="tiles"
         />
       }
     />,

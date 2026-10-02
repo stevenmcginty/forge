@@ -27,6 +27,14 @@ import './ModelChip.css'
  * Bypass — was the first thing an ellipsis ate. Stacked, each line truncates on
  * its own: effort gives way before the model, and the mode keeps a line.
  */
+/**
+ * The effort picked from this phone, per pane. Kept outside the chip: the
+ * side drawer mounts it only while the drawer is out, and no CLI prints the
+ * effort back, so a pick held in the chip's own state would be gone the next
+ * time the drawer opened.
+ */
+const effortPicked = new Map<string, EffortLevel>()
+
 export function ModelChip({
   paneId,
   agentName,
@@ -40,7 +48,8 @@ export function ModelChip({
   currentModeId,
   modeText,
   onMode,
-  disabled
+  disabled,
+  variant = 'chip'
 }: {
   paneId: string
   /** "Claude Code" — the sheet's heading. */
@@ -58,10 +67,15 @@ export function ModelChip({
   modeText?: string
   onMode?: (id: ClaudePermissionMode) => void
   disabled: boolean
+  /**
+   * `tiles`: the side drawer's face — Model, Effort and Mode as three tiles
+   * side by side, each naming what is in force, each opening the same sheet.
+   */
+  variant?: 'chip' | 'tiles'
 }): ReactNode {
   const [open, setOpen] = useState(false)
   const [pickedModel, setPickedModel] = useState<Record<string, string>>({})
-  const [pickedEffort, setPickedEffort] = useState<Record<string, EffortLevel>>({})
+  const [pickedEffort, setPickedEffort] = useState<Record<string, EffortLevel>>(() => Object.fromEntries(effortPicked))
 
   // The pane's own reading wins once it moves: a pick was only standing in for it.
   useEffect(() => {
@@ -91,8 +105,46 @@ export function ModelChip({
 
   const stop = (event: MouseEvent | KeyboardEvent): void => event.stopPropagation()
 
+  const face =
+    variant === 'tiles' ? (
+      <div className="mtiles" role="group" aria-label={`${agentName}: model, effort and mode`}>
+        {(
+          [
+            { key: 'model', title: 'Model', value: modelWord ?? 'Pick', warn: false },
+            { key: 'effort', title: 'Effort', value: effortWord ?? (hasEffort ? 'Pick' : 'None'), warn: false },
+            { key: 'mode', title: 'Mode', value: modeWord ?? 'Pick', warn: bypass }
+          ] as const
+        ).map((tile) => (
+          <button
+            key={tile.key}
+            type="button"
+            className="mtile"
+            data-kind={tile.key}
+            data-warn={tile.warn ? 'true' : undefined}
+            data-open={open ? 'true' : undefined}
+            disabled={disabled}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-label={`${tile.title}: ${tile.value} — change model, effort or mode`}
+            onClick={(event) => {
+              stop(event)
+              setOpen(true)
+            }}
+            onKeyDown={stop}
+          >
+            <span className="mtile__title">{tile.title}</span>
+            <span className="mtile__value">
+              {tile.warn ? <WarnMark size={13} /> : null}
+              <span className="mtile__word">{tile.value}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    ) : null
+
   return (
     <>
+      {face ?? (
       <button
         type="button"
         className="mchip"
@@ -126,6 +178,7 @@ export function ModelChip({
           <Icon name="chevronDown" size={12} />
         </span>
       </button>
+      )}
       {/* The sheet is portalled, but React still bubbles its taps up through
           the strip, whose own click opens the raw footer. They stop here. */}
       <span className="mchip__sheet" onClick={(event) => event.stopPropagation()} onKeyDown={stop}>
@@ -170,6 +223,7 @@ export function ModelChip({
                     title={level.note}
                     onClick={() => {
                       setOpen(false)
+                      effortPicked.set(paneId, level.id)
                       setPickedEffort((all) => ({ ...all, [paneId]: level.id }))
                       onEffort?.(level.id)
                     }}

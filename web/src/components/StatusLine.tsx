@@ -266,17 +266,20 @@ export function StatusLine({
           ) : (
             lead
           )}
-          <span className="pstat__gap" />
-          {chip && !condition && (shell || pane.state !== 'dormant') ? chip : null}
         </div>
-        {!shell && onFlipView && pickView ? <Segments
+        {/* Model, effort and permission mode: always on show in the drawer,
+            greyed while the pane cannot take a pick. */}
+        {chip ?? null}
+        {!shell && onFlipView && pickView ? (
+          <Segments
             view={face}
             labelled
             onPick={(next) => {
               pickView(next)
               onPicked?.()
             }}
-          /> : null}
+          />
+        ) : null}
         {onToggleKeys && face === 'term' ? <KeysSwitch shown={keysShown} onClick={onToggleKeys} /> : null}
         {sheetEl}
       </section>

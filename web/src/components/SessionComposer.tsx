@@ -1116,6 +1116,7 @@ export function SessionComposer({
         modeText={rung === 'auto' ? 'Auto' : undefined}
         onMode={ladder.length ? (mode) => void sendMode(mode) : undefined}
         disabled={!canType}
+        variant="tiles"
       />
     ) : undefined
 
