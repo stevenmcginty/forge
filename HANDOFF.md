@@ -1,5 +1,12 @@
 # Handoff
 
+## Dictation key reminder, desktop + phone (2026-10-02; merged to master and pushed; Forge NOT restarted)
+
+- **Asked (Steve):** phone dictation is "crucial", but a fresh install has no Groq or Gemini key, so it fails for friends. Remind them at every launch until a key is set; X closes it for now; "Don't remind me again" stops it. He picked: show it on the computer AND the phone, with a paste box on both.
+- **Built (foreman, two builders, commits 0e092b2 + 6c45e6c):** desktop `src/components/SpeechKeyPrompt.tsx` (mounted in `App.tsx`, waits for Onboarding / AccountPrompt / WhatsNew), new setting `speechKeyReminderOff`. Main: `checkGroqKey` / `saveSpeechKey` in `electron/voice-bridge.ts` (requires `gsk_`, then GET /models). Wire: feature `speech-key`, requests `speech-key-status` and `speech-key-set` (the phone never receives a key). The renderer gets a keyless "key saved" nudge and reads the key back from `store.snapshot()`, so its whole-settings save cannot wipe a key saved from the phone. Phone `web/src/components/SpeechKeyCard.tsx` (in `Workspace.tsx`, dismissal in localStorage, forced open after a no-key dictation error), preview `?preview=speechkey`. Fixed the error text "Settings → Voice" to "Settings → Keys". Settings → Keys has a "Get a free key" hint under Groq.
+- **Checked:** typecheck 0, lint:hooks 0, web:build 0; screenshots in `forge-speechkey\shots\`; refusal paths and X tried on a throwaway Forge. **NOT tried:** a save with a real Groq key, and phone → desktop save over a live socket.
+- **Next:** Steve said "just push it" without a real-key check. CI releases the desktop to friends; his own Forge needs a restart for the main-process half. First real-key save is the live test. Worktree `C:SERSSTEVEDESKTOPORGE-SPEECHKEY` HAS A JUNCTIONED NODE_MODULES: UNLINK THE JUNCTION BEFORE REMOVING IT.
+
 ## Phone: context chip in the top bar; paperclip to the right (2026-10-02; master c167b67 + d44ed57; web only; NOT pushed at write time)
 
 - **Asked (Steve):** the context read-out only showed inside the PowerDraw; put it top right, left of the green dot and the "⋯", always there, for the tab on screen, and drop a panel down on a tap. Then: the paperclip should sit on the right of the box, in thumb reach of the dictation disc.
