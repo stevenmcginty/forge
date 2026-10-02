@@ -12,8 +12,30 @@ import { ChatView } from './ChatView'
 import { Composer } from './Composer'
 import { Feed } from './Feed'
 import { ListenUnit, VoiceFan } from './PhoneListen'
+import { PowerDrawView } from './PowerDraw'
 import type { WebVoiceState } from '../deck/voiceAgent'
 import type { WebVoiceAgent } from '../deck/voice-words'
+
+const PREVIEW_PARAMS = new URLSearchParams(location.search)
+
+/** The side drawer, so the box's Attach tiles can be seen in it: `&drawer=1` opens it. */
+function PreviewDrawer(): ReactNode {
+  const [open, setOpen] = useState(PREVIEW_PARAMS.get('drawer') === '1')
+  return (
+    <PowerDrawView
+      projects={[
+        { id: 'forge', name: 'forge', path: 'C:\\Users\\steve\\Desktop\\forge', color: '#ff5f6d', panes: 1, asking: false },
+        { id: 'car', name: 'car-harness', path: 'C:\\Users\\steve\\Desktop\\car-harness', color: '#5ab0ff', panes: 2, asking: true },
+        { id: 'kora', name: 'koraos', path: 'C:\\Users\\steve\\Desktop\\koraos', color: '#3ad0b5', panes: 0, asking: false }
+      ]}
+      currentId="forge"
+      open={open}
+      onOpen={() => setOpen(true)}
+      onClose={() => setOpen(false)}
+      onSelect={() => setOpen(false)}
+    />
+  )
+}
 
 const PREVIEW_VOICE = {
   start: () => undefined,
@@ -529,7 +551,9 @@ function PreviewPane({
           autoFocus={false}
           voice={mobile ? PREVIEW_VOICE : undefined}
           listen={mobile ? <PreviewListen /> : undefined}
+          onStop={mobile && PREVIEW_PARAMS.get('busy') === '1' ? () => undefined : undefined}
         />
+        {mobile ? <PreviewDrawer /> : null}
       </div>
     </div>
   )

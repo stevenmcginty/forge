@@ -630,6 +630,42 @@
   cursor: default;
 }
 
+/* Stop at the box's front while an agent works: a solid ink round in the
+   box's own inset, its square cut out of it, so it is the loudest thing in
+   the box without being a third disc on the row. */
+.app[data-mobile] .composer .composer__lead[data-kind='stop'] {
+  width: var(--p-hit);
+  min-width: var(--p-hit);
+  height: var(--p-hit);
+  margin: 5px 0 5px 5px;
+  background: var(--p-ink);
+  color: var(--p-bg);
+  box-shadow: none;
+  animation: composer-stop-in var(--p-dur-glide) var(--p-glide);
+}
+
+.app[data-mobile] .composer .composer__lead[data-kind='stop']:disabled {
+  background: var(--p-press);
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .composer .composer__lead[data-kind='stop'] .composer__stop-ring {
+  border-color: color-mix(in srgb, var(--p-bg) 35%, transparent);
+  border-top-color: var(--p-bg);
+}
+
+.app[data-mobile] .composer .composer__lead[data-kind='stop']:disabled .composer__stop-ring {
+  border-color: var(--p-line-strong);
+  border-top-color: var(--p-ink);
+}
+
+@keyframes composer-stop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
 /* No "+" at the box's front: the words start a normal margin in. */
 .app[data-mobile] .composer__field[data-lead='none'] .composer__input {
   padding-left: var(--p-4);

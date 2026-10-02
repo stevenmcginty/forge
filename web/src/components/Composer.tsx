@@ -13,6 +13,7 @@ import {
   type PointerEvent,
   type ReactNode
 } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from '@/components/Icon'
 import { Popover, PopoverRow, PopoverSection } from '@/components/Popover'
 import { BottomSheet, SheetRow } from './BottomSheet'
@@ -21,6 +22,7 @@ import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import type { VoiceMode, VoiceState } from '../lib/dictate'
 import { allFilesFromDataTransfer, formatFileSize, isImageFile } from '../lib/file'
+import { useDrawerSlot } from '../lib/drawer-slot'
 import { useMobile } from '../lib/mobile'
 import type { LevelMonitor } from '../lib/voice-level'
 import './Composer.css'
@@ -272,6 +274,8 @@ export function Composer({
 }): ReactNode {
   const field = useRef<HTMLTextAreaElement | null>(null)
   const mobile = useMobile()
+  // The side drawer's slot, while it is out: Attach is drawn there on the phone.
+  const drawer = useDrawerSlot()
   const [files, setFiles] = useState<File[]>([])
   /**
    * Armed by the key row's Ctrl and spent on the next letter typed — the one
@@ -656,6 +660,48 @@ export function Composer({
       setOpenPick(null)
       input?.click()
     }
+    /** Something at the box's front: Cancel, Undo, Retry or Stop. Nothing else lives there now. */
+    const leadShown = live || (reviewing && voiceControls !== undefined) || (onVoiceRetry !== undefined && phase === 'idle') || phoneStop
+    /*
+     * Attach, in the side drawer (PowerDraw) rather than at the box's front:
+     * the bottom keeps the box and the two voice discs. The file inputs stay
+     * here, in the form; the drawer's tiles click them and put the drawer away.
+     */
+    const attachTiles =
+      drawer && !disabled
+        ? createPortal(
+            <section className="pdattach" aria-label="Attach to your message">
+              <span className="pdattach__label">Attach</span>
+              <div className="pdattach__tiles">
+                {(
+                  [
+                    { key: 'camera', icon: 'camera', label: 'Camera', input: cameraInputRef },
+                    { key: 'image', icon: 'image', label: 'Photos', input: imageInputRef },
+                    { key: 'file', icon: 'file', label: 'File', input: fileInputRef }
+                  ] as const
+                ).map((tile, i) => (
+                  <button
+                    key={tile.key}
+                    type="button"
+                    className="pdattach__tile"
+                    data-kind={tile.key}
+                    style={{ '--i': i } as CSSProperties}
+                    onClick={() => {
+                      drawer.close()
+                      pick(tile.input.current)
+                    }}
+                  >
+                    <span className="pdattach__icon" aria-hidden="true">
+                      <Icon name={tile.icon} size={20} />
+                    </span>
+                    <span className="pdattach__word">{tile.label}</span>
+                  </button>
+                ))}
+              </div>
+            </section>,
+            drawer.el
+          )
+        : null
     return (
       <form
         className="composer"
@@ -703,7 +749,7 @@ export function Composer({
             onRemove={(index) => setFiles((current) => current.filter((_, i) => i !== index))}
           />
         ) : null}
-        <div className="composer__row" data-stop={phoneStop ? 'true' : undefined}>
+        <div className="composer__row">
           {listen}
           {onShowChat ? (
             <button
@@ -717,7 +763,7 @@ export function Composer({
               <span>Chat</span>
             </button>
           ) : null}
-          <div className="composer__field" data-phase={phase} data-lead={phoneStop && !onVoiceRetry ? 'none' : undefined}>
+          <div className="composer__field" data-phase={phase} data-lead={leadShown ? undefined : 'none'}>
             {live ? (
               <button
                 type="button"
@@ -762,24 +808,31 @@ export function Composer({
               >
                 <Icon name="refresh" size={20} />
               </button>
-            ) : phoneStop ? null : (
-              // While the agent works "+" gives its room to Stop; a pasted
-              // image still attaches, and "+" is back when the agent is done.
+            ) : phoneStop ? (
+              /* Stop, inside the box at its front while an agent works: a
+                 square says Stop; a spinning ring says Stopping; a still ring,
+                 a few seconds on with the agent still working, says one more
+                 press sends Esc again. Attach lives in the side drawer now. */
               <button
-                ref={attachRef}
                 type="button"
-                className="composer__lead"
-                data-kind="attach"
-                disabled={disabled}
-                aria-haspopup="dialog"
-                aria-expanded={openPick === 'attach'}
-                onClick={() => setOpenPick((v) => (v === 'attach' ? null : 'attach'))}
-                title="Attach a photo, image or file"
-                aria-label="Attach"
+                className="composer__lead composer__stop"
+                data-kind="stop"
+                data-stop={stopAgain ? 'again' : stopping ? 'stopping' : 'true'}
+                disabled={!ready || (stopping && !stopAgain)}
+                onClick={onStop}
+                aria-label={stopAgain ? 'Stop again' : stopping ? 'Stopping' : 'Stop'}
+                title={
+                  stopAgain
+                    ? 'Still working — tap to send Esc again'
+                    : stopping
+                      ? 'Stopping…'
+                      : 'Stop — interrupt the agent (Esc)'
+                }
               >
-                <Icon name="plus" size={20} />
+                {stopping ? <span className="composer__stop-ring" aria-hidden="true" /> : null}
+                <span className="composer__stop-square" aria-hidden="true" />
               </button>
-            )}
+            ) : null}
             {live ? (
               <VoiceStrip state={voiceState} analyser={voiceLevel?.analyser ?? null} cancelArmed={cancelArmed} />
             ) : null}
@@ -819,30 +872,6 @@ export function Composer({
             ) : null}
             {phase === 'idle' && !hasDraft ? listenLine : null}
           </div>
-          {/* Stop: a round button just left of the disc, smaller than it, never
-              a pill that takes the box's width. A square says Stop; a
-              spinning ring says Stopping; a still ring, a few seconds on with
-              the agent still working, says one more press sends Esc again. */}
-          {phoneStop ? (
-            <button
-              type="button"
-              className="composer__stop"
-              data-stop={stopAgain ? 'again' : stopping ? 'stopping' : 'true'}
-              disabled={!ready || (stopping && !stopAgain)}
-              onClick={onStop}
-              aria-label={stopAgain ? 'Stop again' : stopping ? 'Stopping' : 'Stop'}
-              title={
-                stopAgain
-                  ? 'Still working — tap to send Esc again'
-                  : stopping
-                    ? 'Stopping…'
-                    : 'Stop — interrupt the agent (Esc)'
-              }
-            >
-              {stopping ? <span className="composer__stop-ring" aria-hidden="true" /> : null}
-              <span className="composer__stop-square" aria-hidden="true" />
-            </button>
-          ) : null}
           {micPrimary ? null : (
             <button
               type="submit"
@@ -877,6 +906,7 @@ export function Composer({
               dictation passes through, so a hold keeps its pointer. */}
           {micPrimary ? mic : null}
         </div>
+        {attachTiles}
         <BottomSheet open={openPick === 'attach'} onClose={() => setOpenPick(null)} label="Attach" testId="attach-sheet">
           <SheetRow
             icon={<Icon name="camera" size={20} />}

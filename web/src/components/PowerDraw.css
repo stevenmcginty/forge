@@ -577,6 +577,9 @@
 .pdraw__pane {
   position: relative;
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-3);
   padding: var(--p-3) var(--p-3) var(--p-3);
   background: color-mix(in srgb, var(--p-bg) 22%, transparent);
 }
@@ -835,4 +838,92 @@
 .pdkeys[aria-checked='true'] .pdkeys__thumb {
   background: var(--p-act-ink);
   transform: translateX(18px);
+}
+
+/* Attach: three glass tiles under the pane's controls (Composer.tsx portals them in). */
+.pdattach {
+  order: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-2);
+  animation: pdpane-in calc(var(--p-dur-sheet) + 60ms) var(--p-ease-sheet) 120ms both;
+}
+
+.pdpane {
+  order: 1;
+}
+
+.pdattach__label {
+  padding: 0 var(--p-1);
+  font: 600 var(--p-t-small) / 1.2 var(--p-font);
+  color: var(--p-ink-3);
+}
+
+.pdattach__tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--p-2);
+}
+
+.pdattach__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 72px;
+  margin: 0;
+  padding: var(--p-2) 0;
+  border: 0;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, var(--pdraw-sheen), transparent 80%),
+    color-mix(in srgb, var(--p-raised) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--pdraw-rim),
+    inset 0 1px 0 var(--pdraw-edge);
+  color: var(--p-ink);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--p-dur-fast) var(--p-ease),
+    background var(--p-dur-fast) var(--p-ease);
+}
+
+.pdattach__tile:active {
+  transform: scale(0.96);
+  background: color-mix(in srgb, var(--p-ink) 8%, transparent);
+}
+
+.pdattach__tile:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: -2px;
+}
+
+.pdattach__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--tile, var(--p-ink));
+  background: color-mix(in srgb, var(--tile, var(--p-ink)) 16%, transparent);
+}
+
+.pdattach__tile[data-kind='camera'] {
+  --tile: var(--p-ring-sky);
+}
+
+.pdattach__tile[data-kind='image'] {
+  --tile: var(--p-dict);
+}
+
+.pdattach__tile[data-kind='file'] {
+  --tile: var(--p-ring-amber);
+}
+
+.pdattach__word {
+  font: 600 var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-ink-2);
 }
