@@ -26,19 +26,18 @@ import './ContextChip.css'
  * clock, the context window, the plan limits, Copy screen and the raw footer.
  * Out by an outside tap, Back, Esc, or the chip again.
  *
- * Never colour alone: the number is always there, warn (80%) turns it heavy
- * and tints the capsule, full (92%) fills the capsule solid; the panel says
- * the level in words. No reading yet, or a shell, is a dash in the same slot,
- * so the bar never jumps between tabs.
+ * Never colour alone: the number is always there, warn (80%) draws the ring and
+ * the figure heavier, full (92%) fills the mark solid; the panel says the level
+ * in words. No reading yet is a drawn dash in the figure's slot; a shell says
+ * "Shell" where the model goes, so the bar never jumps between tabs.
  *
- * Beside the number, the permission mode as a shape: a solid warning triangle
- * for Bypass (the capsule's rim goes red round it), Claude's own two bars for
- * Plan and chevron pair for Accept edits, nothing for Default. Under it, in
- * small print, the model, and the effort picked from this phone as a five-step
- * meter (Low one bar, Max all five) — the bar is a phone's, and a word would
- * cost the project name its room. The panel opens on the three pickers that
- * change them (ModelChip's SetupPicks, through the same senders and the same
- * pick store as the drawer's pill), above the context and the limits.
+ * The mode is a shape: a solid warning triangle for Bypass (and a red rim),
+ * Claude's own two bars for Plan, the chevron pair for Accept edits, nothing
+ * for Default. The model and the effort picked from this phone (a five-step
+ * meter) sit small beside or inside the ring — which, is the face on trial
+ * (`ChipFace` below). The panel opens on the three pickers that change them
+ * (ModelChip's SetupPicks, through the same senders and the same pick store as
+ * the drawer's pill), above the context and the limits.
  */
 
 /** The effort's step on the chip's meter. */
@@ -82,7 +81,7 @@ function setupRead(setup: PaneSetup): SetupRead {
 /** The effort as five rising bars, the ones up to its step filled. Shape and fill, no hue. */
 function EffortMeter({ step }: { step: number }): ReactNode {
   return (
-    <svg className="pctx__meter" width="14" height="10" viewBox="0 0 14 10" aria-hidden="true" focusable="false">
+    <svg className="pctx__meter" width="12" height="9" viewBox="0 0 14 10" aria-hidden="true" focusable="false">
       {[0, 1, 2, 3, 4].map((i) => (
         <rect
           key={i}
@@ -99,8 +98,19 @@ function EffortMeter({ step }: { step: number }): ReactNode {
   )
 }
 
+/** The effort as five pips in a row, the ones up to its step lit: the medallion's, under the figure. */
+function EffortPips({ step }: { step: number }): ReactNode {
+  return (
+    <svg className="pctx__pips" width="19" height="4" viewBox="0 0 19 4" aria-hidden="true" focusable="false">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <circle key={i} cx={1.7 + i * 3.9} cy="2" r={i < step ? 1.6 : 1.1} fill="currentColor" opacity={i < step ? 1 : 0.35} />
+      ))}
+    </svg>
+  )
+}
+
 /**
- * The mode's shape, beside the number. Bypass's is the warning triangle, drawn solid with the "!" cut out of it: at this size the sheet's
+ * The mode's shape. Bypass's is the warning triangle, drawn solid with the "!" cut out of it: at this size the sheet's
  * outlined WarnMark is a hairline, and this one has to be seen at arm's length.
  */
 function ModeGlyph({ mark }: { mark: ModeMark }): ReactNode {
@@ -116,7 +126,7 @@ function ModeGlyph({ mark }: { mark: ModeMark }): ReactNode {
       </svg>
     )
   return (
-    <svg className="pctx__glyph" width="9" height="9" viewBox="0 0 9 9" aria-hidden="true" focusable="false">
+    <svg className="pctx__glyph" width="8" height="8" viewBox="0 0 9 9" aria-hidden="true" focusable="false">
       {mark === 'plan' ? (
         <>
           <rect x="1.4" y="1" width="2.1" height="7" rx="0.6" fill="currentColor" />
@@ -136,6 +146,78 @@ function ModeGlyph({ mark }: { mark: ModeMark }): ReactNode {
       )}
     </svg>
   )
+}
+
+/** The mode worn on the mark's shoulder: Bypass a solid red triangle, the others a small coin with their shape. Default wears none. */
+function ModeBadge({ mark }: { mark: ModeMark }): ReactNode {
+  if (mark === null) return null
+  return (
+    <span className="pctx__badge" data-mark={mark} aria-hidden="true">
+      <ModeGlyph mark={mark} />
+    </span>
+  )
+}
+
+/** The model's name in its parts: "Claude Sonnet 4.6" is family "Sonnet", version "4.6", letter "S". */
+function modelParts(name: string | null): { family: string; version: string; letter: string } | null {
+  if (!name) return null
+  const plain = name.replace(/^claude[\s-]+/i, '').trim()
+  const match = /^(.*?)[\s-]*(\d+(?:\.\d+)*)/.exec(plain)
+  const family = (match?.[1] ? match[1] : plain).trim() || plain
+  return { family, version: match?.[1] ? match[2] : '', letter: family.charAt(0).toUpperCase() }
+}
+
+/**
+ * The figure: the percent, its sign a size down. A shell, which has no context window, shows a prompt instead;
+ * a pane with no reading yet a drawn dash, centred, never a stray glyph.
+ */
+function Figure({ pct, shell }: { pct: number | null; shell: boolean }): ReactNode {
+  if (shell)
+    return (
+      <svg className="pctx__prompt" width="13" height="11" viewBox="0 0 13 11" aria-hidden="true" focusable="false">
+        <path d="M1.6 2 5.4 5.5 1.6 9M7.2 9.4h4.4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  if (pct === null) return <span className="pctx__dash" aria-hidden="true" />
+  return (
+    <span className="pctx__fig" data-wide={pct >= 100 ? 'true' : undefined}>
+      {pct}
+      <span className="pctx__pc">%</span>
+    </span>
+  )
+}
+
+/**
+ * The state's shape riding the head of the context arc, on a disc of the bar's colour that cuts the ring under it.
+ * Ready draws nothing: the ring alone is Ready.
+ */
+function ArcHead({ pct, size, stroke, state, paneId }: { pct: number; size: number; stroke: number; state: DeckAgentState; paneId: string | null }): ReactNode {
+  if (state === 'idle') return null
+  const r = (size - stroke) / 2
+  const turn = (Math.max(0, Math.min(100, pct)) / 100) * 2 * Math.PI
+  // In percent of the dial, so the dial can be drawn a size smaller on a narrow phone and the head still lands on the arc.
+  const style = { left: `${50 + (100 * r * Math.sin(turn)) / size}%`, top: `${50 - (100 * r * Math.cos(turn)) / size}%` } as CSSProperties
+  return (
+    <span className="pctx__head" style={style} aria-hidden="true">
+      <StateMark state={state} paneId={paneId} />
+    </span>
+  )
+}
+
+/**
+ * Three faces on trial for the closed chip (Steve picks from the preview's screenshots; then the other two go):
+ * - `dial`: the ring is a dial with the figure in its hole; the model in a quiet two-line caption beside it. No capsule.
+ * - `medallion`: the ring alone, everything folded into it — the figure and the effort's pips in the hole, the mode on
+ *   its shoulder, the model's letter on a coin at its foot. The narrowest.
+ * - `lockup`: the capsule kept, the ring large with the state in its hole, the figure big beside it, the model small under.
+ */
+export type ChipFace = 'dial' | 'medallion' | 'lockup'
+
+let chipFace: ChipFace = 'dial'
+
+/** The preview's `&face=` only: which face the chips draw. */
+export function setChipFace(face: ChipFace): void {
+  chipFace = face
 }
 
 /** How long the panel takes to go before it unmounts. Matches the exit in ContextChip.css. */
@@ -183,6 +265,10 @@ export function ContextChip({ paneId, profile }: { paneId: string | null; profil
   // Model, effort and mode, and their senders: the drawer pill's own (SessionComposer).
   const setup = usePaneSetup(paneId, profile)
   const read = setupRead(setup)
+  const parts = shell ? null : modelParts(read.model)
+  const pct = context?.usedPct ?? null
+  // From warn up the ring is drawn heavier, so the level has a weight as well as a hue.
+  const warm = level === 'warn' || level === 'full'
   const picks = setup.agent && (setup.roster.length > 0 || setup.levels.length > 0 || setup.ladder.length > 0)
 
   /* ------------------------------------------------------------ the drop */
@@ -303,6 +389,7 @@ export function ContextChip({ paneId, profile }: { paneId: string | null; profil
         data-level={level ?? 'none'}
         data-state={pane.state}
         data-mode={read.mark ?? undefined}
+        data-face={chipFace}
         data-open={open ? 'true' : undefined}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -314,30 +401,75 @@ export function ContextChip({ paneId, profile }: { paneId: string | null; profil
         data-testid="phone-context"
         style={accent ? ({ '--pane-accent': accent } as CSSProperties) : undefined}
       >
-        <span className="pctx__face">
-          <span className="pctx__top">
+        {chipFace === 'lockup' ? (
+          <span className="pctx__face">
             <span className="pctx__ring">
-              <Ring pct={context?.usedPct ?? 0} size={20} stroke={2.5} />
+              <Ring pct={pct ?? 0} size={30} stroke={warm ? 3.5 : 3} />
               <StateMark state={pane.state} paneId={paneId} />
             </span>
-            {context ? (
-              <span className="pctx__num">
-                {context.usedPct}
-                <span className="pctx__unit">%</span>
+            <span className="pctx__stack" aria-hidden="true">
+              <Figure pct={pct} shell={shell} />
+              <span className="pctx__small">
+                {shell ? (
+                  <span className="pctx__fam pctx__fam--none">Shell</span>
+                ) : parts ? (
+                  <span className="pctx__fam">{parts.family}</span>
+                ) : (
+                  <span className="pctx__dash" />
+                )}
+                {read.step ? <EffortMeter step={read.step} /> : null}
               </span>
-            ) : (
-              <span className="pctx__num pctx__num--none" aria-hidden="true">
-                –
+            </span>
+            <ModeBadge mark={read.mark} />
+          </span>
+        ) : chipFace === 'medallion' ? (
+          <span className="pctx__face">
+            <span className="pctx__dial">
+              <span className="pctx__hole" />
+              <Ring pct={pct ?? 0} size={40} stroke={warm ? 4 : 3} />
+              <span className="pctx__core" aria-hidden="true">
+                <Figure pct={pct} shell={shell} />
+                {read.step ? <EffortPips step={read.step} /> : null}
               </span>
-            )}
-            <ModeGlyph mark={read.mark} />
+              <ModeBadge mark={read.mark} />
+              {parts ? (
+                <span className="pctx__coin" aria-hidden="true">
+                  {parts.letter}
+                </span>
+              ) : null}
+            </span>
           </span>
-          {/* The setup in small print, under the lot. A shell, or a pane yet to print its model, keeps the line with a dash. */}
-          <span className="pctx__setup" aria-hidden="true">
-            <span className={read.model ? 'pctx__model' : 'pctx__model pctx__model--none'}>{read.model ?? '–'}</span>
-            {read.step ? <EffortMeter step={read.step} /> : null}
+        ) : (
+          <span className="pctx__face">
+            <span className="pctx__dial">
+              <span className="pctx__hole" />
+              <Ring pct={pct ?? 0} size={36} stroke={warm ? 4 : 3} />
+              <span className="pctx__core" aria-hidden="true">
+                <Figure pct={pct} shell={shell} />
+              </span>
+              <ArcHead pct={pct ?? 0} size={36} stroke={warm ? 4 : 3} state={pane.state} paneId={paneId} />
+              <ModeBadge mark={read.mark} />
+            </span>
+            {/* The model, quietly: its family over its version and the effort. A shell says so; a pane yet to print one keeps a dash. */}
+            <span className="pctx__cap" aria-hidden="true">
+              {shell ? (
+                <span className="pctx__fam pctx__fam--none">Shell</span>
+              ) : parts ? (
+                <>
+                  <span className="pctx__fam">{parts.family}</span>
+                  {parts.version || read.step ? (
+                    <span className="pctx__sub">
+                      {parts.version ? <span>{parts.version}</span> : null}
+                      {read.step ? <EffortMeter step={read.step} /> : null}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span className="pctx__dash" />
+              )}
+            </span>
           </span>
-        </span>
+        )}
       </button>
 
       {mounted && profile && appLayer
