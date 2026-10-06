@@ -52,6 +52,8 @@ export type IconName =
   | 'image'
   | 'sparkle'
   | 'meter'
+  | 'book'
+  | 'pencil'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -340,6 +342,20 @@ const PATHS: Record<IconName, ReactNode> = {
       fill="currentColor"
       stroke="none"
     />
+  ),
+  // An open book, two pages from one spine: the Read mode.
+  book: (
+    <>
+      <path d="M8 4.2C6.6 3.2 4.6 2.8 2.2 3v9.4c2.4-.2 4.4.2 5.8 1.2 1.4-1 3.4-1.4 5.8-1.2V3c-2.4-.2-4.4.2-5.8 1.2z" />
+      <path d="M8 4.2v9.4" />
+    </>
+  ),
+  // A pencil on the slant: edit this text.
+  pencil: (
+    <>
+      <path d="M10.6 2.9l2.5 2.5-7.6 7.6-3.1.6.6-3.1z" />
+      <path d="M9.2 4.3l2.5 2.5" />
+    </>
   )
 }
 

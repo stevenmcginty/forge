@@ -1,0 +1,1018 @@
+/*
+ * The Read mode — "a lamp over the page".
+ *
+ * Forge stays Forge round the edges: the deck's sheet, hairlines, Bahnschrift
+ * on everything that is chrome. The page itself is the one quiet place in the
+ * app: a measured column (about 70 characters) in Sitka Text — Windows' own
+ * screen-reading serif, on every Windows 10/11 box, so nothing to bundle —
+ * with headings in the deck's Bahnschrift so the document still belongs to the
+ * instrument it sits in. A faint lamp-glow at the top of the page, no other
+ * decoration. The accent appears only where it means "live / go": the open
+ * file's pointer, "Updated just now", Save.
+ *
+ * Scroll bars here are wider and lit, with a visible track, on purpose: on a
+ * touchpad a bar you cannot see reads as a page you cannot scroll.
+ */
+
+.reader {
+  --read-serif: 'Sitka Text', 'Sitka', Charter, Georgia, Cambria, serif;
+  --read-ink: color-mix(in srgb, var(--text-primary) 88%, var(--bg-panel));
+  --read-link: color-mix(in srgb, var(--info) 58%, var(--text-primary));
+  --read-side-w: clamp(236px, 18vw, 296px);
+
+  display: grid;
+  grid-template-columns: var(--read-side-w) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: var(--r-pane);
+  background: var(--sheet-bg);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------- scroll bars */
+
+.reader__scroll {
+  scrollbar-gutter: stable;
+}
+
+.reader__scroll::-webkit-scrollbar {
+  width: 14px;
+  height: 12px;
+}
+
+.reader__scroll::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+.reader__scroll::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  background: color-mix(in srgb, var(--text-primary) 26%, transparent);
+  border: 4px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+.reader__scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-primary) 40%, transparent);
+  background-clip: padding-box;
+}
+
+.reader__scroll::-webkit-scrollbar-thumb:active {
+  background: color-mix(in srgb, var(--text-primary) 50%, transparent);
+  background-clip: padding-box;
+}
+
+/* ---------------------------------------------------------------- list */
+
+.reader__side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: color-mix(in srgb, var(--bg-base) 55%, var(--sheet-bg));
+  border-right: 1px solid var(--glass-line);
+}
+
+.rlist {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.rlist__filter {
+  position: relative;
+  flex: none;
+  padding: 12px 12px 8px;
+}
+
+.rlist__input {
+  width: 100%;
+  height: 32px;
+  padding: 0 30px 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--glass-line);
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.rlist__input::placeholder {
+  color: var(--text-dim);
+}
+
+.rlist__input:focus {
+  border-color: var(--accent-line);
+}
+
+.rlist__input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.rlist__clear {
+  position: absolute;
+  top: 17px;
+  right: 17px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.rlist__clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.rlist__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px 2px 20px 8px;
+}
+
+.rlist__section + .rlist__section {
+  margin-top: 18px;
+}
+
+.rlist__eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin: 8px 8px 6px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rlist__count {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+
+.rlist__quiet {
+  margin: 4px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.rlist__group + .rlist__group {
+  margin-top: 4px;
+}
+
+.rlist__folder {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px 0 5px;
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.rlist__folder:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.rlist__chev {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  color: var(--text-dim);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.rlist__chev[data-open='true'] {
+  transform: rotate(90deg);
+}
+
+.rlist__foldername {
+  flex: 1;
+  min-width: 0;
+}
+
+.rlist__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px 0 20px;
+  border-radius: 7px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.rlist__row[data-nested='true'] {
+  padding-left: 32px;
+}
+
+.rlist__row:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* The open file: a pointer, heavier type and a raised row — never colour alone. */
+.rlist__mark {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  width: 0;
+  height: 0;
+  margin-top: -5px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid currentColor;
+  opacity: 0;
+}
+
+.rlist__row[data-nested='true'] .rlist__mark {
+  left: 20px;
+}
+
+.rlist__row[data-current='true'] {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.rlist__row[data-current='true'] .rlist__mark {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.rlist__name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rlist__hint {
+  flex: 0 1 auto;
+  max-width: 42%;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.rlist__age {
+  flex: none;
+  min-width: 22px;
+  text-align: right;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- page */
+
+.rpage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+
+.rpage__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  height: 60px;
+  padding: 0 12px 0 24px;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.rpage__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rpage__name {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.rpage__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.rpage__folder {
+  flex: 0 1 auto;
+  min-width: 40px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rpage__sep {
+  color: var(--text-dim);
+}
+
+.rpage__words {
+  color: var(--text-dim);
+}
+
+.rpage__updated {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  animation: rpage-updated 4s var(--ease-out) both;
+}
+
+@keyframes rpage-updated {
+  0% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  8%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.rpage__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.rpage__status[data-state='dirty'] {
+  color: var(--text-primary);
+}
+
+.rpage__status[data-state='saved'] {
+  color: var(--text-secondary);
+}
+
+.rpage__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
+.rpage__acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.rbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: var(--r-full);
+  border: 1px solid transparent;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.rbtn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.rbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rbtn--edit {
+  color: var(--text-primary);
+  border-color: var(--glass-line-strong);
+}
+
+.rbtn--go {
+  font-weight: 600;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.rbtn--go:hover:not(:disabled) {
+  color: var(--text-on-accent);
+  background: var(--accent-bright);
+}
+
+.rbtn--go:disabled {
+  color: var(--text-dim);
+  background: transparent;
+  border-color: var(--glass-line);
+  opacity: 1;
+}
+
+.rbtn--quiet:hover:not(:disabled) {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+}
+
+.rbtn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* A calm word about the file on disk, under the head while editing. */
+.rbanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 10px 14px 10px 22px;
+  border-bottom: 1px solid var(--warn-line);
+  background: color-mix(in srgb, var(--warn-soft) 70%, var(--bg-panel));
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.rbanner > svg {
+  flex: none;
+  color: var(--warn);
+}
+
+.rbanner__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.rbanner__acts {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
+.rbanner .rbtn:not(.rbtn--go) {
+  border-color: var(--glass-line-strong);
+  color: var(--text-primary);
+}
+
+/* The reading surface: the whole width scrolls, so the bar sits at the page edge. */
+.rpage__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: radial-gradient(110% 420px at 50% 0%, color-mix(in srgb, var(--text-primary) 3%, transparent), transparent 75%);
+}
+
+.rpage__error {
+  max-width: 34em;
+  margin: 0 auto;
+  padding: 14vh 32px 48px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.rpage__errortitle {
+  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rpage__errorhint {
+  margin-top: 10px;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------ the text */
+
+.rdoc {
+  box-sizing: content-box;
+  max-width: 38em;
+  margin: 0 auto;
+  padding: clamp(28px, 6vh, 60px) clamp(24px, 4vw, 64px) 140px;
+  font-family: var(--read-serif);
+  font-size: clamp(15.5px, 0.35vw + 11px, 17.5px);
+  line-height: 1.68;
+  color: var(--read-ink);
+  overflow-wrap: break-word;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+  user-select: text;
+  animation: rdoc-in 280ms var(--ease-out) both;
+}
+
+@keyframes rdoc-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.rdoc .md__p {
+  margin: 0 0 1em;
+}
+
+.rdoc strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rdoc del {
+  color: var(--text-dim);
+}
+
+.rdoc .md__h {
+  margin: 1.9em 0 0.55em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: 0.005em;
+  color: var(--text-primary);
+  scroll-margin-top: 28px;
+  text-wrap: pretty;
+}
+
+.rdoc .md__h[data-level='1'] {
+  margin: 1.6em 0 0.7em;
+  font-size: 2.05em;
+  line-height: 1.1;
+  letter-spacing: -0.012em;
+}
+
+.rdoc .md__h[data-level='2'] {
+  margin-top: 2.1em;
+  padding-top: 1.05em;
+  border-top: 1px solid var(--glass-line);
+  font-size: 1.42em;
+}
+
+.rdoc .md__h[data-level='3'] {
+  font-size: 1.16em;
+}
+
+.rdoc .md__h[data-level='4'] {
+  margin-top: 1.6em;
+  font-size: 1em;
+}
+
+.rdoc .md__h[data-level='5'],
+.rdoc .md__h[data-level='6'] {
+  margin-top: 2em;
+  font-size: 0.74em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.rdoc .md__h[data-level='1'] + .md__h[data-level='2'] {
+  margin-top: 1.4em;
+}
+
+.rdoc > .md__h:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.rdoc .md__link {
+  color: var(--read-link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+  transition: text-decoration-color var(--dur-fast) var(--ease-out);
+}
+
+.rdoc .md__link:hover {
+  text-decoration-color: currentColor;
+}
+
+.rdoc .md__link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.rdoc .md__list {
+  margin: 0 0 1em;
+  padding-left: 1.5em;
+}
+
+.rdoc .md__list li {
+  margin: 0.32em 0;
+  padding-left: 0.2em;
+}
+
+.rdoc .md__list li::marker {
+  color: var(--text-dim);
+}
+
+.rdoc ol.md__list > li::marker {
+  font-family: var(--font-display);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rdoc .md__list .md__list {
+  margin: 0.3em 0 0;
+}
+
+.rdoc .md__quote {
+  margin: 1.3em 0;
+  padding: 0.15em 0 0.15em 1.2em;
+  border-left: 2px solid var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.rdoc .md__quote .md__p:last-child {
+  margin-bottom: 0;
+}
+
+.rdoc .md__hr {
+  height: 1px;
+  margin: 2.4em 0;
+  border: 0;
+  background: var(--glass-line);
+}
+
+.rdoc .md__inline-code {
+  padding: 0.12em 0.34em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: color-mix(in srgb, var(--text-primary) 92%, var(--bg-panel));
+  overflow-wrap: anywhere;
+}
+
+.rdoc .md__codeblock {
+  margin: 1.3em 0 1.5em;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: var(--bg-terminal);
+  overflow: hidden;
+}
+
+.rdoc .md__code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.rdoc .md__lang {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.rdoc .md__copy-btn {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.rdoc .md__copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.rdoc .md__code {
+  margin: 0;
+  padding: 13px 16px 14px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 4;
+  color: var(--text-primary);
+}
+
+.rdoc .md__code[data-more='true'] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent calc(100% - 4px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 56px), transparent calc(100% - 4px));
+}
+
+.rdoc .md__tablewrap {
+  margin: 1.4em 0 1.6em;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.rdoc .md__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-ui);
+  font-size: 0.84em;
+  line-height: 1.5;
+}
+
+.rdoc .md__table th {
+  padding: 0.6em 0.9em;
+  border-bottom: 1px solid var(--glass-line-strong);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  vertical-align: bottom;
+  color: var(--text-primary);
+}
+
+.rdoc .md__table td {
+  padding: 0.55em 0.9em;
+  border-top: 1px solid var(--glass-line);
+  vertical-align: top;
+}
+
+.rdoc .md__table tbody tr:first-child td {
+  border-top: 0;
+}
+
+/* -------------------------------------------------------------- editor */
+
+.rpage__editwrap {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: color-mix(in srgb, var(--bg-sunken) 55%, var(--bg-panel));
+}
+
+.redit {
+  flex: 1;
+  min-width: 0;
+  padding: 32px max(28px, calc(50% - 30em)) 120px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  tab-size: 2;
+  color: var(--text-primary);
+  caret-color: var(--accent);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* ---------------------------------------------------- the leave prompt */
+
+.rprompt {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--stage-scrim);
+  animation: rprompt-fade var(--dur-med) var(--ease-out) both;
+}
+
+@keyframes rprompt-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.rprompt__card {
+  width: min(420px, 100%);
+  padding: 20px 20px 14px;
+  border-radius: var(--r-sheet);
+  border: 1px solid var(--glass-line-strong);
+  background: var(--bg-panel-raised);
+  box-shadow: var(--glass-shadow);
+  animation: rprompt-in var(--dur-pop) var(--spring-pop) both;
+}
+
+@keyframes rprompt-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+.rprompt__title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rprompt__body {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.rprompt__acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 18px;
+}
+
+/* -------------------------------------------------------- empty state */
+
+.rwelcome__body {
+  max-width: 31em;
+  margin: 0 auto;
+  padding: 12vh 32px 64px;
+  font-family: var(--read-serif);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--read-ink);
+  animation: rdoc-in 320ms var(--ease-out) both;
+}
+
+.rwelcome__glyph {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 22px;
+  border-radius: 16px;
+  color: var(--text-secondary);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.rwelcome__title {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
+}
+
+.rwelcome__lede {
+  margin: 0 0 26px;
+  color: var(--text-secondary);
+}
+
+.rwelcome__ways {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rwelcome__ways li {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 13px 0;
+  border-top: 1px solid var(--glass-line);
+}
+
+.rwelcome__ways li:last-child {
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.rwelcome__ways strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rwelcome__way {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-top: -2px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.rwelcome kbd {
+  padding: 0.05em 0.4em;
+  border: 1px solid var(--glass-line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+
+.rwelcome__hint {
+  margin-top: 20px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------ motion off */
+
+@media (prefers-reduced-motion: reduce) {
+  .rdoc,
+  .rwelcome__body,
+  .rprompt,
+  .rprompt__card {
+    animation: none;
+  }
+
+  .rpage__updated {
+    animation-name: rpage-updated-still;
+  }
+}
+
+:root[data-reduced-motion='true'] .rdoc,
+:root[data-reduced-motion='true'] .rwelcome__body,
+:root[data-reduced-motion='true'] .rprompt,
+:root[data-reduced-motion='true'] .rprompt__card {
+  animation: none !important;
+}
+
+@keyframes rpage-updated-still {
+  0%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

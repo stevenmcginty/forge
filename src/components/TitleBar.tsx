@@ -77,7 +77,7 @@ export interface DeckMode {
 }
 
 /** The glyphs Forge Web's deck uses for the same three (web/src/deck/DeckTopBar.tsx). */
-const MODE_ICONS: Record<string, IconName> = { agents: 'terminal', browser: 'globe', board: 'image' }
+const MODE_ICONS: Record<string, IconName> = { agents: 'terminal', browser: 'globe', board: 'image', read: 'book' }
 
 /** The modes, in switcher order: Agents, then every registered surface. */
 export function useDeckModes(): DeckMode[] {

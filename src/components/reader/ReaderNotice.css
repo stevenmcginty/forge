@@ -1,0 +1,112 @@
+/* "Sent to Read" — the Board's arrival tile (hub/BoardArrival.css), with a book where its picture goes. */
+
+.rnotice {
+  position: fixed;
+  right: 18px;
+  bottom: calc(var(--dock-clear) + 54px);
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(360px, calc(100vw - 36px));
+  padding: 8px;
+  border-radius: 16px;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--glass-shadow), 0 0 30px -12px var(--accent-glow), inset 0 1px 0 var(--glass-hi);
+  animation: rnotice-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.rnotice[data-state='closing'] {
+  animation: rnotice-out 200ms var(--ease-in-out) both;
+}
+
+@keyframes rnotice-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.95);
+  }
+}
+
+@keyframes rnotice-out {
+  to {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.98);
+  }
+}
+
+.rnotice__glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 54px;
+  height: 54px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  background: var(--bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.rnotice__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rnotice__eyebrow {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
+.rnotice__title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rnotice__open {
+  flex: none;
+  height: 28px;
+  padding: 0 13px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.rnotice__x {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.rnotice__x:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rnotice,
+  .rnotice[data-state='closing'] {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .rnotice {
+  animation: none !important;
+}

@@ -11,9 +11,13 @@ import { ForemanProvider } from './state/Foreman'
 import { VoiceAgentProvider } from './state/VoiceAgent'
 import { VoiceHubControllerProvider } from './state/VoiceHubController'
 import { registerBrowser } from './components/browser/registerBrowser'
+import { ReaderOpener } from './components/reader/ReaderOpener'
+import { registerReader } from './components/reader/registerReader'
 
 // The built-in browser's canvas surface and its open-browser command.
 registerBrowser()
+// The Read mode's canvas surface (Markdown files, read and edited).
+registerReader()
 
 const host = document.getElementById('root')
 if (!host) throw new Error('#root missing from index.html')
@@ -184,6 +188,8 @@ if (window.forge.overlay.isOverlay()) {
                     stops every pane's menu restarting every other pane's. */}
                 <HandoffProvider>
                   <App />
+                  {/* Files sent to Read (Windows, a terminal click, an agent) — listening even while Read is off screen. */}
+                  <ReaderOpener />
                 </HandoffProvider>
               </ForemanProvider>
               </VoiceHubControllerProvider>
