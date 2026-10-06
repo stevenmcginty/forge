@@ -1,4 +1,4 @@
-import { Terminal, type ITheme } from '@xterm/xterm'
+import { Terminal, type ILink, type ILinkProvider, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { PtyDataEvent, PtyExitEvent, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
@@ -12,6 +12,7 @@ import { joinBufferRows, tidyCapture, type BufferRow } from './paneText'
 import { earconTaskAttention, earconTaskDone } from './earcon'
 import { getLiveSettings } from './livesettings'
 import { announcePaneSent } from './paneSent'
+import { cellText, findMarkdownRefs, type CellLine } from './reader-links'
 
 /**
  * TerminalHost — the renderer-side owner of every xterm instance.
@@ -130,6 +131,111 @@ function isChatAgentCommand(command: string): boolean {
       return false
     default:
       return true
+  }
+}
+
+/* --------------------------------------------------- Ctrl+click to read */
+
+/** A wrapped path is joined across at most this many rows. */
+const READER_LINK_MAX_ROWS = 12
+/** "Not a file" is re-asked after this long: an agent prints a path before it writes the file. */
+const READER_MISS_TTL_MS = 5000
+const READER_CACHE_MAX = 500
+
+/** `${baseDir}\n${text}` → what main's resolve said, and when. */
+const readerResolveCache = new Map<string, { at: number; path: Promise<string | null> }>()
+
+/**
+ * main's answer for one candidate, cached so hovering over a busy pane is not
+ * an IPC per mouse move. Guarded: the live app's preload may be older than this
+ * renderer and have no `reader` at all.
+ */
+function resolveReaderRef(text: string, baseDir: string): Promise<string | null> {
+  const key = `${baseDir}\n${text}`
+  const hit = readerResolveCache.get(key)
+  if (!hit) return refreshReaderRef(key, text, baseDir)
+  if (Date.now() - hit.at < READER_MISS_TTL_MS) return hit.path
+  // A found file stays found; only a miss is worth asking about again.
+  return hit.path.then((p) => p ?? refreshReaderRef(key, text, baseDir))
+}
+
+function refreshReaderRef(key: string, text: string, baseDir: string): Promise<string | null> {
+  const resolve = window.forge?.reader?.resolve
+  const path: Promise<string | null> = resolve
+    ? resolve(text, baseDir || undefined).then(
+        (p) => (typeof p === 'string' && p ? p : null),
+        () => null
+      )
+    : Promise.resolve(null)
+  if (readerResolveCache.size >= READER_CACHE_MAX) readerResolveCache.clear()
+  readerResolveCache.set(key, { at: Date.now(), path })
+  return path
+}
+
+/**
+ * Ctrl+click a .md path in a pane to open it in the Read view.
+ *
+ * Candidates come from ./reader-links.ts; only the ones main resolves to an
+ * existing markdown file (relative ones against the pane's folder) become
+ * links. A plain click does nothing extra — xterm still focuses and selects —
+ * and hovering shows the underline and "Ctrl+click to read".
+ */
+function readerLinkProvider(term: Terminal, wrapper: HTMLElement, baseDir: () => string): ILinkProvider {
+  return {
+    provideLinks(bufferLineNumber, callback) {
+      try {
+        if (!window.forge?.reader?.resolve) return callback(undefined)
+        const buffer = term.buffer.active
+        // The whole logical line this row belongs to, so a path wrapped across rows is one link.
+        let first = bufferLineNumber - 1
+        while (first > 0 && bufferLineNumber - 1 - first < READER_LINK_MAX_ROWS && buffer.getLine(first)?.isWrapped) first--
+        const rows: CellLine[] = []
+        for (let y = first; rows.length < READER_LINK_MAX_ROWS; y++) {
+          const line = buffer.getLine(y)
+          if (!line || (y > first && !line.isWrapped)) break
+          rows.push(line)
+        }
+        const cells = cellText(rows)
+        const row = bufferLineNumber - 1 - first
+        const refs = findMarkdownRefs(cells.text).filter(
+          (r) => (cells.y[r.start] ?? -1) <= row && (cells.y[r.end - 1] ?? -1) >= row
+        )
+        if (refs.length === 0) return callback(undefined)
+        const base = baseDir()
+        void Promise.all(refs.map((r) => resolveReaderRef(r.text, base))).then(
+          (paths) => {
+            const links: ILink[] = []
+            refs.forEach((r, i) => {
+              const path = paths[i]
+              if (!path) return
+              links.push({
+                range: {
+                  start: { x: (cells.x[r.start] ?? 0) + 1, y: first + (cells.y[r.start] ?? 0) + 1 },
+                  end: { x: cells.endX[r.end - 1] ?? 0, y: first + (cells.y[r.end - 1] ?? 0) + 1 }
+                },
+                text: r.text,
+                decorations: { pointerCursor: true, underline: true },
+                activate(event) {
+                  if (!event.ctrlKey && !event.metaKey) return
+                  const open = window.forge?.reader?.open
+                  if (open) void open(path, 'terminal').catch(() => undefined)
+                },
+                hover() {
+                  wrapper.title = 'Ctrl+click to read'
+                },
+                leave() {
+                  wrapper.title = ''
+                }
+              })
+            })
+            callback(links.length > 0 ? links : undefined)
+          },
+          () => callback(undefined)
+        )
+      } catch {
+        callback(undefined)
+      }
+    }
   }
 }
 
@@ -1284,6 +1390,11 @@ class TerminalHost {
       window.forge.pty.write(paneId, data, !entry.quiet)
     })
     entry.disposers.push(() => dataSub.dispose())
+
+    // Ctrl+click a .md path to read it. Relative paths are taken against the
+    // pane's folder — its project's, which is the cwd it was spawned in.
+    const readerLinks = term.registerLinkProvider(readerLinkProvider(term, wrapper, () => entry.spec.cwd))
+    entry.disposers.push(() => readerLinks.dispose())
 
     /*
      * Deliberately no `term.onResize` subscription. It used to be how a settled

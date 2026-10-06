@@ -1,10 +1,12 @@
 import { app, ipcMain, type BrowserWindow } from 'electron'
+import { isAbsolute, resolve } from 'node:path'
 import { VOICE_OWNER, type BrowserAgentReply, type BrowserOwner } from '@shared/browser'
 import { getDataDir, getProjects } from '../store'
 import { liveSessions } from '../pty-host'
 import { askRendererTool } from '../voice-agent/ipc'
 import { askAnchoredAppAction } from '../foreman/ipc'
 import { anchoredOpenAction, paneOpenReply } from '../foreman/pane-caller'
+import { openInReader } from '../reader'
 import { setBrainBrowserRunner } from './brain'
 import { setBrowserLinkFile } from './env'
 import { BrowserService, type BrowserServiceDeps } from './service'
@@ -30,6 +32,29 @@ function resolveFromPanes(caller: BrowserOwner): { owner: BrowserOwner; project?
   return { owner, ...(project ? { project } : {}) }
 }
 
+/**
+ * A pane agent's open_in_reader, answered here in main: the path is taken
+ * against the calling pane's project folder when it is relative, then handed to
+ * the reader's one route in (../reader.ts openInReader), which checks it and
+ * tells the renderer. A caller that is not a pane has no folder, so only an
+ * absolute path works for it.
+ */
+function openInReaderFor(args: Record<string, unknown>, caller: BrowserOwner): BrowserAgentReply {
+  const raw = typeof args['path'] === 'string' ? args['path'].trim() : ''
+  if (!raw) return { ok: false, text: 'No file was sent: path is required.' }
+  const live = caller.id.startsWith('pane:') ? liveSessions().find((s) => s.id === caller.id.slice('pane:'.length)) : undefined
+  const folder = live ? getProjects().find((p) => p.name === live.projectName)?.path : undefined
+  if (!isAbsolute(raw) && !folder) {
+    return { ok: false, text: `No file was sent: ${raw} is relative and there is no project folder to take it from. Give an absolute path.` }
+  }
+  const path = isAbsolute(raw) ? resolve(raw) : resolve(folder as string, raw)
+  const label = live ? live.name || live.paneTitle || caller.label : caller.label
+  const opened = openInReader(path, 'agent', label || undefined)
+  return opened.ok
+    ? { ok: true, text: `Sent ${path} to Forge's Read view. The user has a notice and will open it.` }
+    : { ok: false, text: `No file was sent: ${opened.error}` }
+}
+
 /** Build the service and register the renderer's handlers. Call once, with the other handlers. */
 export function registerBrowserPanes(): void {
   if (service) return
@@ -42,7 +67,9 @@ export function registerBrowserPanes(): void {
     // never a window — and in the *caller's* project, anchored on the calling
     // pane (see ../foreman/pane-caller.ts). A caller that is not a pane has no
     // project of its own and gets the main agent's tool, in the one on screen.
+    // open_in_reader never reaches the renderer: main owns the reader's route in.
     appOp: async (op, args, caller) => {
+      if (op === 'open_in_reader') return openInReaderFor(args, caller)
       const anchored = op === 'open_agent_pane' ? anchoredOpenAction(args, caller.id) : null
       return paneOpenReply(anchored ? await askAnchoredAppAction(anchored) : await askRendererTool(op, args))
     }

@@ -19,6 +19,11 @@
  *     against the base dir, refuses what does not exist
  *   - the "Open with" registration refuses to run outside the stable channel,
  *     before it reaches reg.exe
+ *   - terminal links (src/lib/reader-links.ts): which .md paths in a pane line
+ *     are candidates — Windows absolute, relative, wrapped, with `:line:col` —
+ *     and which are not (`foo.mdx`, a URL, `README.md.bak`); cells map back to
+ *     columns across wide characters and wrapped rows
+ *   - forge-bridge's open_in_reader tool takes one required `path`
  */
 import { registerHooks } from 'node:module'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
@@ -51,6 +56,8 @@ registerHooks({
 
 const R = await import('../electron/reader.ts')
 const S = await import('../shared/reader.ts')
+const L = await import('../src/lib/reader-links.ts')
+const APP = await import('../bridge/forge-app-tools.mjs')
 
 let pass = 0
 let fail = 0
@@ -185,6 +192,71 @@ try {
     ok(R.resolveMarkdownRef('docs/PLAN.md', null) === null, 'relative with no base dir is null')
     ok(R.resolveMarkdownRef('docs/missing.md', base) === null, 'missing file is null')
     ok(R.resolveMarkdownRef('docs', base) === null, 'a folder is null')
+  }
+
+  /* ---------------------------------------------------------- terminal links */
+  console.log('\nterminal links')
+  {
+    const refs = (line) => L.findMarkdownRefs(line).map((r) => r.text)
+    const one = (line, want, label) => {
+      const got = refs(line)
+      ok(got.length === 1 && got[0] === want, label, JSON.stringify(got))
+    }
+    one('wrote C:\\Users\\steve\\plan.md', 'C:\\Users\\steve\\plan.md', 'Windows absolute, backslashes')
+    one('see C:/Users/steve/plan.md now', 'C:/Users/steve/plan.md', 'Windows absolute, forward slashes')
+    one('docs/x.md', 'docs/x.md', 'relative with a folder')
+    one('open ./x.md', './x.md', './ relative')
+    one('open ..\\x.md', '..\\x.md', '..\\ relative')
+    one('Updated HANDOFF.md.', 'HANDOFF.md', 'bare name, sentence full stop left off')
+    one('read `docs/PLAN.md` first', 'docs/PLAN.md', 'in backticks')
+    one('read "docs/PLAN.md" first', 'docs/PLAN.md', 'in double quotes')
+    one("read 'docs/PLAN.md' first", 'docs/PLAN.md', 'in single quotes')
+    one('at docs/PLAN.md:12', 'docs/PLAN.md:12', 'with :line')
+    one('at docs/PLAN.md:12:3,', 'docs/PLAN.md:12:3', 'with :line:col')
+    one('notes/Guide.MARKDOWN', 'notes/Guide.MARKDOWN', '.markdown, any case')
+    one('(see docs/x.md)', 'docs/x.md', 'inside parentheses')
+    one('[plan](docs/x.md)', 'docs/x.md', 'a markdown link target')
+    one('"C:\\Users\\steve\\My Docs\\a b.md" saved', 'C:\\Users\\steve\\My Docs\\a b.md', 'quoted absolute path with spaces')
+    ok(refs('a.md and docs/b.md').join('|') === 'a.md|docs/b.md', 'two on one line, in order', JSON.stringify(refs('a.md and docs/b.md')))
+    ok(refs('foo.mdx').length === 0, 'foo.mdx is not markdown', JSON.stringify(refs('foo.mdx')))
+    ok(refs('https://x.com/a.md').length === 0, 'a URL is not a local path', JSON.stringify(refs('https://x.com/a.md')))
+    ok(refs('README.md.bak').length === 0, 'README.md.bak is not markdown', JSON.stringify(refs('README.md.bak')))
+    ok(refs('x.md/notes').length === 0, 'a folder named x.md is not a file', JSON.stringify(refs('x.md/notes')))
+    ok(refs('.md').length === 0, 'a bare extension is not a name', JSON.stringify(refs('.md')))
+    ok(refs('plain text, no paths').length === 0, 'plain text has none')
+    const r = L.findMarkdownRefs('  `docs/x.md` ok')[0]
+    ok(r?.start === 3 && r?.end === 12, 'start/end index the line, wrapping excluded', JSON.stringify(r))
+
+    // A candidate that resolves is what becomes a link.
+    const base = join(scratch, 'res')
+    const cand = L.findMarkdownRefs('Plan written to `docs/PLAN.md:4`.')[0]
+    ok(R.resolveMarkdownRef(cand?.text, base) === join(base, 'docs', 'PLAN.md'), 'a found candidate resolves against the pane folder', JSON.stringify(cand))
+
+    // Cells: a wide character takes two columns; wrapped rows join into one string.
+    const row = (cells) => ({ length: cells.length, getCell: (x) => cells[x] })
+    const cell = (ch, w = 1) => ({ getChars: () => ch, getWidth: () => w })
+    const wide = row([cell('界', 2), cell('', 0), cell(' '), cell('a'), cell('.'), cell('m'), cell('d')])
+    const c1 = L.cellText([wide])
+    const w = L.findMarkdownRefs(c1.text)[0]
+    ok(c1.text === '界 a.md' && w && c1.x[w.start] === 3 && c1.endX[w.end - 1] === 7, "columns skip a wide character's second cell", JSON.stringify({ text: c1.text, w, x: c1.x, endX: c1.endX }))
+    const c2 = L.cellText([row([...'see docs/'].map((ch) => cell(ch))), row([...'PLAN.md'].map((ch) => cell(ch)))])
+    const wr = L.findMarkdownRefs(c2.text)[0]
+    ok(
+      wr?.text === 'docs/PLAN.md' && c2.y[wr.start] === 0 && c2.x[wr.start] === 4 && c2.y[wr.end - 1] === 1 && c2.endX[wr.end - 1] === 7,
+      'a path wrapped across two rows is one ref spanning both',
+      JSON.stringify(wr)
+    )
+  }
+
+  /* -------------------------------------------------------- open_in_reader */
+  console.log('\nopen_in_reader tool')
+  {
+    const tool = APP.APP_TOOLS.find((t) => t.name === 'open_in_reader')
+    ok(!!tool && JSON.stringify(tool.inputSchema.required) === '["path"]', 'listed, path required', JSON.stringify(tool?.inputSchema))
+    ok(APP.APP_TOOLS[0].name === 'open_agent_pane', 'open_agent_pane stays first (launch-guard reads APP_TOOLS[0])')
+    ok(typeof APP.APP_HANDLERS.open_in_reader === 'function', 'has a handler')
+    const empty = await APP.APP_HANDLERS.open_in_reader({ path: '  ' })
+    ok(empty.isError === true && /path is required/.test(empty.content[0].text), 'an empty path is refused before the pipe', JSON.stringify(empty))
   }
 
   /* --------------------------------------------------------------- recent */

@@ -1,5 +1,5 @@
 /**
- * Forge's app, as MCP tools for pane agents — today one: open_agent_pane.
+ * Forge's app, as MCP tools for pane agents: open_agent_pane and open_in_reader.
  *
  * A Claude or Codex pane asked to "spawn a new agent" used to Start-Process a
  * Windows Terminal outside Forge. This tool opens the agent INSIDE Forge
@@ -11,9 +11,12 @@
  * Spread into forge-bridge's tool list like the browser tools. Plain Node, no
  * MCP SDK import.
  *
- * ⚠ The description is DUPLICATED from shared/brain-tools.ts (canonical — this
- * file cannot import TypeScript). scripts/launch-guard-check.mjs asserts they
- * agree word for word.
+ * ⚠ open_agent_pane's description is DUPLICATED from shared/brain-tools.ts
+ * (canonical — this file cannot import TypeScript). scripts/launch-guard-check.mjs
+ * asserts they agree word for word, and reads it as APP_TOOLS[0].
+ *
+ * open_in_reader is main's alone: electron/browser-panes/ipc.ts answers it with
+ * electron/reader.ts openInReader, without the renderer.
  */
 
 import { browserAsk } from './browser-tools.mjs'
@@ -40,6 +43,18 @@ export const APP_TOOLS = [
       },
       required: ['agent']
     }
+  },
+  {
+    name: 'open_in_reader',
+    description:
+      "Open a Markdown file (.md or .markdown) in Forge's Read view so the user can read it. Use it after you write a plan, report or doc the user should read. The user gets a notice and opens it themselves. path is absolute, or relative to your project folder. The answer says which file was sent, or why not.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'The .md file: absolute, or relative to your project folder' }
+      },
+      required: ['path']
+    }
   }
 ]
 
@@ -63,4 +78,18 @@ async function openAgentPane(args) {
   return reply?.ok ? { content: [{ type: 'text', text }] } : fail(text)
 }
 
-export const APP_HANDLERS = { open_agent_pane: openAgentPane }
+async function openInReader(args) {
+  const path = typeof args?.path === 'string' ? args.path.trim() : ''
+  if (!path) return fail('No file was sent: path is required.')
+  let reply
+  try {
+    reply = await browserAsk('open_in_reader', { path })
+  } catch (err) {
+    if (err?.link) return fail('Forge is not reachable from here (no FORGE_BROWSER_LINK_FILE, or Forge is not running), so no file was sent.')
+    return fail(`No file was sent: ${err?.message ?? err}`)
+  }
+  const text = String(reply?.text ?? 'Forge sent an empty answer.')
+  return reply?.ok ? { content: [{ type: 'text', text }] } : fail(text)
+}
+
+export const APP_HANDLERS = { open_agent_pane: openAgentPane, open_in_reader: openInReader }

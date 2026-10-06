@@ -37,14 +37,15 @@ export interface BrowserServiceDeps {
   onShot?: (path: string, owner: BrowserOwner, id: string, project: string) => void
   /**
    * App ops that ride the same authenticated pipe but are not the browser's:
-   * a pane agent's open_agent_pane (bridge/forge-app-tools.mjs). Answered by
-   * the renderer. Absent = refused in words.
+   * a pane agent's open_agent_pane, answered by the renderer, and its
+   * open_in_reader, answered in main (bridge/forge-app-tools.mjs). Absent =
+   * refused in words.
    */
   appOp?: (op: string, args: Record<string, unknown>, caller: BrowserOwner) => Promise<BrowserAgentReply>
 }
 
 /** Pipe ops that are the app's, not the browser's. */
-export const APP_LINK_OPS: ReadonlySet<string> = new Set(['open_agent_pane'])
+export const APP_LINK_OPS: ReadonlySet<string> = new Set(['open_agent_pane', 'open_in_reader'])
 
 export class BrowserService {
   readonly manager: BrowserManager
@@ -147,7 +148,10 @@ export class BrowserService {
     if (APP_LINK_OPS.has(op)) {
       return this.deps.appOp
         ? this.deps.appOp(op, args, caller)
-        : Promise.resolve({ ok: false, text: 'This Forge cannot open panes for agents yet.' })
+        : Promise.resolve({
+            ok: false,
+            text: op === 'open_in_reader' ? 'This Forge cannot open files for agents yet.' : 'This Forge cannot open panes for agents yet.'
+          })
     }
     let owner = caller
     if (caller.id.startsWith('pane:') && this.deps.resolveCaller) {
