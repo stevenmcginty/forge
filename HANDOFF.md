@@ -1,5 +1,16 @@
 # Handoff
 
+## Read mode: a Markdown reader in Forge desktop (2026-10-06; merged to master and pushed; Forge NOT restarted)
+
+- **Asked (Steve):** a place in Forge to open and read .md files easily, fitting the app; double-clicking a .md in Windows should open Forge if it is closed. He picked a 4th top-bar mode "Read" (over a side panel) and Read + Edit (over read-only).
+- **Built (foreman; worktree `C:\Users\steve\Desktop\forge-reader`, branch `md-reader`, commits fba1721 core, a886d22 entry points, b4cd90b UI):**
+  - Main: `electron/reader.ts` (list / read / write with a hash conflict check and CRLF kept, watch, recent, one `openInReader` path, inbox, HKCU registration), `shared/reader.ts`, `window.forge.reader`.
+  - Windows: `Open in Forge.vbs "<file>"` writes to `<dataRoot>\reader-inbox\` and starts Forge if the pid in `.forge-pid` is dead. The stable source checkout (FORGE_CHANNEL=stable, unpackaged) registers ProgID `Forge.Markdown` + OpenWithProgids for .md/.markdown at boot; it never touches UserChoice. Packaged: electron-builder `fileAssociations` (the NSIS macro also sets .md's default to Forge) + argv / second-instance argv.
+  - Entry points: Ctrl+click a .md path in a pane (`src/lib/reader-links.ts`; relative paths resolve against the project folder, since Forge does not track a pane's live cwd). MCP tool `open_in_reader` shows a notice tile and never switches the mode.
+  - UI: `src/components/reader/*`, full placement: file list with filter + Recent, live reload, Edit / Save / Ctrl+S, conflict choices "Keep mine (save anyway)" / "Load the new version".
+- **Checked:** typecheck, lint:hooks, build 0; `npm run reader:check` 79/79; launch-guard:check 91/91; screenshots in `forge-reader\shots\`. NOT checked live: Ctrl+click in a real pane, real reg.exe writes, an Explorer double-click, and whether Open with shows "Forge" or "Windows Based Script Host" (UNVERIFIED).
+- **Next:** restart Forge (main + preload changed). Steve sets Open with → Forge → Always once. Follow-ups: images / task lists / heading ids in `web/src/lib/markdown.tsx`; add `reader:check` to `scripts/run-checks.mjs`; Read on the Forge browser and phone. The worktree's node_modules is a physical copy (no junction), so `git worktree remove` is safe.
+
 ## Phone answer card stuck after a reconnect (2026-10-02; NOT committed, NOT deployed)
 
 - **Asked (Steve):** the "Claude Code is asking" card stayed up after he picked No and Claude had finished; "real bad problems with this pop-up".
