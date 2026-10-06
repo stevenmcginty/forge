@@ -122,6 +122,14 @@ import type {
   WebVoiceAskReply
 } from './web'
 import type { HandoffStartRemoteEvent } from './handoffview'
+import type {
+  ReaderActionResult,
+  ReaderDoc,
+  ReaderEntry,
+  ReaderOpenRequest,
+  ReaderOpenSource,
+  ReaderWriteResult
+} from './reader'
 import type { SkillSource, SkillsList } from './skills'
 import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
@@ -1149,6 +1157,37 @@ export interface ForgeApi {
     onStartRemote(cb: (e: HandoffStartRemoteEvent) => void): () => void
     /** Answer an `onStartRemote`. `error` empty means the handoff started. */
     startResult(requestId: string, error?: string): void
+  }
+
+  /**
+   * The Read view's markdown files. See electron/reader.ts.
+   *
+   * Paths are absolute and re-checked in main: an existing regular file with a
+   * markdown extension (shared/reader.ts MARKDOWN_EXTENSIONS), at most 5 MB.
+   * Text comes back with LF line endings; `write` puts a CRLF file back as CRLF.
+   */
+  reader: {
+    /** Markdown files under a folder, newest first. Skips node_modules, build output and dot-folders; depth 8, 2000 files. */
+    list(root: string): Promise<ReaderEntry[]>
+    read(path: string): Promise<ReaderDoc | { error: string }>
+    /** Save. `baseHash` is the `hash` the text was read with; a file changed since comes back as a conflict. */
+    write(path: string, text: string, baseHash: string): Promise<ReaderWriteResult>
+    /** Push `onChanged` when the file changes on disk, including after Forge's own `write`. */
+    watch(path: string): Promise<ReaderActionResult>
+    /** send — teardown has nothing to await. */
+    unwatch(path: string): void
+    onChanged(cb: (path: string) => void): () => void
+    /** The last 20 files opened through `open` or any other route; `rel` is the file name. */
+    recent(): Promise<ReaderEntry[]>
+    /** Show a file in the Read view through main's `openInReader` (it arrives on `onOpen`). Default source 'app'. */
+    open(path: string, source?: ReaderOpenSource): Promise<ReaderActionResult>
+    /** A path as written in text — quotes, backticks and `:line:col` peeled — to an existing markdown file, or null. */
+    resolve(text: string, baseDir?: string | null): Promise<string | null>
+    /** Opens that arrived before this page was listening. Calling it marks the page as listening. */
+    takePending(): Promise<ReaderOpenRequest[]>
+    onOpen(cb: (req: ReaderOpenRequest) => void): () => void
+    /** Show the file's folder in Explorer. */
+    revealFolder(path: string): Promise<ReaderActionResult>
   }
 
   /**

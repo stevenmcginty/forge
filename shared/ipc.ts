@@ -819,6 +819,35 @@ export const IPC = {
    */
   handoffStartResult: 'handoff:start-result',
 
+  /*
+   * reader — the Read view's markdown files (electron/reader.ts).
+   *
+   * Unlike handoff, paths do cross this boundary: a reader is for any .md on the
+   * machine. Every channel that takes one re-checks it in main — absolute,
+   * existing, a regular file, a markdown extension — and `readerReveal` opens
+   * the file's *folder*, never the file (openPath is ShellExecute).
+   */
+  readerList: 'reader:list',
+  readerRead: 'reader:read',
+  /** Save over an existing markdown file; refused as a conflict if it changed since it was read. */
+  readerWrite: 'reader:write',
+  readerWatch: 'reader:watch',
+  /** send — teardown has nothing to await. */
+  readerUnwatch: 'reader:unwatch',
+  /** Main → renderer: a watched file changed on disk. Payload: its path. */
+  readerChanged: 'reader:changed',
+  readerRecent: 'reader:recent',
+  /** Renderer → main: show this file, through the same `openInReader` every other route takes. */
+  readerOpenRequest: 'reader:open-request',
+  /** Main → renderer: show this file. Payload: ReaderOpenRequest. */
+  readerOpen: 'reader:open',
+  /** The opens queued before the page was listening; also marks the page as listening. */
+  readerTakePending: 'reader:take-pending',
+  /** A path as written in text (a terminal line) → an existing markdown file, or null. */
+  readerResolve: 'reader:resolve',
+  /** Show the file's folder in Explorer. */
+  readerReveal: 'reader:reveal',
+
   // updates & tools (M10) — what is installed, what is available
   toolsProbe: 'tools:probe',
   toolsLatest: 'tools:latest',

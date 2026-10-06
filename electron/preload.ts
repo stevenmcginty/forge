@@ -362,6 +362,21 @@ const api: ForgeApi = {
     startResult: (requestId, error) => ipcRenderer.send(IPC.handoffStartResult, { requestId, error: error ?? '' })
   },
 
+  reader: {
+    list: (root) => ipcRenderer.invoke(IPC.readerList, root),
+    read: (path) => ipcRenderer.invoke(IPC.readerRead, path),
+    write: (path, text, baseHash) => ipcRenderer.invoke(IPC.readerWrite, path, text, baseHash),
+    watch: (path) => ipcRenderer.invoke(IPC.readerWatch, path),
+    unwatch: (path) => ipcRenderer.send(IPC.readerUnwatch, path),
+    onChanged: (cb) => subscribe(IPC.readerChanged, cb),
+    recent: () => ipcRenderer.invoke(IPC.readerRecent),
+    open: (path, source) => ipcRenderer.invoke(IPC.readerOpenRequest, path, source ?? 'app'),
+    resolve: (text, baseDir) => ipcRenderer.invoke(IPC.readerResolve, text, baseDir ?? null),
+    takePending: () => ipcRenderer.invoke(IPC.readerTakePending),
+    onOpen: (cb) => subscribe(IPC.readerOpen, cb),
+    revealFolder: (path) => ipcRenderer.invoke(IPC.readerReveal, path)
+  },
+
   tools: {
     probe: (refresh) => ipcRenderer.invoke(IPC.toolsProbe, refresh === true),
     latest: (ids, refresh) => ipcRenderer.invoke(IPC.toolsLatest, ids ?? null, refresh === true)

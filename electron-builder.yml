@@ -166,6 +166,18 @@ win:
     - target: nsis
       arch: [x64]
 
+# "Open with Forge" for .md files: Explorer starts Forge.exe "<file>" and
+# electron/reader.ts takes the path from argv (cold start) or second-instance.
+# `name` is the ProgID the installer writes, so it matches the source-run
+# Forge's own registration (electron/reader.ts openWithValues); `description` is
+# what Explorer shows. `role` is macOS-only and inert here. Note the NSIS
+# macro also sets the extension's default value to this ProgID on install.
+fileAssociations:
+  - ext: [md, markdown]
+    name: Forge.Markdown
+    description: Markdown document
+    role: Viewer
+
 nsis:
   artifactName: ${productName}-${version}-setup.${ext}
   # Reaps a live forge-stt.exe before files are touched — the speech engine

@@ -119,6 +119,14 @@ import {
 import { disposeUpdater, initUpdater, registerUpdateHandlers, setUpdateTarget } from './updater'
 import { forwardRendererConsole } from './renderer-log'
 import {
+  disposeReader,
+  openReaderArgv,
+  registerMarkdownOpenWith,
+  registerReaderHandlers,
+  setReaderTarget,
+  startReaderInbox
+} from './reader'
+import {
   disposeSourceUpdater,
   initSourceUpdater,
   registerSourceUpdateHandlers,
@@ -233,7 +241,14 @@ if (!gotSingleInstanceLock) {
   // hidden — so launching Forge from the Start menu would appear to do nothing
   // at all, which is precisely the "Forge won't open" morning this lock exists
   // to avoid.
-  app.on('second-instance', () => openMainWindow())
+  //
+  // A markdown file on that second command line is a double-click in Explorer
+  // (packaged Forge's file association): it goes to the Read view first, then
+  // the window comes forward exactly as it always has. See electron/reader.ts.
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    openReaderArgv(argv, workingDirectory)
+    openMainWindow()
+  })
 }
 
 /* ----------------------------------------------------------------- window */
@@ -486,6 +501,7 @@ function createWindow(): void {
     // feature must never be in.
     setForemanTarget(null)
     setBrainTarget(null)
+    setReaderTarget(null)
     // Takes the overlay down with it. A topmost pill wired to a renderer that
     // no longer exists would be a dead button floating over every other app,
     // and — because it is skipTaskbar — one with no obvious way to close it.
@@ -540,6 +556,7 @@ function createWindow(): void {
   setVoiceAgentTarget(mainWindow)
   setForemanTarget(mainWindow)
   setBrainTarget(mainWindow)
+  setReaderTarget(mainWindow)
   setBrowserWindow(mainWindow)
   setChatWindow(mainWindow)
   // The main window is the overlay's *host*: it holds the one voice agent, so
@@ -1580,6 +1597,21 @@ void app
       registerHandoffHandlers()
       registerToolsHandlers()
       registerCommandsHandlers()
+      // The Read view. A cold start's command line may name a markdown file (a
+      // packaged Forge started by a double-click); it is queued until the page
+      // asks. The source-run Forge's double-clicks come through the inbox
+      // instead — started after the window, below.
+      registerReaderHandlers({ dataRoot: getDataDir(), openMainWindow })
+      openReaderArgv(process.argv.slice(1), process.cwd())
+      // Explorer's "Open with" for the stable checkout run from source; a no-op
+      // for a packaged build (NSIS registers it) and for the Forge Dev checkout.
+      // __dirname is out/main at runtime, so the checkout is two up. Never
+      // awaited, and a failure is a log line: see registerMarkdownOpenWith.
+      registerMarkdownOpenWith({
+        checkoutRoot: join(__dirname, '..', '..'),
+        channel: process.env['FORGE_CHANNEL'],
+        packaged: app.isPackaged
+      }).catch((err) => console.error('[reader] "Open with" registration failed:', err))
       registerUpdateHandlers()
       registerStaleHandlers()
       registerSourceUpdateHandlers()
@@ -1591,6 +1623,13 @@ void app
     }
 
     createWindow()
+    // After the window, because an inbox open brings it forward — and before
+    // it, openMainWindow would have built a second one.
+    try {
+      startReaderInbox()
+    } catch (err) {
+      console.error('[reader] inbox failed to start:', err)
+    }
     // After the window, so the first status event has somewhere to go — and it
     // is a no-op in a dev run: initUpdater() returns immediately unless this is
     // a packaged build or FORGE_FAKE_UPDATE is set. See electron/updater.ts.
@@ -1653,6 +1692,7 @@ app.on('before-quit', () => {
   safely('disposeActivityWatchers', disposeActivityWatchers)
   safely('disposeShareWatchers', disposeShareWatchers)
   safely('disposeHandoffWatchers', disposeHandoffWatchers)
+  safely('disposeReader', disposeReader)
   safely('disposeSttSidecar', disposeSttSidecar)
   safely('disposeSttModel', disposeSttModel)
   // Ends the Agent SDK session and its subprocess. A voice brain outliving the
