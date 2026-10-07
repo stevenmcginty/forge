@@ -25,6 +25,7 @@ import {
   windowOpenAction,
   type BrowserAppKeys,
   type BrowserHistoryAction,
+  type BrowserKeyName,
   type BrowserPageKey,
   type BrowserOwner,
   type BrowserRect,
@@ -36,14 +37,18 @@ import { installArtifactScheme } from '../artifact-scheme'
 import type { BrowserDriver } from './agent-ops'
 import { BrowserSurfaceStore } from './store'
 import {
+  focusScript,
   formatRead,
   readScript,
   refDomClickScript,
+  refFocusOnlyScript,
   refFocusScript,
   refPointScript,
+  refTickScript,
   staleRef,
   uploadTargetScript,
   type PageSnapshot,
+  type RefPoint,
   type UploadTarget
 } from './snapshot'
 
@@ -96,6 +101,17 @@ const SHOT_MS = 8_000
 const PAGE_MS = 10_000
 const NOT_RESPONDING =
   'the page is not responding — a script on it is busy, or it is showing a dialog (alert, confirm) that someone has to close. browser_close still works'
+/** browser_key's keys as CDP Input.dispatchKeyEvent names them. Only Enter and Space carry text. */
+const KEYS: Record<BrowserKeyName, { key: string; code: string; vk: number; text?: string }> = {
+  Tab: { key: 'Tab', code: 'Tab', vk: 9 },
+  Enter: { key: 'Enter', code: 'Enter', vk: 13, text: '\r' },
+  Space: { key: ' ', code: 'Space', vk: 32, text: ' ' },
+  Escape: { key: 'Escape', code: 'Escape', vk: 27 },
+  ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', vk: 37 },
+  ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', vk: 38 },
+  ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
+  ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', vk: 40 }
+}
 interface Tab {
   view: WebContentsView | null
   visible: boolean
@@ -789,7 +805,7 @@ export class BrowserManager implements BrowserDriver {
   async click(id: string, ref: number): Promise<string> {
     const wc = this.wcFor(id)
     if (!wc) return `Tab ${id} is gone.`
-    let point: { x: number; y: number; label: string; w: number; h: number } | null
+    let point: RefPoint | null
     try {
       point = await this.evaluate(wc, refPointScript(ref))
     } catch (err) {
@@ -827,19 +843,86 @@ export class BrowserManager implements BrowserDriver {
       return `I could not click "${point.label}" on tab ${id}: ${errText(err)}`
     }
     await settle(wc)
-    return `Clicked "${point.label}" on tab ${id}. Now on ${this.where(wc)}. Read the page again to see what changed.`
+    const ticked = point.tick === null ? '' : await this.tickAfter(wc, ref, point.tick, point.radio)
+    return `Clicked "${point.label}" on tab ${id}${ticked}. Now on ${this.where(wc)}. Read the page again to see what changed.`
   }
 
-  private async key(wc: WebContents, key: string, code: string, vk: number, text?: string): Promise<void> {
+  /**
+   * What a click did to a radio or tick box, as " — it is now ticked". A box
+   * whose state did not move gets one more click dispatched on it (or on the
+   * label standing in for it) — some pages ignore a press that lands on their
+   * drawn box — and the answer says plainly if that did not take either. ''
+   * when the element is gone (the click navigated) or cannot be asked.
+   */
+  private async tickAfter(wc: WebContents, ref: number, before: string, radio: boolean): Promise<string> {
+    const now = async (): Promise<string | null> => {
+      try {
+        return await this.evaluate<string | null>(wc, refTickScript(ref))
+      } catch {
+        return null
+      }
+    }
+    let after = await now()
+    if (after === null) return ''
+    if (after !== before) return ` — it is now ${after}`
+    // A ticked radio stays ticked when clicked again: nothing went wrong.
+    if (radio && before === 'ticked') return ' — it was already ticked'
+    try {
+      await this.evaluate<boolean>(wc, refDomClickScript(ref))
+    } catch {
+      /* answered below from the state */
+    }
+    await settle(wc)
+    after = await now()
+    if (after === null) return ''
+    if (after !== before) return ` — it is now ${after}`
+    return ` — it is still ${after}; the page did not take the click`
+  }
+
+  /** One key, down then up. `modifiers` is CDP's mask (Shift = 8). Without text, the down is a raw key-down, as DevTools sends it. */
+  private async press(wc: WebContents, key: string, code: string, vk: number, text?: string, modifiers = 0): Promise<void> {
     await this.bounded(wc, 'Input.dispatchKeyEvent', {
-      type: 'keyDown',
+      type: text ? 'keyDown' : 'rawKeyDown',
       key,
       code,
       windowsVirtualKeyCode: vk,
       nativeVirtualKeyCode: vk,
+      modifiers,
       ...(text ? { text, unmodifiedText: text } : {})
     })
-    await this.bounded(wc, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk })
+    await this.bounded(wc, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers })
+  }
+
+  async key(id: string, key: BrowserKeyName, shift: boolean, ref: number | null, times: number): Promise<string> {
+    const wc = this.wcFor(id)
+    if (!wc) return `Tab ${id} is gone.`
+    if (wc.isLoading()) await settle(wc)
+    if (ref !== null) {
+      try {
+        const focused = await this.evaluate<boolean | null>(wc, refFocusOnlyScript(ref))
+        if (!focused) return staleRef(ref)
+      } catch (err) {
+        return `I could not find element ${ref} on tab ${id}: ${errText(err)}`
+      }
+    }
+    const k = KEYS[key]
+    const name = `${shift ? 'Shift+' : ''}${key}`
+    try {
+      for (let i = 0; i < times; i++) {
+        await this.press(wc, k.key, k.code, k.vk, k.text, shift ? 8 : 0)
+        if (i < times - 1) await sleep(TYPE_DELAY_MS)
+      }
+    } catch (err) {
+      return `I could not press ${name} on tab ${id}: ${errText(err)}`
+    }
+    await settle(wc)
+    let focus: string | null = null
+    try {
+      focus = await this.evaluate<string | null>(wc, focusScript())
+    } catch {
+      /* the page went away under the key (Enter submitted it) */
+    }
+    return `Pressed ${name}${times > 1 ? ` ×${times}` : ''} on tab ${id}. Focus is now on ${focus ?? 'nothing in particular'}. Now on ${this.where(wc)}. Read the page again to see what changed.`
   }
 
   async type(id: string, ref: number | null, text: string, submit: boolean): Promise<string> {
@@ -860,7 +943,7 @@ export class BrowserManager implements BrowserDriver {
         await this.bounded(wc, 'Input.insertText', { text })
       } else {
         for (const ch of text) {
-          if (ch === '\n') await this.key(wc, 'Enter', 'Enter', 13, '\r')
+          if (ch === '\n') await this.press(wc, 'Enter', 'Enter', 13, '\r')
           else await this.bounded(wc, 'Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch })
           if (ch !== '\n') await this.bounded(wc, 'Input.dispatchKeyEvent', { type: 'keyUp', key: ch })
           await sleep(TYPE_DELAY_MS)
@@ -872,7 +955,7 @@ export class BrowserManager implements BrowserDriver {
     const into = label ? `into "${label}"` : 'where the focus was'
     if (!submit) return `Typed that ${into} on tab ${id}.`
     try {
-      await this.key(wc, 'Enter', 'Enter', 13, '\r')
+      await this.press(wc, 'Enter', 'Enter', 13, '\r')
     } catch (err) {
       return `Typed it, but pressing Enter failed: ${errText(err)}`
     }

@@ -9,7 +9,7 @@
  *                    main names keys exactly as the keymap does (browserKeyCombo).
  *   2c. pop-ups      windowOpenAction: a script's pop-up (blank, sized, named, sign-in page)
  *                    is a real window, a plain new-tab link stays in the tab, non-web refused.
- *   3. tool schema   bridge/browser-tools.mjs offers exactly the eight tools, with words
+ *   3. tool schema   bridge/browser-tools.mjs offers exactly the nine tools, with words
  *                    and schemas identical to shared/browser.ts (the canonical copy).
  *   4. link auth     the real BrowserLink answers the right token and refuses a wrong,
  *                    missing or oversized one — without ever calling the handler.
@@ -31,6 +31,16 @@
  *   6d. read         only what a person could see and reach is listed: a covered till is left
  *                    out, a modal's buttons come first, `find` narrows the list (and its number
  *                    clicks), plain, below-the-fold and scroll-box buttons all stay.
+ *   6e. radios       GOV.UK radios and tick boxes hidden behind styled labels are listed by
+ *                    their labels with (ticked)/(not ticked), click through the label on and
+ *                    off screen (never following a link inside it), and browser_key presses
+ *                    Tab, Shift+Tab, arrows, Space and Escape.
+ *
+ *   --dvla [--dvla-out <file>]  also: the real DVLA "sell a vehicle out of trade" service
+ *                    (network) — trader name, then its two email-receipt radios ticked by
+ *                    click and by arrow key. Stops there: no reg, no V5C, nothing submitted
+ *                    past the trader name. Every reply goes to <file> (default in the temp
+ *                    dir), with a screenshot beside it.
  *
  *   --live [--shots <dir>]  also: a VISIBLE window mounting the real React surface,
  *                    an agent opening https://example.com, browser_read + browser_screenshot
@@ -66,6 +76,8 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const argv = process.argv.slice(2)
 const LIVE = argv.includes('--live')
 const SHOTS = argv.includes('--shots') ? resolve(argv[argv.indexOf('--shots') + 1] ?? '') : null
+const DVLA = argv.includes('--dvla')
+const DVLA_OUT = argv.includes('--dvla-out') ? resolve(argv[argv.indexOf('--dvla-out') + 1] ?? '') : join(tmpdir(), 'forge-browser-check-dvla.txt')
 
 let passed = 0
 let failed = 0
@@ -222,14 +234,14 @@ const bridgeUrl = pathToFileURL(join(ROOT, 'bridge', 'browser-tools.mjs')).href
 {
   const B = await import(bridgeUrl)
   const names = B.BROWSER_TOOLS.map((t) => t.name)
-  check('exactly the eight tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES), names.join(', '))
-  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 8)
+  check('exactly the nine tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES), names.join(', '))
+  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 9)
   for (const tool of B.BROWSER_TOOLS) {
     check(`${tool.name}: description matches shared word for word`, tool.description === S.BROWSER_TOOL_DESCRIPTIONS[tool.name])
     check(`${tool.name}: schema matches shared`, JSON.stringify(tool.inputSchema) === JSON.stringify(S.BROWSER_TOOL_PARAMS[tool.name]))
     check(`${tool.name}: says it is Forge's browser, preferred, own tabs, parallel`, tool.description.startsWith(S.BROWSER_PREAMBLE))
   }
-  for (const name of ['browser_click', 'browser_type', 'browser_upload']) {
+  for (const name of ['browser_click', 'browser_type', 'browser_upload', 'browser_key']) {
     const d = B.BROWSER_TOOLS.find((t) => t.name === name).description
     check(`${name}: carries the ask-first rule`, d.includes('Ask the user before purchases, messages, or submitting forms'))
   }
@@ -280,6 +292,7 @@ section('5. ownership and concurrency (fake driver)')
   const records = []
   let n = 0
   const log = []
+  let keyCalls = 0
   const delay = (ms) => new Promise((r) => setTimeout(r, ms))
   const driver = {
     records: () => records,
@@ -298,6 +311,10 @@ section('5. ownership and concurrency (fake driver)')
     type: async (id, ref, text, submit) => `type ${id} ${ref} ${text} ${submit}`,
     navigate: async (id, url) => `nav ${id} ${url}`,
     upload: async (id, path, ref, which) => `upload ${id} ${path} ${ref} ${which}`,
+    key: async (id, key, shift, ref, times) => {
+      keyCalls++
+      return `key ${id} ${key} ${shift} ${ref} ${times}`
+    },
     screenshot: async (id) => ({ path: `/tmp/${id}.png` }),
     close: async (id) => {
       const at = records.findIndex((r) => r.id === id)
@@ -350,6 +367,20 @@ section('5. ownership and concurrency (fake driver)')
   const dir = await up({ path: scratch })
   check('a folder is refused', !dir.ok && dir.text.includes('is not a file'), dir.text)
   check('a bad ref or which is refused', !(await up({ path: upFile, ref: 0 })).ok && !(await up({ path: upFile, which: 0 })).ok && !(await up({ path: upFile, which: 'x' })).ok)
+  const key = (args) => ops.run('browser_key', args, A)
+  check('browser_key hands the driver the key, no shift, no ref, once', (await key({ key: 'Tab' })).text === 'key b1 Tab false null 1')
+  check('browser_key passes shift, ref and times through, rounded', (await key({ key: 'ArrowDown', shift: true, ref: 3.2, times: 2 })).text === 'key b1 ArrowDown true 3 2')
+  check('browser_key takes 20 presses', (await key({ key: 'Space', times: 20 })).text === 'key b1 Space false null 20')
+  const before = keyCalls
+  const badKey = await key({ key: 'F5' })
+  check('an unknown key is refused, naming the keys it takes', !badKey.ok && badKey.text.includes('Tab, Enter, Space, Escape, ArrowUp, ArrowDown, ArrowLeft, ArrowRight') && badKey.text.includes('"F5"'), badKey.text)
+  const noKey = await key({})
+  const zero = await key({ key: 'Tab', times: 0 })
+  const many = await key({ key: 'Tab', times: 21 })
+  const junkTimes = await key({ key: 'Tab', times: 'x' })
+  const badKeyRef = await key({ key: 'Enter', ref: 0 })
+  check('no key, times 0, 21 or junk, and a bad ref are refused', [noKey, zero, many, junkTimes, badKeyRef].every((r) => !r.ok) && zero.text.includes('1 to 20') && many.text.includes('1 to 20'), [noKey, zero, many, junkTimes, badKeyRef].map((r) => r.text).join('\n'))
+  check('…all before the driver is called', keyCalls === before, `${keyCalls - before} calls`)
   const shot = await ops.run('browser_screenshot', {}, A)
   check('screenshot returns the file path', shot.ok && shot.imagePath === '/tmp/b1.png')
   const closed = await ops.run('browser_close', {}, A)
@@ -363,6 +394,65 @@ section('5. ownership and concurrency (fake driver)')
 }
 
 /* ------------------------------------------------------------ 6. Electron */
+/**
+ * GOV.UK Frontend (v5) radios and checkboxes as they reach the page: the real
+ * input transparent and 44×44, first in a flex row, over the circle or box the
+ * label draws with ::before; the dot or tick is drawn with ::after once it is
+ * checked. Class names and the CSS that hides and draws are govuk-frontend's,
+ * as the live DVLA service serves them (`--dvla` compares the two).
+ */
+const GOVUK_CSS = '<style>body{font-family:arial,sans-serif;margin:8px}' +
+  '.govuk-radios__item,.govuk-checkboxes__item{display:flex;flex-wrap:wrap;position:relative;margin-bottom:10px}' +
+  '.govuk-radios__input,.govuk-checkboxes__input{z-index:1;width:44px;height:44px;margin:0;opacity:0;cursor:pointer}' +
+  '.govuk-radios__label,.govuk-checkboxes__label{align-self:center;max-width:calc(100% - 74px);margin-bottom:0;padding:7px 15px;cursor:pointer;touch-action:manipulation}' +
+  '.govuk-radios__label:before{content:"";box-sizing:border-box;position:absolute;top:2px;left:2px;width:40px;height:40px;border:2px solid currentcolor;border-radius:50%;background:transparent}' +
+  '.govuk-radios__label:after{content:"";position:absolute;top:12px;left:12px;width:0;height:0;border:10px solid currentcolor;border-radius:50%;opacity:0;background:currentcolor}' +
+  '.govuk-radios__input:checked+.govuk-radios__label:after{opacity:1}' +
+  '.govuk-checkboxes__label:before{content:"";box-sizing:border-box;position:absolute;top:2px;left:2px;width:40px;height:40px;border:2px solid currentcolor;background:transparent}' +
+  '.govuk-checkboxes__label:after{content:"";box-sizing:border-box;position:absolute;top:13px;left:10px;width:23px;height:12px;transform:rotate(-45deg);border:solid;border-width:0 0 5px 5px;border-top-color:transparent;opacity:0;background:transparent}' +
+  '.govuk-checkboxes__input:checked+.govuk-checkboxes__label:after{opacity:1}' +
+  '.fake{display:inline-block;position:relative;padding:4px 4px 4px 30px;cursor:pointer}' +
+  '.fake:before{content:"";position:absolute;left:0;top:2px;width:20px;height:20px;border:2px solid #000}' +
+  '.vh{position:absolute!important;width:1px!important;height:1px!important;margin:0!important;padding:0!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;border:0!important;white-space:nowrap!important}' +
+  '</style>'
+const govukRadios = (name, legend, options) =>
+  '<div class="govuk-form-group"><fieldset class="govuk-fieldset"><legend class="govuk-fieldset__legend govuk-fieldset__legend--l"><h1 class="govuk-fieldset__heading">' + legend + '</h1></legend>' +
+  '<div class="govuk-radios" data-module="govuk-radios">' +
+  options.map(([value, text], i) => {
+    const id = i === 0 ? name : name + '-' + (i + 1)
+    return '<div class="govuk-radios__item"><input class="govuk-radios__input" id="' + id + '" name="' + name + '" type="radio" value="' + value + '">' +
+      '<label class="govuk-label govuk-radios__label" for="' + id + '">' + text + '</label></div>'
+  }).join('') + '</div></fieldset></div>'
+const govukCheckbox = (id, labelHtml) =>
+  '<div class="govuk-form-group"><div class="govuk-checkboxes" data-module="govuk-checkboxes"><div class="govuk-checkboxes__item">' +
+  '<input class="govuk-checkboxes__input" id="' + id + '" name="' + id + '" type="checkbox" value="yes">' +
+  '<label class="govuk-label govuk-checkboxes__label" for="' + id + '">' + labelHtml + '</label></div></div></div>'
+// Which clicks reached what, and whether a hand (a real input event) made them.
+const CLICK_LOG = '<script>window.__clicks = []; document.addEventListener("click", function (e) { window.__clicks.push(e.target.tagName + ":" + (e.target.id || "") + ":" + e.isTrusted) }, true)</script>'
+const FIXTURES = {
+  '/govuk': {
+    title: 'Vehicle tax or SORN',
+    body: GOVUK_CSS +
+      govukRadios('tax_or_sorn', 'Vehicle tax or SORN', [['tax', 'Tax this vehicle'], ['sorn', 'Make a SORN'], ['neither', 'Neither']]) +
+      govukCheckbox('agree', 'I agree to the <a href="/terms">terms and conditions of this service</a>') +
+      '<p><input type="checkbox" id="news" name="news" style="display:none"><label for="news" class="fake">Send me news</label></p>' +
+      '<p><input type="checkbox" id="remember" name="remember" class="vh"></p><p><label for="remember">Remember me</label></p>' +
+      '<p><input type="file" id="photo" style="display:none"><label for="photo" class="fake">Choose photo</label></p>' +
+      '<div style="display:none"><input type="radio" name="ghost" id="ghost1"><label for="ghost1">Ghost radio</label></div>' +
+      '<div role="checkbox" aria-checked="true" tabindex="0">Accept cookies</div>' +
+      '<div role="checkbox" aria-checked="mixed" tabindex="0">Some of them</div>' +
+      CLICK_LOG
+  },
+  '/keys2': {
+    title: 'Keys two',
+    body: GOVUK_CSS + '<h2>Keys two</h2><p><input id="first" aria-label="First name"> <input id="last" aria-label="Last name"></p>' +
+      govukRadios('colour', 'Colour', [['red', 'Red'], ['green', 'Green'], ['blue', 'Blue']]) +
+      govukCheckbox('terms', 'Accept terms') +
+      '<button id="open" onclick="document.getElementById(&quot;dlg&quot;).showModal()">Open dialog</button>' +
+      '<dialog id="dlg"><p>Hello dialog</p><button>OK</button></dialog>'
+  }
+}
+
 const electronExe = join(ROOT, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron')
 const { build } = await import('esbuild')
 
@@ -376,11 +466,13 @@ async function bundleHarness() {
     mainSrc,
     `import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
 import { createServer } from 'node:http'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserService } from ${JSON.stringify(join(ROOT, 'electron', 'browser-panes', 'service.ts'))}
 
 const cfg = JSON.parse(process.env.BROWSER_CHECK_CFG || '{}')
+// Pages kept as plain strings in browser-check.mjs (GOV.UK radios, keys), served by path.
+const fixtures = cfg.fixtures ? JSON.parse(readFileSync(cfg.fixtures, 'utf8')) : {}
 // Never a modal on the desk, never a harness that outlives the check.
 process.on('uncaughtException', (e) => { console.error(e); process.exit(1) })
 dialog.showErrorBox = () => {}
@@ -475,6 +567,8 @@ const server = createServer((req, res) => {
         '<label><input type="checkbox" name="agree" style="position:absolute;opacity:0.01"><span style="position:relative;display:inline-block;width:20px;height:20px;background:#000"></span> Agree</label>' })
     } else if (url.pathname === '/hang') {
       page(res, { title: 'Hang', body: '<h1>Hang page</h1><script>window.onload = function () { setTimeout(function () { for (;;) {} }, 50) }</script>' })
+    } else if (fixtures[url.pathname]) {
+      page(res, fixtures[url.pathname])
     } else { res.writeHead(404); res.end('no') }
   }, delay)
 })
@@ -621,12 +715,14 @@ process.stdout.write('@@AGENT@@' + JSON.stringify(out) + '@@END@@')
 `,
     'utf8'
   )
-  return { dir, main: join(dir, 'main.cjs'), preload: join(dir, 'preload.cjs'), html: join(dir, 'index.html'), runner }
+  const fixtures = join(dir, 'fixtures.json')
+  writeFileSync(fixtures, JSON.stringify(FIXTURES), 'utf8')
+  return { dir, main: join(dir, 'main.cjs'), preload: join(dir, 'preload.cjs'), html: join(dir, 'index.html'), runner, fixtures }
 }
 
 /** Launch the harness; resolves once it says READY. */
 function launch(h, dataDir, live) {
-  const env = { ...process.env, BROWSER_CHECK_CFG: JSON.stringify({ dataDir, live, preload: h.preload, html: h.html }) }
+  const env = { ...process.env, BROWSER_CHECK_CFG: JSON.stringify({ dataDir, live, preload: h.preload, html: h.html, fixtures: h.fixtures }) }
   for (const k of ['ELECTRON_RUN_AS_NODE', 'ELECTRON_RENDERER_URL', 'NODE_ENV', 'NODE_ENV_ELECTRON_VITE']) delete env[k]
   const child = spawn(electronExe, [h.main], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   children.add(child)
@@ -920,6 +1016,87 @@ if (!existsSync(electronExe)) {
     const vicTidy = await agent(h, ready.linkFile, vic, vicIds.map((id) => ({ op: 'browser_close', args: { id } })))
     check("Vic's tabs close", vicIds.length === 5 && vicTidy.every((r) => !r.isError), vicTidy.map((r) => r.text).join('\n'))
 
+    section('6e. Electron: GOV.UK radios and tick boxes behind styled labels, ticked state, browser_key')
+    const wyn = { id: 'pane-F', name: 'Wyn', agent: 'claude' }
+    const refOf = (text, words) => Number(listOf(text).find((l) => l.includes(`"${words}"`))?.match(/^\[(\d+)\]/)?.[1] ?? 0)
+    const lineOf = (text, words) => listOf(text).find((l) => l.includes(`"${words}"`)) ?? ''
+    const govOpen = await agent(h, ready.linkFile, wyn, [
+      { op: 'browser_open', args: { url: `${ready.base}/govuk` } },
+      { op: 'browser_open', args: { url: `${ready.base}/govuk` } }
+    ])
+    const offId = tabIn(govOpen[0])
+    const onId = tabIn(govOpen[1])
+    await app.send({ cmd: 'show', id: onId })
+    for (const [where, id] of [['off screen (clicks dispatched on the label)', offId], ['on screen (a real mouse press)', onId]]) {
+      const [first] = await agent(h, ready.linkFile, wyn, [{ op: 'browser_read', args: { id } }])
+      const read1 = first?.text ?? ''
+      const radios = ['Tax this vehicle', 'Make a SORN', 'Neither'].map((w) => lineOf(read1, w))
+      check(`${where}: the three hidden GOV.UK radios are listed by their labels, not ticked`, radios.every((l, i) => l.endsWith(`input radio "${['Tax this vehicle', 'Make a SORN', 'Neither'][i]}" (not ticked)`)), read1)
+      check(`${where}: …and nothing is counted as left out`, !read1.includes('Left out'), read1)
+      check(`${where}: a role=checkbox with aria-checked true / mixed says (ticked) / (partly ticked)`, lineOf(read1, 'Accept cookies').endsWith('checkbox "Accept cookies" (ticked)') && lineOf(read1, 'Some of them').endsWith('checkbox "Some of them" (partly ticked)'), read1)
+      check(`${where}: a display:none tick box under a styled label is listed`, lineOf(read1, 'Send me news').endsWith('input checkbox "Send me news" (not ticked)'), read1)
+      check(`${where}: a 1px clipped tick box with a separate label is listed`, lineOf(read1, 'Remember me').endsWith('input checkbox "Remember me" (not ticked)'), read1)
+      check(`${where}: a hidden file box behind a label is still not listed`, listOf(read1).every((l) => !l.includes('Choose photo') && !l.includes('input file')), read1)
+      check(`${where}: a radio whose label is hidden too is not listed`, listOf(read1).every((l) => !l.includes('Ghost radio')), read1)
+      const neither = refOf(read1, 'Neither')
+      const agree = listOf(read1).find((l) => l.includes('input checkbox "I agree to the terms'))?.match(/^\[(\d+)\]/)?.[1]
+      const r = await agent(h, ready.linkFile, wyn, [
+        { op: 'browser_click', args: { id, ref: neither } },
+        { op: 'browser_read', args: { id } }
+      ])
+      check(`${where}: clicking "Neither" says it is now ticked`, (r[0]?.text ?? '').startsWith(`Clicked "Neither" on tab ${id} — it is now ticked. Now on `), r[0]?.text)
+      const read2 = r[1]?.text ?? ''
+      check(`${where}: the next read shows "Neither" ticked and the other two not`, lineOf(read2, 'Neither').endsWith('"Neither" (ticked)') && lineOf(read2, 'Tax this vehicle').endsWith('(not ticked)') && lineOf(read2, 'Make a SORN').endsWith('(not ticked)'), read2)
+      const value = await app.send({ cmd: 'tabEval', id, js: 'document.querySelector("input[name=tax_or_sorn]:checked").value' })
+      check(`${where}: the page's checked radio is the third one`, value === 'neither', String(value))
+      const clicks = (await app.send({ cmd: 'tabEval', id, js: 'window.__clicks' })) ?? []
+      if (id === onId) check(`${where}: the tick came from a real press (a trusted click reached the input)`, clicks.includes('INPUT:tax_or_sorn-3:true'), JSON.stringify(clicks))
+      else check(`${where}: the tick came from events dispatched on the label`, clicks[0] === 'LABEL::false' && clicks.includes('INPUT:tax_or_sorn-3:false'), JSON.stringify(clicks))
+      const more = await agent(h, ready.linkFile, wyn, [
+        { op: 'browser_click', args: { id, ref: Number(agree) } },
+        { op: 'browser_click', args: { id, ref: refOf(read2, 'Send me news') } },
+        { op: 'browser_click', args: { id, ref: refOf(read2, 'Remember me') } },
+        { op: 'browser_click', args: { id, ref: refOf(read2, 'Neither') } }
+      ])
+      const state = await app.send({ cmd: 'tabEval', id, js: '[location.pathname, ["agree", "news", "remember"].map((i) => document.getElementById(i).checked)]' })
+      check(`${where}: a tick box whose label holds a link ticks, and the page stays put`, (more[0]?.text ?? '').includes('— it is now ticked. Now on ') && (more[0]?.text ?? '').includes('/govuk') && JSON.stringify(state?.[0]) === '"/govuk"' && state?.[1]?.[0] === true, `${more[0]?.text}\n${JSON.stringify(state)}`)
+      check(`${where}: the display:none and the clipped tick boxes tick through their labels`, (more[1]?.text ?? '').includes('— it is now ticked') && (more[2]?.text ?? '').includes('— it is now ticked') && state?.[1]?.[1] === true && state?.[1]?.[2] === true, `${more[1]?.text}\n${more[2]?.text}\n${JSON.stringify(state)}`)
+      check(`${where}: clicking a radio that is already ticked says so`, (more[3]?.text ?? '').includes('— it was already ticked.'), more[3]?.text)
+    }
+
+    const keys = await agent(h, ready.linkFile, wyn, [
+      { op: 'browser_open', args: { url: `${ready.base}/keys2` } },
+      { op: 'browser_read' }
+    ])
+    const keysTab = tabIn(keys[0])
+    const kr = keys[1]?.text ?? ''
+    const ref = (w) => refOf(kr, w)
+    const ks = await agent(h, ready.linkFile, wyn, [
+      { op: 'browser_key', args: { id: keysTab, key: 'Tab', ref: ref('First name') } },
+      { op: 'browser_key', args: { id: keysTab, key: 'Tab', shift: true } },
+      { op: 'browser_key', args: { id: keysTab, key: 'ArrowDown', ref: ref('Red') } },
+      { op: 'browser_read', args: { id: keysTab } },
+      { op: 'browser_key', args: { id: keysTab, key: 'Space', ref: ref('Accept terms') } },
+      { op: 'browser_key', args: { id: keysTab, key: 'ArrowDown', ref: ref('Red'), times: 2 } },
+      { op: 'browser_click', args: { id: keysTab, ref: ref('Open dialog') } },
+      { op: 'browser_key', args: { id: keysTab, key: 'Escape' } },
+      { op: 'browser_key', args: { id: keysTab, key: 'PageDown' } }
+    ])
+    check('the keys page lists both fields, the three radios, the tick box and the button', ref('First name') && ref('Last name') && ref('Red') && ref('Green') && ref('Blue') && ref('Accept terms') && ref('Open dialog'), kr)
+    check('Tab moves the focus to the next field, and the reply names it', (ks[0]?.text ?? '').startsWith(`Pressed Tab on tab ${keysTab}. Focus is now on input text "Last name".`), ks[0]?.text)
+    check('Shift+Tab goes back', (ks[1]?.text ?? '').startsWith(`Pressed Shift+Tab on tab ${keysTab}. Focus is now on input text "First name".`), ks[1]?.text)
+    check('with ref on a radio, ArrowDown ticks the next one', (ks[2]?.text ?? '').includes('Focus is now on input radio "Green" (ticked).'), ks[2]?.text)
+    check('…and the read confirms it', lineOf(ks[3]?.text, 'Green').endsWith('(ticked)') && lineOf(ks[3]?.text, 'Red').endsWith('(not ticked)') && lineOf(ks[3]?.text, 'Blue').endsWith('(not ticked)'), ks[3]?.text)
+    check('Space ticks a focused tick box', (ks[4]?.text ?? '').includes('Focus is now on input checkbox "Accept terms" (ticked).'), ks[4]?.text)
+    check('times: 2 presses twice (Red → Green → Blue)', (ks[5]?.text ?? '').startsWith(`Pressed ArrowDown ×2 on tab ${keysTab}. Focus is now on input radio "Blue" (ticked).`), ks[5]?.text)
+    const dlg = await app.send({ cmd: 'tabEval', id: keysTab, js: '[document.getElementById("dlg").open, document.getElementById("terms").checked, document.querySelector("input[name=colour]:checked").value]' })
+    check('Escape closes a dialog opened with showModal()', (ks[6]?.text ?? '').startsWith('Clicked "Open dialog"') && (ks[7]?.text ?? '').startsWith('Pressed Escape') && dlg?.[0] === false, `${ks[6]?.text}\n${ks[7]?.text}\n${JSON.stringify(dlg)}`)
+    check('the page agrees: tick box ticked, Blue chosen', dlg?.[1] === true && dlg?.[2] === 'blue', JSON.stringify(dlg))
+    check('a key outside the list is refused over the real pipe', ks[8]?.isError === true && (ks[8]?.text ?? '').includes('`key` must be one of'), ks[8]?.text)
+    const wynIds = [offId, onId, keysTab].filter(Boolean)
+    const wynTidy = await agent(h, ready.linkFile, wyn, wynIds.map((id) => ({ op: 'browser_close', args: { id } })))
+    check("Wyn's tabs close", wynIds.length === 3 && wynTidy.every((r) => !r.isError), wynTidy.map((r) => r.text).join('\n'))
+
     await app.send({ cmd: 'quit' })
     await app.exited
     const { BrowserSurfaceStore } = await import('../electron/browser-panes/store.ts')
@@ -962,6 +1139,93 @@ if (!existsSync(electronExe)) {
       check('the live harness ran', false, `${err?.stack ?? err}\n${ui.stderr().slice(-2000)}`)
       ui.child.kill()
     }
+  }
+
+  if (DVLA) {
+    // The real DVLA "sell a vehicle out of trade" service, as an agent drives it:
+    // start → trader name → the email-receipt question, whose GOV.UK radios are
+    // the point. It stops there: no vehicle reg, no V5C number, nothing submitted
+    // past the trader name.
+    section('8. live: GOV.UK radios on the real DVLA service (network; stops at the email question)')
+    const runLog = []
+    const note = (title, text) => runLog.push(`=== ${title}\n${text ?? ''}\n`)
+    const gov = launch(h, join(scratch, 'dvla'), false)
+    try {
+      const { value: ready } = await gov.next(60_000)
+      const dee = { id: 'pane-dvla', name: 'Dee', agent: 'claude' }
+      const step = async (op, args = {}) => {
+        const [r] = await agent(h, ready.linkFile, dee, [{ op, args }])
+        note(`${op} ${JSON.stringify(args)}`, r?.text)
+        return r ?? { text: '', isError: true }
+      }
+      const items = (text) => (text ?? '').split('\n').filter((l) => /^\[\d+\] /.test(l))
+      const numberOf = (text, re) => Number(items(text).find((l) => re.test(l))?.match(/^\[(\d+)\]/)?.[1] ?? 0)
+      const lineFor = (text, re) => items(text).find((l) => re.test(l)) ?? ''
+      const opened = await step('browser_open', { url: 'https://sell-vehicle-out-of-trade.service.gov.uk' })
+      const id = (opened.text.match(/tab (b\d+)/) ?? [])[1]
+      let read = await step('browser_read', { id })
+      const refWhere = (fn) => gov.send({ cmd: 'tabEval', id, js: `(() => (window.__forgeRefs || []).findIndex(${fn}) + 1)()` })
+      // Only a "Start" button or link is ever clicked on the way to the trader-name page.
+      let nameRef = 0
+      for (let i = 0; i < 3; i++) {
+        nameRef = await refWhere('(e) => String(e.name || "").includes("trader_details[name]")')
+        if (nameRef) break
+        const start = numberOf(read.text, /^\[\d+\] (link|button|input submit) "Start/i)
+        if (!start) break
+        await step('browser_click', { id, ref: start })
+        read = await step('browser_read', { id })
+      }
+      check('dvla: reached the trader-name page (clicking only Start, if the service shows one)', nameRef > 0, read.text)
+      if (nameRef) {
+        const typed = await step('browser_type', { id, ref: nameRef, text: 'Radlett Cars' })
+        const cont = numberOf(read.text, /^\[\d+\] (button|input submit) "Continue"/)
+        check('dvla: typed the trader name and found Continue', !typed.isError && cont > 0, `${typed.text}\n${read.text}`)
+        await step('browser_click', { id, ref: cont })
+        read = await step('browser_read', { id })
+        const yes0 = lineFor(read.text, / input radio "Yes"/)
+        const no0 = lineFor(read.text, / input radio "No"/)
+        check('dvla: the email page lists both real radios, not ticked', yes0.endsWith('input radio "Yes" (not ticked)') && no0.endsWith('input radio "No" (not ticked)'), read.text)
+        const names = await gov.send({ cmd: 'tabEval', id, js: '(window.__forgeRefs || []).filter((e) => e.type === "radio").map((e) => e.name)' })
+        check('dvla: …and they are the email_receipt_decision radios', Array.isArray(names) && names.length === 2 && names.every((n) => String(n).endsWith('[email_receipt_decision]')), JSON.stringify(names))
+        const dump = await gov.send({
+          cmd: 'tabEval',
+          id,
+          js: '(() => { const g = document.querySelector(".govuk-radios"); const i = g && g.querySelector("input"); const l = g && g.querySelector("label"); const s = i && getComputedStyle(i); const it = g && getComputedStyle(g.querySelector(".govuk-radios__item"));' +
+            ' return { html: g ? g.outerHTML : null, input: s ? { position: s.position, opacity: s.opacity, width: s.width, height: s.height, zIndex: s.zIndex, margin: s.margin } : null, item: it ? { display: it.display, position: it.position, paddingLeft: it.paddingLeft } : null, label: l ? { classes: l.className, before: getComputedStyle(l, "::before").width + " x " + getComputedStyle(l, "::before").height + " " + getComputedStyle(l, "::before").position } : null } })()'
+        })
+        note('the email page\'s .govuk-radios block (outerHTML)', dump?.html)
+        note('computed style: first input, item, label ::before', JSON.stringify({ input: dump?.input, item: dump?.item, label: dump?.label }, null, 2))
+        const html = String(dump?.html ?? '')
+        check(
+          'dvla: the live markup uses the classes the /govuk fixture copies',
+          ['govuk-radios ', 'govuk-radios__item', 'govuk-radios__input', 'govuk-label govuk-radios__label'].every((c) => html.includes(c)) &&
+            dump?.input?.opacity === '0' && dump?.input?.width === '44px' && dump?.input?.position === 'static' && dump?.item?.display === 'flex',
+          `${html.slice(0, 600)}\n${JSON.stringify(dump)}`
+        )
+        const clicked = await step('browser_click', { id, ref: numberOf(read.text, / input radio "No"/) })
+        check('dvla: clicking "No" says it is now ticked', clicked.text.startsWith(`Clicked "No" on tab ${id} — it is now ticked.`), clicked.text)
+        read = await step('browser_read', { id })
+        check('dvla: the read shows "No" ticked, "Yes" not', lineFor(read.text, / input radio "No"/).endsWith('"No" (ticked)') && lineFor(read.text, / input radio "Yes"/).endsWith('"Yes" (not ticked)'), read.text)
+        // Numbers from this read, the latest: the click can change what is listed above the radios.
+        const down = await step('browser_key', { id, key: 'ArrowDown', ref: numberOf(read.text, / input radio "Yes"/) })
+        const up = await step('browser_key', { id, key: 'ArrowUp' })
+        check('dvla: browser_key from "Yes": ArrowDown lands on "No" (ticked), ArrowUp moves the tick to "Yes"', down.text.includes('Focus is now on input radio "No" (ticked).') && up.text.includes('Focus is now on input radio "Yes" (ticked).'), `${down.text}\n${up.text}`)
+        read = await step('browser_read', { id })
+        check('dvla: the read agrees — "Yes" ticked, "No" not', lineFor(read.text, / input radio "Yes"/).endsWith('"Yes" (ticked)') && lineFor(read.text, / input radio "No"/).endsWith('"No" (not ticked)'), read.text)
+        const shot = await step('browser_screenshot', { id })
+        const png = (shot.text.match(/saved to (.+\.png)/) ?? [])[1]
+        if (png && existsSync(png)) copyFileSync(png, DVLA_OUT.replace(/\.txt$/i, '') + '.png')
+      }
+      if (id) await step('browser_close', { id })
+      await gov.send({ cmd: 'quit' })
+      await gov.exited
+    } catch (err) {
+      check('the DVLA harness ran', false, `${err?.stack ?? err}\n${gov.stderr().slice(-2000)}`)
+      gov.child.kill()
+    }
+    mkdirSync(join(DVLA_OUT, '..'), { recursive: true })
+    writeFileSync(DVLA_OUT, runLog.join('\n'), 'utf8')
+    console.log(`       run log: ${DVLA_OUT}`)
   }
 }
 

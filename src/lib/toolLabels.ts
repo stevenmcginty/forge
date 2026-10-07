@@ -41,6 +41,7 @@ const TOOL_LABELS: Record<string, string> = {
   browser_read: 'reading a web page',
   browser_click: 'clicking in the browser',
   browser_type: 'typing in the browser',
+  browser_key: 'pressing a key',
   browser_screenshot: 'looking at the browser',
 
   /* ------------------------------------------- the SDK's read-only built-ins */

@@ -217,7 +217,7 @@ await check('every field an ACTION_SPECS example names is a typed parameter', ()
   assert.equal(props.submit.type, 'boolean')
 })
 
-await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four hub tools, B3’s eight browser tools and Forge Brain’s two, unique names', () => {
+await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four hub tools, B3’s nine browser tools and Forge Brain’s two, unique names', () => {
   const names = tools.REALTIME_TOOLS.map((t) => t.name)
   assert.deepEqual(names, [
     'get_app_state',
@@ -241,6 +241,7 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
     'browser_screenshot',
     'browser_close',
     'browser_upload',
+    'browser_key',
     'ask_brain',
     'tell_brain'
   ])

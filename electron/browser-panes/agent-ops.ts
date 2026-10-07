@@ -1,18 +1,21 @@
 import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import {
+  BROWSER_KEY_MAX_TIMES,
+  BROWSER_KEYS,
   BROWSER_MAX_LABEL_CHARS,
   BROWSER_MAX_SURFACES,
   isBrowserTabId,
   normaliseBrowserUrl,
   type BrowserAgentReply,
+  type BrowserKeyName,
   type BrowserOwner,
   type BrowserSurfaceRecord
 } from '@shared/browser'
 import { badRef } from './snapshot'
 
 /**
- * The eight tools' rules, over whatever actually drives the pages.
+ * The nine tools' rules, over whatever actually drives the pages.
  *
  * This is where "many agents at once" is decided, and it is decided by what is
  * *absent*: there is no browser-wide lock. Every agent (a pane, the voice hub,
@@ -43,6 +46,8 @@ export interface BrowserDriver {
   navigate: (id: string, url: string) => Promise<string>
   /** Put the file at `path` (checked: a file that exists) into the page's file box. */
   upload: (id: string, path: string, ref: number | null, which: number | null) => Promise<string>
+  /** Press `key` `times` times (checked: 1–BROWSER_KEY_MAX_TIMES), Shift held if `shift`, after focusing `ref` if given. */
+  key: (id: string, key: BrowserKeyName, shift: boolean, ref: number | null, times: number) => Promise<string>
   /** A PNG on disk, or why not. */
   screenshot: (id: string, owner: BrowserOwner) => Promise<{ path: string } | { error: string }>
   close: (id: string) => Promise<boolean>
@@ -107,6 +112,27 @@ export class BrowserAgentOps {
         }
         case 'browser_upload':
           return await this.upload(owner, args)
+        case 'browser_key': {
+          const key = args['key']
+          if (typeof key !== 'string' || !(BROWSER_KEYS as readonly string[]).includes(key)) {
+            return fail(`\`key\` must be one of ${BROWSER_KEYS.join(', ')} — got ${JSON.stringify(key)}.`)
+          }
+          let ref: number | null = null
+          if (args['ref'] !== undefined && args['ref'] !== null) {
+            if (badRef(args['ref'])) return fail(`\`ref\` must be one of the numbers from your last browser_read — got ${JSON.stringify(args['ref'])}.`)
+            ref = Math.round(Number(args['ref']))
+          }
+          let times = 1
+          if (args['times'] !== undefined && args['times'] !== null) {
+            const n = Number(args['times'])
+            if (!Number.isFinite(n) || Math.round(n) < 1 || Math.round(n) > BROWSER_KEY_MAX_TIMES) {
+              return fail(`\`times\` must be a number from 1 to ${BROWSER_KEY_MAX_TIMES} — got ${JSON.stringify(args['times'])}.`)
+            }
+            times = Math.round(n)
+          }
+          const shift = args['shift'] === true
+          return await this.onTab(owner, args, (id) => this.driver.key(id, key as BrowserKeyName, shift, ref, times))
+        }
         case 'browser_screenshot':
           return await this.screenshot(owner, args)
         case 'browser_close':

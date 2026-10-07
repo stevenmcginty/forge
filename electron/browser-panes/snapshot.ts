@@ -36,47 +36,66 @@ export interface PageSnapshot {
 }
 
 /**
- * Number every interactive element a person could see and reach, park them on
- * the page, and return the list plus the page's own words. An expression, so
- * evaluate returns it. `find` narrows the list to elements whose words contain
- * it (any case); the numbers still map to window.__forgeRefs as usual.
- *
- * What counts as seeable and reachable — kept simple on purpose:
- *  - It has a box (1×1 or bigger), and neither it nor anything it sits in is
- *    display:none, visibility:hidden or opacity:0 (Element.checkVisibility), or
- *    [inert] / [aria-hidden=true] (shadow roots crossed).
- *  - On screen: a hit test (elementFromPoint at its middle and four inner
- *    points) must land on it, inside it, or on its own <label>. Landing on
- *    something else means it is covered. One exception: covered only by a
- *    fixed/sticky bar (wide and short: a header or footer) still counts, since
- *    scrolling brings it out from under the bar.
- *  - Off screen (below the fold, in a scroll box): it must be reachable by
- *    scrolling — not clipped away by an overflow:hidden box, not in a fixed
- *    layer that sits off screen, not at negative page coordinates. And when a
- *    modal is up (aria-modal / <dialog> opened modal, or a full-screen fixed
- *    layer at the viewport centre that is proven to cover other elements), only
- *    what is inside it is listed: the rest would scroll up underneath it.
- *  - Elements inside the dialog on top (or that full-screen layer) come first,
- *    so a modal's buttons never fall past the cap behind the page under it.
+ * Page-side: whether a radio, tick box or switch is ticked — 'ticked', 'not
+ * ticked', 'partly ticked' (aria-checked=mixed) — or null for anything else.
  */
-export function readScript(find: string | null): string {
-  return `(() => {
-  const LIMIT_REFS = ${BROWSER_MAX_REFS};
+const TICK = `const tickOf = (el) => {
+    if (el.tagName === 'INPUT') {
+      const type = String(el.type).toLowerCase();
+      return type === 'checkbox' || type === 'radio' ? (el.checked ? 'ticked' : 'not ticked') : null;
+    }
+    const role = String(el.getAttribute('role') || '').trim().toLowerCase();
+    if (role !== 'checkbox' && role !== 'radio' && role !== 'switch') return null;
+    const state = String(el.getAttribute('aria-checked') || '').trim().toLowerCase();
+    return state === 'true' ? 'ticked' : state === 'mixed' ? 'partly ticked' : 'not ticked';
+  };`
+
+/**
+ * Page-side: ref N's element `el`, and `t`, what a click on it lands on — the
+ * <label> the read listed in its place (window.__forgeRefHits) when the page
+ * hides the input and draws its own, else el itself. `pointOf` picks where to
+ * press: the middle, or for a label a point that lands on the label, the input
+ * or plain words in it, never on a link or control inside it ("I agree to the
+ * <a>terms</a>" must tick the box, not follow the link). Null `el` = stale.
+ */
+function targetJs(ref: number): string {
+  return `const up = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || null;
+  const inside = (outer, n) => { for (let x = n; x; x = up(x)) if (x === outer) return true; return false; };
+  const refs = window.__forgeRefs;
+  const el = refs ? refs[${Math.round(ref) - 1}] : undefined;
+  const standIns = window.__forgeRefHits;
+  const stand = standIns ? standIns[${Math.round(ref) - 1}] : null;
+  const t = el && stand && stand.isConnected ? stand : el;
+  const pointOf = () => {
+    const b = t.getBoundingClientRect();
+    const mid = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    if (t === el) return mid;
+    const root = t.getRootNode && t.getRootNode().elementFromPoint ? t.getRootNode() : document;
+    const fine = (h) => {
+      if (!h) return false;
+      if (h === el || inside(el, h)) return true;
+      if (!inside(t, h)) return false;
+      for (let x = h; x && x !== t; x = up(x)) {
+        if (x.matches && x.matches('a[href], button, input, select, textarea, [role="button"], [role="link"], [onclick]')) return false;
+      }
+      return true;
+    };
+    const tries = [mid, { x: b.left + 6, y: mid.y }, { x: b.left + b.width * 0.25, y: mid.y }, { x: b.left + 6, y: b.top + Math.min(6, b.height / 2) },
+      { x: b.left + b.width * 0.75, y: mid.y }, { x: b.right - 6, y: mid.y }];
+    for (const p of tries) if (fine(root.elementFromPoint(p.x, p.y))) return p;
+    return mid;
+  };`
+}
+
+/**
+ * Page-side words for one element, shared by the read and by browser_key's
+ * reply about where the focus landed: its kind, its label, whether it is ticked,
+ * and what it holds — never a secret field's value. Source text, spliced into
+ * the scripts below.
+ */
+const DESCRIBE = `
   const LIMIT_LABEL = ${BROWSER_MAX_LABEL_CHARS};
-  const FIND_RAW = ${JSON.stringify(find ?? '')};
-  const SELECTOR = [
-    'a[href]', 'button', 'input:not([type=hidden])', 'select', 'textarea', 'summary',
-    '[role="button"]', '[role="link"]', '[role="tab"]', '[role="checkbox"]', '[role="radio"]',
-    '[role="combobox"]', '[role="menuitem"]', '[role="option"]', '[role="switch"]', '[role="textbox"]',
-    '[contenteditable="true"]', '[onclick]'
-  ].join(', ');
   const clean = (v) => String(v == null ? '' : v).replace(/\\s+/g, ' ').trim();
-  const visible = (el) => {
-    const box = el.getBoundingClientRect();
-    if (box.width < 1 || box.height < 1) return false;
-    const style = getComputedStyle(el);
-    return style.visibility !== 'hidden' && style.opacity !== '0' && style.display !== 'none';
-  };
   const kindOf = (el) => {
     const tag = el.tagName.toLowerCase();
     const role = clean(el.getAttribute('role'));
@@ -99,6 +118,59 @@ export function readScript(find: string | null): string {
       if (t) return t.slice(0, LIMIT_LABEL);
     }
     return '';
+  };
+  ${TICK}
+  const extraOf = (el) => {
+    if (secret(el)) return el.value ? ' (filled in — hidden)' : '';
+    const tick = tickOf(el);
+    if (tick) return ' (' + tick + ')';
+    return (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.value && clean(el.value) !== labelOf(el)
+      ? ' = "' + clean(el.value).slice(0, 40) + '"' : '';
+  };`
+
+/**
+ * Number every interactive element a person could see and reach, park them on
+ * the page, and return the list plus the page's own words. An expression, so
+ * evaluate returns it. `find` narrows the list to elements whose words contain
+ * it (any case); the numbers still map to window.__forgeRefs as usual.
+ *
+ * What counts as seeable and reachable — kept simple on purpose:
+ *  - It has a box (1×1 or bigger), and neither it nor anything it sits in is
+ *    display:none, visibility:hidden or opacity:0 (Element.checkVisibility), or
+ *    [inert] / [aria-hidden=true] (shadow roots crossed).
+ *  - On screen: a hit test (elementFromPoint at its middle and four inner
+ *    points) must land on it, inside it, or on its own <label>. Landing on
+ *    something else means it is covered. One exception: covered only by a
+ *    fixed/sticky bar (wide and short: a header or footer) still counts, since
+ *    scrolling brings it out from under the bar.
+ *  - Off screen (below the fold, in a scroll box): it must be reachable by
+ *    scrolling — not clipped away by an overflow:hidden box, not in a fixed
+ *    layer that sits off screen, not at negative page coordinates. And when a
+ *    modal is up (aria-modal / <dialog> opened modal, or a full-screen fixed
+ *    layer at the viewport centre that is proven to cover other elements), only
+ *    what is inside it is listed: the rest would scroll up underneath it.
+ *  - Elements inside the dialog on top (or that full-screen layer) come first,
+ *    so a modal's buttons never fall past the cap behind the page under it.
+ *  - One exception to all of that: an input the page hides and draws on its
+ *    <label> instead (GOV.UK radios, styled tick boxes) is listed when that
+ *    label passes those tests, and a click on it lands on the label.
+ */
+export function readScript(find: string | null): string {
+  return `(() => {
+  const LIMIT_REFS = ${BROWSER_MAX_REFS};
+  const FIND_RAW = ${JSON.stringify(find ?? '')};
+  const SELECTOR = [
+    'a[href]', 'button', 'input:not([type=hidden])', 'select', 'textarea', 'summary',
+    '[role="button"]', '[role="link"]', '[role="tab"]', '[role="checkbox"]', '[role="radio"]',
+    '[role="combobox"]', '[role="menuitem"]', '[role="option"]', '[role="switch"]', '[role="textbox"]',
+    '[contenteditable="true"]', '[onclick]'
+  ].join(', ');
+  ${DESCRIBE}
+  const visible = (el) => {
+    const box = el.getBoundingClientRect();
+    if (box.width < 1 || box.height < 1) return false;
+    const style = getComputedStyle(el);
+    return style.visibility !== 'hidden' && style.opacity !== '0' && style.display !== 'none';
   };
   // The document and every open shadow root inside it (web components).
   const deepAll = (selector) => {
@@ -230,32 +302,79 @@ export function readScript(find: string | null): string {
     }
   }
 
+  // GOV.UK radios and most styled tick boxes hide the real input (opacity 0,
+  // display:none, a 1px clip) and draw a fake one on its <label>. Such an input
+  // is listed anyway when one of its labels passes the same tests a listed
+  // element does; the label is where a click lands (window.__forgeRefHits),
+  // while the input stays the ref, so its state, focus and typing are real.
+  // Never a file box (a label click opens a file dialog; browser_upload covers
+  // those), and never when the label holds a drawn tick box of its own — that
+  // one is listed already.
+  const proxied = (el) => el.tagName === 'INPUT' && !['file', 'hidden'].includes(String(el.type).toLowerCase());
+  const standIn = (el) => {
+    if (!proxied(el) || !el.labels) return null;
+    for (const lab of el.labels) {
+      if (!shown(lab)) continue;
+      let twin = false;
+      for (const n of lab.querySelectorAll('input, [role="checkbox"], [role="radio"], [role="switch"]')) {
+        if (n === el || !shown(n)) continue;
+        const role = clean(n.getAttribute('role')).toLowerCase();
+        if (role === 'checkbox' || role === 'radio' || role === 'switch' || (n.tagName === 'INPUT' && n.type === el.type)) { twin = true; break; }
+      }
+      if (twin) continue;
+      if (!sized) return { lab, at: 'top' };
+      const test = hitTest(lab, clipped(lab, false), (h) => inside(lab, h) || h === el || inside(el, h));
+      if (test.at === 'top') return { lab, at: 'top' };
+      if (test.at !== 'covered' && reachable(lab)) return { lab, at: 'later' };
+    }
+    return null;
+  };
+
   const refs = [];
+  const hits = [];
   const items = [];
   let dropped = 0, hidden = 0, unmatched = 0;
   const onTop = [];
   const later = [];
   const candidates = [];
+  const stands = new Map();
   let layerCovers = false;
   for (const el of deepAll(SELECTOR)) {
     const box = el.getBoundingClientRect();
-    if (box.width < 1 || box.height < 1) continue;
+    let stand = null;
+    if (box.width < 1 || box.height < 1) {
+      stand = standIn(el);
+      if (!stand) continue;
+    }
     if (FIND && !words(el).includes(FIND)) { unmatched++; continue; }
-    if (!drawn(el) || muted(el)) { hidden++; continue; }
+    if (!stand && (!drawn(el) || muted(el))) {
+      stand = standIn(el);
+      if (!stand) { hidden++; continue; }
+    }
+    let test = null;
+    if (!stand && sized) {
+      test = hitTest(el, clipped(el, false), mine(el));
+      if (test.at === 'covered') {
+        if (layer && !inside(layer, el) && test.hits.some((x) => x && inside(layer, x))) layerCovers = true;
+        stand = standIn(el);
+        if (!stand) { hidden++; continue; }
+      } else if (test.at !== 'top' && proxied(el) && !reachable(el)) {
+        stand = standIn(el);
+      }
+    }
     candidates.push(el);
-    if (!sized) { onTop.push(el); continue; }
-    const test = hitTest(el, clipped(el, false), mine(el));
-    if (test.at === 'top') onTop.push(el);
-    else if (test.at === 'covered') {
-      hidden++;
-      if (layer && !inside(layer, el) && test.hits.some((x) => x && inside(layer, x))) layerCovers = true;
-    } else later.push(el);
+    if (stand) {
+      stands.set(el, stand.lab);
+      if (stand.at === 'top') onTop.push(el); else later.push(el);
+    } else if (!sized || test.at === 'top') onTop.push(el);
+    else later.push(el);
   }
   // A full-screen layer only counts as a modal once it is seen covering something.
   const gate = modal || (layerCovers ? layer : null);
   const listed = new Set(onTop);
   for (const el of later) {
-    if (reachable(el) && (!gate || inside(gate, el))) listed.add(el); else hidden++;
+    const t = stands.get(el) || el;
+    if (reachable(t) && (!gate || inside(gate, t))) listed.add(el); else hidden++;
   }
   const front = modal || dialog || gate;
   const all = candidates.filter((el) => listed.has(el));
@@ -265,12 +384,11 @@ export function readScript(find: string | null): string {
   for (const el of ordered) {
     if (refs.length >= LIMIT_REFS) { dropped++; continue; }
     refs.push(el);
-    const extra = secret(el) ? (el.value ? ' (filled in — hidden)' : '')
-      : (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.value && clean(el.value) !== labelOf(el)
-      ? ' = "' + clean(el.value).slice(0, 40) + '"' : '';
-    items.push('[' + refs.length + '] ' + kindOf(el) + ' "' + labelOf(el) + '"' + extra);
+    hits.push(stands.get(el) || null);
+    items.push('[' + refs.length + '] ' + kindOf(el) + ' "' + labelOf(el) + '"' + extraOf(el));
   }
   window.__forgeRefs = refs;
+  window.__forgeRefHits = hits;
   const seen = new Set();
   const blocks = [];
   for (const el of deepAll('h1, h2, h3, h4, p, li, td, th, pre, blockquote')) {
@@ -284,20 +402,73 @@ export function readScript(find: string | null): string {
 })()`
 }
 
+/** What refPointScript hands back. `tick` is null for anything that is not a radio, tick box or switch. */
+export interface RefPoint {
+  x: number
+  y: number
+  label: string
+  w: number
+  h: number
+  tick: string | null
+  radio: boolean
+}
+
 /**
- * Bring ref N into view and say where its middle is, for a real mouse click.
- * Null when the number no longer points at anything.
+ * Bring ref N (or the label standing in for it) into view and say where to
+ * press, for a real mouse click — plus whether it is ticked now, so the click
+ * can say what changed. Null when the number no longer points at anything.
  */
 export function refPointScript(ref: number): string {
+  return `(() => {
+  ${targetJs(ref)}
+  ${TICK}
+  if (!el || !el.isConnected) return null;
+  t.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  const box = t.getBoundingClientRect();
+  const p = pointOf();
+  const tick = tickOf(el);
+  const hidden = el.tagName === 'INPUT' && (String(el.type).toLowerCase() === 'password' || /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(String(el.getAttribute('autocomplete') || '').toLowerCase()));
+  const named = t !== el ? t.innerText : tick && el.labels && el.labels.length ? el.labels[0].innerText : '';
+  const label = String(named || el.innerText || el.getAttribute('aria-label') || (hidden ? el.getAttribute('placeholder') || 'hidden field' : el.value) || el.tagName).replace(/\\s+/g, ' ').trim().slice(0, 60);
+  const radio = el.tagName === 'INPUT' ? String(el.type).toLowerCase() === 'radio' : String(el.getAttribute('role') || '').trim().toLowerCase() === 'radio';
+  return { x: p.x, y: p.y, label, w: box.width, h: box.height, tick, radio };
+})()`
+}
+
+/** Whether ref N is ticked now ('ticked', 'not ticked', 'partly ticked'), or null — not tickable, or gone. */
+export function refTickScript(ref: number): string {
+  return `(() => {
+  ${TICK}
+  const refs = window.__forgeRefs;
+  const el = refs ? refs[${Math.round(ref) - 1}] : undefined;
+  return el && el.isConnected ? tickOf(el) : null;
+})()`
+}
+
+/** Focus ref N — the element itself, never the label standing in for it — and empty nothing. Null when stale. */
+export function refFocusOnlyScript(ref: number): string {
   return `(() => {
   const refs = window.__forgeRefs;
   const el = refs ? refs[${Math.round(ref) - 1}] : undefined;
   if (!el || !el.isConnected) return null;
   el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-  const box = el.getBoundingClientRect();
-  const hidden = el.tagName === 'INPUT' && (String(el.type).toLowerCase() === 'password' || /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(String(el.getAttribute('autocomplete') || '').toLowerCase()));
-  const label = String(el.innerText || el.getAttribute('aria-label') || (hidden ? el.getAttribute('placeholder') || 'hidden field' : el.value) || el.tagName).replace(/\\s+/g, ' ').trim().slice(0, 60);
-  return { x: box.left + box.width / 2, y: box.top + box.height / 2, label, w: box.width, h: box.height };
+  if (typeof el.focus === 'function') el.focus();
+  return true;
+})()`
+}
+
+/**
+ * What has the focus, in the read's own words (kind, label, ticked, value —
+ * never a secret field's), through open shadow roots. Null when nothing in
+ * particular does (the page body).
+ */
+export function focusScript(): string {
+  return `(() => {
+  ${DESCRIBE}
+  let el = document.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+  if (!el || el === document.body || el === document.documentElement) return null;
+  return kindOf(el) + ' "' + labelOf(el) + '"' + extraOf(el);
 })()`
 }
 
@@ -331,22 +502,22 @@ export function refFocusScript(ref: number): string {
  * The click for a tab that is not on screen. A hidden view gets no real mouse
  * input (Chromium never acks it), so the same sequence a hand produces is
  * dispatched on the element itself — pointer and mouse down/up, then click —
- * which links, buttons, forms and React handlers all honour.
+ * which links, buttons, forms and React handlers all honour. For an input the
+ * read listed by its label, the label gets the sequence, as a hand's would.
  */
 export function refDomClickScript(ref: number): string {
   return `(() => {
-  const refs = window.__forgeRefs;
-  const el = refs ? refs[${Math.round(ref) - 1}] : undefined;
+  ${targetJs(ref)}
   if (!el || !el.isConnected) return false;
-  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-  const box = el.getBoundingClientRect();
-  const at = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 };
-  el.dispatchEvent(new PointerEvent('pointerdown', { ...at, pointerType: 'mouse', isPrimary: true }));
-  el.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 1 }));
-  if (typeof el.focus === 'function') el.focus();
-  el.dispatchEvent(new PointerEvent('pointerup', { ...at, pointerType: 'mouse', isPrimary: true }));
-  el.dispatchEvent(new MouseEvent('mouseup', at));
-  el.dispatchEvent(new MouseEvent('click', { ...at, detail: 1 }));
+  t.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  const p = pointOf();
+  const at = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, clientX: p.x, clientY: p.y };
+  t.dispatchEvent(new PointerEvent('pointerdown', { ...at, pointerType: 'mouse', isPrimary: true }));
+  t.dispatchEvent(new MouseEvent('mousedown', { ...at, buttons: 1 }));
+  if (typeof t.focus === 'function') t.focus();
+  t.dispatchEvent(new PointerEvent('pointerup', { ...at, pointerType: 'mouse', isPrimary: true }));
+  t.dispatchEvent(new MouseEvent('mouseup', at));
+  t.dispatchEvent(new MouseEvent('click', { ...at, detail: 1 }));
   return true;
 })()`
 }

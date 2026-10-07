@@ -4,7 +4,7 @@
  *
  * A browser *surface* is a real web page (an Electron WebContentsView) that sits
  * on the canvas beside the panes. Steve can use it by hand; every agent pane and
- * the voice hub can drive it through the same eight tools (bridge/browser-tools.mjs
+ * the voice hub can drive it through the same nine tools (bridge/browser-tools.mjs
  * for the CLIs, src/lib/realtime/tools-browser.ts for the hub, and
  * electron/browser-panes/brain.ts for the Claude brain).
  *
@@ -86,7 +86,7 @@ export const BROWSER_IPC = {
   move: 'browser:move',
   /** Renderer → main, one-way: which project the window is showing. */
   project: 'browser:project',
-  /** Renderer → main: the voice hub calling one of the eight tools. */
+  /** Renderer → main: the voice hub calling one of the nine tools. */
   agent: 'browser:agent',
   /** Main → renderer: the whole surface list changed. */
   changed: 'browser:changed',
@@ -236,7 +236,7 @@ export interface BrowserSurfacesFile {
 
 export type BrowserHistoryAction = 'back' | 'forward' | 'reload' | 'stop'
 
-/** The eight tools, by name, in one place for the schema checks. */
+/** The nine tools, by name, in one place for the schema checks. */
 export const BROWSER_TOOL_NAMES = [
   'browser_open',
   'browser_list',
@@ -245,9 +245,16 @@ export const BROWSER_TOOL_NAMES = [
   'browser_type',
   'browser_screenshot',
   'browser_close',
-  'browser_upload'
+  'browser_upload',
+  'browser_key'
 ] as const
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number]
+
+/** The keys browser_key presses — nothing else, so it can never type text or a shortcut. */
+export const BROWSER_KEYS = ['Tab', 'Enter', 'Space', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'] as const
+export type BrowserKeyName = (typeof BROWSER_KEYS)[number]
+/** How many presses one browser_key call may make. */
+export const BROWSER_KEY_MAX_TIMES = 20
 
 /** One tool call, as the link and the voice-hub IPC carry it. */
 export interface BrowserAgentRequest {
@@ -311,10 +318,12 @@ export const BROWSER_TOOL_DESCRIPTIONS: Record<BrowserToolName, string> = {
     `${BROWSER_PREAMBLE} Reads a tab: the address and title, a numbered list of everything you can click or type into, then what the page says.`,
     'Those numbers are the only way to act on the page. They restart at 1 on EVERY read and die when the page changes — never act on a number you did not just receive.',
     'Only what a person could see and reach is listed: things hidden or covered by something on top are left out, and a dialog on top of the page is listed first. On a busy page pass `find` (e.g. "Next") to list only the elements whose words contain it — their numbers work like any others.',
+    'Radios and tick boxes show (ticked) or (not ticked), and one a page hides behind a styled label is listed by its label.',
     'Omit `id` to read your current tab.'
   ].join('\n'),
   browser_click: [
     `${BROWSER_PREAMBLE} Clicks one of the numbered elements from your last browser_read — a real mouse click in its middle.`,
+    'For a radio or tick box it says whether it is ticked after the click.',
     'Read immediately before this; read again after. Omit `id` for your current tab.',
     BROWSER_CONFIRM_RULE
   ].join('\n'),
@@ -330,6 +339,11 @@ export const BROWSER_TOOL_DESCRIPTIONS: Record<BrowserToolName, string> = {
     'With one file box on the page it is used; with several you get a numbered list — call again with `which`. `ref` (a number from your last browser_read) picks the box that element is, holds, or labels.',
     'Read the page again after: the site reacts as if the file had been picked by hand. Omit `id` for your current tab.',
     BROWSER_CONFIRM_RULE
+  ].join('\n'),
+  browser_key: [
+    `${BROWSER_PREAMBLE} Presses one key in a tab: Tab, Enter, Space, Escape or an arrow key — for keyboard-only widgets, moving between radios, closing a pop-up. \`shift: true\` with Tab goes back. With \`ref\` (a number from your last browser_read) that element is focused first.`,
+    'It says where the focus landed. Omit `id` for your current tab.',
+    BROWSER_CONFIRM_RULE
   ].join('\n')
 }
 
@@ -344,13 +358,17 @@ export const BROWSER_PARAM_TEXT = {
   path: 'Full path of the file on this computer, e.g. "C:\\Users\\me\\Downloads\\statement.csv".',
   which: 'Which file box, by its number in the list a previous browser_upload gave. Only needed when the page has more than one.',
   uploadRef: 'Optional: the number in square brackets from your last browser_read of the file box, or of the button or label that opens it.',
-  find: 'Optional: list only the elements whose words (label, text, placeholder) contain this, ignoring case — e.g. "Next" or "Close". The numbers still work with browser_click, browser_type and browser_upload.'
+  find: 'Optional: list only the elements whose words (label, text, placeholder) contain this, ignoring case — e.g. "Next" or "Close". The numbers still work with browser_click, browser_type and browser_upload.',
+  key: 'The key to press: Tab, Enter, Space, Escape, ArrowUp, ArrowDown, ArrowLeft or ArrowRight.',
+  shift: 'Optional: hold Shift while pressing — Shift+Tab moves the focus back.',
+  keyRef: 'Optional: the number in square brackets from your last browser_read of the element to focus first. Nothing is emptied.',
+  times: 'Optional: how many times to press it, 1 to 20. Default 1.'
 } as const
 
 /** A JSON-schema object for one tool's arguments. Plain enough for MCP, Gemini Live and OpenAI Realtime. */
 export interface BrowserToolSchema {
   type: 'object'
-  properties: Record<string, { type: 'string' | 'number' | 'boolean'; description: string }>
+  properties: Record<string, { type: 'string' | 'number' | 'boolean'; enum?: readonly string[]; description: string }>
   required: string[]
 }
 
@@ -398,6 +416,17 @@ export const BROWSER_TOOL_PARAMS: Record<BrowserToolName, BrowserToolSchema> = {
       which: { type: 'number', description: BROWSER_PARAM_TEXT.which }
     },
     required: ['path']
+  },
+  browser_key: {
+    type: 'object',
+    properties: {
+      id: idParam,
+      key: { type: 'string', enum: BROWSER_KEYS, description: BROWSER_PARAM_TEXT.key },
+      shift: { type: 'boolean', description: BROWSER_PARAM_TEXT.shift },
+      ref: { type: 'number', description: BROWSER_PARAM_TEXT.keyRef },
+      times: { type: 'number', description: BROWSER_PARAM_TEXT.times }
+    },
+    required: ['key']
   }
 }
 

@@ -1,5 +1,5 @@
 /**
- * Forge's built-in browser, as MCP tools — the eight `browser_*` tools every
+ * Forge's built-in browser, as MCP tools — the nine `browser_*` tools every
  * agent CLI gets.
  *
  * Not a server of its own: a module the bridge servers spread into their tool
@@ -45,8 +45,15 @@ const PARAM = {
   path: 'Full path of the file on this computer, e.g. "C:\\Users\\me\\Downloads\\statement.csv".',
   which: 'Which file box, by its number in the list a previous browser_upload gave. Only needed when the page has more than one.',
   uploadRef: 'Optional: the number in square brackets from your last browser_read of the file box, or of the button or label that opens it.',
-  find: 'Optional: list only the elements whose words (label, text, placeholder) contain this, ignoring case — e.g. "Next" or "Close". The numbers still work with browser_click, browser_type and browser_upload.'
+  find: 'Optional: list only the elements whose words (label, text, placeholder) contain this, ignoring case — e.g. "Next" or "Close". The numbers still work with browser_click, browser_type and browser_upload.',
+  key: 'The key to press: Tab, Enter, Space, Escape, ArrowUp, ArrowDown, ArrowLeft or ArrowRight.',
+  shift: 'Optional: hold Shift while pressing — Shift+Tab moves the focus back.',
+  keyRef: 'Optional: the number in square brackets from your last browser_read of the element to focus first. Nothing is emptied.',
+  times: 'Optional: how many times to press it, 1 to 20. Default 1.'
 }
+
+/** The keys browser_key presses (shared/browser.ts BROWSER_KEYS). */
+const KEYS = ['Tab', 'Enter', 'Space', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
 
 const idParam = { type: 'string', description: PARAM.id }
 
@@ -79,6 +86,7 @@ export const BROWSER_TOOLS = [
       `${BROWSER_PREAMBLE} Reads a tab: the address and title, a numbered list of everything you can click or type into, then what the page says.`,
       'Those numbers are the only way to act on the page. They restart at 1 on EVERY read and die when the page changes — never act on a number you did not just receive.',
       'Only what a person could see and reach is listed: things hidden or covered by something on top are left out, and a dialog on top of the page is listed first. On a busy page pass `find` (e.g. "Next") to list only the elements whose words contain it — their numbers work like any others.',
+      'Radios and tick boxes show (ticked) or (not ticked), and one a page hides behind a styled label is listed by its label.',
       'Omit `id` to read your current tab.'
     ].join('\n'),
     inputSchema: { type: 'object', properties: { id: idParam, find: { type: 'string', description: PARAM.find } }, required: [] }
@@ -87,6 +95,7 @@ export const BROWSER_TOOLS = [
     name: 'browser_click',
     description: [
       `${BROWSER_PREAMBLE} Clicks one of the numbered elements from your last browser_read — a real mouse click in its middle.`,
+      'For a radio or tick box it says whether it is ticked after the click.',
       'Read immediately before this; read again after. Omit `id` for your current tab.',
       BROWSER_CONFIRM_RULE
     ].join('\n'),
@@ -141,6 +150,25 @@ export const BROWSER_TOOLS = [
         which: { type: 'number', description: PARAM.which }
       },
       required: ['path']
+    }
+  },
+  {
+    name: 'browser_key',
+    description: [
+      `${BROWSER_PREAMBLE} Presses one key in a tab: Tab, Enter, Space, Escape or an arrow key — for keyboard-only widgets, moving between radios, closing a pop-up. \`shift: true\` with Tab goes back. With \`ref\` (a number from your last browser_read) that element is focused first.`,
+      'It says where the focus landed. Omit `id` for your current tab.',
+      BROWSER_CONFIRM_RULE
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: idParam,
+        key: { type: 'string', enum: KEYS, description: PARAM.key },
+        shift: { type: 'boolean', description: PARAM.shift },
+        ref: { type: 'number', description: PARAM.keyRef },
+        times: { type: 'number', description: PARAM.times }
+      },
+      required: ['key']
     }
   }
 ]

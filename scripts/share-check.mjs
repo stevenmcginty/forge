@@ -617,6 +617,7 @@ console.log('\nthe MCP server')
         JSON.stringify([
           'browser_click',
           'browser_close',
+          'browser_key',
           'browser_list',
           'browser_open',
           'browser_read',
@@ -633,7 +634,7 @@ console.log('\nthe MCP server')
           'share_read',
           'share_write'
         ]),
-      'exactly the five share tools, the two pane tools, the two chat relay tools and the eight browser tools, and nothing else',
+      'exactly the five share tools, the two pane tools, the two chat relay tools and the nine browser tools, and nothing else',
       JSON.stringify(names)
     )
     ok(

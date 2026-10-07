@@ -175,14 +175,14 @@ async function handshake(session, label) {
   return init
 }
 
-const TOOL_NAMES = ['ask_gemini', 'browser_click', 'browser_close', 'browser_list', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_type', 'browser_upload', 'edit_image', 'make_image', 'make_video', 'open_agent_pane', 'open_in_reader', 'show_on_board', 'summarize_video']
+const TOOL_NAMES = ['ask_gemini', 'browser_click', 'browser_close', 'browser_key', 'browser_list', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_type', 'browser_upload', 'edit_image', 'make_image', 'make_video', 'open_agent_pane', 'open_in_reader', 'show_on_board', 'summarize_video']
 
 async function listTools(session, label) {
   const res = await session.request('tools/list', {})
   const tools = res.result?.tools ?? []
   const names = tools.map((t) => t.name).sort()
   check(
-    `${label}: tools/list returns exactly the sixteen bridge tools`,
+    `${label}: tools/list returns exactly the seventeen bridge tools`,
     JSON.stringify(names) === JSON.stringify(TOOL_NAMES),
     JSON.stringify(names)
   )
@@ -209,6 +209,7 @@ async function listTools(session, label) {
     browser_screenshot: [],
     browser_close: [],
     browser_upload: ['path'],
+    browser_key: ['key'],
     // B7: agents open inside Forge (bridge/forge-app-tools.mjs).
     open_agent_pane: ['agent'],
     open_in_reader: ['path']

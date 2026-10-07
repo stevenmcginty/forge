@@ -3,7 +3,7 @@ import { BROWSER_TOOL_DESCRIPTIONS, BROWSER_TOOL_NAMES, BROWSER_TOOL_PARAMS, typ
 import { browserBridge } from '../../components/browser/bridge'
 
 /**
- * The seven browser tools for the voice hub's realtime brains (Gemini Live and
+ * The nine browser tools for the voice hub's realtime brains (Gemini Live and
  * OpenAI Realtime), shaped like B2's HUB_REALTIME_TOOLS: spread
  * `...BROWSER_REALTIME_TOOLS` into REALTIME_TOOLS, and call `runBrowserHubTool`
  * beside `runHubTool` — it answers null for any name that is not a browser tool.
