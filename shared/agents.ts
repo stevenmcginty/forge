@@ -729,7 +729,7 @@ function modelFamily(command: string): string | null {
  * from the Claude Code 2.1.284 model table — Opus 5.5 keeps its `[1m]` suffix
  * (the table marks it supports_1m_suffix, Steve runs it that way); Fable 5.1
  * and Sonnet 5.5 are native 1M, so their plain ids already get 1M context;
- * Haiku 4.5 is 200k and has no effort dial;
+ * Haiku 5.5 (2026-10-07, Claude Code 2.1.293) is native 1M with an effort dial;
  * Grok versions from `grok models` plus the older ids the TUI still takes;
  * Codex from the visible rows of `codex debug models` (0.157.1);
  * Antigravity from `agy models`; Kimi from kimi.com/code/docs models;
@@ -750,7 +750,7 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'claude-fable-5-1', label: 'Fable 5.1', note: 'the hardest, longest-running tasks' },
     { id: 'claude-opus-5-5[1m]', label: 'Opus 5.5', note: 'complex reasoning — the usual default' },
     { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'the newest Sonnet — daily coding, faster' },
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', note: 'simple tasks, the lightest' }
+    { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'simple tasks, the lightest' }
   ],
   glm: [
     { id: 'glm-5.3[1m]', label: 'GLM 5.3', note: 'the Coding Plan flagship, 1M context' },

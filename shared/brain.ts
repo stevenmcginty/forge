@@ -40,7 +40,7 @@ export const BRAIN_ENGINE_NAME: Record<BrainEngine, string> = {
  * first. The id goes on the brain's command line as `--model <id>`.
  */
 export const BRAIN_MODELS: ReadonlyArray<{ id: string; name: string; note: string }> = [
-  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', note: 'fastest' },
+  { id: 'claude-haiku-5-5', name: 'Haiku 5.5', note: 'fastest' },
   { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', note: 'default' },
   { id: 'claude-opus-5-5', name: 'Opus 5.5', note: 'smartest' }
 ]
@@ -49,6 +49,8 @@ export const BRAIN_MODEL_DEFAULT = 'claude-sonnet-5-5'
 
 /** A saved `brainModel` as one of `BRAIN_MODELS`; anything else is the default. */
 export function sanitiseBrainModel(value: unknown): string {
+  // Haiku 4.5 was retired from the list 2026-10-07; a brain saved on it moves to Haiku 5.5.
+  if (value === 'claude-haiku-4-5-20251001') return 'claude-haiku-5-5'
   return BRAIN_MODELS.some((m) => m.id === value) ? (value as string) : BRAIN_MODEL_DEFAULT
 }
 

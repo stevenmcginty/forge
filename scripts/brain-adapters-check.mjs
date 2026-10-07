@@ -537,7 +537,7 @@ console.log('\nForge Brain — the slim launch, its model, its notes')
   })
   await check('the model setting is one of three ids; anything else is Sonnet', () => {
     assert.equal(BS.BRAIN_MODEL_DEFAULT, 'claude-sonnet-5-5')
-    assert.deepEqual(BS.BRAIN_MODELS.map((m) => m.id), ['claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'])
+    assert.deepEqual(BS.BRAIN_MODELS.map((m) => m.id), ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'])
     for (const m of BS.BRAIN_MODELS) assert.equal(BS.sanitiseBrainModel(m.id), m.id)
     for (const bad of [undefined, null, '', 7, 'opus', 'claude-fable-5-1', 'claude-sonnet-5-5 --dangerously-skip-permissions']) {
       assert.equal(BS.sanitiseBrainModel(bad), 'claude-sonnet-5-5', String(bad))
