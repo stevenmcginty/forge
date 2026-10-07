@@ -61,7 +61,15 @@ import { BRAIN_CONTEXT_WARN_PCT, BRAIN_MODEL_DEFAULT, BRAIN_VOICE_DEFAULT } from
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
-import { ACCENT_PALETTE, DEFAULT_PROFILE_ID, tabDefaultProfileId } from '@/lib/agents'
+import {
+  ACCENT_PALETTE,
+  DEFAULT_PROFILE_ID,
+  launchCommand,
+  leafPermissionMode,
+  paneDisplayTitle,
+  resolveProfile,
+  tabDefaultProfileId
+} from '@/lib/agents'
 import { applyReducedMotion, applyTheme, findTheme } from '@/theme/themes'
 import { makeId } from '@/lib/ids'
 import { emptyMosaic, sanitiseGrid, sanitiseMosaic } from '@/lib/mosaicLayout'
@@ -535,6 +543,44 @@ type Action =
  * panes are handed identical to the one on disk.
  */
 const MAX_REPO_URL = 400
+
+/** How long the grid gets to attach a remotely opened pane before it is started off screen. */
+const UNSHOWN_PANE_GRACE_MS = 500
+
+/**
+ * Start the panes a remote op opened that nothing on the desk has shown.
+ *
+ * A pane's PTY comes up when its terminal is first attached, and only the
+ * agents' grid attaches. With the browser, the board or Read on stage the
+ * grid mounts no panes, so a tab opened from the phone sat in the layout with
+ * no process behind it — the phone waited on it until somebody at the desk
+ * went back to the agents. By the grace period the grid has attached every
+ * pane it is going to; whatever it has not is started off screen, the way
+ * Forge Brain starts one (TerminalHost.startHidden), and the grid adopts the
+ * same terminal and process when it does show it.
+ */
+function startUnshownPanes(st: AppState, projectId: string, paneIds: readonly string[]): void {
+  const project = st.projects.find((p) => p.id === projectId)
+  const ws = st.workspaces[projectId]
+  if (!project || !ws) return
+  for (const tab of ws.tabs) {
+    for (const leaf of collectLeaves(tab.root)) {
+      if (!paneIds.includes(leaf.id) || terminalHost.has(leaf.id)) continue
+      const profile = resolveProfile(st.settings.agentProfiles, leaf.profileId)
+      terminalHost.startHidden(leaf.id, {
+        cwd: project.path,
+        bootstrapCommand: launchCommand(profile, leafPermissionMode(leaf)),
+        fontSize: st.settings.terminalFontSize,
+        fontFamily: st.settings.terminalFontFamily,
+        accent: profile.accent,
+        projectName: project.name,
+        paneTitle: paneDisplayTitle(profile, leaf.title),
+        sessionId: leaf.sessionId,
+        repoUrl: project.repoUrl
+      })
+    }
+  }
+}
 
 function mosaicOf(ws: Workspace): MosaicState {
   return ws.mosaic ?? emptyMosaic()
@@ -2538,11 +2584,21 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
    * the window out, which is precisely the failure this path exists to survive.
    *
    * The empty dependency list is deliberate: this subscribes once and reads
-   * nothing from render scope but the two stable refs.
+   * nothing from render scope but the stable refs.
    */
   useEffect(() => {
     return window.forge?.store?.onWorkspaceReplaced?.(({ projectId, workspace }) => {
       if (!projectId || !workspace || !Array.isArray(workspace.tabs)) return
+      // The panes this op brought in, for the start-up check below. Diffed
+      // against the copy here before it is replaced. A project this window has
+      // never loaded has no copy, so only its active tab counts as new: that is
+      // all the grid would have started on showing it, and the restored tabs
+      // behind it stay asleep until they are looked at, as they always have.
+      const current = liveStateRef.current.workspaces[projectId]
+      const before = new Set(current ? current.tabs.flatMap((t) => collectLeaves(t.root).map((l) => l.id)) : [])
+      const added = (current ? workspace.tabs : workspace.tabs.filter((t) => t.id === workspace.activeTabId))
+        .flatMap((t) => collectLeaves(t.root).map((l) => l.id))
+        .filter((id) => !before.has(id))
       // Marked persisted *before* the dispatch, and this line is load-bearing:
       // main has already written this exact workspace to disk, so without it
       // the 250ms persistence effect would wake up, notice the copy in state is
@@ -2555,6 +2611,9 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       // these ops itself: a tab opened from away into a project nobody here is
       // looking at is a tab nobody at the desk can see.
       dispatch({ type: 'selectProject', projectId })
+      if (added.length > 0) {
+        window.setTimeout(() => startUnshownPanes(liveStateRef.current, projectId, added), UNSHOWN_PANE_GRACE_MS)
+      }
     })
   }, [])
 

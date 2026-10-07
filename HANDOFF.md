@@ -1,5 +1,12 @@
 # Handoff
 
+## Phone's new agent stuck while the desktop shows the browser (2026-10-07; committed and pushed to master)
+
+- **Asked (Steve):** on the phone, a new agent in a project with no terminals did not start while the desktop was on the Browser view; it started only when he went back to Agents on the desktop.
+- **Cause:** a pane's PTY starts on its first `terminalHost.attach`, and only the agents' grid attaches. With a surface on stage (Browser, Board, Read) `TerminalGrid` runs `beside` and mounts no panes, so a tab that main's layout engine opened for the phone (`onWorkspaceReplaced`) had no process until the grid showed it.
+- **Fix (renderer only, `src/state/AppState.tsx`):** the `onWorkspaceReplaced` handler diffs the new workspace against the old copy (a never-loaded project counts only its active tab), and after `UNSHOWN_PANE_GRACE_MS` (500 ms) `startUnshownPanes` starts any new pane with no terminal via `terminalHost.startHidden` (the Forge Brain route). The grid adopts the same terminal when shown. Panes the grid attaches in time are untouched.
+- **Checked:** typecheck 0, eslint on the file 0. NOT tested live. Reaches the everyday Forge through the dev renderer's hot reload; no restart.
+
 ## Read mode: a Markdown reader in Forge desktop (2026-10-06; merged to master and pushed; Forge NOT restarted)
 
 - **Asked (Steve):** a place in Forge to open and read .md files easily, fitting the app; double-clicking a .md in Windows should open Forge if it is closed. He picked a 4th top-bar mode "Read" (over a side panel) and Read + Edit (over read-only).
