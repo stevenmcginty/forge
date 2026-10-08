@@ -9,7 +9,8 @@
  * #shotcard windows as pages.
  *
  *   1. minimise    the #minibar window shows, always on top, with the project
- *                  name and one chip per pane
+ *                  name and one chip per pane; clicks fall through its
+ *                  see-through corner and land on the bar itself
  *   2. send        `echo minibar-ok` typed in the bar reaches the pane (read
  *                  back through the host's Peek, which is snapshotText)
  *   3. project     the project.next chord pressed in the bar switches project
@@ -241,6 +242,29 @@ try {
   const chips = await bar.locator('.mb-chips > .mb-chip').count()
   log(chips === 2, `the bar shows two agent chips (${chips})`)
   await snap(bar, '1-minimised')
+
+  // Click-through: the bar's window spied on, then the pointer moved by the
+  // page (CDP reaches it whatever the OS does with clicks).
+  await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('#minibar'))
+    if (!win || win.__clickSpy) return
+    win.__clickSpy = true
+    const real = win.setIgnoreMouseEvents.bind(win)
+    globalThis.__minibarIgnoring = null
+    win.setIgnoreMouseEvents = (ignore, options) => {
+      globalThis.__minibarIgnoring = ignore === true
+      return real(ignore, options)
+    }
+  })
+  const ignoring = () => app.evaluate(() => globalThis.__minibarIgnoring)
+  const barBox = await bar.locator('.mb-bar').first().boundingBox()
+  // The top-left corner is the shadow's room, outside every surface.
+  await bar.mouse.move(3, 3)
+  const throughCorner = await until(async () => ((await ignoring()) === true ? true : null), 3000)
+  log(throughCorner === true, 'over a see-through corner, the bar window lets clicks through')
+  if (barBox) await bar.mouse.move(barBox.x + barBox.width / 2, barBox.y + barBox.height / 2)
+  const solidBar = await until(async () => ((await ignoring()) === false ? true : null), 3000)
+  log(solidBar === true, 'over the bar, it takes clicks again')
 
   /* ---- 2 ---- */
   section('2. Type in the bar: the pane runs it')

@@ -171,6 +171,7 @@ export function fakeApi(log: (line: string) => void = (l) => console.log(l)): Mi
     pickFiles: async () => {
       log('pickFiles')
       return ['C:\\Users\\steve\\Desktop\\shot.png']
-    }
+    },
+    setClickThrough: (on) => log(`setClickThrough ${on}`)
   }
 }

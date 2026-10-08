@@ -503,7 +503,8 @@ const api: ForgeApi = {
     openMain: (maximised) => ipcRenderer.invoke(IPC.minibarOpenMain, maximised === true),
     quitInfo: () => ipcRenderer.invoke(IPC.minibarQuitInfo),
     quit: (opts) => ipcRenderer.invoke(IPC.minibarQuit, { dontAskAgain: opts?.dontAskAgain === true }),
-    pickFiles: () => ipcRenderer.invoke(IPC.minibarPickFiles)
+    pickFiles: () => ipcRenderer.invoke(IPC.minibarPickFiles),
+    setClickThrough: (on) => ipcRenderer.send(IPC.minibarClickThrough, on === true)
   },
 
   minibarHost: {
@@ -525,7 +526,8 @@ const api: ForgeApi = {
       }
     },
     done: () => ipcRenderer.send(IPC.shotcardDone),
-    toMiniBar: (paths) => ipcRenderer.send(IPC.shotcardToMiniBar, paths)
+    toMiniBar: (paths) => ipcRenderer.send(IPC.shotcardToMiniBar, paths),
+    setClickThrough: (on) => ipcRenderer.send(IPC.shotcardClickThrough, on === true)
   },
 
   panes: {

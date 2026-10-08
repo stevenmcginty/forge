@@ -60,7 +60,9 @@ export function MiniBarHost(): ReactNode {
       const next = m?.on === true
       if (next === current) return
       current = next
-      if (next) draft.current = barDraft()
+      // A draft from main: this host reloaded while the bar was up, and those
+      // are the bar's words; otherwise the big bar's are handed over.
+      if (next) draft.current = typeof m.draft === 'string' ? m.draft : barDraft()
       else setBarDraft(draft.current)
       setOn(next)
     })

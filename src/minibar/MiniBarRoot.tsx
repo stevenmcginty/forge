@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { MiniBarState } from '@shared/minibar'
 import { filePaths } from '@/lib/paths'
 import { MiniBarView } from './MiniBarView'
+import { MINIBAR_SOLID, useClickThrough } from './useClickThrough'
 import { useMiniKeys } from './useMiniKeys'
 
 /**
@@ -12,6 +13,9 @@ import { useMiniKeys } from './useMiniKeys'
  * Files dropped anywhere on the bar go to the host as `paths`, which puts
  * them in the box quoted, as the paperclip does. An unprevented file drop
  * would navigate the window to the file.
+ *
+ * The room around the bar, the stage and the toasts lets clicks through to
+ * whatever is under it (useClickThrough).
  */
 export function MiniBarRoot(): ReactNode {
   const api = window.forge.minibar
@@ -24,6 +28,9 @@ export function MiniBarRoot(): ReactNode {
 
   // Shortcuts and the talk keys while the bar has focus.
   useMiniKeys(state, api)
+
+  // Clicks on the see-through room go to the app underneath.
+  useClickThrough(MINIBAR_SOLID, api?.setClickThrough)
 
   useEffect(() => {
     if (!api) return undefined

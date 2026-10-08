@@ -3,6 +3,7 @@ import type { Shot } from '@shared/types'
 import { ShotCard } from '@/components/ShotPop'
 import { reducedMotion } from '@/lib/motion'
 import { applyTheme, findTheme } from '@/theme/themes'
+import { SHOTCARD_SOLID, useClickThrough } from './useClickThrough'
 import '@/components/shell/deck-tokens.css'
 import '@/components/ShotPop.css'
 import './ShotCardApp.css'
@@ -48,6 +49,8 @@ export function ShotCardApp(): ReactNode {
   useLayoutEffect(() => {
     document.documentElement.dataset['shotcardView'] = 'true'
   }, [])
+  // The window is the tallest card's size: clicks beside a shorter one go to the app underneath.
+  useClickThrough(SHOTCARD_SOLID, api?.setClickThrough)
   useEffect(() => {
     void window.forge.store
       .snapshot()

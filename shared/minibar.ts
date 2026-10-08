@@ -141,12 +141,15 @@ export interface MiniBarViewApi {
   quit(opts?: { dontAskAgain?: boolean }): Promise<void>
   /** File picker parented to the mini bar window. */
   pickFiles(): Promise<string[]>
+  /** True while the pointer is over see-through room: clicks there fall through to the app below. */
+  setClickThrough(on: boolean): void
 }
 
 /** window.forge.minibarHost in the main window. */
 export interface MiniBarHostApi {
   publish(s: MiniBarState): void
-  onMode(cb: (m: { on: boolean }) => void): () => void
+  /** `draft`: the bar's last words, given back to a host that reloaded while the bar was up. */
+  onMode(cb: (m: { on: boolean; draft?: string }) => void): () => void
   onCall(cb: (c: MiniBarCall) => void): () => void
   onRemoteKey(cb: (k: RemoteKey) => void): () => void
 }
@@ -159,6 +162,8 @@ export interface ShotCardApi {
   done(): void
   /** Click on the picture: add these paths to the mini bar's box (relayed to the host as { t: 'paths' }). */
   toMiniBar(paths: string[]): void
+  /** True while the pointer is over see-through room: clicks there fall through to the app below. */
+  setClickThrough(on: boolean): void
 }
 
 /** Settings added for the mini bar (live in shared/types.ts Settings). */

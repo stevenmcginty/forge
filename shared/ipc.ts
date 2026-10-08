@@ -927,7 +927,11 @@ export const IPC = {
    * (electron/minibar-window.ts, electron/shot-card-window.ts). Payload types
    * are in shared/minibar.ts. See docs/MINI-BAR.md, section 5.3.
    */
-  /** Main → host: the bar is up (`{ on: true }`) or gone. Re-sent on the host's every load. */
+  /**
+   * Main → host: the bar is up (`{ on: true }`) or gone. Re-sent on the host's
+   * every load, with the bar's last words (`draft`) while it is up, so a host
+   * that reloaded does not lose them.
+   */
   minibarMode: 'minibar:mode',
   /** Host → main: the whole MiniBarState. Main caches the last one for a freshly loaded view. */
   minibarPublish: 'minibar:publish',
@@ -937,6 +941,8 @@ export const IPC = {
   minibarCall: 'minibar:call',
   /** View → main: `{ height, width? }`; the bottom edge stays put. */
   minibarResize: 'minibar:resize',
+  /** View → main, (on: boolean): the pointer is over see-through room, so clicks fall through (or not). */
+  minibarClickThrough: 'minibar:clickThrough',
   /** View → main, invoke, (maximised?: boolean): restore Forge. */
   minibarOpenMain: 'minibar:openMain',
   /** View → main, invoke: MiniBarQuitInfo for the inline confirm. */
@@ -953,6 +959,8 @@ export const IPC = {
   shotcardDone: 'shotcard:done',
   /** Shot card → main: the picture was clicked; relayed to the host as `{ t: 'paths' }`. */
   shotcardToMiniBar: 'shotcard:toMiniBar',
+  /** Shot card → main, (on: boolean): as minibarClickThrough, for the card's window. */
+  shotcardClickThrough: 'shotcard:clickThrough',
   /**
    * Host → main, invoke, (paneId): a Claude pane's last reply from its session
    * JSONL, `{ text, at } | null` (null for other panes or no transcript yet).

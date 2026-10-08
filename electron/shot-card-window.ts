@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import { IPC } from '@shared/ipc'
 import type { Shot } from '@shared/types'
-import { callHost } from './minibar-window'
+import { callHost, setClickThrough } from './minibar-window'
 
 /**
  * The desktop shot card: a new screen capture, popped at the top right of the
@@ -105,6 +105,8 @@ function createCard(): BrowserWindow {
   // handed over once it has loaded.
   win.webContents.on('did-finish-load', () => {
     ready = true
+    // A fresh page has not said where the pointer is: take clicks until it does.
+    setClickThrough(win, false)
     const queued = pending
     pending = []
     if (queued.length === 0 || win.isDestroyed()) return
@@ -158,6 +160,12 @@ export function registerShotCardIpc(): void {
     if (!Array.isArray(paths)) return
     const clean = paths.filter((p): p is string => typeof p === 'string' && p.length > 0).slice(0, 20)
     if (clean.length > 0) callHost({ t: 'paths', paths: clean })
+  })
+
+  // The room around the card (its window is the tallest card's size) lets clicks through.
+  ipcMain.on(IPC.shotcardClickThrough, (e, on: unknown) => {
+    if (!cardAlive() || e.sender !== card!.webContents) return
+    setClickThrough(card!, on === true)
   })
 }
 

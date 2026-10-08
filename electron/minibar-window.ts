@@ -56,6 +56,12 @@ let mode = false
 let focusWhenReady = false
 /** The host's last MiniBarState, for a view that loads after it was published. */
 let lastState: MiniBarState | null = null
+/**
+ * The bar's words as main last saw them pass (the view's `setDraft`, or a
+ * draft the host published), while the bar is up. A host that reloads gets
+ * them back with its mode, or they would die with the old renderer.
+ */
+let lastDraft: string | null = null
 /** The bar's current height, as the view last asked for it. */
 let height = BAR_HEIGHT
 /** Set while we move the window ourselves, so our own setBounds is not saved as a drag. */
@@ -82,7 +88,19 @@ function toBar(channel: string, payload: unknown): void {
 }
 
 function sendMode(): void {
-  toHost(IPC.minibarMode, { on: mode })
+  toHost(IPC.minibarMode, mode && lastDraft !== null ? { on: true, draft: lastDraft } : { on: mode })
+}
+
+/**
+ * Clicks on the see-through room around the surfaces fall through to the app
+ * below. The view says when the pointer crosses into or out of that room;
+ * `forward` keeps the pointer's moves coming to it meanwhile, so it can tell
+ * when to take clicks again.
+ */
+export function setClickThrough(win: BrowserWindow, on: boolean): void {
+  if (win.isDestroyed()) return
+  if (on) win.setIgnoreMouseEvents(true, { forward: true })
+  else win.setIgnoreMouseEvents(false)
 }
 
 /* ------------------------------------------------------------------ host */
@@ -283,6 +301,8 @@ function createBar(): BrowserWindow {
   // A view that (re)loads gets the last state at once rather than after the
   // host's next publish.
   win.webContents.on('did-finish-load', () => {
+    // A fresh page has not said where the pointer is: take clicks until it does.
+    setClickThrough(win, false)
     if (lastState) toBar(IPC.minibarState, lastState)
   })
 
@@ -323,6 +343,8 @@ export function showMiniBar(): void {
   }
   if (!mode) {
     mode = true
+    // A new minimise: the host takes the big bar's words, not the last bar's.
+    lastDraft = null
     sendMode()
   }
 }
@@ -333,6 +355,7 @@ export function hideMiniBar(): void {
   if (barAlive() && bar!.isVisible()) bar!.hide()
   if (mode) {
     mode = false
+    lastDraft = null
     sendMode()
   }
 }
@@ -367,6 +390,11 @@ export function registerMiniBarIpc(deps: { openMainWindow: () => void }): void {
   // Host → view. Cached, so a view that loads later still draws at once.
   ipcMain.on(IPC.minibarPublish, (e, state: MiniBarState) => {
     if (!hostAlive() || e.sender !== host!.webContents) return
+    // The hand-off at minimise, or the host moved the words itself (picked
+    // paths, words it gave back). Its heartbeat repeats them: that is no news.
+    if (mode && typeof state?.draft === 'string' && (lastDraft === null || state.draft !== lastState?.draft)) {
+      lastDraft = state.draft
+    }
     lastState = state
     toBar(IPC.minibarState, state)
   })
@@ -374,7 +402,13 @@ export function registerMiniBarIpc(deps: { openMainWindow: () => void }): void {
   // View → host. Main has no opinion on the payload.
   ipcMain.on(IPC.minibarCall, (e, call: MiniBarCall) => {
     if (!barAlive() || e.sender !== bar!.webContents) return
+    if (mode && call?.t === 'setDraft' && typeof call.text === 'string') lastDraft = call.text
     callHost(call)
+  })
+
+  ipcMain.on(IPC.minibarClickThrough, (e, on: unknown) => {
+    if (!barAlive() || e.sender !== bar!.webContents) return
+    setClickThrough(bar!, on === true)
   })
 
   ipcMain.on(IPC.minibarResize, (e, size: { height?: unknown; width?: unknown }) => {
@@ -422,6 +456,7 @@ export function disposeMiniBar(): void {
   bar = null
   ready = false
   mode = false
+  lastDraft = null
   if (win && !win.isDestroyed()) win.destroy()
   host = null
 }
