@@ -83,6 +83,13 @@ export function Toasts({
   )
 }
 
+/** A burst's one toast: "3 agents are done: Jonah, Ruth and Ivy". */
+function burstHeadline(kind: MiniBarEvent['kind'], names: string[]): string {
+  const list = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+  const verb = kind === 'done' ? 'are done' : kind === 'asking' ? 'are asking' : 'stopped'
+  return `${names.length} agents ${verb}: ${list}`
+}
+
 function Toast({
   ev,
   out,
@@ -112,7 +119,7 @@ function Toast({
       </span>
       <div className="mb-toast__main">
         <header className="mb-toast__head">
-          <span className="mb-toast__title">{eventHeadline(ev.kind, ev.name)}</span>
+          <span className="mb-toast__title">{ev.group && ev.group.length > 1 ? burstHeadline(ev.kind, ev.group) : eventHeadline(ev.kind, ev.name)}</span>
           <span className="mb-toast__meta">
             {project}
             {ev.workedMs ? (

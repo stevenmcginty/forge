@@ -15,7 +15,8 @@
  *                  back through the host's Peek, which is snapshotText)
  *   3. project     the project.next chord pressed in the bar switches project
  *   4. restore     the bar hides; words typed but not sent are in the big bar
- *   5. shot card   an image on the clipboard while minimised pops #shotcard at
+ *   5. shot card   a new shot while minimised (injected through the test hook,
+ *                  electron/shots-watcher.ts `__forgeMinibarTest`) pops #shotcard at
  *                  the top right, and it is gone again after about 10.5 s
  *   6. news        a pane that prints for ~10 s and stops raises a Done toast
  *                  and an Activity row; Peek from the row shows its last lines
@@ -28,9 +29,10 @@
  * sleep never counts as work, and neither does a line every half second. The
  * command prints a line every 200 ms for about ten seconds instead.
  *
- * Side effects outside the scratch folder, on purpose and small: step 5 writes
- * a 64x48 image to the real clipboard (any other running Forge will catch it
- * too), and the throwaway window shows on screen for about a minute. Global
+ * Side effects outside the scratch folder, on purpose and small: the
+ * throwaway window shows on screen for about a minute. Step 5 hands its image
+ * straight to the throwaway's test hook (FORGE_MINIBAR_TEST=1), so nothing
+ * Steve has copied is overwritten and no other running Forge catches it. Global
  * keys, spoken updates and earcons are off in the seed.
  *
  * Screenshots go to shots/e2e-*.png (or `--shots <dir>`).
@@ -199,6 +201,7 @@ mkdirSync(SHOTS, { recursive: true })
 const { scratch, data } = seed()
 const env = { ...process.env }
 for (const k of ['ELECTRON_RUN_AS_NODE', 'ELECTRON_RENDERER_URL', 'NODE_ENV', 'NODE_ENV_ELECTRON_VITE']) delete env[k]
+env.FORGE_MINIBAR_TEST = '1'
 
 const app = await _electron.launch({ executablePath: ELECTRON, args: ['.', '--data-dir', data], cwd: ROOT, env, timeout: 60000 })
 let exited = false
@@ -325,12 +328,8 @@ try {
   section('5. A shot while minimised: the desktop card')
   await mainWindow(app, 'minimize')
   await until(async () => ((await windowInfo(app, 'minibar'))?.visible ? true : null), 8000)
-  const before = await app.evaluate(({ clipboard }) => ({
-    text: clipboard.readText(),
-    image: clipboard.availableFormats().some((f) => f.startsWith('image/'))
-  }))
   // A fresh image every run, or the shelf calls it a duplicate and pops nothing.
-  await app.evaluate(({ clipboard, nativeImage }) => {
+  const png = await app.evaluate(({ nativeImage }) => {
     const width = 64
     const height = 48
     const px = Buffer.alloc(width * height * 4)
@@ -341,8 +340,12 @@ try {
       px[i + 2] = r
       px[i + 3] = 255
     }
-    clipboard.writeImage(nativeImage.createFromBitmap(px, { width, height }))
+    return nativeImage.createFromBitmap(px, { width, height }).toPNG().toString('base64')
   })
+  const pngPath = join(scratch, 'minibar-shot.png')
+  writeFileSync(pngPath, Buffer.from(png, 'base64'))
+  const injected = await app.evaluate((_e, p) => globalThis.__forgeMinibarTest?.injectShot(p) ?? false, pngPath)
+  log(injected === true, 'the test hook caught the shot')
   const card = await until(async () => {
     const w = await windowInfo(app, 'shotcard')
     return w?.visible ? { ...w, at: Date.now() } : null
@@ -371,7 +374,6 @@ try {
     const upFor = gone ? gone - card.at : NaN
     log(upFor >= CARD_GONE_MIN_MS && upFor <= CARD_GONE_MAX_MS, `it hides itself after ${(upFor / 1000).toFixed(1)} s`)
   }
-  if (before.text && !before.image) await app.evaluate(({ clipboard }, t) => clipboard.writeText(t), before.text)
 
   /* ---- 6 ---- */
   section('6. Work, then quiet: Done toast, Activity, Peek')

@@ -71,7 +71,7 @@ export function Bar({
       ) : null}
 
       <div className="mb-bar__row" inert={quit ? true : undefined}>
-        <Grip api={api} />
+        <Grip />
 
         {noProject ? (
           <div className="mb-empty">
@@ -217,10 +217,10 @@ function OpenSplit({
   )
 }
 
-/** Drag to move; double-click to open Forge. */
-function Grip({ api }: { api: MiniBarViewApi }): ReactNode {
+/** Drag to move. (A drag region never hands the page a double-click on Windows.) */
+function Grip(): ReactNode {
   return (
-    <span className="mb-grip" title="Drag to move — double-click to open Forge" onDoubleClick={() => void api.openMain(false)}>
+    <span className="mb-grip" title="Drag to move">
       <GripGlyph />
     </span>
   )
@@ -290,7 +290,7 @@ export function ConnectingBar({
     <div className="mb-bar" data-quiet="true" data-confirm={quit ? 'true' : undefined}>
       {quit ? <QuitConfirm info={quit} api={api} onCancel={onQuitCancel} /> : null}
       <div className="mb-bar__row">
-        <Grip api={api} />
+        <Grip />
         <span className="mb-connecting">
           <StateMark status="starting" size={11} />
           Connecting…

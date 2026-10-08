@@ -12,7 +12,7 @@ import { setMiniBox } from '@/lib/miniBarDictation'
 import { activityOf } from '@/lib/paneActivity'
 import { terminalHost, type PaneRuntime } from '@/lib/terminals'
 import { useApp, type AppState } from '@/state/AppState'
-import { agentReplyLine, useMiniNews } from './minibar/news'
+import { agentReplyLine, isShellPrompt, useMiniNews } from './minibar/news'
 import { useMiniVoice } from './minibar/voice'
 
 /**
@@ -353,14 +353,14 @@ function statusOf(paneId: string, runtime: PaneRuntime): AgentStatus {
   return activityOf(paneId, runtime).state === 'done' ? 'done' : 'idle'
 }
 
-/** The last non-empty line on the pane's screen; J3c swaps in a Claude pane's last reply. */
+/** The last non-empty line on the pane's screen that is not a shell prompt; J3c swaps in a Claude pane's last reply. */
 function lastLine(paneId: string): string {
   const text = terminalHost.snapshotText(paneId, LINE_ROWS)
   if (!text) return ''
   const lines = text.split('\n')
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!.trim()
-    if (line) return line.length > LINE_MAX ? `${line.slice(0, LINE_MAX - 1)}…` : line
+    if (line && !isShellPrompt(line)) return line.length > LINE_MAX ? `${line.slice(0, LINE_MAX - 1)}…` : line
   }
   return ''
 }

@@ -39,6 +39,11 @@ export interface MiniBarEvent {
   line?: string
   /** The one-line question, for 'asking'. */
   prompt?: string
+  /**
+   * A burst (3 or more of this kind within 5 s): the agents' names, oldest
+   * first, on the newest event of it. Its toast stands for them all.
+   */
+  group?: string[]
 }
 
 export interface MiniBarChoice {

@@ -129,12 +129,31 @@ function paneIdsOf(state: AppState): string[] {
   return out
 }
 
-/** The last non-empty line on the pane's screen. */
+/**
+ * A shell's prompt, not something an agent said: PowerShell `PS C:\proj>`,
+ * cmd `C:\proj>`, bash/zsh `steve@pc:~/proj$`, `~/proj $` or a bare `$`, and
+ * Git Bash's header line `steve@pc MINGW64 ~/proj`. Text typed after the
+ * prompt counts as the prompt too.
+ */
+const SHELL_PROMPTS = [
+  /^PS\s[^>]*>/,
+  /^[A-Za-z]:\\[^>]*>/,
+  /^(\([^)]*\)\s*)?[\w.-]+@[\w.-]+[^$#%]*[$#%](\s|$)/,
+  /^[~/]\S*\s?[$#%](\s|$)/,
+  /^[$#%]$|^\$\s/,
+  /^[\w.-]+@[\w.-]+\s+(MINGW|MSYS|UCRT|CLANG)\w*\s/
+]
+
+export function isShellPrompt(line: string): boolean {
+  return SHELL_PROMPTS.some((re) => re.test(line))
+}
+
+/** The last non-empty line on the pane's screen that is not a shell prompt. */
 function screenLine(paneId: string): string {
   const lines = (terminalHost.snapshotText(paneId, PEEK_ROWS) ?? '').split('\n')
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!.trim()
-    if (line) return line.length > LINE_MAX ? `${line.slice(0, LINE_MAX - 1)}…` : line
+    if (line && !isShellPrompt(line)) return line.length > LINE_MAX ? `${line.slice(0, LINE_MAX - 1)}…` : line
   }
   return ''
 }
@@ -257,12 +276,14 @@ export function useMiniNews(): MiniBarPart {
     else earconAgentAsking()
   }
 
-  const addEvent = (ev: MiniBarEvent): void => {
-    const recent = [ev, ...eventsRef.current]
-    eventsRef.current = recent.slice(0, MAX_EVENTS)
+  const addEvent = (one: MiniBarEvent): void => {
+    // A burst of one kind is one toast, the newest, naming them all: the cards
+    // it replaces fold into the bell. Activity still lists each event.
+    const burst = [one, ...eventsRef.current].filter((e) => e.kind === one.kind && one.at - e.at <= BURST_WINDOW_MS)
+    const names = [...new Set(burst.map((e) => e.name).reverse())]
+    const ev: MiniBarEvent = burst.length >= BURST_MIN && names.length > 1 ? { ...one, group: names } : one
+    eventsRef.current = [ev, ...eventsRef.current].slice(0, MAX_EVENTS)
     setEvents(eventsRef.current)
-    // A burst of one kind is one toast, the newest: the cards it replaces fold into the bell.
-    const burst = recent.filter((e) => e.kind === ev.kind && ev.at - e.at <= BURST_WINDOW_MS)
     const folded = new Set(burst.length >= BURST_MIN ? burst.map((e) => e.id) : [])
     setToastList([ev.id, ...toastsRef.current.filter((id) => !folded.has(id))].slice(0, MAX_TOASTS))
     toastTimers.current.set(

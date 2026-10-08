@@ -162,26 +162,42 @@ function pollOnce(): void {
   const formats = clipboard.availableFormats()
   if (!formats.some((f) => f.startsWith('image/'))) return
 
-  const img = clipboard.readImage()
-  if (img.isEmpty()) return
+  catchImage(clipboard.readImage())
+}
+
+/** A new image, as from the clipboard: onto the shelf, onto the desktop if minimised, to the windows. */
+function catchImage(img: NativeImage): boolean {
+  if (!shelf || img.isEmpty()) return false
 
   const hash = hashOfImage(img)
-  if (!hash) return
+  if (!hash) return false
   if (!shelf.shouldCatch(hash)) {
     // Still note it, so the poll after this one is a single comparison.
     shelf.noteClipboard(hash)
-    return
+    return false
   }
 
   const png = img.toPNG()
   const result = shelf.pinBytes(png, hash)
   if (!result.ok) {
     if (result.reason !== 'duplicate') console.error('[shots] catch failed:', result.reason)
-    return
+    return false
   }
   console.log(`[shots] caught ${result.record.name} (${img.getSize().width}x${img.getSize().height})`)
   popOnDesktop(result.record)
   broadcast()
+  return true
+}
+
+/**
+ * minibar:check's way in (scripts/minibar-check.mjs, step 5), only when it
+ * launched this Forge: a PNG file goes down the clipboard's "new shot" path
+ * without touching the real clipboard, which Steve's own Forge is polling.
+ */
+function exposeTestHook(): void {
+  if (process.env.FORGE_MINIBAR_TEST !== '1') return
+  const g = globalThis as { __forgeMinibarTest?: { injectShot(pngPath: string): boolean } }
+  g.__forgeMinibarTest = { injectShot: (pngPath) => catchImage(nativeImage.createFromPath(String(pngPath))) }
 }
 
 /**
@@ -212,6 +228,7 @@ export function registerShotsHandlers(): void {
   enabled = settings.catchShots
   shelf.load(hashOfFile)
   absorbClipboard(false)
+  exposeTestHook()
 
   timer = setInterval(poll, POLL_MS)
 

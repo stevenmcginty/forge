@@ -196,7 +196,7 @@ Internal: `miniBarBounds` (per display id: x, y, width), `miniBarTucked`.
   - line 2: the agent's last line, one sentence (Claude panes: the last reply; other panes: the last non-empty screen line);
   - buttons: Peek, Reply, Open, and X. Asking toasts also show the answer buttons (4.10).
 - A toast stays 8 s; hover pauses it. Then it folds into the bell's count.
-- A burst (3 or more within 5 s) shows one toast: "3 agents are done: Jonah, Ruth, Ivy".
+- A burst (3 or more within 5 s) shows one toast: "3 agents are done: Jonah, Ruth and Ivy".
 - **Activity panel (bell):** the last 30 events, newest first, each with time, project, state word and shape, and the last line. Click a row = Peek that agent. Opening it marks all as seen.
 - **Chime:** a short sound on Done, a different two-note sound on Asking (sound, plus the word on the card; never sound alone).
 - **Chips update live:** Working (ring), Done (tick, for 6 s as today, then Idle), Asking (?), Waiting (dots), Stopped (square).
@@ -239,7 +239,6 @@ Internal: `miniBarBounds` (per display id: x, y, width), `miniBarTucked`.
 - **Tuck (`_`):** the bar shrinks to a pill at the same spot: `( :: forge - (tick)2 ?1 (ring)3 - (mic) )`, showing counts per state with shapes and the mic. Click the pill to unfold. Talk keys, toasts and spoken updates still work while tucked. The tucked state is remembered.
 - **Open:** restores Forge as it was (normal or maximised). **Open maximised:** restores and maximises.
 - **Keep minimised:** the default; the bar stays until Forge is opened or quit.
-- Double-click the grip: Open.
 
 ## 5. Architecture
 
