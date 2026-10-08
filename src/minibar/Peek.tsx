@@ -50,11 +50,13 @@ export function Peek({
     el.style.height = `${Math.min(MAX_REPLY_H, el.scrollHeight)}px`
   }, [reply])
 
-  // A new reply scrolls back to its top; a refresh of the same one keeps the reader's place.
+  // A new reply scrolls back to its top, a new screen to its newest line at the
+  // bottom; a refresh of the same one keeps the reader's place.
   const scroller = useRef<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
-    scroller.current?.scrollTo({ top: 0 })
-  }, [peek.paneId])
+    const el = scroller.current
+    el?.scrollTo({ top: peek.source === 'screen' ? el.scrollHeight : 0 })
+  }, [peek.paneId, peek.source])
 
   const send = (): void => {
     if (!reply.trim()) return

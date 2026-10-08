@@ -21,7 +21,12 @@ import { callHost } from './minibar-window'
  */
 
 const CARD_WIDTH = 288
-const CARD_HEIGHT = 230
+/**
+ * Room for the tallest card: ShotPop holds the picture to 1.42:1 at the
+ * narrowest, so a 4:3 or portrait snip is ~180 px of picture plus the head,
+ * foot and the stack's ghosts below. 230 fitted only a 16:9 one.
+ */
+const CARD_HEIGHT = 272
 /** In from the top and right edges of the work area. */
 const INSET = 14
 
