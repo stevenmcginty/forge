@@ -4,7 +4,7 @@
  *
  * A browser *surface* is a real web page (an Electron WebContentsView) that sits
  * on the canvas beside the panes. Steve can use it by hand; every agent pane and
- * the voice hub can drive it through the same nine tools (bridge/browser-tools.mjs
+ * the voice hub can drive it through the same ten tools (bridge/browser-tools.mjs
  * for the CLIs, src/lib/realtime/tools-browser.ts for the hub, and
  * electron/browser-panes/brain.ts for the Claude brain).
  *
@@ -86,7 +86,7 @@ export const BROWSER_IPC = {
   move: 'browser:move',
   /** Renderer → main, one-way: which project the window is showing. */
   project: 'browser:project',
-  /** Renderer → main: the voice hub calling one of the nine tools. */
+  /** Renderer → main: the voice hub calling one of the ten tools. */
   agent: 'browser:agent',
   /** Main → renderer: the whole surface list changed. */
   changed: 'browser:changed',
@@ -236,7 +236,7 @@ export interface BrowserSurfacesFile {
 
 export type BrowserHistoryAction = 'back' | 'forward' | 'reload' | 'stop'
 
-/** The nine tools, by name, in one place for the schema checks. */
+/** The ten tools, by name, in one place for the schema checks. */
 export const BROWSER_TOOL_NAMES = [
   'browser_open',
   'browser_list',
@@ -246,7 +246,8 @@ export const BROWSER_TOOL_NAMES = [
   'browser_screenshot',
   'browser_close',
   'browser_upload',
-  'browser_key'
+  'browser_key',
+  'browser_text'
 ] as const
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number]
 
@@ -255,6 +256,9 @@ export const BROWSER_KEYS = ['Tab', 'Enter', 'Space', 'Escape', 'ArrowUp', 'Arro
 export type BrowserKeyName = (typeof BROWSER_KEYS)[number]
 /** How many presses one browser_key call may make. */
 export const BROWSER_KEY_MAX_TIMES = 20
+/** browser_text's `maxChars`: the default, and the most one call may ask for. */
+export const BROWSER_TEXT_DEFAULT_CHARS = 20_000
+export const BROWSER_TEXT_MAX_CHARS = 200_000
 
 /** One tool call, as the link and the voice-hub IPC carry it. */
 export interface BrowserAgentRequest {
@@ -344,6 +348,11 @@ export const BROWSER_TOOL_DESCRIPTIONS: Record<BrowserToolName, string> = {
     `${BROWSER_PREAMBLE} Presses one key in a tab: Tab, Enter, Space, Escape or an arrow key — for keyboard-only widgets, moving between radios, closing a pop-up. \`shift: true\` with Tab goes back. With \`ref\` (a number from your last browser_read) that element is focused first.`,
     'It says where the focus landed. Omit `id` for your current tab.',
     BROWSER_CONFIRM_RULE
+  ].join('\n'),
+  browser_text: [
+    `${BROWSER_PREAMBLE} Returns the page's full visible text, for reading prices, tables and articles browser_read does not list; read-only — it clicks, scrolls and changes nothing.`,
+    'The title and address come first, then the text as a person sees it. `selector` (a CSS selector) reads only the first element it matches. Long text is cut at `maxChars` (default 20000, at most 200000) and says how long the whole is.',
+    'It gives no numbers to click — browser_read does that. Omit `id` for your current tab.'
   ].join('\n')
 }
 
@@ -362,7 +371,9 @@ export const BROWSER_PARAM_TEXT = {
   key: 'The key to press: Tab, Enter, Space, Escape, ArrowUp, ArrowDown, ArrowLeft or ArrowRight.',
   shift: 'Optional: hold Shift while pressing — Shift+Tab moves the focus back.',
   keyRef: 'Optional: the number in square brackets from your last browser_read of the element to focus first. Nothing is emptied.',
-  times: 'Optional: how many times to press it, 1 to 20. Default 1.'
+  times: 'Optional: how many times to press it, 1 to 20. Default 1.',
+  selector: 'Optional: a CSS selector, e.g. "#prices" or "table.odds" — only the first element it matches is read. Omit for the whole page.',
+  maxChars: 'Optional: the most characters to return, 1 to 200000. Default 20000.'
 } as const
 
 /** A JSON-schema object for one tool's arguments. Plain enough for MCP, Gemini Live and OpenAI Realtime. */
@@ -427,6 +438,15 @@ export const BROWSER_TOOL_PARAMS: Record<BrowserToolName, BrowserToolSchema> = {
       times: { type: 'number', description: BROWSER_PARAM_TEXT.times }
     },
     required: ['key']
+  },
+  browser_text: {
+    type: 'object',
+    properties: {
+      id: idParam,
+      selector: { type: 'string', description: BROWSER_PARAM_TEXT.selector },
+      maxChars: { type: 'number', description: BROWSER_PARAM_TEXT.maxChars }
+    },
+    required: []
   }
 }
 

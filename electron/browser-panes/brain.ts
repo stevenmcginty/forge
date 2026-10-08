@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { BROWSER_KEYS, BROWSER_PARAM_TEXT, BROWSER_TOOL_DESCRIPTIONS, type BrowserAgentReply, type BrowserToolName } from '@shared/browser'
 
 /**
- * Eight of the nine browser tools (all but browser_upload) for the Claude brain (electron/voice-agent/host.ts),
+ * Nine of the ten browser tools (all but browser_upload) for the Claude brain (electron/voice-agent/host.ts),
  * as `{ name, description, shape, handler }` entries its `tool()` helper takes
  * unchanged — so the host swaps its five chrome-control tools for these with a
  * one-line spread.
@@ -101,6 +101,16 @@ export function brainBrowserTools(): BrainBrowserTool[] {
       handler: (args: Record<string, unknown>) => call('browser_key', args)
     },
     {
+      name: 'browser_text',
+      description: BROWSER_TOOL_DESCRIPTIONS.browser_text,
+      shape: {
+        id,
+        selector: z.string().optional().describe(BROWSER_PARAM_TEXT.selector),
+        maxChars: z.number().optional().describe(BROWSER_PARAM_TEXT.maxChars)
+      },
+      handler: (args: Record<string, unknown>) => call('browser_text', args)
+    },
+    {
       name: 'browser_screenshot',
       description: BROWSER_TOOL_DESCRIPTIONS.browser_screenshot,
       shape: { id },
@@ -123,6 +133,7 @@ export const BRAIN_BROWSER_ALLOWED = [
   'mcp__forge__browser_click',
   'mcp__forge__browser_type',
   'mcp__forge__browser_key',
+  'mcp__forge__browser_text',
   'mcp__forge__browser_screenshot',
   'mcp__forge__browser_close'
 ]

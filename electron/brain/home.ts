@@ -136,6 +136,7 @@ export function claudeHomeSettings(docsDir: string | null = null, statusLine: Re
         `mcp__${BRAIN_MCP_SERVER}`,
         'mcp__forge-bridge__browser_open',
         'mcp__forge-bridge__browser_read',
+        'mcp__forge-bridge__browser_text',
         'mcp__forge-bridge__browser_list',
         'mcp__forge-bridge__browser_screenshot',
         'mcp__forge-bridge__browser_close',

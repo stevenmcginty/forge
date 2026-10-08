@@ -18,6 +18,7 @@ import {
   ARTIFACT_PARTITION,
   BROWSER_DEFAULT_RECT,
   BROWSER_PARTITION,
+  BROWSER_TEXT_MAX_CHARS,
   USER_OWNER,
   browserKeyCombo,
   isArtifactUrl,
@@ -112,6 +113,56 @@ const KEYS: Record<BrowserKeyName, { key: string; code: string; vk: number; text
   ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', vk: 38 },
   ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', vk: 39 },
   ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', vk: 40 }
+}
+/** The isolated world browser_text reads in: its own globals and prototypes, so the page can neither see the read nor patch innerText under it. */
+const TEXT_WORLD = 'forge-text'
+/** Same-origin frames browser_text appends to the page's own text, at most. */
+const TEXT_MAX_FRAMES = 20
+
+/** What textScript hands back. */
+type PageText =
+  | { bad: string }
+  | { none: true }
+  | { length: number; text: string; frames: number; skipped: number }
+
+/**
+ * browser_text's page side: innerText — the text as laid out, what a person
+ * sees — of the first `selector` match, or of the body plus each shown
+ * same-origin frame's body. Trailing spaces and runs of blank lines are folded.
+ * Reads only: no focus, no scroll, no event. Cut at `max` here, so a huge page
+ * never crosses the wire whole; `length` is the whole.
+ */
+function textScript(selector: string | null, max: number): string {
+  return `(() => {
+  const sel = ${JSON.stringify(selector)}
+  const tidy = (t) => String(t || '').replace(/\\r\\n?/g, '\\n').replace(/[ \\t\\u00a0]+\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim()
+  const words = (el) => tidy(el instanceof HTMLElement ? el.innerText : el.textContent)
+  let text = ''
+  let frames = 0
+  let skipped = 0
+  if (sel) {
+    let el = null
+    try { el = document.querySelector(sel) } catch (e) { return { bad: String((e && e.message) || e) } }
+    if (!el) return { none: true }
+    text = words(el)
+  } else {
+    const root = document.body || document.documentElement
+    text = root ? words(root) : ''
+    for (const f of Array.from(document.querySelectorAll('iframe, frame')).slice(0, ${TEXT_MAX_FRAMES})) {
+      const box = f.getBoundingClientRect()
+      if (box.width < 1 || box.height < 1) continue
+      let doc = null
+      try { doc = f.contentDocument } catch (e) { doc = null }
+      const body = doc && (doc.body || doc.documentElement)
+      if (!body) { skipped++; continue }
+      const t = words(body)
+      if (!t) continue
+      text += '\\n\\n--- frame ' + doc.location.href + ' ---\\n' + t
+      frames++
+    }
+  }
+  return { length: text.length, text: text.slice(0, ${max}), frames, skipped }
+})()`
 }
 interface Tab {
   view: WebContentsView | null
@@ -799,6 +850,55 @@ export class BrowserManager implements BrowserDriver {
       throw new Error(res.exceptionDetails.exception?.description ?? res.exceptionDetails.text ?? 'page script failed')
     }
     return res.result?.value as T
+  }
+
+  /**
+   * Runtime.evaluate in TEXT_WORLD on the main frame, not the page's own world:
+   * the DOM is shared, its scripts are not. No user gesture — reading grants
+   * the page nothing.
+   */
+  private async evaluateIsolated<T>(wc: WebContents, expression: string): Promise<T> {
+    const tree = await this.bounded<{ frameTree: { frame: { id: string } } }>(wc, 'Page.getFrameTree')
+    const world = await this.bounded<{ executionContextId: number }>(wc, 'Page.createIsolatedWorld', {
+      frameId: tree.frameTree.frame.id,
+      worldName: TEXT_WORLD
+    })
+    const res = await this.bounded<{ result?: { value?: T }; exceptionDetails?: { text?: string; exception?: { description?: string } } }>(
+      wc,
+      'Runtime.evaluate',
+      { expression, contextId: world.executionContextId, returnByValue: true }
+    )
+    if (res.exceptionDetails) {
+      throw new Error(res.exceptionDetails.exception?.description ?? res.exceptionDetails.text ?? 'page script failed')
+    }
+    return res.result?.value as T
+  }
+
+  async text(id: string, selector: string | null, maxChars: number): Promise<{ text: string } | { error: string }> {
+    const wc = this.wcFor(id)
+    if (!wc) return { error: `Tab ${id} is gone.` }
+    if (wc.isLoading()) await settle(wc)
+    let got: PageText | null
+    try {
+      got = await this.evaluateIsolated<PageText | null>(wc, textScript(selector, maxChars))
+    } catch (err) {
+      return { error: `Tab ${id} could not be read: ${errText(err)}` }
+    }
+    if (!got) return { error: `Tab ${id} could not be read: the page gave nothing back.` }
+    if ('bad' in got) return { error: `\`selector\` ${JSON.stringify(selector)} is not a CSS selector the page understands: ${got.bad}` }
+    if ('none' in got) return { error: `Nothing on tab ${id} matches the selector ${JSON.stringify(selector)}. browser_text without \`selector\` reads the whole page.` }
+    const what = selector ? `the first match for ${JSON.stringify(selector)}` : 'the page'
+    const frames = [
+      got.frames ? `${got.frames} same-origin frame${got.frames === 1 ? '' : 's'} included, each after a "--- frame <address> ---" line` : '',
+      got.skipped ? `${got.skipped} frame${got.skipped === 1 ? '' : 's'} from another site not read` : ''
+    ].filter(Boolean)
+    const head = `Text of ${what} on tab ${id}: ${this.where(wc)}${frames.length ? ` (${frames.join('; ')})` : ''}.`
+    if (!got.length) return { text: `${head}\n\n(no visible text)` }
+    const cut =
+      got.length > got.text.length
+        ? `\n\n[Cut: the first ${got.text.length} of ${got.length} characters. Pass a larger maxChars (at most ${BROWSER_TEXT_MAX_CHARS}) or a selector for the rest.]`
+        : ''
+    return { text: `${head} ${got.length} characters.\n\n${got.text}${cut}` }
   }
 
   async read(id: string, find: string | null = null): Promise<string> {

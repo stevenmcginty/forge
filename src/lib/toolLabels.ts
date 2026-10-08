@@ -39,6 +39,7 @@ const TOOL_LABELS: Record<string, string> = {
   /* ------------------------------------------------------------ the browser */
   browser_open: 'opening a web page',
   browser_read: 'reading a web page',
+  browser_text: 'reading the page text',
   browser_click: 'clicking in the browser',
   browser_type: 'typing in the browser',
   browser_key: 'pressing a key',

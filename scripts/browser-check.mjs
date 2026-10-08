@@ -9,7 +9,7 @@
  *                    main names keys exactly as the keymap does (browserKeyCombo).
  *   2c. pop-ups      windowOpenAction: a script's pop-up (blank, sized, named, sign-in page)
  *                    is a real window, a plain new-tab link stays in the tab, non-web refused.
- *   3. tool schema   bridge/browser-tools.mjs offers exactly the nine tools, with words
+ *   3. tool schema   bridge/browser-tools.mjs offers exactly the ten tools, with words
  *                    and schemas identical to shared/browser.ts (the canonical copy).
  *   4. link auth     the real BrowserLink answers the right token and refuses a wrong,
  *                    missing or oversized one — without ever calling the handler.
@@ -42,8 +42,16 @@
  *                    values kept — on a tab, a cross-site frame, after a cross-site move, in a
  *                    pop-up and after the debugger is detached; Forge's window, other sessions
  *                    and artifact tabs keep Electron's own.
+ *   6g. text         browser_text returns the page's visible text (title and address first,
+ *                    hidden text left out, a same-origin frame appended), a selector's
+ *                    first match, clear errors for no match and a bad selector, the cut
+ *                    note at maxChars — read in a world the page cannot patch, and the
+ *                    page sees no event, scroll, focus or selection from it.
  *
- *   --chrome-ua      also: https://httpbin.org/headers (network) in a tab through the real code
+ *   --bet365         also: https://www.bet365.com/ (network) in a fresh, logged-out profile —
+ *                    nothing clicked, typed or accepted — and browser_text must hold prices.
+ *
+ *   --chrome-ua     also: https://httpbin.org/headers (network) in a tab through the real code
  *                    path, its User-Agent printed beside the tab's own navigator values.
  *
  *   --dvla [--dvla-out <file>]  also: the real DVLA "sell a vehicle out of trade" service
@@ -88,6 +96,7 @@ const LIVE = argv.includes('--live')
 const SHOTS = argv.includes('--shots') ? resolve(argv[argv.indexOf('--shots') + 1] ?? '') : null
 const DVLA = argv.includes('--dvla')
 const CHROME_UA = argv.includes('--chrome-ua')
+const BET365 = argv.includes('--bet365')
 const DVLA_OUT = argv.includes('--dvla-out') ? resolve(argv[argv.indexOf('--dvla-out') + 1] ?? '') : join(tmpdir(), 'forge-browser-check-dvla.txt')
 
 let passed = 0
@@ -245,8 +254,8 @@ const bridgeUrl = pathToFileURL(join(ROOT, 'bridge', 'browser-tools.mjs')).href
 {
   const B = await import(bridgeUrl)
   const names = B.BROWSER_TOOLS.map((t) => t.name)
-  check('exactly the nine tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES), names.join(', '))
-  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 9)
+  check('exactly the ten tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES) && names.length === 10 && names.includes('browser_text'), names.join(', '))
+  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 10)
   for (const tool of B.BROWSER_TOOLS) {
     check(`${tool.name}: description matches shared word for word`, tool.description === S.BROWSER_TOOL_DESCRIPTIONS[tool.name])
     check(`${tool.name}: schema matches shared`, JSON.stringify(tool.inputSchema) === JSON.stringify(S.BROWSER_TOOL_PARAMS[tool.name]))
@@ -256,6 +265,8 @@ const bridgeUrl = pathToFileURL(join(ROOT, 'bridge', 'browser-tools.mjs')).href
     const d = B.BROWSER_TOOLS.find((t) => t.name === name).description
     check(`${name}: carries the ask-first rule`, d.includes('Ask the user before purchases, messages, or submitting forms'))
   }
+  const textTool = B.BROWSER_TOOLS.find((t) => t.name === 'browser_text')
+  check('browser_text: says when to use it and that it is read-only, needs nothing', textTool.description.includes("the page's full visible text, for reading prices, tables and articles browser_read does not list; read-only") && textTool.inputSchema.required.length === 0)
   check('server instructions match shared', B.BROWSER_INSTRUCTIONS === S.BROWSER_INSTRUCTIONS)
   check('the bridge module imports no MCP SDK and no child_process', !/@modelcontextprotocol|child_process/.test(readFileSync(join(ROOT, 'bridge', 'browser-tools.mjs'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')))
   const saved = process.env['FORGE_BROWSER_LINK_FILE']
@@ -304,6 +315,7 @@ section('5. ownership and concurrency (fake driver)')
   let n = 0
   const log = []
   let keyCalls = 0
+  let textCalls = 0
   const delay = (ms) => new Promise((r) => setTimeout(r, ms))
   const driver = {
     records: () => records,
@@ -325,6 +337,10 @@ section('5. ownership and concurrency (fake driver)')
     key: async (id, key, shift, ref, times) => {
       keyCalls++
       return `key ${id} ${key} ${shift} ${ref} ${times}`
+    },
+    text: async (id, selector, maxChars) => {
+      textCalls++
+      return selector === '#gone' ? { error: 'no match' } : { text: `text ${id} ${selector} ${maxChars}` }
     },
     screenshot: async (id) => ({ path: `/tmp/${id}.png` }),
     close: async (id) => {
@@ -392,6 +408,17 @@ section('5. ownership and concurrency (fake driver)')
   const badKeyRef = await key({ key: 'Enter', ref: 0 })
   check('no key, times 0, 21 or junk, and a bad ref are refused', [noKey, zero, many, junkTimes, badKeyRef].every((r) => !r.ok) && zero.text.includes('1 to 20') && many.text.includes('1 to 20'), [noKey, zero, many, junkTimes, badKeyRef].map((r) => r.text).join('\n'))
   check('…all before the driver is called', keyCalls === before, `${keyCalls - before} calls`)
+  const txt = (args) => ops.run('browser_text', args, A)
+  check('browser_text: the caller\'s own tab, no selector, 20000 characters by default', (await txt({})).text === 'text b1 null 20000')
+  check('browser_text: selector trimmed, maxChars rounded', (await txt({ selector: '  #odds td ', maxChars: 49.6 })).text === 'text b1 #odds td 50')
+  check('browser_text: an empty selector reads the whole page; maxChars over 200000 is held to 200000', (await txt({ selector: '   ', maxChars: 999999 })).text === 'text b1 null 200000')
+  const noMatch = await txt({ selector: '#gone' })
+  check('browser_text: a driver error is a failure, on that tab', !noMatch.ok && noMatch.text === 'no match' && noMatch.id === 'b1', JSON.stringify(noMatch))
+  const textBefore = textCalls
+  const badTexts = [await txt({ maxChars: 0 }), await txt({ maxChars: 'lots' }), await txt({ selector: 5 })]
+  check('browser_text: maxChars 0 or junk and a selector that is not text are refused', badTexts.every((r) => !r.ok) && badTexts[0].text.includes('1 to 200000') && badTexts[2].text.includes('`selector` must be'), badTexts.map((r) => r.text).join('\n'))
+  check('…before the driver is called', textCalls === textBefore, `${textCalls - textBefore} calls`)
+  check('browser_text: another owner\'s tab only by id', (await ops.run('browser_text', { id: 'b2' }, A)).text === 'text b2 null 20000' && (await txt({})).text === 'text b1 null 20000')
   const shot = await ops.run('browser_screenshot', {}, A)
   check('screenshot returns the file path', shot.ok && shot.imagePath === '/tmp/b1.png')
   const closed = await ops.run('browser_close', {}, A)
@@ -454,6 +481,22 @@ const FIXTURES = {
       '<div role="checkbox" aria-checked="mixed" tabindex="0">Some of them</div>' +
       CLICK_LOG
   },
+  // browser_text: a price table, hidden words, a same-origin frame, a long tail, and a page
+  // that patches innerText and querySelector in its own world and logs every event it could see.
+  '/text': {
+    title: 'Odds board',
+    body: '<h1>Odds board</h1><p>Saturday racing</p>' +
+      '<table id="prices"><tr><th>Runner</th><th>Odds</th></tr><tr><td>Red Rum</td><td>5/2</td></tr><tr><td>Arkle</td><td>2.50</td></tr></table>' +
+      '<div style="display:none">Hidden secret words</div>' +
+      '<iframe src="/text-frame" style="width:300px;height:80px"></iframe>' +
+      '<p id="tail">' + 'Lorem ipsum '.repeat(400) + '</p>' +
+      '<script>window.__seen = [];' +
+      '["focus", "blur", "scroll", "click", "mousedown", "pointerdown", "keydown", "input", "change", "copy"].forEach(function (t) { addEventListener(t, function () { window.__seen.push(t) }, true) });' +
+      'document.addEventListener("selectionchange", function () { window.__seen.push("selectionchange") });' +
+      'Object.defineProperty(HTMLElement.prototype, "innerText", { get: function () { return "TAMPERED" } });' +
+      'document.querySelector = function () { return null };</script>'
+  },
+  '/text-frame': { title: 'Frame', body: '<p>Frame odds 11/4</p>' },
   '/keys2': {
     title: 'Keys two',
     body: GOVUK_CSS + '<h2>Keys two</h2><p><input id="first" aria-label="First name"> <input id="last" aria-label="Last name"></p>' +
@@ -1216,6 +1259,41 @@ if (!existsSync(electronExe)) {
     const idaTidy = await agent(h, ready.linkFile, ida, idaIds.map((id) => ({ op: 'browser_close', args: { id } })))
     check("Ida's tabs close", idaIds.length === 2 && idaTidy.every((r) => !r.isError), idaTidy.map((r) => r.text).join('\n'))
 
+    section('6g. Electron: browser_text reads the visible text, in a world the page cannot patch, and changes nothing')
+    const kit = { id: 'pane-H', name: 'Kit', agent: 'claude' }
+    const [textOpen] = await agent(h, ready.linkFile, kit, [{ op: 'browser_open', args: { url: `${ready.base}/text` } }])
+    const textId = tabIn(textOpen)
+    // A tab's first DevTools call turns on focus emulation, which the page sees as a window
+    // focus, whichever tool makes it; a read first, so only browser_text's own effect is measured.
+    await agent(h, ready.linkFile, kit, [{ op: 'browser_read', args: { id: textId } }])
+    const pageState = 'JSON.stringify([window.__seen, scrollX, scrollY, document.activeElement && document.activeElement.tagName, String(getSelection())])'
+    const stateBefore = await app.send({ cmd: 'tabEval', id: textId, js: pageState })
+    const tx = await agent(h, ready.linkFile, kit, [
+      { op: 'browser_text' },
+      { op: 'browser_text', args: { selector: '#prices' } },
+      { op: 'browser_text', args: { selector: '#nope' } },
+      { op: 'browser_text', args: { selector: '[[' } },
+      { op: 'browser_text', args: { maxChars: 50 } }
+    ])
+    const stateAfter = await app.send({ cmd: 'tabEval', id: textId, js: pageState })
+    const whole = tx[0]?.text ?? ''
+    const fullLength = Number(whole.match(/ (\d+) characters\.\n\n/)?.[1] ?? 0)
+    check('browser_text: title and address first, then the text with its length', !tx[0]?.isError && whole.startsWith(`Text of the page on tab ${textId}: ${ready.base}/text — "Odds board"`) && fullLength > 4000, whole.slice(0, 400))
+    check('browser_text: the body text — heading, prices table, the long tail', whole.includes('Odds board\n\nSaturday racing') && whole.includes('Red Rum\t5/2') && whole.includes('Arkle\t2.50') && whole.includes('Lorem ipsum Lorem ipsum'), whole.slice(0, 600))
+    check('browser_text: hidden words are not text a person sees', !whole.includes('Hidden secret words'))
+    check('browser_text: a shown same-origin frame is appended under its address', whole.includes(`--- frame ${ready.base}/text-frame ---\nFrame odds 11/4`) && whole.includes('1 same-origin frame included'), whole.slice(-300))
+    check("browser_text: read in its own world — the page's patched innerText and querySelector are not used", !whole.includes('TAMPERED') && !tx[1]?.isError)
+    const part = tx[1]?.text ?? ''
+    check('browser_text: `selector` reads only its first match', part.startsWith(`Text of the first match for "#prices" on tab ${textId}:`) && part.includes('Runner\tOdds\nRed Rum\t5/2\nArkle\t2.50') && !part.includes('Saturday racing'), part)
+    check('browser_text: a selector that matches nothing is a clear error', tx[2]?.isError === true && (tx[2]?.text ?? '').includes(`Nothing on tab ${textId} matches the selector "#nope"`), tx[2]?.text)
+    check('browser_text: a selector that is not CSS is a clear error', tx[3]?.isError === true && (tx[3]?.text ?? '').includes('`selector` "[[" is not a CSS selector the page understands'), tx[3]?.text)
+    const short = tx[4]?.text ?? ''
+    const shown = short.split('\n\n').slice(1, -1).join('\n\n')
+    check('browser_text: maxChars cuts the text and says how long the whole is', !tx[4]?.isError && shown.length === 50 && short.endsWith(`[Cut: the first 50 of ${fullLength} characters. Pass a larger maxChars (at most 200000) or a selector for the rest.]`), short)
+    check('browser_text: the page saw no event, scroll, focus or selection change', typeof stateBefore === 'string' && stateBefore === stateAfter, `${stateBefore}\n${stateAfter}`)
+    const kitTidy = await agent(h, ready.linkFile, kit, [{ op: 'browser_close', args: { id: textId } }])
+    check("Kit's tab closes", !!textId && !kitTidy[0]?.isError, kitTidy[0]?.text)
+
     await app.send({ cmd: 'quit' })
     await app.exited
     const { BrowserSurfaceStore } = await import('../electron/browser-panes/store.ts')
@@ -1378,6 +1456,42 @@ if (!existsSync(electronExe)) {
     } catch (err) {
       check('the chrome-ua harness ran', false, `${err?.stack ?? err}\n${net.stderr().slice(-2000)}`)
       net.child.kill()
+    }
+  }
+
+  if (BET365) {
+    // The page browser_text was made for: prices browser_read does not list. Read only —
+    // a fresh profile, logged out, no cookie banner answered, nothing clicked or typed.
+    section('10. live: https://www.bet365.com/ (network) — browser_text holds the prices')
+    const bet = launch(h, join(scratch, 'bet365'), false)
+    try {
+      const { value: ready } = await bet.next(60_000)
+      const bo = { id: 'pane-bet', name: 'Bo', agent: 'claude' }
+      const [opened] = await agent(h, ready.linkFile, bo, [{ op: 'browser_open', args: { url: 'https://www.bet365.com/' } }])
+      const id = (opened?.text ?? '').match(/tab (b\d+)/)?.[1]
+      // Fractional (5/2) or decimal (2.50) odds standing alone on a line or between spaces.
+      const price = /(^|\s)(\d{1,3}\/\d{1,3}|\d{1,3}\.\d{2})(?=\s|$)/
+      const priced = (text) => text.split('\n').filter((l) => price.test(l))
+      let text = ''
+      let read = ''
+      for (let i = 0; i < 8 && id; i++) {
+        await new Promise((res) => setTimeout(res, 5000))
+        const [r, t] = await agent(h, ready.linkFile, bo, [{ op: 'browser_read', args: { id } }, { op: 'browser_text', args: { id, maxChars: 200000 } }])
+        read = r?.text ?? ''
+        text = t?.text ?? ''
+        if (priced(text).length >= 5) break
+      }
+      const lines = priced(text)
+      check('bet365: browser_text holds prices (fractional or decimal odds)', lines.length >= 5, `${opened?.text}\n${text.slice(0, 1500)}`)
+      console.log(`       ${text.split('\n')[0]}`)
+      console.log(`       browser_text: ${text.length} characters back, ${lines.length} lines with a price; browser_read: ${read.length} characters, ${priced(read).length} lines with a price`)
+      for (const l of lines.slice(0, 5)) console.log(`       | ${l.slice(0, 160)}`)
+      if (id) await agent(h, ready.linkFile, bo, [{ op: 'browser_close', args: { id } }])
+      await bet.send({ cmd: 'quit' })
+      await bet.exited
+    } catch (err) {
+      check('the bet365 harness ran', false, `${err?.stack ?? err}\n${bet.stderr().slice(-2000)}`)
+      bet.child.kill()
     }
   }
 }

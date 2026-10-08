@@ -5,6 +5,8 @@ import {
   BROWSER_KEYS,
   BROWSER_MAX_LABEL_CHARS,
   BROWSER_MAX_SURFACES,
+  BROWSER_TEXT_DEFAULT_CHARS,
+  BROWSER_TEXT_MAX_CHARS,
   isBrowserTabId,
   normaliseBrowserUrl,
   type BrowserAgentReply,
@@ -15,7 +17,7 @@ import {
 import { badRef } from './snapshot'
 
 /**
- * The nine tools' rules, over whatever actually drives the pages.
+ * The ten tools' rules, over whatever actually drives the pages.
  *
  * This is where "many agents at once" is decided, and it is decided by what is
  * *absent*: there is no browser-wide lock. Every agent (a pane, the voice hub,
@@ -48,6 +50,8 @@ export interface BrowserDriver {
   upload: (id: string, path: string, ref: number | null, which: number | null) => Promise<string>
   /** Press `key` `times` times (checked: 1–BROWSER_KEY_MAX_TIMES), Shift held if `shift`, after focusing `ref` if given. */
   key: (id: string, key: BrowserKeyName, shift: boolean, ref: number | null, times: number) => Promise<string>
+  /** The page's visible text (or the first `selector` match's), cut at `maxChars` (checked: 1–BROWSER_TEXT_MAX_CHARS). Read-only. */
+  text: (id: string, selector: string | null, maxChars: number) => Promise<{ text: string } | { error: string }>
   /** A PNG on disk, or why not. */
   screenshot: (id: string, owner: BrowserOwner) => Promise<{ path: string } | { error: string }>
   close: (id: string) => Promise<boolean>
@@ -133,6 +137,8 @@ export class BrowserAgentOps {
           const shift = args['shift'] === true
           return await this.onTab(owner, args, (id) => this.driver.key(id, key as BrowserKeyName, shift, ref, times))
         }
+        case 'browser_text':
+          return await this.text(owner, args)
         case 'browser_screenshot':
           return await this.screenshot(owner, args)
         case 'browser_close':
@@ -247,6 +253,30 @@ export class BrowserAgentOps {
       which = Math.round(n)
     }
     return await this.onTab(owner, args, (id) => this.driver.upload(id, path, ref, which))
+  }
+
+  /** Read-only, so nothing to confirm; a selector that matches nothing is an error, not an empty page. */
+  private async text(owner: BrowserOwner, args: Record<string, unknown>): Promise<BrowserAgentReply> {
+    let selector: string | null = null
+    if (args['selector'] !== undefined && args['selector'] !== null) {
+      if (typeof args['selector'] !== 'string') return fail(`\`selector\` must be a CSS selector as text, e.g. "#prices" — got ${JSON.stringify(args['selector'])}.`)
+      selector = args['selector'].trim() || null
+    }
+    let maxChars = BROWSER_TEXT_DEFAULT_CHARS
+    if (args['maxChars'] !== undefined && args['maxChars'] !== null) {
+      const n = Number(args['maxChars'])
+      if (!Number.isFinite(n) || Math.round(n) < 1) {
+        return fail(`\`maxChars\` must be a number from 1 to ${BROWSER_TEXT_MAX_CHARS} — got ${JSON.stringify(args['maxChars'])}.`)
+      }
+      maxChars = Math.min(Math.round(n), BROWSER_TEXT_MAX_CHARS)
+    }
+    const target = this.resolve(owner, args['id'])
+    if ('error' in target) return fail(target.error)
+    const { id } = target
+    this.touch(owner, id)
+    const got = await this.queued(id, () => this.driver.text(id, selector, maxChars))
+    if ('error' in got) return fail(got.error, id)
+    return ok(got.text, id)
   }
 
   private async screenshot(owner: BrowserOwner, args: Record<string, unknown>): Promise<BrowserAgentReply> {
