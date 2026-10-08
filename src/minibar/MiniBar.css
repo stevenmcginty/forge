@@ -1,0 +1,2246 @@
+/*
+ * The mini bar (MiniBarView.tsx): Forge's bottom bar, afloat on the desktop.
+ *
+ * The same object as the dock (Dock.css, Composer.css): the machined panel
+ * gradient, a hairline of light on its top edge, 24px corners, wells for the
+ * words, Bahnschrift for every label and state word, the accent kept for
+ * live / focused / go, dictation's violet for dictation. What changes is what
+ * sits behind it. Inside Forge the dock floats on Forge's own backdrop; here
+ * it floats on somebody else's window or a wallpaper, light or dark. So every
+ * surface is opaque, and each wears a two-part edge: a dark keyline outside
+ * the bone rim (it holds the shape on a white page) and a deep, soft drop
+ * (it lifts the shape off a dark one).
+ *
+ * THE PAGE IS THE WINDOW. `html`/`body` have no background at all, so all
+ * that shows is the bar, the stage and the toasts; the window is sized to them
+ * by the main process. The room around them (--mb-pad-*) is for their shadow.
+ *
+ * DRAGGING IS THE OS's: the bar's and the pill's surfaces are drag regions;
+ * every control opts out, or it would be a dead button.
+ *
+ * Motion: arrivals only — sheets rise, toasts slide up, a chip's shape pops
+ * when its state changes and rings once when it turns Done. The one loop is
+ * the Working ring. Transform and opacity only; reduced motion stills it all.
+ */
+
+/* ------------------------------------------------------------ the window */
+
+:root[data-minibar-view],
+:root[data-minibar-view] body,
+:root[data-minibar-view] #root {
+  background: transparent;
+}
+
+.mb {
+  --mb-pad-x: 16px; /* MB_PAD_X in MiniBarView.tsx */
+  --mb-pad-top: 16px;
+  --mb-pad-bottom: 20px;
+  --mb-keyline: rgba(0, 0, 0, 0.62);
+  --mb-drop: 0 16px 36px -10px rgba(0, 0, 0, 0.66), 0 3px 9px rgba(0, 0, 0, 0.36);
+  --mb-edge: 0 0 0 1px var(--mb-keyline), var(--mb-drop), inset 0 1px 0 var(--glass-hi);
+  --mb-surface: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-panel-raised) 55%, var(--bg-panel)),
+    color-mix(in srgb, var(--bg-panel) 72%, var(--bg-base))
+  );
+  --well-shade: rgba(0, 0, 0, 0.35);
+
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  min-height: 100%;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+}
+
+:root[data-appearance='light'] .mb {
+  --mb-keyline: rgba(18, 20, 24, 0.17);
+  --mb-drop: 0 14px 32px -12px rgba(0, 0, 0, 0.3), 0 2px 7px rgba(0, 0, 0, 0.12);
+  --well-shade: rgba(0, 0, 0, 0.07);
+}
+
+.mb__content {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: var(--mb-pad-top) var(--mb-pad-x) var(--mb-pad-bottom);
+}
+
+.mb[data-tucked='true'] .mb__content {
+  align-items: center;
+}
+
+.mb[data-tucked='true'] .mb-stage {
+  align-self: stretch;
+}
+
+/* ---------------------------------------------------------------- the bar */
+
+.mb-bar {
+  container: mbbar / inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 52px;
+  padding: 5px 6px 5px 4px;
+  border-radius: 24px;
+  background: var(--mb-surface);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--mb-edge);
+  -webkit-app-region: drag;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+/* The dock's hairline of light along the top edge. */
+.mb-bar::before,
+.mb-pill::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 16%;
+  right: 16%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text-primary) 55%, transparent), transparent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Dictating: the hairline takes dictation's colour, as the dock's does. */
+.mb-bar:has(.mb-well[data-dict])::before {
+  background: linear-gradient(90deg, transparent, var(--dictation-core), transparent);
+  opacity: 0.8;
+}
+
+.mb-bar:focus-within {
+  border-color: color-mix(in srgb, var(--text-primary) 30%, transparent);
+}
+
+.mb-bar__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+  min-height: 40px;
+}
+
+/* Everything that is pressed, typed in or dragged opts out of the window drag. */
+.mb-bar :is(button, textarea, input, label, a, .mb-end, .mb-well, .mb-chips, .mb-bar__notice),
+.mb-pill button,
+.mb-stage {
+  -webkit-app-region: no-drag;
+}
+
+/* -------------------------------------------------------- ends and grip */
+
+.mb-end {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  z-index: 2;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.mb-end[data-side='left'] {
+  left: -6px;
+}
+
+.mb-end[data-side='right'] {
+  right: -6px;
+}
+
+/* A nub shows on hover: this edge moves. */
+.mb-end::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 18px;
+  border-radius: var(--r-full);
+  background: var(--text-muted);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.mb-end:hover::after {
+  opacity: 0.7;
+}
+
+.mb-grip {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 40px;
+  color: var(--text-dim);
+  cursor: grab;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.mb-grip:hover {
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------- keys */
+
+.mb-ibtn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-full);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-ibtn--sm {
+  width: 28px;
+  height: 28px;
+}
+
+.mb-ibtn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mb-ibtn:active {
+  transform: scale(0.94);
+}
+
+.mb-ibtn[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.mb :is(button, [role='switch']):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.mb-new {
+  margin-bottom: 3px;
+}
+
+/* ----------------------------------------------------------- project pill */
+
+.mb-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 156px;
+  height: 34px;
+  margin-bottom: 3px;
+  padding: 0 9px 0 10px;
+  border-radius: var(--r-full);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-proj:hover,
+.mb-proj[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+.mb-proj:active {
+  transform: scale(0.97);
+}
+
+.mb-proj > svg {
+  flex: none;
+}
+
+.mb-proj__name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* The list rises, so the chevron points up, and flips to close. */
+.mb-proj__chev {
+  color: var(--text-dim);
+  transform: rotate(180deg);
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.mb-proj[data-open='true'] .mb-proj__chev {
+  transform: rotate(0deg);
+}
+
+/* ------------------------------------------------------------------ chips */
+
+.mb-chips {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 40px;
+  overflow: hidden;
+}
+
+.mb-chips__ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  gap: 3px;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* What is open above it gets a small bar on its top edge: "this one". */
+:is(.mb-chip, .mb-forge, .mb-more)[data-open='true']::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 14px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--text-primary);
+  transform: translateX(-50%);
+  animation: mb-fade-in var(--dur-med) var(--ease-out) both;
+}
+
+.mb-forge {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-full);
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-forge:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mb-forge:active,
+.mb-chip:active,
+.mb-more:active {
+  transform: scale(0.96);
+}
+
+/* Forge as the target wears the house accent, as on the big bar. */
+.mb-forge[data-target='true'] {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.mb-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  height: 38px;
+  padding: 0 11px 0 7px;
+  border-radius: var(--r-full);
+  text-align: left;
+  color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-chip:hover {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+/* The target is a raised key: lit rim, a step of fill, a bright name. */
+.mb-chip[data-target='true'] {
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line-strong),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.mb-chip[data-target='true'] .mb-chip__name {
+  color: var(--text-primary);
+}
+
+/* Asking wants Steve: its rim says so too. */
+.mb-chip[data-status='asking'] {
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+/* Turning Done rings once. */
+.mb-chip[data-status='done'] {
+  animation: mb-land 900ms var(--ease-out);
+}
+
+.mb-chip__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mb-chip__name {
+  max-width: 104px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+}
+
+.mb-chip__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.mb-more {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 30px;
+  padding: 0 11px 0 10px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-more[data-folded='true'] {
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+}
+
+.mb-more:hover,
+.mb-more[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+}
+
+/* ------------------------------------------------------------ state colour
+ *
+ * The shape and the word carry the state; the colour only agrees. Working is
+ * live (the accent); Asking wants you (amber); Done is news (bone); Stopped is
+ * an end (danger); the quiet states step back.
+ */
+
+[data-status='working'] {
+  --mb-state: var(--accent-ink);
+}
+[data-status='asking'] {
+  --mb-state: var(--warn);
+}
+[data-status='done'] {
+  --mb-state: var(--text-primary);
+}
+[data-status='stopped'] {
+  --mb-state: var(--danger-ink);
+}
+[data-status='waiting'] {
+  --mb-state: var(--text-secondary);
+}
+[data-status='idle'],
+[data-status='starting'] {
+  --mb-state: var(--text-dim);
+}
+
+.mb-chip__state,
+.mb-statepill,
+.mb-pill__count,
+.mb-toast__state {
+  color: var(--mb-state, var(--text-muted));
+}
+
+.mb-state {
+  flex: none;
+  display: block;
+  animation: mb-glyph-in var(--dur-pop) var(--spring-pop) both;
+}
+
+/* The one loop on the bar: an agent at work. */
+.mb-state[data-status='working'] {
+  animation:
+    mb-glyph-in var(--dur-pop) var(--spring-pop) both,
+    mb-spin 1.1s linear infinite;
+}
+
+.mb-statepill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 20px;
+  padding: 0 8px 0 7px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+.mb-statepill[data-status='working'] {
+  background: var(--accent-softer);
+}
+
+.mb-statepill[data-status='asking'] {
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.mb-statepill[data-status='done'] {
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.mb-statepill[data-status='stopped'] {
+  background: var(--danger-soft);
+}
+
+.mb-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The agent's mark, at the sizes the mini bar uses (AgentBadge.css draws it). */
+.mb-mark.agent-badge {
+  border-radius: 6px;
+}
+
+.mb-mark.agent-badge:not([data-logo]) {
+  font-size: 9px;
+}
+
+/* ------------------------------------------------------------ the words */
+
+.mb-well {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  /* Basis 0: the well takes what the chips leave, down to its floor. */
+  flex: 1 1 0;
+  min-width: 250px;
+  min-height: 40px;
+  padding: 2px 3px 2px 14px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--bg-sunken) 72%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line),
+    inset 0 1px 2px var(--well-shade);
+  cursor: text;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.mb-well:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--glass-line-strong),
+    inset 0 1px 2px var(--well-shade);
+}
+
+.mb-well[data-dict] {
+  /* Dictation's word needs its own room beside the words; the chips refold. */
+  min-width: 420px;
+  box-shadow:
+    inset 0 0 0 1px var(--dictation-line),
+    0 0 18px -8px var(--dictation-glow),
+    inset 0 1px 2px var(--well-shade);
+}
+
+.mb-box {
+  flex: 1;
+  min-width: 60px;
+  height: 36px;
+  max-height: 114px;
+  margin: 0;
+  padding: 8px 2px;
+  box-sizing: border-box;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: 0;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.mb-box::placeholder,
+.mb-reply__box::placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* While dictation's word stands in an empty box, the word has the room. */
+.mb-well[data-dict][data-empty='true'] .mb-box::placeholder {
+  color: transparent;
+}
+
+.mb-well__keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  height: 36px;
+}
+
+/* ---- dictation's word: Listening (level), Writing…, Sending… Undo ---- */
+
+.mb-dict {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  height: 26px;
+  margin: 0 4px 5px -6px;
+  padding: 0 10px 0 9px;
+  border-radius: var(--r-full);
+  overflow: hidden;
+  color: var(--dictation-ink);
+  background: linear-gradient(90deg, var(--dictation-soft), color-mix(in srgb, var(--dictation-accent-2) 10%, transparent));
+  box-shadow: inset 0 0 0 1px var(--dictation-line);
+  white-space: nowrap;
+  animation: mb-slide-in var(--dur-glide) var(--spring-glide) both;
+}
+
+.mb-dict[data-phase='sending'] {
+  padding-right: 3px;
+}
+
+.mb-dict__word {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.mb-dict__clock {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--dictation-ink) 70%, var(--text-muted));
+}
+
+.mb-dict__undo {
+  height: 20px;
+  padding: 0 9px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--dictation-on);
+  background: var(--dictation-accent);
+  transition: transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-dict__undo:hover {
+  background: var(--dictation-accent-3);
+}
+
+.mb-dict__undo:active {
+  transform: scale(0.95);
+}
+
+/* The countdown, as a line draining along the foot of the chip. */
+.mb-dict__drain {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--dictation-accent);
+  transform-origin: left center;
+  animation: mb-drain linear both;
+}
+
+.mb-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+
+.mb-meter > span {
+  width: 2.5px;
+  height: 14px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: center;
+  transition: transform 90ms linear;
+}
+
+.mb-arc {
+  animation: mb-spin 0.9s linear infinite;
+}
+
+/* ---- the end keys ---- */
+
+.mb-mic {
+  --d: var(--dictation-accent);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-full);
+  border: 1px solid color-mix(in srgb, var(--d) 50%, transparent);
+  color: var(--d);
+  background: color-mix(in srgb, var(--d) 13%, transparent);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-mic:hover {
+  background: color-mix(in srgb, var(--d) 24%, transparent);
+  border-color: var(--d);
+}
+
+.mb-mic:active {
+  transform: scale(0.94);
+}
+
+.mb-mic[data-look='rec'],
+.mb-mic[data-look='rec']:hover {
+  color: var(--dictation-on);
+  background: linear-gradient(135deg, var(--dictation-accent-2), var(--d));
+  border-color: var(--d);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--d) 26%, transparent);
+}
+
+.mb-mic[data-look='busy'] {
+  border-color: var(--d);
+}
+
+.mb-mic__glyph {
+  display: inline-grid;
+  place-items: center;
+  animation: mb-glyph-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-stopsq {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2.5px;
+  background: currentColor;
+}
+
+.mb-listen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-full);
+  color: var(--text-muted);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-listen:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mb-listen:active {
+  transform: scale(0.95);
+}
+
+.mb-listen[data-on='true'] {
+  padding: 0 11px 0 9px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.mb-listen[data-look='muted'] {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.mb-listen__word {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  animation: mb-slide-in var(--dur-glide) var(--spring-glide) both;
+}
+
+.mb-send {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-full);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+/* Send: the accent, filled — go. */
+.mb-send[data-look='send'] {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.mb-send[data-look='send']:hover:not(:disabled) {
+  background: var(--accent-bright);
+}
+
+.mb-send:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/* Nothing to send: the same disc, empty. */
+.mb-send[data-look='send']:disabled {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  box-shadow: none;
+}
+
+/* Stop: a bone key with a square. */
+.mb-send[data-look='stop'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+  animation: mb-glyph-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-send[data-look='stop']:hover {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger-line);
+}
+
+/* ------------------------------------------------------- news and window */
+
+.mb-cluster,
+.mb-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: 40px;
+}
+
+.mb-seam {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  margin: 0 2px 9px;
+  background: var(--glass-line);
+}
+
+.mb-bell__count {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  display: grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--bg-base);
+  background: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+  animation: mb-glyph-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-speak:not([data-on]) {
+  color: var(--text-dim);
+}
+
+.mb-open {
+  display: inline-flex;
+  align-items: stretch;
+  flex: none;
+  height: 34px;
+  margin: 0 2px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  overflow: hidden;
+}
+
+.mb-open__main {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px 0 12px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.mb-open__main[data-solo='true'] {
+  padding-right: 13px;
+}
+
+.mb-open__more {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  color: var(--text-dim);
+  border-left: 1px solid var(--glass-line);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.mb-open__more > svg {
+  transform: rotate(180deg);
+  transition: transform var(--dur-glide) var(--spring-glide);
+}
+
+.mb-open__more[data-open='true'] > svg {
+  transform: rotate(0deg);
+}
+
+.mb-open__main:hover,
+.mb-open__more:hover,
+.mb-open__more[data-open='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.mb-open :focus-visible {
+  outline-offset: -2px;
+}
+
+/* Quit sits apart, past a gap, so a miss on Open never lands on it. */
+.mb-quit {
+  margin-left: 12px;
+}
+
+.mb-quit:hover {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger-line);
+}
+
+/* A narrow bar: the project and Open give up words before the box loses room. */
+@container mbbar (max-width: 1040px) {
+  .mb-bar__row {
+    gap: 5px;
+  }
+  .mb-proj {
+    max-width: 118px;
+  }
+  .mb-well {
+    min-width: 228px;
+    padding-left: 12px;
+  }
+  .mb-well[data-dict] {
+    min-width: 390px;
+  }
+  .mb-well__keys {
+    gap: 1px;
+  }
+  .mb-open__word {
+    display: none;
+  }
+  .mb-open__main {
+    padding: 0 7px 0 10px;
+  }
+}
+
+/* -------------------------------------------- rows that grow out of the bar */
+
+.mb-bar__notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 0 5px 4px;
+  padding: 2px 2px 7px 8px;
+  border-bottom: 1px solid var(--glass-line);
+  animation: mb-row-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-bar__notice-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--bg-base);
+  background: var(--warn);
+}
+
+.mb-bar__notice-mark[data-kind='quit'] {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger-line);
+}
+
+.mb-bar__notice-word {
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.mb-bar__notice-sub {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.mb-bar__notice > .mb-btn:last-child {
+  margin-left: auto;
+}
+
+.mb-bar[data-stale='true'] {
+  border-color: var(--warn-line-strong);
+}
+
+.mb-bar[data-stale='true'] .mb-bar__row {
+  opacity: 0.55;
+  transition: opacity var(--dur-med) var(--ease-out);
+}
+
+.mb-bar[data-stale='true'] .mb-bar__row:hover {
+  opacity: 1;
+}
+
+.mb-bar[data-confirm='true'] {
+  border-color: var(--danger-line);
+}
+
+.mb-bar[data-confirm='true'] .mb-bar__row {
+  opacity: 0.4;
+}
+
+.mb-quitrow .mb-bar__notice-word {
+  flex: 1;
+  min-width: 0;
+}
+
+.mb-quitrow__acts {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
+.mb-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  margin-right: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.mb-check > input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mb-check__box {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px var(--glass-line-strong);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.mb-check > input:checked + .mb-check__box {
+  background: var(--text-primary);
+  box-shadow: none;
+}
+
+/* The tick: a shape, so "checked" never rests on the fill. */
+.mb-check > input:checked + .mb-check__box::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--bg-base);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.mb-check > input:focus-visible + .mb-check__box {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mb-connecting,
+.mb-empty {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding-left: 6px;
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.mb-empty {
+  gap: 14px;
+}
+
+.mb-empty__word {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.mb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-btn:hover {
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+.mb-btn:active {
+  transform: scale(0.96);
+}
+
+.mb-btn--sm {
+  height: 25px;
+  padding: 0 11px;
+  font-size: 11.5px;
+}
+
+/* The answer to give: a bone key. */
+.mb-btn--solid {
+  color: var(--bg-base);
+  background: var(--text-primary);
+  box-shadow: none;
+}
+
+.mb-btn--solid:hover {
+  background: color-mix(in srgb, var(--text-primary) 86%, var(--bg-base));
+}
+
+.mb-btn--danger {
+  color: var(--danger-ink);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px var(--danger-line);
+}
+
+.mb-btn--danger:hover {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.mb-dot {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  margin: 0 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+/* ---------------------------------------------------------------- stage */
+
+.mb-stage {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mb-stage:empty {
+  display: none;
+}
+
+.mb-stage__slot {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 760px;
+  min-width: 0;
+  max-height: var(--mb-stage-max, 460px);
+}
+
+.mb-stage__slot[data-panel='chat'] {
+  flex-basis: 640px;
+}
+
+.mb-stage__slot[data-panel='activity'] {
+  flex-basis: 620px;
+}
+
+.mb-stage__slot[data-panel='projects'] {
+  flex-basis: 320px;
+  margin-left: 18px;
+}
+
+.mb-stage__slot[data-panel='all'] {
+  flex-basis: 560px;
+  margin-left: 18px;
+}
+
+/* Open's menu sits over the Open key, at the far right. */
+.mb-stage__slot[data-panel='open'] {
+  order: 2;
+  flex: none;
+  margin-right: 44px;
+}
+
+/* ----------------------------------------------------------------- sheets */
+
+.mb-sheet {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: inherit;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  border-radius: var(--r-sheet);
+  box-shadow: var(--mb-edge);
+  overflow: hidden;
+  transform-origin: 40px 100%;
+  animation: mb-sheet-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-sheet__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 48px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.mb-sheet__close {
+  flex: none;
+}
+
+.mb-eyebrow {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.mb-sheet__count {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.mb-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mb-sheet__empty {
+  margin: 0;
+  padding: 24px 16px;
+  text-align: center;
+  font-size: var(--t-md);
+  color: var(--text-muted);
+}
+
+.mb-rows {
+  margin: 0;
+  padding: var(--sheet-inset);
+  list-style: none;
+}
+
+.mb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 7px 10px;
+  border-radius: var(--r-sheet-row);
+  text-align: left;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.mb-row:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mb .mb-row:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------------ peek */
+
+.mb-peek__who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.mb-peek__name {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 17px;
+  color: var(--text-primary);
+}
+
+.mb-peek__meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.mb-peek__open {
+  height: 28px;
+  padding: 0 12px;
+}
+
+.mb-peek__body {
+  padding: 14px 20px 16px;
+  user-select: text;
+}
+
+.mb-ask {
+  margin: 0 0 16px;
+  padding: 12px 14px 12px;
+  border-radius: 12px;
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line);
+}
+
+.mb-ask__q {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.mb-ask__q > .mb-state {
+  margin-top: 3px;
+  color: var(--warn);
+}
+
+.mb-ask__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+  padding-left: 21px;
+}
+
+.mb-screen {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--glass-line);
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.mb-reply {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex: none;
+  padding: 6px 7px 6px 18px;
+  border-top: 1px solid var(--glass-line);
+  background: color-mix(in srgb, var(--bg-sunken) 45%, transparent);
+}
+
+.mb-reply__box {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  margin: 0;
+  padding: 6px 0;
+  box-sizing: border-box;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 20px;
+  user-select: text;
+}
+
+/* ---- the reply, as Markdown (web/src/lib/markdown.tsx's md__ classes) ---- */
+
+.mb-md {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--text-primary) 92%, var(--bg-panel));
+  overflow-wrap: break-word;
+}
+
+.mb-md > :first-child {
+  margin-top: 0;
+}
+
+.mb-md > :last-child {
+  margin-bottom: 0;
+}
+
+.mb-md .md__p {
+  margin: 0 0 0.75em;
+}
+
+.mb-md strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mb-md .md__h {
+  margin: 1.1em 0 0.45em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.mb-md .md__h[data-level='1'] {
+  font-size: 1.3em;
+}
+
+.mb-md .md__h[data-level='2'] {
+  font-size: 1.14em;
+}
+
+.mb-md .md__h[data-level='3'],
+.mb-md .md__h[data-level='4'] {
+  font-size: 1em;
+}
+
+.mb-md .md__h[data-level='5'],
+.mb-md .md__h[data-level='6'] {
+  font-size: 0.76em;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.mb-md .md__link {
+  color: var(--info);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 0.2em;
+}
+
+.mb-md .md__list {
+  margin: 0 0 0.75em;
+  padding-left: 1.4em;
+}
+
+.mb-md .md__list li {
+  margin: 0.22em 0;
+}
+
+.mb-md .md__list li::marker {
+  color: var(--text-dim);
+}
+
+.mb-md .md__quote {
+  margin: 0.8em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 2px solid var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.mb-md .md__hr {
+  height: 1px;
+  margin: 1.2em 0;
+  border: 0;
+  background: var(--glass-line);
+}
+
+.mb-md .md__inline-code {
+  padding: 0.1em 0.36em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+
+.mb-md .md__codeblock {
+  margin: 0.8em 0 1em;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  background: var(--term-bg);
+  overflow: hidden;
+}
+
+.mb-md .md__code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--glass-line);
+}
+
+.mb-md .md__lang {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.mb-md .md__copy-btn {
+  height: 20px;
+  padding: 0 9px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.mb-md .md__copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mb-md .md__code {
+  margin: 0;
+  padding: 10px 13px 11px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--term-fg);
+}
+
+.mb-md .md__code[data-more='true'] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent calc(100% - 4px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent calc(100% - 4px));
+}
+
+.mb-md .md__tablewrap {
+  margin: 0.8em 0 1em;
+  border: 1px solid var(--glass-line);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.mb-md .md__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.mb-md .md__table :is(th, td) {
+  padding: 0.45em 0.8em;
+  border-bottom: 1px solid var(--glass-line);
+  text-align: left;
+}
+
+.mb-md .md__table th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+/* ------------------------------------------------------------------ chat */
+
+.mb-chat__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.mb-chat__list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  list-style: none;
+  user-select: text;
+}
+
+.mb-turn {
+  display: grid;
+  grid-template-columns: 54px 1fr auto;
+  align-items: baseline;
+  gap: 0 10px;
+  animation: mb-slide-up var(--dur-glide) var(--spring-glide) both;
+}
+
+.mb-turn__who {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.mb-turn[data-who='forge'] .mb-turn__who {
+  color: var(--accent-ink);
+}
+
+.mb-turn__text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--text-primary);
+}
+
+.mb-turn[data-who='you'] .mb-turn__text {
+  color: var(--text-secondary);
+}
+
+.mb-turn__at {
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+/* -------------------------------------------------------------- activity */
+
+.mb-evrow {
+  align-items: flex-start;
+}
+
+.mb-evrow > .agent-badge,
+.mb-evrow > .mb-statepill {
+  margin-top: 1px;
+}
+
+.mb-evrow__at {
+  flex: none;
+  width: 36px;
+  padding-top: 3px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.mb-evrow__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mb-evrow__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mb-evrow__title {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.mb-evrow__meta {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.mb-evrow__line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------- projects, agents */
+
+.mb-projrow__tick {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  color: var(--text-primary);
+}
+
+.mb-projrow__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.mb-projrow[data-here='true'] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.mb-projrow__count {
+  flex: none;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.mb-projrow__count[data-zero='true'] {
+  color: var(--text-dim);
+}
+
+.mb-group + .mb-group {
+  border-top: 1px solid var(--glass-line);
+}
+
+.mb-group .mb-rows {
+  padding-top: 0;
+}
+
+.mb-group__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px 4px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.mb-group__here {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: var(--text-dim);
+}
+
+.mb-agentrow__name {
+  flex: none;
+  width: 92px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.mb-agentrow > .mb-statepill {
+  width: 82px;
+}
+
+.mb-agentrow__line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.mb-agentrow[data-target='true'] {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  box-shadow: inset 2px 0 0 var(--text-primary);
+}
+
+/* ------------------------------------------------------------ open menu */
+
+.mb-openmenu {
+  min-width: 210px;
+  padding: var(--sheet-inset);
+  transform-origin: calc(100% - 30px) 100%;
+}
+
+.mb-menurow {
+  min-height: var(--menu-row-h);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.mb-menurow > svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.mb-menurow[data-quiet='true'] {
+  color: var(--text-secondary);
+}
+
+.mb-menurow__hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- toasts */
+
+.mb-toasts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+  width: min(344px, 100%);
+  margin-left: auto;
+}
+
+.mb-toast {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 12px 12px 11px 13px;
+  border-radius: 14px;
+  background: var(--sheet-bg);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--mb-edge);
+  animation: mb-toast-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-toast[data-kind='done'] {
+  border-color: color-mix(in srgb, var(--text-primary) 28%, transparent);
+}
+
+.mb-toast[data-kind='asking'] {
+  border-color: var(--warn-line-strong);
+  box-shadow:
+    0 0 26px -10px color-mix(in srgb, var(--warn) 55%, transparent),
+    var(--mb-edge);
+}
+
+.mb-toast[data-kind='stopped'] {
+  border-color: var(--danger-line);
+}
+
+.mb-toast[data-leaving='true'] {
+  animation: mb-toast-out 180ms var(--ease-in-out) both;
+}
+
+.mb-toast__seat {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+}
+
+.mb-toast__seat > .agent-badge {
+  border-radius: 8px;
+}
+
+/* The state's shape, on the logo's shoulder. */
+.mb-toast__state {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--sheet-bg);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.mb-toast__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding-right: 22px;
+}
+
+.mb-toast__head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mb-toast__title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 18px;
+  color: var(--text-primary);
+}
+
+.mb-toast__meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.mb-toast__line {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.mb-toast__acts {
+  display: flex;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.mb-toast__acts > .mb-btn[data-lead='true'] {
+  background: var(--warn-soft);
+  box-shadow: inset 0 0 0 1px var(--warn-line-strong);
+}
+
+.mb-toast__x {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+}
+
+/* ----------------------------------------------------------------- pill */
+
+.mb-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 46px;
+  padding: 0 5px 0 6px;
+  border-radius: var(--r-full);
+  background: var(--mb-surface);
+  border: 1px solid var(--glass-line-strong);
+  box-shadow: var(--mb-edge);
+  -webkit-app-region: drag;
+  animation: mb-sheet-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-grip--pill {
+  height: 36px;
+}
+
+.mb-pill__body {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+
+.mb-pill__body:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+}
+
+.mb-pill__name {
+  max-width: 140px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.mb-pill__seam {
+  width: 1px;
+  height: 16px;
+  background: var(--glass-line);
+}
+
+.mb-pill__count,
+.mb-pill__news {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-pill__news {
+  color: var(--text-primary);
+}
+
+.mb-pill__news > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mb-mic--pill {
+  width: 34px;
+  height: 34px;
+}
+
+/* ------------------------------------------------------------- keyframes */
+
+@keyframes mb-sheet-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.975);
+  }
+}
+
+@keyframes mb-toast-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.97);
+  }
+}
+
+@keyframes mb-toast-out {
+  to {
+    opacity: 0;
+    transform: translate3d(10px, 0, 0) scale(0.98);
+  }
+}
+
+@keyframes mb-row-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+}
+
+@keyframes mb-slide-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-6px, 0, 0);
+  }
+}
+
+@keyframes mb-slide-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+}
+
+@keyframes mb-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* `scale` and `rotate` are separate properties, so a shape can pop in and turn at once. */
+@keyframes mb-glyph-in {
+  from {
+    opacity: 0;
+    scale: 0.5;
+  }
+}
+
+@keyframes mb-spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+@keyframes mb-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes mb-land {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--text-primary) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--text-primary) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mb *,
+  .mb *::before,
+  .mb *::after {
+    animation: none !important;
+  }
+}
+
+:root[data-reduced-motion='true'] :is(.mb *, .mb *::before, .mb *::after) {
+  animation: none !important;
+}
