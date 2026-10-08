@@ -35,6 +35,16 @@
  *                    their labels with (ticked)/(not ticked), click through the label on and
  *                    off screen (never following a link inside it), and browser_key presses
  *                    Tab, Shift+Tab, arrows, Space and Escape.
+ *   6f. identity     every page in the browser session is plain Google Chrome of the running
+ *                    version: header User-Agent = navigator.userAgent (no Forge/, no Electron/),
+ *                    userAgentData brands with "Google Chrome" in Chromium's own GREASE order,
+ *                    Sec-CH-UA headers equal to the JS brands, Electron's own high-entropy
+ *                    values kept — on a tab, a cross-site frame, after a cross-site move, in a
+ *                    pop-up and after the debugger is detached; Forge's window, other sessions
+ *                    and artifact tabs keep Electron's own.
+ *
+ *   --chrome-ua      also: https://httpbin.org/headers (network) in a tab through the real code
+ *                    path, its User-Agent printed beside the tab's own navigator values.
  *
  *   --dvla [--dvla-out <file>]  also: the real DVLA "sell a vehicle out of trade" service
  *                    (network) — trader name, then its two email-receipt radios ticked by
@@ -77,6 +87,7 @@ const argv = process.argv.slice(2)
 const LIVE = argv.includes('--live')
 const SHOTS = argv.includes('--shots') ? resolve(argv[argv.indexOf('--shots') + 1] ?? '') : null
 const DVLA = argv.includes('--dvla')
+const CHROME_UA = argv.includes('--chrome-ua')
 const DVLA_OUT = argv.includes('--dvla-out') ? resolve(argv[argv.indexOf('--dvla-out') + 1] ?? '') : join(tmpdir(), 'forge-browser-check-dvla.txt')
 
 let passed = 0
@@ -466,6 +477,7 @@ async function bundleHarness() {
     mainSrc,
     `import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
 import { createServer } from 'node:http'
+import { chromeBrands, chromeIdentity } from ${JSON.stringify(join(ROOT, 'electron', 'browser-panes', 'chrome-identity.ts'))}
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserService } from ${JSON.stringify(join(ROOT, 'electron', 'browser-panes', 'service.ts'))}
@@ -567,6 +579,18 @@ const server = createServer((req, res) => {
         '<label><input type="checkbox" name="agree" style="position:absolute;opacity:0.01"><span style="position:relative;display:inline-block;width:20px;height:20px;background:#000"></span> Agree</label>' })
     } else if (url.pathname === '/hang') {
       page(res, { title: 'Hang', body: '<h1>Hang page</h1><script>window.onload = function () { setTimeout(function () { for (;;) {} }, 50) }</script>' })
+    } else if (url.pathname === '/whoami') {
+      // The request's own headers (and their order) for the identity checks, asking for the
+      // high-entropy hints as a site would. ?frame= puts another page in an iframe.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'accept-ch': 'Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform-Version, Sec-CH-UA-Arch, Sec-CH-UA-Bitness' })
+      const frame = url.searchParams.get('frame');
+      res.end('<!doctype html><html><head><title>Who am I</title><script>window.__hdr=' + JSON.stringify(JSON.stringify(req.headers)) +
+        ';window.__raw=' + JSON.stringify(JSON.stringify(req.rawHeaders.filter((_, i) => i % 2 === 0))) + '</script></head><body><h1>Who am I</h1>' +
+        '<button onclick="window.open(&quot;/whoami?popup=1&quot;, &quot;w&quot;, &quot;width=420,height=420&quot;)">Open pop-up</button>' +
+        (frame ? '<iframe src="' + frame + '"></iframe>' : '') + '</body></html>')
+    } else if (url.pathname === '/echo') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(req.headers))
     } else if (fixtures[url.pathname]) {
       page(res, fixtures[url.pathname])
     } else { res.writeHead(404); res.end('no') }
@@ -588,6 +612,8 @@ app.whenReady().then(async () => {
     focusable: false, skipTaskbar: true, backgroundColor: '#101114', title: 'Forge browser check',
     webPreferences: { preload: cfg.preload, contextIsolation: true, sandbox: false } })
   service.setWindow(win)
+  // A page's pop-up (the identity check opens one) is a real window: kept out of sight.
+  app.on('browser-window-created', (_e, w) => { if (w !== win) { w.setFocusable(false); w.setPosition(wa.x + wa.width - 440, wa.y + wa.height - 440) } })
   // What main hands the renderer as page keys, recorded for the key checks.
   const sentKeys = []
   const realSend = win.webContents.send.bind(win.webContents)
@@ -622,6 +648,27 @@ app.whenReady().then(async () => {
       return true
     }
     if (cmd.cmd === 'sentKeys') return sentKeys
+    if (cmd.cmd === 'identity') return { chrome: process.versions.chrome, id: chromeIdentity(), b154: chromeBrands(154, '154'), b150: chromeBrands(150, '150'), forgeUa: await win.webContents.executeJavaScript('navigator.userAgent') }
+    if (cmd.cmd === 'baseline') {
+      // Electron's own values: a page in a session the identity never touches.
+      const w = new BrowserWindow({ show: false, webPreferences: { partition: 'browser-check-baseline', sandbox: true, contextIsolation: true } })
+      try { await w.loadURL(cmd.url); return await w.webContents.executeJavaScript(cmd.js) } finally { w.destroy() }
+    }
+    if (cmd.cmd === 'frameEval') return await tabOf(cmd.id).view.webContents.mainFrame.frames[0].executeJavaScript(cmd.js)
+    if (cmd.cmd === 'popupEval') {
+      const w = BrowserWindow.getAllWindows().find((x) => x !== win && x.webContents.getURL().includes(cmd.match))
+      if (!w) return { error: 'no pop-up' }
+      const value = await w.webContents.executeJavaScript(cmd.js)
+      w.close()
+      return value
+    }
+    if (cmd.cmd === 'detachTab') { tabOf(cmd.id).view.webContents.debugger.detach(); return true }
+    if (cmd.cmd === 'attached') return tabOf(cmd.id).view.webContents.debugger.isAttached()
+    if (cmd.cmd === 'reloadTab') {
+      const wc = tabOf(cmd.id).view.webContents
+      await new Promise((r) => { wc.once('did-finish-load', r); wc.reload() })
+      return true
+    }
     if (cmd.cmd === 'tabEval') return await tabOf(cmd.id).view.webContents.executeJavaScript(cmd.js)
     if (cmd.cmd === 'composite') {
       const tabs = service.manager['tabs']
@@ -1097,6 +1144,78 @@ if (!existsSync(electronExe)) {
     const wynTidy = await agent(h, ready.linkFile, wyn, wynIds.map((id) => ({ op: 'browser_close', args: { id } })))
     check("Wyn's tabs close", wynIds.length === 3 && wynTidy.every((r) => !r.isError), wynTidy.map((r) => r.text).join('\n'))
 
+    section('6f. Electron: every page in the browser session is plain Google Chrome (header, JS, client hints)')
+    const ida = { id: 'pane-G', name: 'Ida', agent: 'claude' }
+    const ident = await app.send({ cmd: 'identity' })
+    const major = ident.chrome.split('.')[0]
+    const port = new URL(ready.base).port
+    const brandsOf = (list) => (list ?? []).map((b) => `"${b.brand}";v="${b.version}"`).join(', ')
+    const isGrease = (b) => /^Not.A.Brand$/.test(b.brand)
+    const whoJs = `(async () => { const d = navigator.userAgentData;
+      const he = d ? await d.getHighEntropyValues(['platformVersion', 'architecture', 'bitness', 'fullVersionList', 'model', 'wow64', 'formFactors', 'uaFullVersion']) : null;
+      const echo = await (await fetch('/echo')).json();
+      return { headers: JSON.parse(window.__hdr), raw: JSON.parse(window.__raw), echo, ua: navigator.userAgent, platform: navigator.platform,
+        brands: d ? d.brands : null, mobile: d ? d.mobile : null, uaPlatform: d ? d.platform : null, he, languages: navigator.languages,
+        webdriver: navigator.webdriver, plugins: navigator.plugins.length, mimeTypes: navigator.mimeTypes.length, vendor: navigator.vendor } })()`
+    // Chromium's GREASE and order: 154 as real Chrome 154 reported it on this PC (temp profile);
+    // 150 as user_agent_utils.cc orders it (seed 150 % 6 = 0: GREASE, Chromium, brand).
+    check('brand order for 154 is what real Chrome 154 reports', brandsOf(ident.b154) === '"Chromium";v="154", "Google Chrome";v="154", "Not A(Brand";v="99"', brandsOf(ident.b154))
+    check('brand order for 150 is GREASE, Chromium, Google Chrome', brandsOf(ident.b150) === '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"', brandsOf(ident.b150))
+    const base = await app.send({ cmd: 'baseline', url: `${ready.base}/whoami`, js: whoJs })
+    check("a page in another session keeps Electron's own user agent", /Electron\//.test(base?.ua ?? '') && /Electron\//.test(base?.headers?.['user-agent'] ?? ''), base?.ua)
+    check("Forge's own window keeps Electron's user agent", /Electron\//.test(ident.forgeUa), ident.forgeUa)
+    const baseGrease = (base?.brands ?? []).find(isGrease)
+    const sameIdentity = (where, x, navHints = true) => {
+      const ua = x?.headers?.['user-agent'] ?? ''
+      check(`${where}: header User-Agent has no Forge/ and no Electron/`, !!ua && !/Forge\/|Electron\//.test(ua), ua)
+      check(`${where}: it is Chrome's reduced string for ${major}`, process.platform !== 'win32' || ua === `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`, ua)
+      check(`${where}: navigator.userAgent equals the header`, x?.ua === ua, `${x?.ua}\n${ua}`)
+      const names = (x?.brands ?? []).map((b) => `${b.brand}/${b.version}`)
+      check(`${where}: brands are Google Chrome and Chromium at ${major}, plus one GREASE`, names.includes(`Google Chrome/${major}`) && names.includes(`Chromium/${major}`) && x.brands.length === 3 && x.brands.filter(isGrease).length === 1, JSON.stringify(x?.brands))
+      check(`${where}: in Chromium's order for ${major}, with the GREASE brand Electron's own Chromium makes`, brandsOf(x?.brands) === brandsOf(ident.id.metadata.brands) && !!baseGrease && JSON.stringify(x.brands.find(isGrease)) === JSON.stringify(baseGrease), `${brandsOf(x?.brands)}\n${JSON.stringify(baseGrease)}`)
+      if (navHints) {
+        check(`${where}: Sec-CH-UA on the page's own request equals the JS brands`, x?.headers?.['sec-ch-ua'] === brandsOf(x?.brands), `${x?.headers?.['sec-ch-ua']}\n${brandsOf(x?.brands)}`)
+        check(`${where}: Sec-CH-UA-Mobile ?0, Sec-CH-UA-Platform "${x?.uaPlatform}"`, x?.headers?.['sec-ch-ua-mobile'] === '?0' && x?.headers?.['sec-ch-ua-platform'] === `"${x?.uaPlatform}"`, JSON.stringify(x?.headers))
+      }
+      check(`${where}: a fetch from the page sends the same Sec-CH-UA and User-Agent`, x?.echo?.['sec-ch-ua'] === brandsOf(x?.brands) && x?.echo?.['user-agent'] === ua, JSON.stringify(x?.echo))
+    }
+    const opened = await agent(h, ready.linkFile, ida, [{ op: 'browser_open', args: { url: `${ready.base}/whoami?frame=${encodeURIComponent(`http://localhost:${port}/whoami?inner=1`)}` } }])
+    const whoId = tabIn(opened[0])
+    const me = await app.send({ cmd: 'tabEval', id: whoId, js: whoJs })
+    sameIdentity('a tab', me)
+    const keep = ['platformVersion', 'architecture', 'bitness', 'model', 'wow64', 'formFactors', 'mobile', 'platform']
+    check("a tab: Electron's own high-entropy values are kept (platform version, arch, bitness, model, wow64, form factors)", keep.every((k) => JSON.stringify(me?.he?.[k]) === JSON.stringify(base?.he?.[k])), `${JSON.stringify(me?.he)}\n${JSON.stringify(base?.he)}`)
+    check(`a tab: full versions are the running Chromium's (${ident.chrome})`, me?.he?.uaFullVersion === ident.chrome && (me?.he?.fullVersionList ?? []).some((b) => b.brand === 'Google Chrome' && b.version === ident.chrome), JSON.stringify(me?.he?.fullVersionList))
+    check("a tab: navigator.platform is Electron's own", me?.platform === base?.platform, `${me?.platform} / ${base?.platform}`)
+    check('a tab: the attached debugger does not show — navigator.webdriver false, the PDF plugins listed as in Chrome', me?.webdriver === false && me?.plugins === 5 && me?.mimeTypes === 2 && me?.vendor === 'Google Inc.', JSON.stringify({ webdriver: me?.webdriver, plugins: me?.plugins, mimeTypes: me?.mimeTypes, vendor: me?.vendor }))
+    const langs = String(me?.headers?.['accept-language'] ?? '').split(',').map((l) => l.split(';')[0].trim())
+    check('a tab: Accept-Language and navigator.languages agree', langs.join() === (me?.languages ?? []).join(), `${me?.headers?.['accept-language']} / ${JSON.stringify(me?.languages)}`)
+    // Header order as real Chrome 154 sent it for the same page (temp profile, this PC).
+    const chromeOrder = 'Host, Connection, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, Upgrade-Insecure-Requests, User-Agent, Accept, Sec-Fetch-Site, Sec-Fetch-Mode, Sec-Fetch-User, Sec-Fetch-Dest, Accept-Encoding, Accept-Language'
+    check("a tab: the page's request headers come in Chrome's order", (me?.raw ?? []).join(', ') === chromeOrder, (me?.raw ?? []).join(', '))
+    console.log(`       ${me?.headers?.['user-agent']}\n       ${brandsOf(me?.brands)}`)
+    sameIdentity('a cross-site frame', await app.send({ cmd: 'frameEval', id: whoId, js: whoJs }))
+    const workerJs = 'new Promise((r) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage({ ua: navigator.userAgent, brands: navigator.userAgentData && navigator.userAgentData.brands })"], { type: "text/javascript" }))); w.onmessage = (e) => r(e.data); setTimeout(() => r(null), 5000) })'
+    const worker = await app.send({ cmd: 'tabEval', id: whoId, js: workerJs })
+    check("a dedicated worker: navigator.userAgent and brands are the page's", worker?.ua === me?.ua && brandsOf(worker?.brands) === brandsOf(me?.brands), JSON.stringify(worker))
+    await agent(h, ready.linkFile, ida, [{ op: 'browser_open', args: { id: whoId, url: `http://localhost:${port}/whoami?moved=1` } }])
+    sameIdentity('after a cross-site move (new renderer)', await app.send({ cmd: 'tabEval', id: whoId, js: whoJs }))
+    await app.send({ cmd: 'detachTab', id: whoId })
+    await new Promise((res) => setTimeout(res, 500))
+    check('a debugger detached by something else is attached again', (await app.send({ cmd: 'attached', id: whoId })) === true)
+    await app.send({ cmd: 'reloadTab', id: whoId })
+    sameIdentity('after that detach and a reload', await app.send({ cmd: 'tabEval', id: whoId, js: whoJs }))
+    const pop = await agent(h, ready.linkFile, ida, [
+      { op: 'browser_open', args: { url: `${ready.base}/whoami` } },
+      { op: 'browser_read' },
+      { op: 'browser_click', args: { ref: 1 } }
+    ])
+    await new Promise((res) => setTimeout(res, 1500))
+    sameIdentity("a page's pop-up window", await app.send({ cmd: 'popupEval', match: 'popup=1', js: whoJs }))
+    const idaIds = [whoId, tabIn(pop[0])].filter(Boolean)
+    const idaTidy = await agent(h, ready.linkFile, ida, idaIds.map((id) => ({ op: 'browser_close', args: { id } })))
+    check("Ida's tabs close", idaIds.length === 2 && idaTidy.every((r) => !r.isError), idaTidy.map((r) => r.text).join('\n'))
+
     await app.send({ cmd: 'quit' })
     await app.exited
     const { BrowserSurfaceStore } = await import('../electron/browser-panes/store.ts')
@@ -1226,6 +1345,40 @@ if (!existsSync(electronExe)) {
     mkdirSync(join(DVLA_OUT, '..'), { recursive: true })
     writeFileSync(DVLA_OUT, runLog.join('\n'), 'utf8')
     console.log(`       run log: ${DVLA_OUT}`)
+  }
+
+  if (CHROME_UA) {
+    // A real site's view of the browser's identity: httpbin echoes the request headers it got.
+    // Read only — nothing is signed in to, typed or submitted.
+    section('9. live: https://httpbin.org/headers in a tab (network) — the identity a real site sees')
+    const net = launch(h, join(scratch, 'chrome-ua'), false)
+    try {
+      const { value: ready } = await net.next(60_000)
+      const una = { id: 'pane-ua', name: 'Una', agent: 'claude' }
+      const [opened] = await agent(h, ready.linkFile, una, [{ op: 'browser_open', args: { url: 'https://httpbin.org/headers' } }])
+      const id = (opened?.text ?? '').match(/tab (b\d+)/)?.[1]
+      const body = id ? await net.send({ cmd: 'tabEval', id, js: 'document.body.innerText' }) : ''
+      let headers = {}
+      try {
+        headers = JSON.parse(String(body)).headers ?? {}
+      } catch {
+        /* not JSON: shown below */
+      }
+      const ua = headers['User-Agent'] ?? ''
+      const major = (await net.send({ cmd: 'identity' })).chrome.split('.')[0]
+      check('httpbin: the User-Agent it got has no Forge/ and no Electron/', !!ua && !/Forge\/|Electron\//.test(ua), String(body).slice(0, 1500))
+      check(`httpbin: …and says Chrome/${major}.0.0.0`, ua.includes(`Chrome/${major}.0.0.0 `), ua)
+      check('httpbin: Sec-Ch-Ua was sent and names Google Chrome', /"Google Chrome";v="\d+"/.test(headers['Sec-Ch-Ua'] ?? ''), JSON.stringify(headers))
+      const js = id ? await net.send({ cmd: 'tabEval', id, js: '({ ua: navigator.userAgent, brands: navigator.userAgentData.brands, platform: navigator.userAgentData.platform, mobile: navigator.userAgentData.mobile })' }) : null
+      check('httpbin: the tab\'s navigator.userAgent equals the header httpbin got', js?.ua === ua, `${js?.ua}\n${ua}`)
+      console.log(`       httpbin User-Agent: ${ua}\n       httpbin Sec-Ch-Ua: ${headers['Sec-Ch-Ua']}  Mobile: ${headers['Sec-Ch-Ua-Mobile']}  Platform: ${headers['Sec-Ch-Ua-Platform']}\n       tab navigator.userAgent: ${js?.ua}\n       tab userAgentData: ${JSON.stringify(js?.brands)} platform ${js?.platform} mobile ${js?.mobile}`)
+      if (id) await agent(h, ready.linkFile, una, [{ op: 'browser_close', args: { id } }])
+      await net.send({ cmd: 'quit' })
+      await net.exited
+    } catch (err) {
+      check('the chrome-ua harness ran', false, `${err?.stack ?? err}\n${net.stderr().slice(-2000)}`)
+      net.child.kill()
+    }
   }
 }
 

@@ -35,6 +35,7 @@ import {
 } from '@shared/browser'
 import { installArtifactScheme } from '../artifact-scheme'
 import type { BrowserDriver } from './agent-ops'
+import { addDebuggerSetup, attachDebugger, releaseDebugger, useChromeIdentity } from './chrome-identity'
 import { BrowserSurfaceStore } from './store'
 import {
   focusScript,
@@ -227,6 +228,8 @@ function isTrustedChatbotAudio(
 function prepareSession(ses: Session, downloadsDir: string): void {
   if (sessionReady) return
   sessionReady = true
+  // Every page in it presents itself as plain Google Chrome (./chrome-identity.ts).
+  useChromeIdentity(ses)
   // An agent must never be the reason a camera or location prompt appears, and
   // a prompt nobody is looking at is worse than a refusal. Integrated chatbots
   // (ChatGPT, Gemini, Claude) share this session so Steve's sign-in is kept,
@@ -296,6 +299,8 @@ export class BrowserManager implements BrowserDriver {
   private appTalk = new Set<string>()
   /** Modifier voice keys held down in a page right now. */
   private readonly talkHeld = new Set<string>()
+  /** Pages whose CDP session has focus emulation (cdp's first use). */
+  private readonly focusEmulated = new WeakSet<WebContents>()
 
   constructor(deps: BrowserManagerDeps) {
     this.deps = deps
@@ -726,7 +731,7 @@ export class BrowserManager implements BrowserDriver {
     const wc = view.webContents
     if (!wc.isDestroyed()) {
       try {
-        if (wc.debugger.isAttached()) wc.debugger.detach()
+        releaseDebugger(wc)
       } catch {
         /* detached already */
       }
@@ -756,14 +761,20 @@ export class BrowserManager implements BrowserDriver {
     return `Tab ${id} is now on ${this.where(wc)}. Read it again to see what is there.`
   }
 
-  /** CDP, attached on first use and re-attached if something detached it. */
+  /**
+   * CDP, attached on first use and re-attached if something detached it. A web
+   * tab's session is attached from birth (the Chrome identity, ./chrome-identity.ts),
+   * so focus emulation is its own first-use step, and is put back at every re-attach.
+   */
   private async cdp<T = unknown>(wc: WebContents, method: string, params?: Record<string, unknown>): Promise<T> {
-    if (!wc.debugger.isAttached()) {
-      wc.debugger.attach('1.3')
+    if (!this.focusEmulated.has(wc)) {
+      this.focusEmulated.add(wc)
       // Every tab behaves as the focused page, so several agents can type into
       // several tabs at once without any of them taking the keyboard from Steve.
       // Without this only the one WebContents holding window focus takes keys.
-      await wc.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => undefined)
+      await addDebuggerSetup(wc, 'Emulation.setFocusEmulationEnabled', { enabled: true })
+    } else {
+      attachDebugger(wc)
     }
     return (await wc.debugger.sendCommand(method, params ?? {})) as T
   }
@@ -1066,7 +1077,7 @@ export class BrowserManager implements BrowserDriver {
       const wc = tab.view.webContents
       if (!wc.isDestroyed()) {
         try {
-          if (wc.debugger.isAttached()) wc.debugger.detach()
+          releaseDebugger(wc)
         } catch {
           /* detached already */
         }
