@@ -9,7 +9,7 @@
  *                    main names keys exactly as the keymap does (browserKeyCombo).
  *   2c. pop-ups      windowOpenAction: a script's pop-up (blank, sized, named, sign-in page)
  *                    is a real window, a plain new-tab link stays in the tab, non-web refused.
- *   3. tool schema   bridge/browser-tools.mjs offers exactly the nine tools, with words
+ *   3. tool schema   bridge/browser-tools.mjs offers exactly the ten tools, with words
  *                    and schemas identical to shared/browser.ts (the canonical copy).
  *   4. link auth     the real BrowserLink answers the right token and refuses a wrong,
  *                    missing or oversized one — without ever calling the handler.
@@ -30,11 +30,33 @@
  *                    and picked by `which` or by a nearby element's ref.
  *   6d. read         only what a person could see and reach is listed: a covered till is left
  *                    out, a modal's buttons come first, `find` narrows the list (and its number
- *                    clicks), plain, below-the-fold and scroll-box buttons all stay.
+ *                    clicks), plain, below-the-fold and scroll-box buttons all stay. A plain
+ *                    <div> with a click handler and a pointer cursor is listed once as
+ *                    "clickable" (its children, a label's and a link's wrapper are not) and
+ *                    clicks; a log-in box that animates in is listed right after the click.
  *   6e. radios       GOV.UK radios and tick boxes hidden behind styled labels are listed by
  *                    their labels with (ticked)/(not ticked), click through the label on and
  *                    off screen (never following a link inside it), and browser_key presses
  *                    Tab, Shift+Tab, arrows, Space and Escape.
+ *   6f. identity     every page in the browser session is plain Google Chrome of the running
+ *                    version: header User-Agent = navigator.userAgent (no Forge/, no Electron/),
+ *                    userAgentData brands with "Google Chrome" in Chromium's own GREASE order,
+ *                    Sec-CH-UA headers equal to the JS brands, a UK Chrome's languages in
+ *                    Accept-Language and navigator.languages alike, Electron's own high-entropy
+ *                    values kept — on a tab, a cross-site frame, after a cross-site move, in a
+ *                    pop-up and after the debugger is detached; Forge's window, other sessions
+ *                    and artifact tabs keep Electron's own.
+ *   6g. text         browser_text returns the page's visible text (title and address first,
+ *                    hidden text left out, a same-origin frame appended), a selector's
+ *                    first match, clear errors for no match and a bad selector, the cut
+ *                    note at maxChars — read in a world the page cannot patch, and the
+ *                    page sees no event, scroll, focus or selection from it.
+ *
+ *   --bet365         also: https://www.bet365.com/ (network) in a fresh, logged-out profile —
+ *                    nothing clicked, typed or accepted — and browser_text must hold prices.
+ *
+ *   --chrome-ua     also: https://httpbin.org/headers (network) in a tab through the real code
+ *                    path, its User-Agent printed beside the tab's own navigator values.
  *
  *   --dvla [--dvla-out <file>]  also: the real DVLA "sell a vehicle out of trade" service
  *                    (network) — trader name, then its two email-receipt radios ticked by
@@ -77,6 +99,8 @@ const argv = process.argv.slice(2)
 const LIVE = argv.includes('--live')
 const SHOTS = argv.includes('--shots') ? resolve(argv[argv.indexOf('--shots') + 1] ?? '') : null
 const DVLA = argv.includes('--dvla')
+const CHROME_UA = argv.includes('--chrome-ua')
+const BET365 = argv.includes('--bet365')
 const DVLA_OUT = argv.includes('--dvla-out') ? resolve(argv[argv.indexOf('--dvla-out') + 1] ?? '') : join(tmpdir(), 'forge-browser-check-dvla.txt')
 
 let passed = 0
@@ -234,8 +258,8 @@ const bridgeUrl = pathToFileURL(join(ROOT, 'bridge', 'browser-tools.mjs')).href
 {
   const B = await import(bridgeUrl)
   const names = B.BROWSER_TOOLS.map((t) => t.name)
-  check('exactly the nine tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES), names.join(', '))
-  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 9)
+  check('exactly the ten tools, in order', JSON.stringify(names) === JSON.stringify(S.BROWSER_TOOL_NAMES) && names.length === 10 && names.includes('browser_text'), names.join(', '))
+  check('a handler for every tool', names.every((n) => typeof B.BROWSER_HANDLERS[n] === 'function') && Object.keys(B.BROWSER_HANDLERS).length === 10)
   for (const tool of B.BROWSER_TOOLS) {
     check(`${tool.name}: description matches shared word for word`, tool.description === S.BROWSER_TOOL_DESCRIPTIONS[tool.name])
     check(`${tool.name}: schema matches shared`, JSON.stringify(tool.inputSchema) === JSON.stringify(S.BROWSER_TOOL_PARAMS[tool.name]))
@@ -245,6 +269,8 @@ const bridgeUrl = pathToFileURL(join(ROOT, 'bridge', 'browser-tools.mjs')).href
     const d = B.BROWSER_TOOLS.find((t) => t.name === name).description
     check(`${name}: carries the ask-first rule`, d.includes('Ask the user before purchases, messages, or submitting forms'))
   }
+  const textTool = B.BROWSER_TOOLS.find((t) => t.name === 'browser_text')
+  check('browser_text: says when to use it and that it is read-only, needs nothing', textTool.description.includes("the page's full visible text, for reading prices, tables and articles browser_read does not list; read-only") && textTool.inputSchema.required.length === 0)
   check('server instructions match shared', B.BROWSER_INSTRUCTIONS === S.BROWSER_INSTRUCTIONS)
   check('the bridge module imports no MCP SDK and no child_process', !/@modelcontextprotocol|child_process/.test(readFileSync(join(ROOT, 'bridge', 'browser-tools.mjs'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')))
   const saved = process.env['FORGE_BROWSER_LINK_FILE']
@@ -293,6 +319,7 @@ section('5. ownership and concurrency (fake driver)')
   let n = 0
   const log = []
   let keyCalls = 0
+  let textCalls = 0
   const delay = (ms) => new Promise((r) => setTimeout(r, ms))
   const driver = {
     records: () => records,
@@ -314,6 +341,10 @@ section('5. ownership and concurrency (fake driver)')
     key: async (id, key, shift, ref, times) => {
       keyCalls++
       return `key ${id} ${key} ${shift} ${ref} ${times}`
+    },
+    text: async (id, selector, maxChars) => {
+      textCalls++
+      return selector === '#gone' ? { error: 'no match' } : { text: `text ${id} ${selector} ${maxChars}` }
     },
     screenshot: async (id) => ({ path: `/tmp/${id}.png` }),
     close: async (id) => {
@@ -381,6 +412,17 @@ section('5. ownership and concurrency (fake driver)')
   const badKeyRef = await key({ key: 'Enter', ref: 0 })
   check('no key, times 0, 21 or junk, and a bad ref are refused', [noKey, zero, many, junkTimes, badKeyRef].every((r) => !r.ok) && zero.text.includes('1 to 20') && many.text.includes('1 to 20'), [noKey, zero, many, junkTimes, badKeyRef].map((r) => r.text).join('\n'))
   check('…all before the driver is called', keyCalls === before, `${keyCalls - before} calls`)
+  const txt = (args) => ops.run('browser_text', args, A)
+  check('browser_text: the caller\'s own tab, no selector, 20000 characters by default', (await txt({})).text === 'text b1 null 20000')
+  check('browser_text: selector trimmed, maxChars rounded', (await txt({ selector: '  #odds td ', maxChars: 49.6 })).text === 'text b1 #odds td 50')
+  check('browser_text: an empty selector reads the whole page; maxChars over 200000 is held to 200000', (await txt({ selector: '   ', maxChars: 999999 })).text === 'text b1 null 200000')
+  const noMatch = await txt({ selector: '#gone' })
+  check('browser_text: a driver error is a failure, on that tab', !noMatch.ok && noMatch.text === 'no match' && noMatch.id === 'b1', JSON.stringify(noMatch))
+  const textBefore = textCalls
+  const badTexts = [await txt({ maxChars: 0 }), await txt({ maxChars: 'lots' }), await txt({ selector: 5 })]
+  check('browser_text: maxChars 0 or junk and a selector that is not text are refused', badTexts.every((r) => !r.ok) && badTexts[0].text.includes('1 to 200000') && badTexts[2].text.includes('`selector` must be'), badTexts.map((r) => r.text).join('\n'))
+  check('…before the driver is called', textCalls === textBefore, `${textCalls - textBefore} calls`)
+  check('browser_text: another owner\'s tab only by id', (await ops.run('browser_text', { id: 'b2' }, A)).text === 'text b2 null 20000' && (await txt({})).text === 'text b1 null 20000')
   const shot = await ops.run('browser_screenshot', {}, A)
   check('screenshot returns the file path', shot.ok && shot.imagePath === '/tmp/b1.png')
   const closed = await ops.run('browser_close', {}, A)
@@ -443,6 +485,37 @@ const FIXTURES = {
       '<div role="checkbox" aria-checked="mixed" tabindex="0">Some of them</div>' +
       CLICK_LOG
   },
+  // browser_text: a price table, hidden words, a same-origin frame, a long tail, and a page
+  // that patches innerText and querySelector in its own world and logs every event it could see.
+  '/text': {
+    title: 'Odds board',
+    body: '<h1>Odds board</h1><p>Saturday racing</p>' +
+      '<table id="prices"><tr><th>Runner</th><th>Odds</th></tr><tr><td>Red Rum</td><td>5/2</td></tr><tr><td>Arkle</td><td>2.50</td></tr></table>' +
+      '<div style="display:none">Hidden secret words</div>' +
+      '<iframe src="/text-frame" style="width:300px;height:80px"></iframe>' +
+      '<p id="tail">' + 'Lorem ipsum '.repeat(400) + '</p>' +
+      '<script>window.__seen = [];' +
+      '["focus", "blur", "scroll", "click", "mousedown", "pointerdown", "keydown", "input", "change", "copy"].forEach(function (t) { addEventListener(t, function () { window.__seen.push(t) }, true) });' +
+      'document.addEventListener("selectionchange", function () { window.__seen.push("selectionchange") });' +
+      'Object.defineProperty(HTMLElement.prototype, "innerText", { get: function () { return "TAMPERED" } });' +
+      'document.querySelector = function () { return null };</script>'
+  },
+  '/text-frame': { title: 'Frame', body: '<p>Frame odds 11/4</p>' },
+  // bet365's way: plain <div>s with script click handlers and a pointer cursor, and a
+  // log-in box that drops in (held at its first frame for 5 s, as a tab off screen holds it).
+  '/pointer': {
+    title: 'Pointer',
+    body: '<style>.p{cursor:pointer} @keyframes drop{from{opacity:0;transform:translateY(-1000px)}to{opacity:1;transform:none}} #box.open{display:block!important} #box.open .slide{animation:drop 5s steps(1,end)}</style>' +
+      '<h1>Pointer</h1><div id="league" class="p"><span>Premier</span> <span class="p">League</span></div>' +
+      '<div id="login" class="p">Log In</div>' +
+      '<div class="p" style="display:none">Ghost none</div><div class="p" style="visibility:hidden">Ghost vis</div>' +
+      '<div style="position:relative"><div class="p">Ghost covered</div><div style="position:absolute;inset:0;background:#fff"></div></div>' +
+      '<p><input id="nick"><label for="nick" class="p">Nick</label></p><div class="p"><a href="/pointer">Card link</a></div>' +
+      '<div id="box" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9"><div class="slide" role="dialog" aria-modal="true" style="position:absolute;left:20%;top:20%;width:300px;background:#fff">' +
+      '<input placeholder="Username"><input type="password" placeholder="Password"></div></div>' +
+      '<script>document.getElementById("league").addEventListener("click", function () { document.title = "League pressed" });' +
+      'document.getElementById("login").addEventListener("click", function () { document.getElementById("box").className = "open" })</script>'
+  },
   '/keys2': {
     title: 'Keys two',
     body: GOVUK_CSS + '<h2>Keys two</h2><p><input id="first" aria-label="First name"> <input id="last" aria-label="Last name"></p>' +
@@ -466,6 +539,7 @@ async function bundleHarness() {
     mainSrc,
     `import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
 import { createServer } from 'node:http'
+import { chromeBrands, chromeIdentity } from ${JSON.stringify(join(ROOT, 'electron', 'browser-panes', 'chrome-identity.ts'))}
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserService } from ${JSON.stringify(join(ROOT, 'electron', 'browser-panes', 'service.ts'))}
@@ -567,6 +641,18 @@ const server = createServer((req, res) => {
         '<label><input type="checkbox" name="agree" style="position:absolute;opacity:0.01"><span style="position:relative;display:inline-block;width:20px;height:20px;background:#000"></span> Agree</label>' })
     } else if (url.pathname === '/hang') {
       page(res, { title: 'Hang', body: '<h1>Hang page</h1><script>window.onload = function () { setTimeout(function () { for (;;) {} }, 50) }</script>' })
+    } else if (url.pathname === '/whoami') {
+      // The request's own headers (and their order) for the identity checks, asking for the
+      // high-entropy hints as a site would. ?frame= puts another page in an iframe.
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'accept-ch': 'Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform-Version, Sec-CH-UA-Arch, Sec-CH-UA-Bitness' })
+      const frame = url.searchParams.get('frame');
+      res.end('<!doctype html><html><head><title>Who am I</title><script>window.__hdr=' + JSON.stringify(JSON.stringify(req.headers)) +
+        ';window.__raw=' + JSON.stringify(JSON.stringify(req.rawHeaders.filter((_, i) => i % 2 === 0))) + '</script></head><body><h1>Who am I</h1>' +
+        '<button onclick="window.open(&quot;/whoami?popup=1&quot;, &quot;w&quot;, &quot;width=420,height=420&quot;)">Open pop-up</button>' +
+        (frame ? '<iframe src="' + frame + '"></iframe>' : '') + '</body></html>')
+    } else if (url.pathname === '/echo') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify(req.headers))
     } else if (fixtures[url.pathname]) {
       page(res, fixtures[url.pathname])
     } else { res.writeHead(404); res.end('no') }
@@ -588,6 +674,8 @@ app.whenReady().then(async () => {
     focusable: false, skipTaskbar: true, backgroundColor: '#101114', title: 'Forge browser check',
     webPreferences: { preload: cfg.preload, contextIsolation: true, sandbox: false } })
   service.setWindow(win)
+  // A page's pop-up (the identity check opens one) is a real window: kept out of sight.
+  app.on('browser-window-created', (_e, w) => { if (w !== win) { w.setFocusable(false); w.setPosition(wa.x + wa.width - 440, wa.y + wa.height - 440) } })
   // What main hands the renderer as page keys, recorded for the key checks.
   const sentKeys = []
   const realSend = win.webContents.send.bind(win.webContents)
@@ -622,6 +710,27 @@ app.whenReady().then(async () => {
       return true
     }
     if (cmd.cmd === 'sentKeys') return sentKeys
+    if (cmd.cmd === 'identity') return { chrome: process.versions.chrome, id: chromeIdentity(), b154: chromeBrands(154, '154'), b150: chromeBrands(150, '150'), forgeUa: await win.webContents.executeJavaScript('navigator.userAgent') }
+    if (cmd.cmd === 'baseline') {
+      // Electron's own values: a page in a session the identity never touches.
+      const w = new BrowserWindow({ show: false, webPreferences: { partition: 'browser-check-baseline', sandbox: true, contextIsolation: true } })
+      try { await w.loadURL(cmd.url); return await w.webContents.executeJavaScript(cmd.js) } finally { w.destroy() }
+    }
+    if (cmd.cmd === 'frameEval') return await tabOf(cmd.id).view.webContents.mainFrame.frames[0].executeJavaScript(cmd.js)
+    if (cmd.cmd === 'popupEval') {
+      const w = BrowserWindow.getAllWindows().find((x) => x !== win && x.webContents.getURL().includes(cmd.match))
+      if (!w) return { error: 'no pop-up' }
+      const value = await w.webContents.executeJavaScript(cmd.js)
+      w.close()
+      return value
+    }
+    if (cmd.cmd === 'detachTab') { tabOf(cmd.id).view.webContents.debugger.detach(); return true }
+    if (cmd.cmd === 'attached') return tabOf(cmd.id).view.webContents.debugger.isAttached()
+    if (cmd.cmd === 'reloadTab') {
+      const wc = tabOf(cmd.id).view.webContents
+      await new Promise((r) => { wc.once('did-finish-load', r); wc.reload() })
+      return true
+    }
     if (cmd.cmd === 'tabEval') return await tabOf(cmd.id).view.webContents.executeJavaScript(cmd.js)
     if (cmd.cmd === 'composite') {
       const tabs = service.manager['tabs']
@@ -1012,9 +1121,28 @@ if (!existsSync(electronExe)) {
     const ghosts = plain[5]?.text ?? ''
     check('hidden, transparent, inert, aria-hidden, off-canvas, clipped, off-page and covered buttons are left out', listOf(ghosts).every((l) => !l.includes('Ghost')) && ghosts.includes('Left out: 8 hidden'), ghosts)
     check('…while a visible button and a checkbox under its own styled label are kept', listOf(ghosts).some((l) => l.includes('button "Real one"')) && listOf(ghosts).some((l) => l.startsWith('[2] input checkbox')), ghosts)
-    const vicIds = [tabIn(busy[0]), tabIn(busy[5]), tabIn(plain[0]), longId, tabIn(plain[4])].filter(Boolean)
+    const ptr = await agent(h, ready.linkFile, vic, [{ op: 'browser_open', args: { url: `${ready.base}/pointer` } }, { op: 'browser_read' }])
+    const ptrItems = listOf(ptr[1]?.text)
+    const refIn = (line) => Number(line?.match(/^\[(\d+)\]/)?.[1] ?? 0)
+    const league = ptrItems.find((l) => l.endsWith('clickable "Premier League"'))
+    const login = ptrItems.find((l) => l.endsWith('clickable "Log In"'))
+    check('a pointer-cursor <div> with a click handler is listed once, as clickable, its own words', !!league && !!login && ptrItems.filter((l) => l.includes('League')).length === 1, ptr[1]?.text)
+    check('…hidden and covered ones are left out', !ptrItems.some((l) => l.includes('Ghost')), ptr[1]?.text)
+    check("…a pointer label and a link's pointer wrapper are not listed again", ptrItems.filter((l) => l.includes('Nick')).length === 1 && ptrItems.some((l) => l.includes('input text "Nick"')) &&
+      ptrItems.filter((l) => l.includes('Card link')).length === 1 && ptrItems.some((l) => l.includes('link "Card link"')), ptr[1]?.text)
+    const ptrClicks = await agent(h, ready.linkFile, vic, [
+      { op: 'browser_click', args: { ref: refIn(league) } },
+      { op: 'browser_read' },
+      { op: 'browser_click', args: { ref: refIn(login) } },
+      { op: 'browser_read' }
+    ])
+    check('…and clicking its number runs the page\'s handler', !ptrClicks[0]?.isError && (ptrClicks[1]?.text ?? '').includes('"League pressed"'), `${ptrClicks[0]?.text}\n${ptrClicks[1]?.text}`)
+    const boxItems = listOf(ptrClicks[3]?.text)
+    check('a log-in box that animates in (fixed, modal) lists its inputs right after the click that opened it',
+      boxItems[0] === '[1] input text "Username"' && boxItems[1] === '[2] input password "Password"' && boxItems.length === 2, `${ptrClicks[2]?.text}\n${ptrClicks[3]?.text}`)
+    const vicIds = [tabIn(busy[0]), tabIn(busy[5]), tabIn(plain[0]), longId, tabIn(plain[4]), tabIn(ptr[0])].filter(Boolean)
     const vicTidy = await agent(h, ready.linkFile, vic, vicIds.map((id) => ({ op: 'browser_close', args: { id } })))
-    check("Vic's tabs close", vicIds.length === 5 && vicTidy.every((r) => !r.isError), vicTidy.map((r) => r.text).join('\n'))
+    check("Vic's tabs close", vicIds.length === 6 && vicTidy.every((r) => !r.isError), vicTidy.map((r) => r.text).join('\n'))
 
     section('6e. Electron: GOV.UK radios and tick boxes behind styled labels, ticked state, browser_key')
     const wyn = { id: 'pane-F', name: 'Wyn', agent: 'claude' }
@@ -1096,6 +1224,114 @@ if (!existsSync(electronExe)) {
     const wynIds = [offId, onId, keysTab].filter(Boolean)
     const wynTidy = await agent(h, ready.linkFile, wyn, wynIds.map((id) => ({ op: 'browser_close', args: { id } })))
     check("Wyn's tabs close", wynIds.length === 3 && wynTidy.every((r) => !r.isError), wynTidy.map((r) => r.text).join('\n'))
+
+    section('6f. Electron: every page in the browser session is plain Google Chrome (header, JS, client hints)')
+    const ida = { id: 'pane-G', name: 'Ida', agent: 'claude' }
+    const ident = await app.send({ cmd: 'identity' })
+    const major = ident.chrome.split('.')[0]
+    const port = new URL(ready.base).port
+    const brandsOf = (list) => (list ?? []).map((b) => `"${b.brand}";v="${b.version}"`).join(', ')
+    const isGrease = (b) => /^Not.A.Brand$/.test(b.brand)
+    const whoJs = `(async () => { const d = navigator.userAgentData;
+      const he = d ? await d.getHighEntropyValues(['platformVersion', 'architecture', 'bitness', 'fullVersionList', 'model', 'wow64', 'formFactors', 'uaFullVersion']) : null;
+      const echo = await (await fetch('/echo')).json();
+      return { headers: JSON.parse(window.__hdr), raw: JSON.parse(window.__raw), echo, ua: navigator.userAgent, platform: navigator.platform,
+        brands: d ? d.brands : null, mobile: d ? d.mobile : null, uaPlatform: d ? d.platform : null, he, languages: navigator.languages,
+        webdriver: navigator.webdriver, plugins: navigator.plugins.length, mimeTypes: navigator.mimeTypes.length, vendor: navigator.vendor } })()`
+    // Chromium's GREASE and order: 154 as real Chrome 154 reported it on this PC (temp profile);
+    // 150 as user_agent_utils.cc orders it (seed 150 % 6 = 0: GREASE, Chromium, brand).
+    check('brand order for 154 is what real Chrome 154 reports', brandsOf(ident.b154) === '"Chromium";v="154", "Google Chrome";v="154", "Not A(Brand";v="99"', brandsOf(ident.b154))
+    check('brand order for 150 is GREASE, Chromium, Google Chrome', brandsOf(ident.b150) === '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"', brandsOf(ident.b150))
+    const base = await app.send({ cmd: 'baseline', url: `${ready.base}/whoami`, js: whoJs })
+    check("a page in another session keeps Electron's own user agent", /Electron\//.test(base?.ua ?? '') && /Electron\//.test(base?.headers?.['user-agent'] ?? ''), base?.ua)
+    check("Forge's own window keeps Electron's user agent", /Electron\//.test(ident.forgeUa), ident.forgeUa)
+    const baseGrease = (base?.brands ?? []).find(isGrease)
+    const sameIdentity = (where, x, navHints = true) => {
+      const ua = x?.headers?.['user-agent'] ?? ''
+      check(`${where}: header User-Agent has no Forge/ and no Electron/`, !!ua && !/Forge\/|Electron\//.test(ua), ua)
+      check(`${where}: it is Chrome's reduced string for ${major}`, process.platform !== 'win32' || ua === `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`, ua)
+      check(`${where}: navigator.userAgent equals the header`, x?.ua === ua, `${x?.ua}\n${ua}`)
+      const names = (x?.brands ?? []).map((b) => `${b.brand}/${b.version}`)
+      check(`${where}: brands are Google Chrome and Chromium at ${major}, plus one GREASE`, names.includes(`Google Chrome/${major}`) && names.includes(`Chromium/${major}`) && x.brands.length === 3 && x.brands.filter(isGrease).length === 1, JSON.stringify(x?.brands))
+      check(`${where}: in Chromium's order for ${major}, with the GREASE brand Electron's own Chromium makes`, brandsOf(x?.brands) === brandsOf(ident.id.metadata.brands) && !!baseGrease && JSON.stringify(x.brands.find(isGrease)) === JSON.stringify(baseGrease), `${brandsOf(x?.brands)}\n${JSON.stringify(baseGrease)}`)
+      if (navHints) {
+        check(`${where}: Sec-CH-UA on the page's own request equals the JS brands`, x?.headers?.['sec-ch-ua'] === brandsOf(x?.brands), `${x?.headers?.['sec-ch-ua']}\n${brandsOf(x?.brands)}`)
+        check(`${where}: Sec-CH-UA-Mobile ?0, Sec-CH-UA-Platform "${x?.uaPlatform}"`, x?.headers?.['sec-ch-ua-mobile'] === '?0' && x?.headers?.['sec-ch-ua-platform'] === `"${x?.uaPlatform}"`, JSON.stringify(x?.headers))
+      }
+      check(`${where}: a fetch from the page sends the same Sec-CH-UA and User-Agent`, x?.echo?.['sec-ch-ua'] === brandsOf(x?.brands) && x?.echo?.['user-agent'] === ua, JSON.stringify(x?.echo))
+    }
+    const opened = await agent(h, ready.linkFile, ida, [{ op: 'browser_open', args: { url: `${ready.base}/whoami?frame=${encodeURIComponent(`http://localhost:${port}/whoami?inner=1`)}` } }])
+    const whoId = tabIn(opened[0])
+    const me = await app.send({ cmd: 'tabEval', id: whoId, js: whoJs })
+    sameIdentity('a tab', me)
+    const keep = ['platformVersion', 'architecture', 'bitness', 'model', 'wow64', 'formFactors', 'mobile', 'platform']
+    check("a tab: Electron's own high-entropy values are kept (platform version, arch, bitness, model, wow64, form factors)", keep.every((k) => JSON.stringify(me?.he?.[k]) === JSON.stringify(base?.he?.[k])), `${JSON.stringify(me?.he)}\n${JSON.stringify(base?.he)}`)
+    check(`a tab: full versions are the running Chromium's (${ident.chrome})`, me?.he?.uaFullVersion === ident.chrome && (me?.he?.fullVersionList ?? []).some((b) => b.brand === 'Google Chrome' && b.version === ident.chrome), JSON.stringify(me?.he?.fullVersionList))
+    check("a tab: navigator.platform is Electron's own", me?.platform === base?.platform, `${me?.platform} / ${base?.platform}`)
+    check('a tab: the attached debugger does not show — navigator.webdriver false, the PDF plugins listed as in Chrome', me?.webdriver === false && me?.plugins === 5 && me?.mimeTypes === 2 && me?.vendor === 'Google Inc.', JSON.stringify({ webdriver: me?.webdriver, plugins: me?.plugins, mimeTypes: me?.mimeTypes, vendor: me?.vendor }))
+    const langs = String(me?.headers?.['accept-language'] ?? '').split(',').map((l) => l.split(';')[0].trim())
+    check('a tab: Accept-Language and navigator.languages agree', langs.join() === (me?.languages ?? []).join(), `${me?.headers?.['accept-language']} / ${JSON.stringify(me?.languages)}`)
+    check("a tab: …and are a UK Chrome's, en-GB,en-US;q=0.9,en;q=0.8", me?.headers?.['accept-language'] === 'en-GB,en-US;q=0.9,en;q=0.8' && (me?.languages ?? []).join() === 'en-GB,en-US,en', `${me?.headers?.['accept-language']} / ${JSON.stringify(me?.languages)}`)
+    // Header order as real Chrome 154 sent it for the same page (temp profile, this PC).
+    const chromeOrder = 'Host, Connection, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, Upgrade-Insecure-Requests, User-Agent, Accept, Sec-Fetch-Site, Sec-Fetch-Mode, Sec-Fetch-User, Sec-Fetch-Dest, Accept-Encoding, Accept-Language'
+    check("a tab: the page's request headers come in Chrome's order", (me?.raw ?? []).join(', ') === chromeOrder, (me?.raw ?? []).join(', '))
+    console.log(`       ${me?.headers?.['user-agent']}\n       ${brandsOf(me?.brands)}`)
+    sameIdentity('a cross-site frame', await app.send({ cmd: 'frameEval', id: whoId, js: whoJs }))
+    const workerJs = 'new Promise((r) => { const w = new Worker(URL.createObjectURL(new Blob(["postMessage({ ua: navigator.userAgent, brands: navigator.userAgentData && navigator.userAgentData.brands })"], { type: "text/javascript" }))); w.onmessage = (e) => r(e.data); setTimeout(() => r(null), 5000) })'
+    const worker = await app.send({ cmd: 'tabEval', id: whoId, js: workerJs })
+    check("a dedicated worker: navigator.userAgent and brands are the page's", worker?.ua === me?.ua && brandsOf(worker?.brands) === brandsOf(me?.brands), JSON.stringify(worker))
+    await agent(h, ready.linkFile, ida, [{ op: 'browser_open', args: { id: whoId, url: `http://localhost:${port}/whoami?moved=1` } }])
+    sameIdentity('after a cross-site move (new renderer)', await app.send({ cmd: 'tabEval', id: whoId, js: whoJs }))
+    await app.send({ cmd: 'detachTab', id: whoId })
+    await new Promise((res) => setTimeout(res, 500))
+    check('a debugger detached by something else is attached again', (await app.send({ cmd: 'attached', id: whoId })) === true)
+    await app.send({ cmd: 'reloadTab', id: whoId })
+    sameIdentity('after that detach and a reload', await app.send({ cmd: 'tabEval', id: whoId, js: whoJs }))
+    const pop = await agent(h, ready.linkFile, ida, [
+      { op: 'browser_open', args: { url: `${ready.base}/whoami` } },
+      { op: 'browser_read' },
+      { op: 'browser_click', args: { ref: 1 } }
+    ])
+    await new Promise((res) => setTimeout(res, 1500))
+    sameIdentity("a page's pop-up window", await app.send({ cmd: 'popupEval', match: 'popup=1', js: whoJs }))
+    const idaIds = [whoId, tabIn(pop[0])].filter(Boolean)
+    const idaTidy = await agent(h, ready.linkFile, ida, idaIds.map((id) => ({ op: 'browser_close', args: { id } })))
+    check("Ida's tabs close", idaIds.length === 2 && idaTidy.every((r) => !r.isError), idaTidy.map((r) => r.text).join('\n'))
+
+    section('6g. Electron: browser_text reads the visible text, in a world the page cannot patch, and changes nothing')
+    const kit = { id: 'pane-H', name: 'Kit', agent: 'claude' }
+    const [textOpen] = await agent(h, ready.linkFile, kit, [{ op: 'browser_open', args: { url: `${ready.base}/text` } }])
+    const textId = tabIn(textOpen)
+    // A tab's first DevTools call turns on focus emulation, which the page sees as a window
+    // focus, whichever tool makes it; a read first, so only browser_text's own effect is measured.
+    await agent(h, ready.linkFile, kit, [{ op: 'browser_read', args: { id: textId } }])
+    const pageState = 'JSON.stringify([window.__seen, scrollX, scrollY, document.activeElement && document.activeElement.tagName, String(getSelection())])'
+    const stateBefore = await app.send({ cmd: 'tabEval', id: textId, js: pageState })
+    const tx = await agent(h, ready.linkFile, kit, [
+      { op: 'browser_text' },
+      { op: 'browser_text', args: { selector: '#prices' } },
+      { op: 'browser_text', args: { selector: '#nope' } },
+      { op: 'browser_text', args: { selector: '[[' } },
+      { op: 'browser_text', args: { maxChars: 50 } }
+    ])
+    const stateAfter = await app.send({ cmd: 'tabEval', id: textId, js: pageState })
+    const whole = tx[0]?.text ?? ''
+    const fullLength = Number(whole.match(/ (\d+) characters\.\n\n/)?.[1] ?? 0)
+    check('browser_text: title and address first, then the text with its length', !tx[0]?.isError && whole.startsWith(`Text of the page on tab ${textId}: ${ready.base}/text — "Odds board"`) && fullLength > 4000, whole.slice(0, 400))
+    check('browser_text: the body text — heading, prices table, the long tail', whole.includes('Odds board\n\nSaturday racing') && whole.includes('Red Rum\t5/2') && whole.includes('Arkle\t2.50') && whole.includes('Lorem ipsum Lorem ipsum'), whole.slice(0, 600))
+    check('browser_text: hidden words are not text a person sees', !whole.includes('Hidden secret words'))
+    check('browser_text: a shown same-origin frame is appended under its address', whole.includes(`--- frame ${ready.base}/text-frame ---\nFrame odds 11/4`) && whole.includes('1 same-origin frame included'), whole.slice(-300))
+    check("browser_text: read in its own world — the page's patched innerText and querySelector are not used", !whole.includes('TAMPERED') && !tx[1]?.isError)
+    const part = tx[1]?.text ?? ''
+    check('browser_text: `selector` reads only its first match', part.startsWith(`Text of the first match for "#prices" on tab ${textId}:`) && part.includes('Runner\tOdds\nRed Rum\t5/2\nArkle\t2.50') && !part.includes('Saturday racing'), part)
+    check('browser_text: a selector that matches nothing is a clear error', tx[2]?.isError === true && (tx[2]?.text ?? '').includes(`Nothing on tab ${textId} matches the selector "#nope"`), tx[2]?.text)
+    check('browser_text: a selector that is not CSS is a clear error', tx[3]?.isError === true && (tx[3]?.text ?? '').includes('`selector` "[[" is not a CSS selector the page understands'), tx[3]?.text)
+    const short = tx[4]?.text ?? ''
+    const shown = short.split('\n\n').slice(1, -1).join('\n\n')
+    check('browser_text: maxChars cuts the text and says how long the whole is', !tx[4]?.isError && shown.length === 50 && short.endsWith(`[Cut: the first 50 of ${fullLength} characters. Pass a larger maxChars (at most 200000) or a selector for the rest.]`), short)
+    check('browser_text: the page saw no event, scroll, focus or selection change', typeof stateBefore === 'string' && stateBefore === stateAfter, `${stateBefore}\n${stateAfter}`)
+    const kitTidy = await agent(h, ready.linkFile, kit, [{ op: 'browser_close', args: { id: textId } }])
+    check("Kit's tab closes", !!textId && !kitTidy[0]?.isError, kitTidy[0]?.text)
 
     await app.send({ cmd: 'quit' })
     await app.exited
@@ -1226,6 +1462,76 @@ if (!existsSync(electronExe)) {
     mkdirSync(join(DVLA_OUT, '..'), { recursive: true })
     writeFileSync(DVLA_OUT, runLog.join('\n'), 'utf8')
     console.log(`       run log: ${DVLA_OUT}`)
+  }
+
+  if (CHROME_UA) {
+    // A real site's view of the browser's identity: httpbin echoes the request headers it got.
+    // Read only — nothing is signed in to, typed or submitted.
+    section('9. live: https://httpbin.org/headers in a tab (network) — the identity a real site sees')
+    const net = launch(h, join(scratch, 'chrome-ua'), false)
+    try {
+      const { value: ready } = await net.next(60_000)
+      const una = { id: 'pane-ua', name: 'Una', agent: 'claude' }
+      const [opened] = await agent(h, ready.linkFile, una, [{ op: 'browser_open', args: { url: 'https://httpbin.org/headers' } }])
+      const id = (opened?.text ?? '').match(/tab (b\d+)/)?.[1]
+      const body = id ? await net.send({ cmd: 'tabEval', id, js: 'document.body.innerText' }) : ''
+      let headers = {}
+      try {
+        headers = JSON.parse(String(body)).headers ?? {}
+      } catch {
+        /* not JSON: shown below */
+      }
+      const ua = headers['User-Agent'] ?? ''
+      const major = (await net.send({ cmd: 'identity' })).chrome.split('.')[0]
+      check('httpbin: the User-Agent it got has no Forge/ and no Electron/', !!ua && !/Forge\/|Electron\//.test(ua), String(body).slice(0, 1500))
+      check(`httpbin: …and says Chrome/${major}.0.0.0`, ua.includes(`Chrome/${major}.0.0.0 `), ua)
+      check('httpbin: Sec-Ch-Ua was sent and names Google Chrome', /"Google Chrome";v="\d+"/.test(headers['Sec-Ch-Ua'] ?? ''), JSON.stringify(headers))
+      const js = id ? await net.send({ cmd: 'tabEval', id, js: '({ ua: navigator.userAgent, brands: navigator.userAgentData.brands, platform: navigator.userAgentData.platform, mobile: navigator.userAgentData.mobile })' }) : null
+      check('httpbin: the tab\'s navigator.userAgent equals the header httpbin got', js?.ua === ua, `${js?.ua}\n${ua}`)
+      console.log(`       httpbin User-Agent: ${ua}\n       httpbin Sec-Ch-Ua: ${headers['Sec-Ch-Ua']}  Mobile: ${headers['Sec-Ch-Ua-Mobile']}  Platform: ${headers['Sec-Ch-Ua-Platform']}\n       tab navigator.userAgent: ${js?.ua}\n       tab userAgentData: ${JSON.stringify(js?.brands)} platform ${js?.platform} mobile ${js?.mobile}`)
+      if (id) await agent(h, ready.linkFile, una, [{ op: 'browser_close', args: { id } }])
+      await net.send({ cmd: 'quit' })
+      await net.exited
+    } catch (err) {
+      check('the chrome-ua harness ran', false, `${err?.stack ?? err}\n${net.stderr().slice(-2000)}`)
+      net.child.kill()
+    }
+  }
+
+  if (BET365) {
+    // The page browser_text was made for: prices browser_read does not list. Read only —
+    // a fresh profile, logged out, no cookie banner answered, nothing clicked or typed.
+    section('10. live: https://www.bet365.com/ (network) — browser_text holds the prices')
+    const bet = launch(h, join(scratch, 'bet365'), false)
+    try {
+      const { value: ready } = await bet.next(60_000)
+      const bo = { id: 'pane-bet', name: 'Bo', agent: 'claude' }
+      const [opened] = await agent(h, ready.linkFile, bo, [{ op: 'browser_open', args: { url: 'https://www.bet365.com/' } }])
+      const id = (opened?.text ?? '').match(/tab (b\d+)/)?.[1]
+      // Fractional (5/2) or decimal (2.50) odds standing alone on a line or between spaces.
+      const price = /(^|\s)(\d{1,3}\/\d{1,3}|\d{1,3}\.\d{2})(?=\s|$)/
+      const priced = (text) => text.split('\n').filter((l) => price.test(l))
+      let text = ''
+      let read = ''
+      for (let i = 0; i < 8 && id; i++) {
+        await new Promise((res) => setTimeout(res, 5000))
+        const [r, t] = await agent(h, ready.linkFile, bo, [{ op: 'browser_read', args: { id } }, { op: 'browser_text', args: { id, maxChars: 200000 } }])
+        read = r?.text ?? ''
+        text = t?.text ?? ''
+        if (priced(text).length >= 5) break
+      }
+      const lines = priced(text)
+      check('bet365: browser_text holds prices (fractional or decimal odds)', lines.length >= 5, `${opened?.text}\n${text.slice(0, 1500)}`)
+      console.log(`       ${text.split('\n')[0]}`)
+      console.log(`       browser_text: ${text.length} characters back, ${lines.length} lines with a price; browser_read: ${read.length} characters, ${priced(read).length} lines with a price`)
+      for (const l of lines.slice(0, 5)) console.log(`       | ${l.slice(0, 160)}`)
+      if (id) await agent(h, ready.linkFile, bo, [{ op: 'browser_close', args: { id } }])
+      await bet.send({ cmd: 'quit' })
+      await bet.exited
+    } catch (err) {
+      check('the bet365 harness ran', false, `${err?.stack ?? err}\n${bet.stderr().slice(-2000)}`)
+      bet.child.kill()
+    }
   }
 }
 

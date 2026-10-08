@@ -133,6 +133,8 @@ const DESCRIBE = `
  * the page, and return the list plus the page's own words. An expression, so
  * evaluate returns it. `find` narrows the list to elements whose words contain
  * it (any case); the numbers still map to window.__forgeRefs as usual.
+ * Interactive means a link, a control or an ARIA role, or a plain element the
+ * page shows a pointer cursor over (listed as "clickable"; see plainClickable).
  *
  * What counts as seeable and reachable — kept simple on purpose:
  *  - It has a box (1×1 or bigger), and neither it nor anything it sits in is
@@ -330,6 +332,30 @@ export function readScript(find: string | null): string {
     return null;
   };
 
+  // A plain <div> a page made clickable with script (bet365's prices and league
+  // links) has no tag or role that says so; the pointer cursor the page shows
+  // over it does. The cursor is inherited, so only the outermost one counts —
+  // its parent shows no pointer — and only when it has words, is not inside or
+  // around an element the selector lists, and is not a label for an input
+  // (that input is listed already). Listed as "clickable".
+  const cursors = new Map();
+  const cursorOf = (n) => { let c = cursors.get(n); if (c === undefined) { c = getComputedStyle(n).cursor; cursors.set(n, c); } return c; };
+  const plainClickable = (el) => {
+    if (cursorOf(el) !== 'pointer') return false;
+    const p = up(el);
+    if (!p || p === document.documentElement || cursorOf(p) === 'pointer') return false;
+    if (el.tagName === 'LABEL' && el.control) return false;
+    for (let x = p; x; x = up(x)) if (x.matches && x.matches(SELECTOR)) return false;
+    if (el.querySelector(SELECTOR)) return false;
+    return labelOf(el) !== '';
+  };
+  const plain = new Set();
+  const pool = [];
+  for (const el of deepAll('*')) {
+    if (el.matches(SELECTOR)) pool.push(el);
+    else if (plainClickable(el)) { pool.push(el); plain.add(el); }
+  }
+
   const refs = [];
   const hits = [];
   const items = [];
@@ -339,7 +365,7 @@ export function readScript(find: string | null): string {
   const candidates = [];
   const stands = new Map();
   let layerCovers = false;
-  for (const el of deepAll(SELECTOR)) {
+  for (const el of pool) {
     const box = el.getBoundingClientRect();
     let stand = null;
     if (box.width < 1 || box.height < 1) {
@@ -385,7 +411,7 @@ export function readScript(find: string | null): string {
     if (refs.length >= LIMIT_REFS) { dropped++; continue; }
     refs.push(el);
     hits.push(stands.get(el) || null);
-    items.push('[' + refs.length + '] ' + kindOf(el) + ' "' + labelOf(el) + '"' + extraOf(el));
+    items.push('[' + refs.length + '] ' + (plain.has(el) ? 'clickable' : kindOf(el)) + ' "' + labelOf(el) + '"' + extraOf(el));
   }
   window.__forgeRefs = refs;
   window.__forgeRefHits = hits;
@@ -519,6 +545,26 @@ export function refDomClickScript(ref: number): string {
   t.dispatchEvent(new MouseEvent('mouseup', at));
   t.dispatchEvent(new MouseEvent('click', { ...at, detail: 1 }));
   return true;
+})()`
+}
+
+/**
+ * For a tab that is not on screen, after a click: it draws no frames, so an
+ * animation the click started can hang at its first frame for seconds —
+ * measured on bet365, the log-in box sat at opacity 0, above the top edge, for
+ * 2.5 s of a 0.3 s fade, and a read then listed none of its inputs. The page's
+ * running animations that have an end are finished, as they would have been on
+ * screen; endless ones (spinners) are left alone. How many were finished.
+ */
+export function finishAnimationsScript(): string {
+  return `(() => {
+  let n = 0;
+  for (const a of document.getAnimations()) {
+    try {
+      if (a.playState === 'running' && a.effect && Number.isFinite(a.effect.getComputedTiming().endTime)) { a.finish(); n++; }
+    } catch (e) { /* a zero playback rate: left as it is */ }
+  }
+  return n;
 })()`
 }
 

@@ -1,5 +1,5 @@
 /**
- * Forge's built-in browser, as MCP tools — the nine `browser_*` tools every
+ * Forge's built-in browser, as MCP tools — the ten `browser_*` tools every
  * agent CLI gets.
  *
  * Not a server of its own: a module the bridge servers spread into their tool
@@ -49,7 +49,9 @@ const PARAM = {
   key: 'The key to press: Tab, Enter, Space, Escape, ArrowUp, ArrowDown, ArrowLeft or ArrowRight.',
   shift: 'Optional: hold Shift while pressing — Shift+Tab moves the focus back.',
   keyRef: 'Optional: the number in square brackets from your last browser_read of the element to focus first. Nothing is emptied.',
-  times: 'Optional: how many times to press it, 1 to 20. Default 1.'
+  times: 'Optional: how many times to press it, 1 to 20. Default 1.',
+  selector: 'Optional: a CSS selector, e.g. "#prices" or "table.odds" — only the first element it matches is read. Omit for the whole page.',
+  maxChars: 'Optional: the most characters to return, 1 to 200000. Default 20000.'
 }
 
 /** The keys browser_key presses (shared/browser.ts BROWSER_KEYS). */
@@ -169,6 +171,23 @@ export const BROWSER_TOOLS = [
         times: { type: 'number', description: PARAM.times }
       },
       required: ['key']
+    }
+  },
+  {
+    name: 'browser_text',
+    description: [
+      `${BROWSER_PREAMBLE} Returns the page's full visible text, for reading prices, tables and articles browser_read does not list; read-only — it clicks, scrolls and changes nothing.`,
+      'The title and address come first, then the text as a person sees it. `selector` (a CSS selector) reads only the first element it matches. Long text is cut at `maxChars` (default 20000, at most 200000) and says how long the whole is.',
+      'It gives no numbers to click — browser_read does that. Omit `id` for your current tab.'
+    ].join('\n'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: idParam,
+        selector: { type: 'string', description: PARAM.selector },
+        maxChars: { type: 'number', description: PARAM.maxChars }
+      },
+      required: []
     }
   }
 ]
