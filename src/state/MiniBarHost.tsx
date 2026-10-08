@@ -8,10 +8,11 @@ import { barTarget, setBarTarget, useBarTarget } from '@/components/hub/barMode'
 import { hubAsk, useHubView } from '@/components/hub/hubView'
 import { barDraft, setBarDraft } from '@/lib/barDraft'
 import { barSend, whenPaneReady } from '@/lib/barSend'
+import { setMiniBox } from '@/lib/miniBarDictation'
 import { activityOf } from '@/lib/paneActivity'
 import { terminalHost, type PaneRuntime } from '@/lib/terminals'
 import { useApp, type AppState } from '@/state/AppState'
-import { useMiniNews } from './minibar/news'
+import { agentReplyLine, useMiniNews } from './minibar/news'
 import { useMiniVoice } from './minibar/voice'
 
 /**
@@ -241,6 +242,20 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
   const handleRef = useRef(handle)
   handleRef.current = handle
 
+  // Dictation's way into the mini bar's box (src/lib/miniBarDictation.ts).
+  useEffect(
+    () =>
+      setMiniBox({
+        text: () => draft.current,
+        setText: (text) => {
+          draft.current = text
+          setOut(text)
+        },
+        send: (text) => handleRef.current({ t: 'send', text })
+      }),
+    []
+  )
+
   useEffect(() => {
     const host = window.forge.minibarHost
     if (typeof host?.onCall !== 'function') return undefined
@@ -300,7 +315,7 @@ function agentsOf(state: AppState): MiniBarAgent[] {
     for (const tab of ws.tabs) {
       for (const leaf of collectLeaves(tab.root)) {
         const profile = resolveProfile(state.settings.agentProfiles, leaf.profileId)
-        const line = lastLine(leaf.id)
+        const line = agentReplyLine(leaf.id) ?? lastLine(leaf.id)
         out.push({
           projectId: project.id,
           tabId: tab.id,

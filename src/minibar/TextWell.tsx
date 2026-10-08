@@ -37,7 +37,7 @@ export function TextWell({
   useEffect(() => {
     if (state.draft === seen.current) return
     seen.current = state.draft
-    if (told.current.includes(state.draft)) return
+    if (state.draft !== '' && told.current.includes(state.draft)) return
     told.current = [...told.current.slice(-7), state.draft]
     setText(state.draft)
   }, [state.draft])
