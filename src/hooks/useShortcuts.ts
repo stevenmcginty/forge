@@ -13,6 +13,45 @@ import { useHubRuntime } from './useHubRuntime'
 /** Broadcast so <TerminalGrid> can pop its agent chooser open. */
 export const NEW_TAB_EVENT = 'forge:new-tab'
 
+/**
+ * The shortcuts the mini bar honours while it has focus (docs/MINI-BAR.md,
+ * 4.5), by command id. The keys are still Steve's own keymap; this only says
+ * which commands make sense without the big window:
+ *
+ *   run       run in the host as they are: projects, tabs and panels (the
+ *             target follows), new agent, saved prompts, the command list,
+ *             Ask Forge, Listen, mute, interrupt.
+ *   restore   need the big window: Forge comes back, and they run there.
+ *   null      ignored: closing, splitting, moving between or resizing panes
+ *             Steve cannot see, and the clipboard.
+ *
+ * The host runs them through the registry's `runCommand`, as the palette
+ * does; src/state/minibar/voice.ts publishes the table with the chords.
+ */
+const MINI_RUN = new Set([
+  'project.next',
+  'project.prev',
+  'rail.toggle',
+  'tab.next',
+  'tab.prev',
+  'pane.next',
+  'pane.prev',
+  'tab.new',
+  'bar.palette',
+  'voice.hubCard',
+  'voice.live.toggle',
+  'voice.mute',
+  'voice.interrupt'
+])
+const MINI_RESTORE = new Set(['app.settings', 'app.cheatSheet', 'view.toggle', 'canvas.show', 'app.devtools'])
+
+export function miniCommandScope(id: string): 'run' | 'restore' | null {
+  if (MINI_RESTORE.has(id)) return 'restore'
+  if (MINI_RUN.has(id) || /^(tab|pane)\.goto\.[1-9]$/.test(id)) return 'run'
+  if (id.startsWith('agent.new.') || id.startsWith('prompt.')) return 'run'
+  return null
+}
+
 type Dir = 'left' | 'right' | 'up' | 'down'
 
 /**

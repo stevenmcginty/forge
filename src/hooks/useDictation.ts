@@ -15,6 +15,8 @@ import { insertPhrase, resolveInsertTarget, type InsertTarget } from '@/lib/dict
 import { earconDictationOff, earconDictationOn } from '@/lib/earcon'
 import { formatCombo } from '@/lib/keymap'
 import { bindCommandKeys, getKeymapView, keyForCommand, setCommandHandler, subscribeKeymap } from '@/lib/keymapRegistry'
+import { miniDictationSink } from '@/lib/miniBarDictation'
+import { miniTalkKeyTarget } from '@/lib/miniBarKeys'
 import { TALK_AGENT_ID, TALK_DICTATE_ID } from '@/lib/shortcutCommands'
 import { attachTalkKey, type GestureIntent } from '@/lib/stt-gesture'
 import { terminalHost } from '@/lib/terminals'
@@ -194,6 +196,12 @@ export function useDictationEngine(): Dictation {
       }
       // The bar's Agent mode: the main agent is asked, nothing is typed.
       if (agentVoiceNow()?.phrase(text)) return
+      // Forge is minimised: every phrase goes into the mini bar's box (src/lib/miniBarDictation.ts).
+      const mini = miniDictationSink()
+      if (mini) {
+        mini.phrase(text)
+        return
+      }
       // The bar's mic started this dictation: its words go into the bar's box.
       const bar = barDictationPhase() !== 'off' ? barDictationSink() : null
       if (bar) {
@@ -299,6 +307,20 @@ export function useDictationEngine(): Dictation {
   useEffect(() => {
     const bar = barDictationPhase()
     const phase = status.phase
+    // Minimised: the mini bar runs its own countdown and send; the big bar's
+    // flow stands down, and a session it had started ends with no send.
+    const mini = miniDictationSink()
+    if (mini) {
+      if (phase !== 'idle' && phase !== 'off' && phase !== 'error') return
+      keyWantsSend.current = false
+      setKeyDictationSendsOnEnd(false)
+      if (bar !== 'off') {
+        setBarDictationPhase('off')
+        barDictationSink()?.done(false)
+      }
+      mini.done(phase !== 'error')
+      return
+    }
     if (bar === 'off') {
       if (phase === 'listening' && keyWantsSend.current && !toAgentRef.current) setKeyDictationSendsOnEnd(true)
       if (phase === 'error') keyWantsSend.current = false
@@ -326,6 +348,16 @@ export function useDictationEngine(): Dictation {
   /** `intoBar`: the bar's mic, whose words go into the bar. The key's are raw. */
   const startDictation = useCallback((intoBar = false): void => {
     if (phaseRef.current === 'finishing') return
+    // Minimised: the words go into the mini bar's box, whichever started it.
+    const mini = miniDictationSink()
+    if (mini) {
+      setBarDictationPhase('off')
+      setKeyDictationSendsOnEnd(false)
+      keyWantsSend.current = false
+      mini.start(intoBar)
+      void window.forge.stt.start().then(setStatus)
+      return
+    }
     setBarDictationPhase(intoBar ? 'armed' : 'off')
     setKeyDictationSendsOnEnd(false)
     // A key dictation sends when it ends, however it ends (the key, the button,
@@ -410,7 +442,7 @@ export function useDictationEngine(): Dictation {
       return
     }
     if (phaseRef.current === 'listening') {
-      if (barDictationPhase() === 'off' && !autoSendRef.current) setKeyDictationSendsOnEnd(true)
+      if (!miniDictationSink() && barDictationPhase() === 'off' && !autoSendRef.current) setKeyDictationSendsOnEnd(true)
       void window.forge.stt.stop()
       return
     }
@@ -572,6 +604,22 @@ export function useDictationEngine(): Dictation {
   )
   useEffect(
     () => (agentKey ? attachTalkKey(window, agentKey, () => toAgentRef.current, applyAgentIntent, cancelAgentHold) : undefined),
+    [agentKey, applyAgentIntent, cancelAgentHold]
+  )
+
+  // The same two keys again, heard for this window while Forge is minimised:
+  // the mini bar and the global hook send raw presses, which the mini bar's
+  // host replays into this target (src/lib/miniBarKeys.ts). Nothing else
+  // dispatches there, so with Forge up these never fire.
+  useEffect(
+    () =>
+      attachTalkKey(miniTalkKeyTarget, hotkey, () => phaseRef.current === 'listening', applyIntent, undefined, (line) =>
+        console.info(`[hub] mini dictate key ${line} phase=${phaseRef.current} agent=${toAgentRef.current}`)
+      ),
+    [hotkey, applyIntent]
+  )
+  useEffect(
+    () => (agentKey ? attachTalkKey(miniTalkKeyTarget, agentKey, () => toAgentRef.current, applyAgentIntent, cancelAgentHold) : undefined),
     [agentKey, applyAgentIntent, cancelAgentHold]
   )
 

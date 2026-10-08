@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { MiniBarState } from '@shared/minibar'
 import { filePaths } from '@/lib/paths'
 import { MiniBarView } from './MiniBarView'
+import { useMiniKeys } from './useMiniKeys'
 
 /**
  * The #minibar window's whole tree (src/main.tsx): no providers, because it
@@ -20,6 +21,9 @@ export function MiniBarRoot(): ReactNode {
     if (typeof api?.onState !== 'function') return undefined
     return api.onState(setState)
   }, [api])
+
+  // Shortcuts and the talk keys while the bar has focus.
+  useMiniKeys(state, api)
 
   useEffect(() => {
     if (!api) return undefined
