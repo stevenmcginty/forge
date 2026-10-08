@@ -73,6 +73,47 @@ export function AdvancedSection(): ReactNode {
       </Card>
 
       <Card
+        title="When Forge is minimised"
+        hint="A small bar floats over your other apps: type or talk to your agents, see when they finish or ask, and open Forge again in one click."
+      >
+        <Row label="Show the mini bar">
+          <Toggle
+            checked={state.settings.miniBar}
+            onChange={(next) => actions.patchSettings({ miniBar: next })}
+            label="Show the mini bar when Forge is minimised"
+          />
+        </Row>
+        <Row label="Dictate and Listen keys work in any app" hint="Only these two keys, and only while Forge is minimised">
+          <Toggle
+            checked={state.settings.miniGlobalKeys}
+            onChange={(next) => actions.patchSettings({ miniGlobalKeys: next })}
+            label="Dictate and Listen keys work in any app"
+          />
+        </Row>
+        <Row label="Show screen captures on the desktop" hint="A new capture pops at the top right of the screen">
+          <Toggle
+            checked={state.settings.shotsOnDesktop}
+            onChange={(next) => actions.patchSettings({ shotsOnDesktop: next })}
+            label="Show screen captures on the desktop"
+          />
+        </Row>
+        <Row label="Speak updates when agents finish or ask">
+          <Toggle
+            checked={state.settings.miniSpeakUpdates}
+            onChange={(next) => actions.patchSettings({ miniSpeakUpdates: next })}
+            label="Speak updates when agents finish or ask"
+          />
+        </Row>
+        <Row label="Chime when agents finish or ask">
+          <Toggle
+            checked={state.settings.miniChime}
+            onChange={(next) => actions.patchSettings({ miniChime: next })}
+            label="Chime when agents finish or ask"
+          />
+        </Row>
+      </Card>
+
+      <Card
         title="GitHub while away"
         hint={
           <>

@@ -28,6 +28,7 @@ import { shellMode, shellSheet, useShellMode, useSurfaces } from '@/lib/shellSlo
 import { terminalHost } from '@/lib/terminals'
 import { uiCommands, useUiCommand } from '@/lib/uiCommands'
 import { useActiveProject, useApp, type SettingsSection } from '@/state/AppState'
+import { MiniBarHost } from '@/state/MiniBarHost'
 import '@/components/shell/deck-tokens.css'
 import '@/components/shell/Shell.css'
 import '@/components/shell/deck.css'
@@ -226,6 +227,8 @@ export function App(): ReactNode {
       <ApprovalPrompt />
       <WebProjectRemoveBridge />
       <WebVoiceBridge />
+      {/* The mini bar's host: while Forge is minimised, the floating bar's state and its calls (docs/MINI-BAR.md). */}
+      <MiniBarHost />
     </div>
   )
 }

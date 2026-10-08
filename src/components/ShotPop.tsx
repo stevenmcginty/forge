@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import type { Shot } from '@shared/types'
 import { reducedMotion } from '@/lib/motion'
 import { shellSheet, useShellSheet } from '@/lib/shellSlots'
@@ -63,7 +63,8 @@ export function ShotPop(): ReactNode {
         known.current = ids
         return
       }
-      const fresh = next.filter((s) => !known.current!.has(s.id))
+      // A shot that already popped on the desktop (the main window was minimised) is not news here.
+      const fresh = next.filter((s) => !known.current!.has(s.id) && !s.shownOnDesktop)
       known.current = ids
       // Deleted from the tray (or pruned) while it was up: nothing left to hold.
       if (showing.current && !ids.has(showing.current.id)) setShot(null)
@@ -178,6 +179,57 @@ export function ShotPop(): ReactNode {
 
   if (!shot) return null
 
+  return (
+    <ShotCard
+      shot={shot}
+      count={count}
+      run={run}
+      held={held}
+      copied={copied}
+      leaving={leaving}
+      cardRef={cardRef}
+      onHover={setHovered}
+      onClose={() => leave('away')}
+      onCopy={() =>
+        void copy(shot).then((r) => {
+          if (r.ok) setCopied(true)
+        })
+      }
+    />
+  )
+}
+
+/**
+ * The card itself, without its clock or its exits: the picture, the count, ✕,
+ * click to copy, drag out as a file. ShotPop holds it up in the main window;
+ * src/minibar/ShotCardApp.tsx holds the same card up on the desktop while
+ * Forge is minimised.
+ */
+export function ShotCard({
+  shot,
+  count,
+  run,
+  held,
+  copied,
+  leaving,
+  cardRef,
+  onHover,
+  onClose,
+  onCopy
+}: {
+  shot: Shot
+  /** Shots that have arrived while the card has been up. */
+  count: number
+  /** Bumped by every arrival: restarts the drain bar. */
+  run: number
+  held: boolean
+  copied: boolean
+  leaving: boolean
+  cardRef: RefObject<HTMLDivElement | null>
+  onHover: (on: boolean) => void
+  onClose: () => void
+  onCopy: () => void
+}): ReactNode {
   const stamp = new Date(shot.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const dims = shot.width > 0 ? `${shot.width} × ${shot.height}` : 'image'
   // The frame follows the picture's shape, within reason: very tall or very
@@ -197,8 +249,8 @@ export function ShotPop(): ReactNode {
         aria-label={count > 1 ? `${count} new screenshots` : 'New screenshot'}
         data-held={held ? 'true' : undefined}
         style={{ '--shotpop-ms': `${SHOW_MS}ms` } as CSSProperties}
-        onPointerEnter={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}
+        onPointerEnter={() => onHover(true)}
+        onPointerLeave={() => onHover(false)}
       >
         <header className="shotpop__head">
           <span className="shotpop__mark" aria-hidden="true" />
@@ -212,7 +264,7 @@ export function ShotPop(): ReactNode {
             // Keep focus where it was: dismissing must not pull the keyboard off
             // the pane or the bar you were talking into.
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => leave('away')}
+            onClick={onClose}
           >
             <Icon name="close" size={10} />
           </button>
@@ -225,11 +277,7 @@ export function ShotPop(): ReactNode {
           title={`${shot.name}\nClick to copy · drag out as a file`}
           draggable
           onDragStart={(e) => dragShotOut(e, shot)}
-          onClick={() =>
-            void copy(shot).then((r) => {
-              if (r.ok) setCopied(true)
-            })
-          }
+          onClick={onCopy}
           data-copied={copied ? 'true' : undefined}
         >
           {shot.thumb ? (

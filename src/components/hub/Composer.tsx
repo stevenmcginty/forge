@@ -6,6 +6,8 @@ import { useKeymap, useSavedPrompts } from '@/hooks/useHub'
 import { hotkeyLabel, useQuietDictation } from '@/hooks/useDictation'
 import { resolveProfile } from '@/lib/agents'
 import { publishDictationReview, setBarDictationSink, useBarDictationPhase } from '@/lib/barDictation'
+import { setBarDraft, useBarDraft } from '@/lib/barDraft'
+import { barSend } from '@/lib/barSend'
 import { HUB_COMPOSER_EVENT, type HubComposerDetail } from '@/lib/hubnav'
 import { runSavedPrompt } from '@/lib/hubRuntime'
 import { fireComet, usePresence } from '@/lib/motion'
@@ -14,7 +16,6 @@ import { droppedFilePaths, maybeFiles } from '@/lib/paths'
 import { comboFromEvent } from '@/lib/keymap'
 import { commandForCombo, setCommandHandler } from '@/lib/keymapRegistry'
 import { relayComet } from '@/lib/relayComet'
-import { composerRouteNow } from '@/lib/shellSlots'
 import { findLeaf } from '@/lib/splitTree'
 import { terminalHost } from '@/lib/terminals'
 import { useUiCommand } from '@/lib/uiCommands'
@@ -67,48 +68,6 @@ import './Composer.css'
  *               in the bar as a new prompt.
  */
 
-/** The Enter waits for the pane's echo of the words, then this much quiet. */
-const ECHO_QUIET_MS = 150
-/** The most the Enter waits: a pane that never goes quiet still gets it. */
-const ECHO_MAX_MS = 1500
-const ECHO_POLL_MS = 30
-
-/**
- * Fire the keys a hand at the prompt would: the text, then Enter once the pane
- * has drawn it.
- *
- * The words go in as a paste, never as typing. Typed raw, a long line reached
- * Claude Code as one fast burst it guesses is a paste — and when the Enter
- * arrived in the same read as the words, it was taken in as part of that
- * paste, a new line rather than a send, so the words sat on the prompt until
- * Steve pressed Enter himself. xterm's paste wraps the words in bracketed-
- * paste markers whenever the agent asked for them (Claude Code, Codex and
- * Gemini CLI all do), so the agent knows exactly where the words end: an
- * Enter after the end marker is an Enter, and one that lands while it is still
- * taking the paste in is held and pressed after it. A shell that never asked
- * for the markers gets the plain words, as before.
- *
- * The Enter still waits for the echo — output after the words went in, then a
- * short quiet — so it follows the words rather than racing them.
- */
-function sendToPane(paneId: string, text: string): boolean {
-  if (!terminalHost.has(paneId) || terminalHost.runtime(paneId).status === 'exited') return false
-  const before = terminalHost.readiness(paneId).outputBytes
-  terminalHost.paste(paneId, text)
-  const started = performance.now()
-  const tick = (): void => {
-    const r = terminalHost.readiness(paneId)
-    const echoed = r.outputBytes > before && r.quietForMs >= ECHO_QUIET_MS
-    if (echoed || performance.now() - started >= ECHO_MAX_MS) {
-      terminalHost.submit(paneId)
-      return
-    }
-    window.setTimeout(tick, ECHO_POLL_MS)
-  }
-  window.setTimeout(tick, ECHO_POLL_MS)
-  return true
-}
-
 /** How long dictated words wait, with Undo, before they send — the phone's (web SessionComposer). */
 const REVIEW_MS = 1500
 
@@ -150,7 +109,9 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
   const hub = useHubView()
   const preview = useHubPreview()
   const target = useBarTarget()
-  const [text, setText] = useState('')
+  // The words live in a module store (lib/barDraft), so the mini bar can take them at minimise and give them back.
+  const text = useBarDraft()
+  const setText = setBarDraft
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [cursor, setCursor] = useState(0)
   const [saving, setSaving] = useState<string | null>(null)
@@ -260,22 +221,9 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     if (!message.trim()) return
     endReview()
     historyAt.current = -1
-    const route = composerRouteNow()
-    if (route?.({ text: message, paneId })) {
-      rememberSent(message)
-      setText('')
-      endBarWords()
-      return
-    }
-    if (toForge) {
-      hubAsk(hub, message, 'typed')
-      rememberSent(message)
-      setText('')
-      endBarWords()
-      if (shellRef.current) fireComet(shellRef.current, shellRef.current.querySelector('.listen') ?? shellRef.current, 'var(--accent)')
-      return
-    }
-    if (!paneId || !sendToPane(paneId, message)) {
+    // The route, Forge or the pane: one path, shared with the mini bar (lib/barSend).
+    const sent = barSend(message, { paneId, toForge, ask: (m) => hubAsk(hub, m, 'typed') })
+    if (sent === 'failed') {
       actions.setNotice('That pane has no live shell to send to')
       return
     }
@@ -283,7 +231,11 @@ export function Composer({ lead, compact = false }: { lead?: ReactNode; compact?
     setText('')
     // Sent: the words in the bar are done with. Dictation into the bar ends with the send.
     endBarWords()
-    relayComet(paneId, shellRef.current)
+    if (sent === 'forge') {
+      if (shellRef.current) fireComet(shellRef.current, shellRef.current.querySelector('.listen') ?? shellRef.current, 'var(--accent)')
+    } else if (sent === 'pane' && paneId) {
+      relayComet(paneId, shellRef.current)
+    }
   }
 
   const cancel = (): void => {

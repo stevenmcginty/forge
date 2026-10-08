@@ -1,0 +1,19 @@
+/*
+ * The desktop shot card's window (electron/shot-card-window.ts): transparent,
+ * the card's own size, at the top right of the screen. The card is ShotPop's
+ * (ShotPop.css); only where it sits changes. A little room at the sides and
+ * the top for its shadow.
+ */
+
+:root[data-shotcard-view],
+:root[data-shotcard-view] body,
+:root[data-shotcard-view] #root {
+  background: transparent;
+  overflow: hidden;
+}
+
+:root[data-shotcard-view] .shotpop {
+  top: 4px;
+  right: 6px;
+  width: calc(100% - 12px);
+}

@@ -1,4 +1,4 @@
-import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react'
+import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@xterm/xterm/css/xterm.css'
 import './theme/global.css'
@@ -18,6 +18,14 @@ import { registerReader } from './components/reader/registerReader'
 registerBrowser()
 // The Read mode's canvas surface (Markdown files, read and edited).
 registerReader()
+
+/**
+ * The mini bar and the desktop shot card (docs/MINI-BAR.md): two more windows
+ * on this bundle, thin views like the overlay, so neither gets a provider.
+ * Loaded on demand, so the main window does not carry their code and styles.
+ */
+const MiniBarRoot = lazy(() => import('./minibar/MiniBarRoot').then((m) => ({ default: m.MiniBarRoot })))
+const ShotCardApp = lazy(() => import('./minibar/ShotCardApp').then((m) => ({ default: m.ShotCardApp })))
 
 const host = document.getElementById('root')
 if (!host) throw new Error('#root missing from index.html')
@@ -152,7 +160,19 @@ class RootBoundary extends Component<{ children: ReactNode }, { error: string }>
  * decision has to be made before the first render: awaiting an IPC round trip
  * would mount the entire terminal grid, for a frame, inside a 180×56 pill.
  */
-if (window.forge.overlay.isOverlay()) {
+if (window.forge.minibar?.isMiniBar?.()) {
+  root.render(
+    <Suspense fallback={null}>
+      <MiniBarRoot />
+    </Suspense>
+  )
+} else if (window.forge.shotCard?.isShotCard?.()) {
+  root.render(
+    <Suspense fallback={null}>
+      <ShotCardApp />
+    </Suspense>
+  )
+} else if (window.forge.overlay.isOverlay()) {
   root.render(<OverlayApp />)
 } else {
   // Note: deliberately no <StrictMode>. Its double-invoked effects would
