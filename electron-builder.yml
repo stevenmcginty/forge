@@ -119,6 +119,10 @@ asarUnpack:
   # cannot be executed, and the SDK reports that as a libc mismatch.
   - '**/node_modules/@anthropic-ai/claude-agent-sdk/**'
   - '**/node_modules/@anthropic-ai/claude-agent-sdk-*/**'
+  # The mini bar's global talk keys (electron/global-keys.ts). A native .node
+  # cannot load from inside the asar; smartUnpack would catch it too, but this
+  # does not lean on that heuristic.
+  - '**/node_modules/uiohook-napi/**'
 
 # @lydell/node-pty ships prebuilt binaries and has no gyp step; there is nothing
 # to rebuild, and letting electron-builder try invites a toolchain it does not

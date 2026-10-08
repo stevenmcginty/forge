@@ -58,6 +58,7 @@ import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './
 import { registerAgentProbeHandlers } from './agent-probe'
 import { disposeOverlay, registerOverlayIpc, setOverlayHost } from './overlay-window'
 import { disposeMiniBar, hideMiniBar, registerMiniBarIpc, setMiniBarHost, showMiniBar } from './minibar-window'
+import { disposeGlobalKeys, syncGlobalKeys } from './global-keys'
 import { disposeShotCard, registerShotCardIpc } from './shot-card-window'
 import { registerVoiceHandlers } from './voice-bridge'
 import {
@@ -451,8 +452,14 @@ function createWindow(): void {
   // refuses while quitting or with the setting off. The isMinimized guard is
   // because Windows can hand a minimised window a stray focus.
   mainWindow.on('minimize', showMiniBar)
+  // The global talk keys (electron/global-keys.ts) ride with the bar: on while
+  // it is up and miniGlobalKeys is on, off the moment Forge is back.
+  mainWindow.on('minimize', syncGlobalKeys)
   const backFromMinimised = (): void => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) hideMiniBar()
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+      hideMiniBar()
+      syncGlobalKeys()
+    }
   }
   mainWindow.on('restore', backFromMinimised)
   mainWindow.on('show', backFromMinimised)
@@ -1030,6 +1037,9 @@ function registerAppHandlers(): void {
     const before = getSettings()
     const next = setSettings(rendererOwned(patch ?? {}))
     applyShotSettings(next)
+    // Turning the global talk keys (or the mini bar) off while minimised takes
+    // the hook down at once.
+    if (before.miniGlobalKeys !== next.miniGlobalKeys || before.miniBar !== next.miniBar) syncGlobalKeys()
     // The bridge's mcp.json carries the Gemini key and image model, so it has to
     // be rewritten when either changes — otherwise a key pasted today would not
     // reach make_image until the next launch. (Panes still have to be reopened:
@@ -1750,5 +1760,6 @@ app.on('before-quit', () => {
   // would sit over everything with nothing behind it to close it.
   safely('disposeOverlay', disposeOverlay)
   safely('disposeMiniBar', disposeMiniBar)
+  safely('disposeGlobalKeys', disposeGlobalKeys)
   safely('disposeShotCard', disposeShotCard)
 })
