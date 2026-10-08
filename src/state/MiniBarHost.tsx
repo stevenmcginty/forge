@@ -48,6 +48,7 @@ const LINE_MAX = 200
 let rev = 0
 
 export function MiniBarHost(): ReactNode {
+  const { state } = useApp()
   const [on, setOn] = useState(false)
   /** The bar's words: the big bar's at minimise, then whatever the view last reported. */
   const draft = useRef('')
@@ -68,7 +69,9 @@ export function MiniBarHost(): ReactNode {
     })
   }, [])
 
-  return on ? <Live draft={draft} /> : null
+  // The master switch (Settings, `miniBar`): off, and the host stays empty even
+  // if a mode message slips through — no publishing, no news, no chimes.
+  return on && state.settings.miniBar === true ? <Live draft={draft} /> : null
 }
 
 /* ----------------------------------------------------------- while it is on */

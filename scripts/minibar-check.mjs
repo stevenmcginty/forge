@@ -101,6 +101,7 @@ function seed() {
       lastNotesVersion: '0.3.0',
       lastProjectId: P1.id,
       confirmOnQuit: true,
+      // The bar is off by default (miniBar): this check needs it on.
       miniBar: true,
       shotsOnDesktop: true,
       // Never hook Steve's keyboard, talk, or chime from a check.

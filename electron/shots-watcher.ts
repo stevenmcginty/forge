@@ -110,12 +110,15 @@ function withDesktopMark(shot: Shot): Shot {
 }
 
 /**
- * A new shot landed. While Forge is minimised (and the setting is on) it pops
- * on the desktop instead, and is marked so the big window does not pop it too.
- * Called before the broadcast, so the mark travels with it.
+ * A new shot landed. While Forge is minimised (with the mini bar and the
+ * setting on) it pops on the desktop instead, and is marked so the big window
+ * does not pop it too. Called before the broadcast, so the mark travels with
+ * it. With the mini bar off it is never marked, and ShotPop shows it as it
+ * always did, after the restore.
  */
 function popOnDesktop(record: ShotRecord): void {
-  if (!isMainMinimised() || !getSettings().shotsOnDesktop) return
+  const settings = getSettings()
+  if (!isMainMinimised() || !settings.miniBar || !settings.shotsOnDesktop) return
   shownOnDesktop.add(record.id)
   try {
     showShotCard(withDesktopMark(toShot(record)))

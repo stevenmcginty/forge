@@ -1,11 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { MiniBarCall, MiniBarState, MiniBarViewApi } from '@shared/minibar'
+import { CueGlyph } from '@/components/DictationCueView'
 import { Icon } from '@/components/Icon'
+import { flashBarSent } from './BarCues'
 import { agentById, targetName } from './format'
 import { ListenGlyph, StopSquare, TurnArc } from './glyphs'
 
-/** The box grows to the big bar's limit (spec 4.2), then scrolls. */
-const MAX_BOX_H = 114
+/** The box grows as the big bar's does (Composer): one line, then a line at a time to five, then scrolls. */
+const MIN_BOX_H = 34
+const MAX_BOX_H = 5 * 20 + 14
 const DRAFT_DEBOUNCE_MS = 250
 
 /**
@@ -57,8 +60,8 @@ export function TextWell({
     const el = box.current
     if (!el) return
     const fit = (): void => {
-      el.style.height = 'auto'
-      el.style.height = `${Math.min(MAX_BOX_H, el.scrollHeight)}px`
+      el.style.height = '0px'
+      el.style.height = `${Math.min(Math.max(MIN_BOX_H, el.scrollHeight), MAX_BOX_H)}px`
     }
     fit()
     if (typeof ResizeObserver === 'undefined') return
@@ -83,6 +86,8 @@ export function TextWell({
     if (empty) return
     call({ t: 'send', text })
     setText('')
+    // The big bar's "it went": the flash, here round the bar itself.
+    flashBarSent(box.current)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -188,25 +193,27 @@ function DictationWord({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
 
+  // The big bar's own glyph (CueGlyph): its synthesizer bars, its settling dots, its draining ring.
+  const levels = useRef({ mic: 0, out: 0 })
+  levels.current = { mic: Math.max(0, Math.min(1, level)), out: 0 }
+  const readLevels = useCallback(() => levels.current, [])
+  const cue = phase === 'listening' ? 'listening' : phase === 'writing' ? 'finishing' : 'sending'
+
   return (
     <span key={phase} className="mb-dict" data-phase={phase}>
-      {phase === 'listening' ? <Meter level={level} /> : null}
-      {phase === 'writing' ? <TurnArc size={13} /> : null}
+      <CueGlyph phase={cue} endsAt={run ? run.id + run.ms : null} readLevels={readLevels} small />
       <span className="mb-dict__word">{phase === 'listening' ? 'Listening' : phase === 'writing' ? 'Writing…' : 'Sending…'}</span>
       {phase === 'sending' && run ? <Countdown to={run.id + run.ms} /> : null}
       {phase === 'sending' ? (
-        <>
-          <button
-            type="button"
-            className="mb-dict__undo"
-            title="Undo — keep the words in the box, do not send"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => call({ t: 'undoSend' })}
-          >
-            Undo
-          </button>
-          {run ? <span key={run.id} className="mb-dict__drain" style={{ animationDuration: `${run.ms}ms` }} aria-hidden="true" /> : null}
-        </>
+        <button
+          type="button"
+          className="mb-dict__undo"
+          title="Undo — keep the words in the box, do not send"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => call({ t: 'undoSend' })}
+        >
+          Undo
+        </button>
       ) : null}
     </span>
   )
@@ -220,18 +227,6 @@ function Countdown({ to }: { to: number }): ReactNode {
     return () => window.clearInterval(id)
   }, [])
   return <span className="mb-dict__clock">{(Math.max(0, to - now) / 1000).toFixed(1)} s</span>
-}
-
-/** Five bars from the mic level: still when it is quiet, never a loop. */
-function Meter({ level }: { level: number }): ReactNode {
-  const l = Math.max(0, Math.min(1, level))
-  return (
-    <span className="mb-meter" aria-hidden="true">
-      {[0.45, 0.8, 1, 0.7, 0.4].map((w, i) => (
-        <span key={i} style={{ transform: `scaleY(${0.22 + 0.78 * Math.min(1, l * w * 1.4)})` }} />
-      ))}
-    </span>
-  )
 }
 
 function MicKey({ phase, onClick }: { phase: MiniBarState['dictation']['phase']; onClick: () => void }): ReactNode {

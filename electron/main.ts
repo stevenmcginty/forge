@@ -1038,7 +1038,8 @@ function registerAppHandlers(): void {
     const next = setSettings(rendererOwned(patch ?? {}))
     applyShotSettings(next)
     // Turning the global talk keys (or the mini bar) off while minimised takes
-    // the hook down at once.
+    // the hook down at once; turning the bar off takes the bar down with it.
+    if (before.miniBar && !next.miniBar) hideMiniBar()
     if (before.miniGlobalKeys !== next.miniGlobalKeys || before.miniBar !== next.miniBar) syncGlobalKeys()
     // The bridge's mcp.json carries the Gemini key and image model, so it has to
     // be rewritten when either changes — otherwise a key pasted today would not

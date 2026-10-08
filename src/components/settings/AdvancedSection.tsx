@@ -19,6 +19,9 @@ export function AdvancedSection(): ReactNode {
   }, [])
 
   const info = state.info
+  // The floating bar is the master switch: the four under it wait for it.
+  const barOn = state.settings.miniBar
+  const needsBar = barOn ? undefined : 'Turn on the floating bar first'
 
   return (
     <Section title="Advanced" blurb="Where Forge keeps things, and what it is doing right now.">
@@ -76,37 +79,47 @@ export function AdvancedSection(): ReactNode {
         title="When Forge is minimised"
         hint="A small bar floats over your other apps: type or talk to your agents, see when they finish or ask, and open Forge again in one click."
       >
-        <Row label="Show the mini bar">
+        <Row
+          label="Minimise to a floating bar"
+          hint="Forge shrinks to a bar on your desktop. You can talk to your agents without the full window."
+        >
           <Toggle
-            checked={state.settings.miniBar}
+            checked={barOn}
             onChange={(next) => actions.patchSettings({ miniBar: next })}
-            label="Show the mini bar when Forge is minimised"
+            label="Minimise to a floating bar"
           />
         </Row>
-        <Row label="Dictate and Listen keys work in any app" hint="Only these two keys, and only while Forge is minimised">
+        <Row
+          label="Dictate and Listen keys work in any app"
+          hint={needsBar ?? 'Only these two keys, and only while Forge is minimised'}
+        >
           <Toggle
             checked={state.settings.miniGlobalKeys}
+            disabled={!barOn}
             onChange={(next) => actions.patchSettings({ miniGlobalKeys: next })}
             label="Dictate and Listen keys work in any app"
           />
         </Row>
-        <Row label="Show screen captures on the desktop" hint="A new capture pops at the top right of the screen">
+        <Row label="Show screen captures on the desktop" hint={needsBar ?? 'A new capture pops at the top right of the screen'}>
           <Toggle
             checked={state.settings.shotsOnDesktop}
+            disabled={!barOn}
             onChange={(next) => actions.patchSettings({ shotsOnDesktop: next })}
             label="Show screen captures on the desktop"
           />
         </Row>
-        <Row label="Speak updates when agents finish or ask">
+        <Row label="Speak updates when agents finish or ask" hint={needsBar}>
           <Toggle
             checked={state.settings.miniSpeakUpdates}
+            disabled={!barOn}
             onChange={(next) => actions.patchSettings({ miniSpeakUpdates: next })}
             label="Speak updates when agents finish or ask"
           />
         </Row>
-        <Row label="Chime when agents finish or ask">
+        <Row label="Chime when agents finish or ask" hint={needsBar}>
           <Toggle
             checked={state.settings.miniChime}
+            disabled={!barOn}
             onChange={(next) => actions.patchSettings({ miniChime: next })}
             label="Chime when agents finish or ask"
           />

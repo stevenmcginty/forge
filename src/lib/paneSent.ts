@@ -44,7 +44,8 @@ function clear(el: HTMLElement): void {
   delete el.dataset['sentBeat']
 }
 
-function flash(el: HTMLElement, by: SentBy): void {
+/** Flash one element's edge. Also the mini bar's own "sent" (src/minibar/BarCues.tsx). */
+export function flash(el: HTMLElement, by: SentBy): void {
   const beat = el.dataset['sentBeat'] === '0' ? '1' : '0'
   clear(el)
   el.dataset['sentBeat'] = beat

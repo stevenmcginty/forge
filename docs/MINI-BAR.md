@@ -177,14 +177,17 @@ All keys come from Steve's own keymap (`keymap.json`), so a rebind in Settings >
 
 ### 4.8 Settings
 
-Settings > General > "When Forge is minimised":
+Settings > Advanced > "When Forge is minimised":
 
-- "Show the mini bar" (`miniBar`, default on)
+- "Minimise to a floating bar" (`miniBar`, **default off**), hint "Forge shrinks to a bar on your desktop. You can talk to your agents without the full window." The master switch (Steve, 2026-10-08: "turned off by default, so by default it acts exactly how it acts today"). While it is off nothing of the mini bar runs: no bar on minimise, no global key hook, no desktop shot card (ShotPop pops shots after the restore, as before), no spoken updates, no chimes, no `minibar:mode` on. Turning it off while minimised takes the bar down.
 - "Dictate and Listen keys work in any app" (`miniGlobalKeys`, default on)
 - "Show screen captures on the desktop" (`shotsOnDesktop`, default on)
-
 - "Speak updates when agents finish or ask" (`miniSpeakUpdates`, default on)
 - "Chime when agents finish or ask" (`miniChime`, default on)
+
+The four under the master switch keep their own values but are disabled, with the hint "Turn on the floating bar first", while it is off.
+
+When it is on, the bar wears the big bar's live cues (`src/minibar/BarCues.tsx`): the DictationEdge synthesizer round its outline (dictation's violet, the agent's lime while Listen is on, one at a time, low glow), the dock's tint and hairline, the big bar's CueGlyph beside the dictation word, the box growing from 34 px to 114 px as the dock field does, and the "sent" flash round the bar.
 
 Internal: `miniBarBounds` (per display id: x, y, width), `miniBarTucked`.
 

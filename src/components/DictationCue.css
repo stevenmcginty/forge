@@ -623,6 +623,7 @@
  * the ring flares at the end of each lap, then it is gone. One pseudo-
  * element per pane, only while the attribute is on; nothing runs between sends.
  * The agent sends in his lime, dictation and the bar in the violet.
+ * The mini bar wears the same flash on its own surface (.mb-sent, BarCues.tsx).
  */
 
 @property --sent-a {
@@ -637,19 +638,19 @@
   initial-value: 0;
 }
 
-:is(.pane, .mtile)[data-sent] {
+:is(.pane, .mtile, .mb-sent)[data-sent] {
   --sent-lead: var(--dictation-accent-2);
   --sent-mid: var(--dictation-accent);
   --sent-core: var(--dictation-core);
 }
 
-:is(.pane, .mtile)[data-sent='agent'] {
+:is(.pane, .mtile, .mb-sent)[data-sent='agent'] {
   --sent-lead: var(--agent-edge-a);
   --sent-mid: var(--agent-edge-b);
   --sent-core: var(--agent-edge-core);
 }
 
-:is(.pane, .mtile)[data-sent]::before {
+:is(.pane, .mtile, .mb-sent)[data-sent]::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -683,15 +684,15 @@
 
 /* The pane's own edge glows with it for the moment it lasts: the outer halo,
    in the sender's colour, which the pane's overflow cannot clip. */
-:is(.pane, .mtile)[data-sent] {
+:is(.pane, .mtile, .mb-sent)[data-sent] {
   animation: pane-sent-glow-0 2200ms cubic-bezier(0.3, 0.7, 0.4, 1) both;
 }
 
-:is(.pane, .mtile)[data-sent][data-sent-beat='1'] {
+:is(.pane, .mtile, .mb-sent)[data-sent][data-sent-beat='1'] {
   animation-name: pane-sent-glow-1;
 }
 
-:is(.pane, .mtile)[data-sent][data-sent-beat='1']::before {
+:is(.pane, .mtile, .mb-sent)[data-sent][data-sent-beat='1']::before {
   animation-name: pane-sent-1;
 }
 
@@ -833,29 +834,29 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :is(.pane, .mtile)[data-sent] {
+  :is(.pane, .mtile, .mb-sent)[data-sent] {
     animation: none;
   }
 
-  :is(.pane, .mtile)[data-sent]::before {
+  :is(.pane, .mtile, .mb-sent)[data-sent]::before {
     background: linear-gradient(var(--sent-mid), var(--sent-mid));
     animation: pane-sent-still-0 520ms ease-out both;
   }
 
-  :is(.pane, .mtile)[data-sent][data-sent-beat='1']::before {
+  :is(.pane, .mtile, .mb-sent)[data-sent][data-sent-beat='1']::before {
     animation-name: pane-sent-still-1;
   }
 }
 
-:root[data-reduced-motion='true'] :is(.pane, .mtile)[data-sent] {
+:root[data-reduced-motion='true'] :is(.pane, .mtile, .mb-sent)[data-sent] {
   animation: none;
 }
 
-:root[data-reduced-motion='true'] :is(.pane, .mtile)[data-sent]::before {
+:root[data-reduced-motion='true'] :is(.pane, .mtile, .mb-sent)[data-sent]::before {
   background: linear-gradient(var(--sent-mid), var(--sent-mid));
   animation: pane-sent-still-0 520ms ease-out both;
 }
 
-:root[data-reduced-motion='true'] :is(.pane, .mtile)[data-sent][data-sent-beat='1']::before {
+:root[data-reduced-motion='true'] :is(.pane, .mtile, .mb-sent)[data-sent][data-sent-beat='1']::before {
   animation-name: pane-sent-still-1;
 }

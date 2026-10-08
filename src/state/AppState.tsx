@@ -328,7 +328,8 @@ const FALLBACK_SETTINGS: Settings = {
   gitShelfEnabled: true,
   resumeSessions: true,
   confirmOnQuit: true,
-  miniBar: true,
+  // Off until Steve turns it on (docs/MINI-BAR.md, 4.8).
+  miniBar: false,
   miniGlobalKeys: true,
   shotsOnDesktop: true,
   miniSpeakUpdates: true,

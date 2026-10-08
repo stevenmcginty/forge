@@ -354,9 +354,10 @@ function defaultSettings(): Settings {
     resumeSessions: true,
     // …and the backstop for everything resuming cannot bring back.
     confirmOnQuit: true,
-    // The mini bar and the desktop shot card: on, because minimising is how
-    // Steve steps away from Forge without leaving it. See docs/MINI-BAR.md.
-    miniBar: true,
+    // The mini bar and the desktop shot card: off, so a minimised Forge does
+    // exactly what it always did until Steve turns the bar on. The four switches
+    // under it keep their own answer (on) for the day it is. See docs/MINI-BAR.md.
+    miniBar: false,
     miniGlobalKeys: true,
     shotsOnDesktop: true,
     miniSpeakUpdates: true,
@@ -953,7 +954,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     resumeSessions: s.resumeSessions === undefined ? DEFAULT_SETTINGS.resumeSessions : Boolean(s.resumeSessions),
     confirmOnQuit: s.confirmOnQuit === undefined ? DEFAULT_SETTINGS.confirmOnQuit : Boolean(s.confirmOnQuit),
     // The mini bar's switches: undefined is a settings.json written before it
-    // existed, and the answer for that file is the default (on).
+    // existed, and the answer for that file is the default (the bar off, the
+    // four switches under it on).
     miniBar: s.miniBar === undefined ? DEFAULT_SETTINGS.miniBar : Boolean(s.miniBar),
     miniGlobalKeys: s.miniGlobalKeys === undefined ? DEFAULT_SETTINGS.miniGlobalKeys : Boolean(s.miniGlobalKeys),
     shotsOnDesktop: s.shotsOnDesktop === undefined ? DEFAULT_SETTINGS.shotsOnDesktop : Boolean(s.shotsOnDesktop),

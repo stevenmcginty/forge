@@ -173,7 +173,7 @@ export interface ShotCardApi {
 
 /** Settings added for the mini bar (live in shared/types.ts Settings). */
 export interface MiniBarSettings {
-  miniBar: boolean // default true
+  miniBar: boolean // default false: the master switch, nothing below runs while it is off
   miniGlobalKeys: boolean // default true
   shotsOnDesktop: boolean // default true
   miniSpeakUpdates: boolean // default true

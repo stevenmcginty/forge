@@ -107,10 +107,46 @@
   pointer-events: none;
 }
 
+/*
+ * The voice on the bar (BarCues.tsx), as on the dock (Composer.css, data-mic
+ * and data-edge): a faint tint in dictation's violet or the agent's lime, and
+ * the whole outline is the synthesizer (DictationEdge.tsx), the one moving
+ * cue. The state itself is the word and the shape in the well, never the
+ * colour alone.
+ */
+.mb-bar[data-edge='dictation'] {
+  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dictation-accent) 11%, var(--bg-panel)),
+    color-mix(in srgb, var(--dictation-accent-2) 6%, var(--bg-panel))
+  );
+  box-shadow:
+    var(--mb-edge),
+    inset 0 0 22px -10px var(--dictation-glow);
+}
+
+.mb-bar[data-edge='agent'] {
+  border-color: transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--agent-edge-a) 6%, var(--bg-panel)),
+    color-mix(in srgb, var(--agent-edge-a) 3%, var(--bg-panel))
+  );
+}
+
 /* Dictating: the hairline takes dictation's colour, as the dock's does. */
-.mb-bar:has(.mb-well[data-dict])::before {
+.mb-bar[data-edge='dictation']::before {
   background: linear-gradient(90deg, transparent, var(--dictation-core), transparent);
   opacity: 0.8;
+}
+
+/* The big bar's "sent" flash (DictationCue.css draws it once data-sent is on), round the bar's border box. */
+.mb-sent {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
 }
 
 .mb-bar:focus-within {
@@ -593,21 +629,22 @@
 }
 
 .mb-well[data-dict] {
-  /* Dictation's word needs its own room beside the words; the chips refold. */
+  /* Dictation's word needs its own room beside the words; the chips refold.
+     The glow is the bar's edge now (BarCues.tsx): one cue at a time. */
   min-width: 420px;
   box-shadow:
     inset 0 0 0 1px var(--dictation-line),
-    0 0 18px -8px var(--dictation-glow),
     inset 0 1px 2px var(--well-shade);
 }
 
 .mb-box {
   flex: 1;
   min-width: 60px;
-  height: 36px;
+  /* The dock field's box (Dock.css): 34px for one line, +20 a line, 114 at five. */
+  height: 34px;
   max-height: 114px;
-  margin: 0;
-  padding: 8px 2px;
+  margin: 0 0 1px;
+  padding: 7px 2px;
   box-sizing: border-box;
   resize: none;
   border: 0;
@@ -701,35 +738,6 @@
 
 .mb-dict__undo:active {
   transform: scale(0.95);
-}
-
-/* The countdown, as a line draining along the foot of the chip. */
-.mb-dict__drain {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 2px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--dictation-accent);
-  transform-origin: left center;
-  animation: mb-drain linear both;
-}
-
-.mb-meter {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 14px;
-}
-
-.mb-meter > span {
-  width: 2.5px;
-  height: 14px;
-  border-radius: 2px;
-  background: currentColor;
-  transform-origin: center;
-  transition: transform 90ms linear;
 }
 
 .mb-arc {
@@ -2215,15 +2223,6 @@
   }
 }
 
-@keyframes mb-drain {
-  from {
-    transform: scaleX(1);
-  }
-  to {
-    transform: scaleX(0);
-  }
-}
-
 @keyframes mb-land {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--text-primary) 45%, transparent);
@@ -2233,14 +2232,15 @@
   }
 }
 
+/* The sent flash keeps its own reduced-motion form, a still blink (DictationCue.css). */
 @media (prefers-reduced-motion: reduce) {
-  .mb *,
-  .mb *::before,
+  .mb *:not(.mb-sent),
+  .mb *:not(.mb-sent)::before,
   .mb *::after {
     animation: none !important;
   }
 }
 
-:root[data-reduced-motion='true'] :is(.mb *, .mb *::before, .mb *::after) {
+:root[data-reduced-motion='true'] :is(.mb *:not(.mb-sent), .mb *:not(.mb-sent)::before, .mb *::after) {
   animation: none !important;
 }

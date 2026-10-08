@@ -2007,7 +2007,11 @@ export interface Settings {
    * (spelled out here so this file stays dependency-free).
    */
 
-  /** Show the mini bar while Forge is minimised. */
+  /**
+   * Minimise to the floating bar. Off by default, and the master switch: while
+   * it is off nothing of the mini bar runs (no bar, no global keys, no desktop
+   * shot card, no spoken updates or chimes) and minimising is what it always was.
+   */
   miniBar: boolean
   /** The Dictate and Listen keys work in any app while Forge is minimised. */
   miniGlobalKeys: boolean

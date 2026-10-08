@@ -1,6 +1,7 @@
 import { useRef, type ReactNode } from 'react'
 import type { MiniBarCall, MiniBarQuitInfo, MiniBarState, MiniBarViewApi } from '@shared/minibar'
 import { Icon } from '@/components/Icon'
+import { barEdge, BarCues } from './BarCues'
 import { Chips } from './Chips'
 import { BellGlyph, GripGlyph, OpenGlyph, QuitGlyph, SpeakerGlyph, StateMark, TuckGlyph } from './glyphs'
 import { fmtDuration } from './format'
@@ -19,7 +20,8 @@ import { TextWell } from './TextWell'
  *
  * The bar's own surface is a drag region; every control opts out
  * (MiniBar.css). Rows that are about the whole app (quit confirm, "not
- * answering") grow out of the top of the same surface, in place.
+ * answering") grow out of the top of the same surface, in place. Its outline
+ * carries the big bar's live cues (BarCues.tsx): the voice edge and the sent flash.
  */
 export function Bar({
   state,
@@ -50,9 +52,17 @@ export function Bar({
 }): ReactNode {
   const bar = useRef<HTMLDivElement | null>(null)
   const noProject = state.project === null
+  const edge = barEdge(state)
 
   return (
-    <div ref={bar} className="mb-bar" data-stale={stale ? 'true' : undefined} data-confirm={quit ? 'true' : undefined}>
+    <div
+      ref={bar}
+      className="mb-bar"
+      data-stale={stale ? 'true' : undefined}
+      data-confirm={quit ? 'true' : undefined}
+      data-edge={edge?.variant}
+    >
+      <BarCues state={state} edge={edge} />
       <WidthEnd side="left" bar={bar} onWidth={onWidth} />
 
       {quit ? (

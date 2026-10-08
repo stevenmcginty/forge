@@ -220,7 +220,8 @@ export function useMiniNews(): MiniBarPart {
   const [announcer] = useState(() =>
     createAnnouncer({
       now: () => Date.now(),
-      on: () => live.current.speakUpdates,
+      // The master switch first: with the mini bar off Forge never speaks up on its own.
+      on: () => live.current.state.settings.miniBar === true && live.current.speakUpdates,
       quiet: () => {
         const { hub: h, listening } = live.current
         if (listening || barDictationPhase() !== 'off') return false
@@ -268,7 +269,9 @@ export function useMiniNews(): MiniBarPart {
   const chimedAt = useRef<Record<string, number>>({})
   const chime = (kind: MiniBarEvent['kind']): void => {
     // Stopped already has its sound: the terminal's exit blip (terminals.ts chimeOnExit).
-    if (live.current.state.settings.miniChime === false || kind === 'stopped') return
+    // No chimes at all with the mini bar switched off.
+    const s = live.current.state.settings
+    if (s.miniBar !== true || s.miniChime === false || kind === 'stopped') return
     const now = Date.now()
     if (now - (chimedAt.current[kind] ?? 0) < CHIME_GAP_MS) return
     chimedAt.current[kind] = now

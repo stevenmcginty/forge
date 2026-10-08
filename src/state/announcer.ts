@@ -140,7 +140,7 @@ export function speechFor(items: NewsItem[]): string {
 
 export interface AnnouncerDeps {
   now(): number
-  /** Mini mode is on and "Speak updates" is on. */
+  /** The mini bar is switched on (`miniBar`), mini mode is on and "Speak updates" is on. */
   on(): boolean
   /** Nobody is talking: no dictation, Listen hears no one, Forge is not speaking. */
   quiet(): boolean
