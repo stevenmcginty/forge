@@ -30,7 +30,10 @@
  *                    and picked by `which` or by a nearby element's ref.
  *   6d. read         only what a person could see and reach is listed: a covered till is left
  *                    out, a modal's buttons come first, `find` narrows the list (and its number
- *                    clicks), plain, below-the-fold and scroll-box buttons all stay.
+ *                    clicks), plain, below-the-fold and scroll-box buttons all stay. A plain
+ *                    <div> with a click handler and a pointer cursor is listed once as
+ *                    "clickable" (its children, a label's and a link's wrapper are not) and
+ *                    clicks; a log-in box that animates in is listed right after the click.
  *   6e. radios       GOV.UK radios and tick boxes hidden behind styled labels are listed by
  *                    their labels with (ticked)/(not ticked), click through the label on and
  *                    off screen (never following a link inside it), and browser_key presses
@@ -38,7 +41,8 @@
  *   6f. identity     every page in the browser session is plain Google Chrome of the running
  *                    version: header User-Agent = navigator.userAgent (no Forge/, no Electron/),
  *                    userAgentData brands with "Google Chrome" in Chromium's own GREASE order,
- *                    Sec-CH-UA headers equal to the JS brands, Electron's own high-entropy
+ *                    Sec-CH-UA headers equal to the JS brands, a UK Chrome's languages in
+ *                    Accept-Language and navigator.languages alike, Electron's own high-entropy
  *                    values kept — on a tab, a cross-site frame, after a cross-site move, in a
  *                    pop-up and after the debugger is detached; Forge's window, other sessions
  *                    and artifact tabs keep Electron's own.
@@ -497,6 +501,21 @@ const FIXTURES = {
       'document.querySelector = function () { return null };</script>'
   },
   '/text-frame': { title: 'Frame', body: '<p>Frame odds 11/4</p>' },
+  // bet365's way: plain <div>s with script click handlers and a pointer cursor, and a
+  // log-in box that drops in (held at its first frame for 5 s, as a tab off screen holds it).
+  '/pointer': {
+    title: 'Pointer',
+    body: '<style>.p{cursor:pointer} @keyframes drop{from{opacity:0;transform:translateY(-1000px)}to{opacity:1;transform:none}} #box.open{display:block!important} #box.open .slide{animation:drop 5s steps(1,end)}</style>' +
+      '<h1>Pointer</h1><div id="league" class="p"><span>Premier</span> <span class="p">League</span></div>' +
+      '<div id="login" class="p">Log In</div>' +
+      '<div class="p" style="display:none">Ghost none</div><div class="p" style="visibility:hidden">Ghost vis</div>' +
+      '<div style="position:relative"><div class="p">Ghost covered</div><div style="position:absolute;inset:0;background:#fff"></div></div>' +
+      '<p><input id="nick"><label for="nick" class="p">Nick</label></p><div class="p"><a href="/pointer">Card link</a></div>' +
+      '<div id="box" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9"><div class="slide" role="dialog" aria-modal="true" style="position:absolute;left:20%;top:20%;width:300px;background:#fff">' +
+      '<input placeholder="Username"><input type="password" placeholder="Password"></div></div>' +
+      '<script>document.getElementById("league").addEventListener("click", function () { document.title = "League pressed" });' +
+      'document.getElementById("login").addEventListener("click", function () { document.getElementById("box").className = "open" })</script>'
+  },
   '/keys2': {
     title: 'Keys two',
     body: GOVUK_CSS + '<h2>Keys two</h2><p><input id="first" aria-label="First name"> <input id="last" aria-label="Last name"></p>' +
@@ -1102,9 +1121,28 @@ if (!existsSync(electronExe)) {
     const ghosts = plain[5]?.text ?? ''
     check('hidden, transparent, inert, aria-hidden, off-canvas, clipped, off-page and covered buttons are left out', listOf(ghosts).every((l) => !l.includes('Ghost')) && ghosts.includes('Left out: 8 hidden'), ghosts)
     check('…while a visible button and a checkbox under its own styled label are kept', listOf(ghosts).some((l) => l.includes('button "Real one"')) && listOf(ghosts).some((l) => l.startsWith('[2] input checkbox')), ghosts)
-    const vicIds = [tabIn(busy[0]), tabIn(busy[5]), tabIn(plain[0]), longId, tabIn(plain[4])].filter(Boolean)
+    const ptr = await agent(h, ready.linkFile, vic, [{ op: 'browser_open', args: { url: `${ready.base}/pointer` } }, { op: 'browser_read' }])
+    const ptrItems = listOf(ptr[1]?.text)
+    const refIn = (line) => Number(line?.match(/^\[(\d+)\]/)?.[1] ?? 0)
+    const league = ptrItems.find((l) => l.endsWith('clickable "Premier League"'))
+    const login = ptrItems.find((l) => l.endsWith('clickable "Log In"'))
+    check('a pointer-cursor <div> with a click handler is listed once, as clickable, its own words', !!league && !!login && ptrItems.filter((l) => l.includes('League')).length === 1, ptr[1]?.text)
+    check('…hidden and covered ones are left out', !ptrItems.some((l) => l.includes('Ghost')), ptr[1]?.text)
+    check("…a pointer label and a link's pointer wrapper are not listed again", ptrItems.filter((l) => l.includes('Nick')).length === 1 && ptrItems.some((l) => l.includes('input text "Nick"')) &&
+      ptrItems.filter((l) => l.includes('Card link')).length === 1 && ptrItems.some((l) => l.includes('link "Card link"')), ptr[1]?.text)
+    const ptrClicks = await agent(h, ready.linkFile, vic, [
+      { op: 'browser_click', args: { ref: refIn(league) } },
+      { op: 'browser_read' },
+      { op: 'browser_click', args: { ref: refIn(login) } },
+      { op: 'browser_read' }
+    ])
+    check('…and clicking its number runs the page\'s handler', !ptrClicks[0]?.isError && (ptrClicks[1]?.text ?? '').includes('"League pressed"'), `${ptrClicks[0]?.text}\n${ptrClicks[1]?.text}`)
+    const boxItems = listOf(ptrClicks[3]?.text)
+    check('a log-in box that animates in (fixed, modal) lists its inputs right after the click that opened it',
+      boxItems[0] === '[1] input text "Username"' && boxItems[1] === '[2] input password "Password"' && boxItems.length === 2, `${ptrClicks[2]?.text}\n${ptrClicks[3]?.text}`)
+    const vicIds = [tabIn(busy[0]), tabIn(busy[5]), tabIn(plain[0]), longId, tabIn(plain[4]), tabIn(ptr[0])].filter(Boolean)
     const vicTidy = await agent(h, ready.linkFile, vic, vicIds.map((id) => ({ op: 'browser_close', args: { id } })))
-    check("Vic's tabs close", vicIds.length === 5 && vicTidy.every((r) => !r.isError), vicTidy.map((r) => r.text).join('\n'))
+    check("Vic's tabs close", vicIds.length === 6 && vicTidy.every((r) => !r.isError), vicTidy.map((r) => r.text).join('\n'))
 
     section('6e. Electron: GOV.UK radios and tick boxes behind styled labels, ticked state, browser_key')
     const wyn = { id: 'pane-F', name: 'Wyn', agent: 'claude' }
@@ -1233,6 +1271,7 @@ if (!existsSync(electronExe)) {
     check('a tab: the attached debugger does not show — navigator.webdriver false, the PDF plugins listed as in Chrome', me?.webdriver === false && me?.plugins === 5 && me?.mimeTypes === 2 && me?.vendor === 'Google Inc.', JSON.stringify({ webdriver: me?.webdriver, plugins: me?.plugins, mimeTypes: me?.mimeTypes, vendor: me?.vendor }))
     const langs = String(me?.headers?.['accept-language'] ?? '').split(',').map((l) => l.split(';')[0].trim())
     check('a tab: Accept-Language and navigator.languages agree', langs.join() === (me?.languages ?? []).join(), `${me?.headers?.['accept-language']} / ${JSON.stringify(me?.languages)}`)
+    check("a tab: …and are a UK Chrome's, en-GB,en-US;q=0.9,en;q=0.8", me?.headers?.['accept-language'] === 'en-GB,en-US;q=0.9,en;q=0.8' && (me?.languages ?? []).join() === 'en-GB,en-US,en', `${me?.headers?.['accept-language']} / ${JSON.stringify(me?.languages)}`)
     // Header order as real Chrome 154 sent it for the same page (temp profile, this PC).
     const chromeOrder = 'Host, Connection, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, Upgrade-Insecure-Requests, User-Agent, Accept, Sec-Fetch-Site, Sec-Fetch-Mode, Sec-Fetch-User, Sec-Fetch-Dest, Accept-Encoding, Accept-Language'
     check("a tab: the page's request headers come in Chrome's order", (me?.raw ?? []).join(', ') === chromeOrder, (me?.raw ?? []).join(', '))

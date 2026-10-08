@@ -39,6 +39,7 @@ import type { BrowserDriver } from './agent-ops'
 import { addDebuggerSetup, attachDebugger, releaseDebugger, useChromeIdentity } from './chrome-identity'
 import { BrowserSurfaceStore } from './store'
 import {
+  finishAnimationsScript,
   focusScript,
   formatRead,
   readScript,
@@ -927,12 +928,12 @@ export class BrowserManager implements BrowserDriver {
     const box = tab?.bounds ?? { width: HIDDEN_SIZE.width, height: HIDDEN_SIZE.height }
     const zoom = wc.getZoomFactor() || 1
     const inView = point.w >= 1 && point.h >= 1 && point.x >= 0 && point.y >= 0 && point.x * zoom <= box.width && point.y * zoom <= box.height
+    let pressed = false
     try {
       // A real mouse press at the element's middle when the page is on screen,
       // so a listener on a parent — most buttons on most sites — reacts as it
       // would to a hand. A view that is not on screen never acks mouse input,
       // so it gets the same sequence dispatched on the element instead.
-      let pressed = false
       if (inView && this.onScreen(id)) {
         const base = { x: point.x, y: point.y, button: 'left', clickCount: 1 }
         pressed =
@@ -954,6 +955,8 @@ export class BrowserManager implements BrowserDriver {
       return `I could not click "${point.label}" on tab ${id}: ${errText(err)}`
     }
     await settle(wc)
+    // Not on screen, so what the click set animating (a log-in box fading in) would hang half-drawn.
+    if (!pressed) await this.evaluate(wc, finishAnimationsScript()).catch(() => undefined)
     const ticked = point.tick === null ? '' : await this.tickAfter(wc, ref, point.tick, point.radio)
     return `Clicked "${point.label}" on tab ${id}${ticked}. Now on ${this.where(wc)}. Read the page again to see what changed.`
   }

@@ -17,7 +17,8 @@ import { app, type Session, type WebContents } from 'electron'
  *     components/embedder_support/user_agent_utils.cc does it for that major —
  *     and the same on each cross-site frame and worker the page starts;
  *   - Sec-CH-UA, -Mobile and -Platform written onto every request to a secure
- *     origin: Electron sends none on a navigation, Chrome sends all three.
+ *     origin: Electron sends none on a navigation, Chrome sends all three;
+ *   - a UK Chrome's languages, in the header and navigator.languages alike.
  *
  * Measured on Electron 43 (Chromium 150): the override must be sent before the
  * first navigation and not awaited — the protocol answers nothing until the page
@@ -162,10 +163,18 @@ function send(wc: WebContents, method: string, params: Record<string, unknown>, 
   void wc.debugger.sendCommand(method, params, sessionId).catch(() => undefined)
 }
 
+/**
+ * A UK Chrome's languages: navigator.languages, and the Accept-Language header
+ * Chromium builds from them ("en-GB,en-US;q=0.9,en;q=0.8"). The session's
+ * setting sets only the header (navigator.languages stays Electron's "en-GB"),
+ * so the per-page override carries them too; that one moves the header up
+ * beside User-Agent, so useChromeIdentity puts it back last, where Chrome sends it.
+ */
+const ACCEPT_LANGUAGES = 'en-GB,en-US,en'
+
 function overrideParams(): Record<string, unknown> {
   const id = chromeIdentity()
-  // No acceptLanguage: overriding it moves Accept-Language out of Chrome's header order.
-  return { userAgent: id.userAgent, platform: id.platform, userAgentMetadata: id.metadata }
+  return { userAgent: id.userAgent, platform: id.platform, userAgentMetadata: id.metadata, acceptLanguage: ACCEPT_LANGUAGES }
 }
 
 /**
@@ -253,19 +262,24 @@ export function useChromeIdentity(ses: Session): void {
   if (identitySessions.has(ses)) return
   identitySessions.add(ses)
   const id = chromeIdentity()
-  ses.setUserAgent(id.userAgent)
+  ses.setUserAgent(id.userAgent, ACCEPT_LANGUAGES)
   const hints: Record<string, string> = {
     'sec-ch-ua': secChUa(id.metadata.brands),
     'sec-ch-ua-mobile': id.metadata.mobile ? '?1' : '?0',
     'sec-ch-ua-platform': `"${id.metadata.platform}"`
   }
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
-    if (!secureUrl(details.url)) return callback({ requestHeaders: details.requestHeaders })
-    // Chrome's order: the three hints lead (before Upgrade-Insecure-Requests and User-Agent).
-    const requestHeaders: Record<string, string> = { ...hints }
+    // Chrome's order: the three hints lead (before Upgrade-Insecure-Requests and
+    // User-Agent) on a secure origin, and Accept-Language comes last everywhere.
+    const secure = secureUrl(details.url)
+    const requestHeaders: Record<string, string> = secure ? { ...hints } : {}
+    let language: [string, string] | null = null
     for (const [k, v] of Object.entries(details.requestHeaders)) {
-      if (!(k.toLowerCase() in hints)) requestHeaders[k] = v
+      const key = k.toLowerCase()
+      if (key === 'accept-language') language = [k, v]
+      else if (!secure || !(key in hints)) requestHeaders[k] = v
     }
+    if (language) requestHeaders[language[0]] = language[1]
     callback({ requestHeaders })
   })
   app.on('web-contents-created', (_e, wc) => {
