@@ -156,6 +156,14 @@ export interface VoiceHubController {
    * Parakeet phrase — do not also put it on the transcript bus.
    */
   ask(text: string, opts?: { via?: 'typed' | 'voice' }): void
+  /**
+   * Forge says one finished line aloud, unasked: the mini bar's spoken updates
+   * (`kind: 'announce'`, src/state/announcer.ts). The same route as a Forge
+   * Brain line: a live realtime session says it in its own voice; otherwise
+   * the brain's voice and speech queue (VoiceAgent `announce`). Nothing when
+   * `voiceReplyMode` is 'text'.
+   */
+  say(text: string, opts?: { kind: 'announce' }): void
   /** Raw text into one pane, no brain. Multi-line is pasted; `submit` presses Enter. */
   dictateTo(paneId: string, text: string, opts?: { submit?: boolean }): Promise<{ ok: boolean; summary: string }>
   /** The recogniser (or the live session) is really recording right now. */
@@ -298,6 +306,19 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
         event.speak
       )
     })
+  }, [])
+
+  // Forge saying one line unasked (the mini bar's spoken updates): the route
+  // above, but said word for word — the line is already short and trimmed.
+  const say = useCallback((text: string, _opts?: { kind: 'announce' }): void => {
+    const line = text.trim()
+    if (!line || settingsRef.current.voiceReplyMode === 'text') return
+    const session = sessionRef.current
+    if (!session) {
+      agentRef.current.announce?.(line)
+      return
+    }
+    session.sendContext(`[Forge] ${line} — say exactly this to Steve now, nothing more.`, true)
   }, [])
 
   // Forge Brain waiting on a yes (its confirm gate): each new question is said
@@ -1007,6 +1028,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       brain: pickedBrain.brain,
       brainLabel,
       ask,
+      say,
       dictateTo,
       capturing,
       starting,
@@ -1017,6 +1039,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       pickedBrain.brain,
       brainLabel,
       ask,
+      say,
       dictateTo,
       capturing,
       starting,

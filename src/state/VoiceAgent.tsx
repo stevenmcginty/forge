@@ -475,6 +475,12 @@ export interface VoiceAgentCtx {
    * it here when no live realtime session is there to say it.
    */
   hearBrainConfirm?(confirm: BrainConfirmRequest): void
+  /**
+   * One finished line, said as it is in Forge Brain's voice and queue, with no
+   * turn added: the mini bar's spoken updates (src/state/announcer.ts), which
+   * have done their own trimming. Silent when `voiceReplyMode` is 'text'.
+   */
+  announce?(text: string): void
 }
 
 /**
@@ -2488,6 +2494,14 @@ ${said}` : said
     [sayBrain]
   )
 
+  /** A finished line in the brain's voice, no turn (VoiceAgentCtx.announce). */
+  const announce = useCallback(
+    (text: string): void => {
+      if (text.trim()) void sayBrain(`announce-${Date.now()}`, text.trim())
+    },
+    [sayBrain]
+  )
+
   // One subscription for every source that ever registers with the bus — which
   // is how dictation joins in without any surface changing. It is registered
   // here, once, rather than in a panel: two subscriptions would run every phrase
@@ -2823,6 +2837,7 @@ ${said}` : said
       endConversation,
       hearBrain,
       hearBrainConfirm,
+      announce,
       recogniser: {
         phase: stt.phase,
         ready: stt.ready,
@@ -2867,6 +2882,7 @@ ${said}` : said
       endConversation,
       hearBrain,
       hearBrainConfirm,
+      announce,
       captureWanted
     ]
   )

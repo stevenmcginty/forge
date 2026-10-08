@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
-import { isYesNo, offersYesNo, readAsk, type ParsedAsk } from '../lib/answer-options'
+import { answerKeys, isYesNo, offersYesNo, readAsk, sendAnswerKeys, type ParsedAsk } from '../lib/answer-options'
 import './AnswerCard.css'
 
 /**
@@ -34,10 +34,6 @@ const SENT_RETRY_MS = 4000
 const CONTEXT_FOLD_ROWS = 6
 /** "  13 -  padding: 12px;" — a diff row, by the sign after its line number. */
 const DIFF_ROW = /^\s*\d+\s+([+-])(?=\s|$)/
-/** The gap between arrow presses while walking to a row. */
-const SETTLE_BETWEEN_KEYS_MS = 80
-/** The gap between the last arrow and the Enter that picks the row. */
-const SETTLE_BEFORE_ENTER_MS = 120
 /** A reply to a question with no menu. See `plainReplies`. */
 export interface PlainReply {
   label: string
@@ -66,11 +62,6 @@ export function plainReplies(question: string): PlainReply[] {
  * plan or diff drawn above it, which is why it is more than a menu needs.
  */
 export const SCREEN_TAIL_LINES = 120
-
-const UP = '\x1b[A'
-const DOWN = '\x1b[B'
-
-const pause = (ms: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 /* ------------------------------------------------------ the screen, by pane */
 
@@ -108,23 +99,8 @@ export function readPaneAsk(paneId: string, prompt: string): ParsedAsk {
   return readAsk(prompt, readScreen(paneId))
 }
 
-/** The keys that land on option `index` (0-based) of `ask`'s menu. */
-export function answerKeys(ask: ParsedAsk, index: number, digits: boolean): string[] {
-  // A pick from the agent's own prose is a message: the number, then Enter.
-  if (ask.typed) return [String(ask.options[index]!.n), '\r']
-  if (digits) return [String(ask.options[index]!.n)]
-  const moves = index - ask.cursor
-  const arrow = moves < 0 ? UP : DOWN
-  return [...Array.from({ length: Math.abs(moves) }, () => arrow), '\r']
-}
-
-/** Write an answer's keys a beat apart — arrows, then Enter a longer beat after. */
-export async function sendAnswerKeys(keys: string[], write: (data: string) => void): Promise<void> {
-  for (let i = 0; i < keys.length; i++) {
-    if (i > 0) await pause(i === keys.length - 1 && keys[i] === '\r' ? SETTLE_BEFORE_ENTER_MS : SETTLE_BETWEEN_KEYS_MS)
-    write(keys[i]!)
-  }
-}
+/** The keys and their pacing live with the parser (lib/answer-options.ts), so the desktop answers the same way. */
+export { answerKeys, sendAnswerKeys }
 
 /* ------------------------------------------------------------------ the card */
 

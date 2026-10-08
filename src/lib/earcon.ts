@@ -170,3 +170,28 @@ export function earconTaskDone(): void {
 export function earconTaskAttention(): void {
   pair(TASK_HIGH, TASK_LOW)
 }
+
+/* ------------------------------------------------------------- the mini bar
+ *
+ * An agent's news while Forge is minimised (docs/MINI-BAR.md, 4.9): one note
+ * when an agent is done, two quick taps on one note when it is asking. Not a
+ * pair that rises or falls, so neither is mistaken for the dictation pair or a
+ * session ending — and never sound alone: the toast says it in words.
+ */
+
+/** G6, alone: "that one finished". */
+export function earconAgentDone(): void {
+  const ctx = audio()
+  if (!ctx) return
+  note(ctx, TASK_HIGH, ctx.currentTime, (EARCON_MS * 1.4) / 1000, PEAK)
+}
+
+/** E6 twice, a knock: "one of them wants you". */
+export function earconAgentAsking(): void {
+  const ctx = audio()
+  if (!ctx) return
+  const now = ctx.currentTime
+  const tap = EARCON_MS / 1000
+  note(ctx, 1318.5, now, tap, PEAK)
+  note(ctx, 1318.5, now + tap * 1.3, tap, PEAK)
+}
