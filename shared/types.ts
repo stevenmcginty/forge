@@ -902,6 +902,11 @@ export interface Shot {
   height: number
   /** PNG data URL, scaled to fit the tray (and a hover preview). */
   thumb: string
+  /**
+   * Already popped on the desktop (electron/shot-card-window.ts) while Forge
+   * was minimised, so the big window's ShotPop does not pop it again.
+   */
+  shownOnDesktop?: boolean
 }
 
 /* ---------------------------------------------------------------- settings */
@@ -1994,6 +1999,32 @@ export interface Settings {
    * halfway through, a shell with unsaved work, an agent that is not Claude.
    */
   confirmOnQuit: boolean
+
+  /* ---------------------------------------------------------- mini bar
+   *
+   * The floating bar shown while the main window is minimised, and the shot
+   * card that pops on the desktop. Mirrors MiniBarSettings in shared/minibar.ts
+   * (spelled out here so this file stays dependency-free).
+   */
+
+  /** Show the mini bar while Forge is minimised. */
+  miniBar: boolean
+  /** The Dictate and Listen keys work in any app while Forge is minimised. */
+  miniGlobalKeys: boolean
+  /** New screen captures pop a card on the desktop while Forge is minimised. */
+  shotsOnDesktop: boolean
+  /** Speak updates when agents finish or ask. */
+  miniSpeakUpdates: boolean
+  /** Chime when agents finish or ask. */
+  miniChime: boolean
+  /**
+   * Where the mini bar was last put, per display id: its left edge, its
+   * *bottom* edge (the bar grows upward, so the bottom is what stays put) and
+   * its width.
+   */
+  miniBarBounds?: Record<string, { x: number; y: number; width: number }>
+  /** The bar is tucked into its pill. */
+  miniBarTucked?: boolean
 
   /* ------------------------------------------------- forge companion (M9)
    *

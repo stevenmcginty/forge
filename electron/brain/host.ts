@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
@@ -25,7 +25,6 @@ import type { ChatUpdate } from '@shared/chat'
 import type { PaneLeaf, Workspace } from '@shared/types'
 import { makeId } from '@shared/ids'
 import { newSessionId } from '@shared/session'
-import { findLeaf } from '@shared/splitTree'
 import { stripAnsi } from '@shared/ansi'
 import { onAttention, type AttentionEvent } from '../attention-bus'
 import { addPtySink, createPaneSession, getManager, killPane, liveSessions } from '../pty-host'
@@ -44,7 +43,6 @@ import {
   askingNote,
   claudeMcpConfig,
   isQuietReply,
-  paneWords,
   prepareBrainHome,
   statusLineFrom,
   stopIsNews,
@@ -54,6 +52,7 @@ import {
   type BrainMcpServer
 } from './home'
 import { claudeBrainCommand, setBrainLaunch, type BrainLaunch } from './launch'
+import { paneTranscript, paneWords, readTail, type PanePlace } from '../pane-reply'
 
 /**
  * Forge Brain, the main-process half: one CLI agent for the whole app, in a
@@ -247,9 +246,6 @@ interface PaneRun {
   busy: boolean
 }
 
-/** How much of a pane's transcript end a stop note is written from. */
-const PANE_TAIL_BYTES = 512 * 1024
-
 let running: Running | null = null
 let state: BrainState = 'off'
 let lastError: string | null = null
@@ -315,6 +311,14 @@ export function unavailableEngines(): Partial<Record<BrainEngine, string>> {
 }
 
 /* ---------------------------------------------------------------- status */
+
+/**
+ * The panes the brain opened, for the mini bar's announcer: it leaves their
+ * news to the brain rather than saying it twice. Empty while the brain is off.
+ */
+export function brainOpenedPanes(): string[] {
+  return state === 'off' ? [] : [...opened]
+}
 
 export function brainStatus(): BrainStatus {
   const settings = getSettings()
@@ -1264,36 +1268,9 @@ function forgetStops(): void {
   stops.clear()
 }
 
-/** A Claude pane's transcript, from the saved layout that holds the pane: the project's folder and the leaf's session. */
-function paneTranscript(paneId: string): string | null {
-  for (const project of getProjects()) {
-    for (const tab of getWorkspace(project.id)?.tabs ?? []) {
-      const leaf = findLeaf(tab.root, paneId)
-      if (!leaf) continue
-      if (!leaf.sessionId) return null
-      const file = transcriptPath(project.path, leaf.sessionId)
-      return existsSync(file) ? file : null
-    }
-  }
-  return null
-}
-
-/** The last `bytes` of a file as text, or '' when it cannot be read. */
-function readTail(file: string, bytes: number): string {
-  try {
-    const fd = openSync(file, 'r')
-    try {
-      const size = fstatSync(fd).size
-      const length = Math.min(size, bytes)
-      const chunk = Buffer.alloc(length)
-      readSync(fd, chunk, 0, length, size - length)
-      return chunk.toString('utf8')
-    } finally {
-      closeSync(fd)
-    }
-  } catch {
-    return ''
-  }
+/** Where a stopped pane's transcript is looked for: every project's folder and saved layout, in turn. */
+function* panePlaces(): Generator<PanePlace> {
+  for (const project of getProjects()) yield { path: project.path, workspace: getWorkspace(project.id) }
 }
 
 /**
@@ -1314,8 +1291,11 @@ function weighStopLater(paneId: string): void {
       const workedMs = run ? run.endedAt - run.startedAt : null
       if (!stopIsNews(workedMs, run?.busy === true)) return
       if ((!running && !freshStarting) || !opened.has(paneId) || !noteOnce(paneId, 'done')) return
-      const file = paneTranscript(paneId)
-      addNote(stopNote(paneLabel(paneId), workedMs, file ? paneWords(readTail(file, PANE_TAIL_BYTES)) : null))
+      const label = paneLabel(paneId)
+      void (async () => {
+        const file = await paneTranscript(paneId, panePlaces())
+        addNote(stopNote(label, workedMs, file ? paneWords(await readTail(file)) : null))
+      })()
     }, STOP_SETTLE_MS)
   )
 }

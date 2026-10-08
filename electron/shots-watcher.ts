@@ -3,6 +3,8 @@ import { IPC } from '@shared/ipc'
 import type { Settings, Shot } from '@shared/types'
 import { contentHash, ShotShelf, type ShotRecord } from './shots/shelf'
 import { getSettings, getShotsDir } from './store'
+import { isMainMinimised } from './minibar-window'
+import { showShotCard } from './shot-card-window'
 
 /**
  * The screenshot tray's engine: poll the clipboard, keep every new image as a
@@ -26,6 +28,11 @@ let timer: NodeJS.Timeout | null = null
 let enabled = true
 /** path -> PNG data URL. Decoding 12 shots on every broadcast would be silly. */
 const thumbCache = new Map<string, Shot>()
+/**
+ * Ids of shots that already popped on the desktop (the shot card, while Forge
+ * was minimised), so the big window's ShotPop does not pop them again.
+ */
+const shownOnDesktop = new Set<string>()
 
 /* --------------------------------------------------------------- helpers */
 
@@ -90,7 +97,31 @@ function shots(): Shot[] {
   for (const path of thumbCache.keys()) {
     if (!live.has(path)) thumbCache.delete(path)
   }
-  return list.map(toShot)
+  const ids = new Set(list.map((r) => r.id))
+  for (const id of shownOnDesktop) {
+    if (!ids.has(id)) shownOnDesktop.delete(id)
+  }
+  return list.map((record) => withDesktopMark(toShot(record)))
+}
+
+/** The cached shot plus its desktop mark; a copy, so the cache stays unmarked. */
+function withDesktopMark(shot: Shot): Shot {
+  return shownOnDesktop.has(shot.id) ? { ...shot, shownOnDesktop: true } : shot
+}
+
+/**
+ * A new shot landed. While Forge is minimised (and the setting is on) it pops
+ * on the desktop instead, and is marked so the big window does not pop it too.
+ * Called before the broadcast, so the mark travels with it.
+ */
+function popOnDesktop(record: ShotRecord): void {
+  if (!isMainMinimised() || !getSettings().shotsOnDesktop) return
+  shownOnDesktop.add(record.id)
+  try {
+    showShotCard(withDesktopMark(toShot(record)))
+  } catch (err) {
+    console.error('[shots] could not pop the shot on the desktop:', err)
+  }
 }
 
 function broadcast(): Shot[] {
@@ -149,6 +180,7 @@ function pollOnce(): void {
     return
   }
   console.log(`[shots] caught ${result.record.name} (${img.getSize().width}x${img.getSize().height})`)
+  popOnDesktop(result.record)
   broadcast()
 }
 
@@ -248,7 +280,11 @@ export function adoptShotFiles(paths: readonly string[]): number {
   for (const p of paths) {
     if (typeof p !== 'string') continue
     if (shelf.owns(p)) continue // already ours — dragging within the tray
-    if (shelf.pinFile(p, hashOfFile).ok) adopted += 1
+    const result = shelf.pinFile(p, hashOfFile)
+    if (!result.ok) continue
+    adopted += 1
+    // A phone's image (electron/companion-host.ts) pops on the desktop too.
+    popOnDesktop(result.record)
   }
   if (adopted > 0) broadcast()
   return adopted
@@ -271,5 +307,6 @@ export function disposeShotsWatcher(): void {
   if (timer) clearInterval(timer)
   timer = null
   thumbCache.clear()
+  shownOnDesktop.clear()
   shelf = null
 }

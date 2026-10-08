@@ -57,6 +57,8 @@ import { disposeSttSidecar, registerSttHandlers, scheduleWarmStart, setSttTarget
 import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './stt-model'
 import { registerAgentProbeHandlers } from './agent-probe'
 import { disposeOverlay, registerOverlayIpc, setOverlayHost } from './overlay-window'
+import { disposeMiniBar, hideMiniBar, registerMiniBarIpc, setMiniBarHost, showMiniBar } from './minibar-window'
+import { disposeShotCard, registerShotCardIpc } from './shot-card-window'
 import { registerVoiceHandlers } from './voice-bridge'
 import {
   disposeVoiceAgent,
@@ -444,6 +446,17 @@ function createWindow(): void {
   mainWindow.on('restore', syncPresence)
   mainWindow.on('hide', syncPresence)
   mainWindow.on('show', syncPresence)
+  // The mini bar (electron/minibar-window.ts): up while the window is
+  // minimised, by any route; gone the moment it is back. `showMiniBar` itself
+  // refuses while quitting or with the setting off. The isMinimized guard is
+  // because Windows can hand a minimised window a stray focus.
+  mainWindow.on('minimize', showMiniBar)
+  const backFromMinimised = (): void => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) hideMiniBar()
+  }
+  mainWindow.on('restore', backFromMinimised)
+  mainWindow.on('show', backFromMinimised)
+  mainWindow.on('focus', backFromMinimised)
 
   mainWindow.on('close', (event) => {
     if (boundsTimer) clearTimeout(boundsTimer)
@@ -506,6 +519,8 @@ function createWindow(): void {
     // no longer exists would be a dead button floating over every other app,
     // and — because it is skipTaskbar — one with no obvious way to close it.
     setOverlayHost(null)
+    // And the mini bar, for the same reason.
+    setMiniBarHost(null)
     syncPresence()
   })
 
@@ -562,6 +577,8 @@ function createWindow(): void {
   // The main window is the overlay's *host*: it holds the one voice agent, so
   // it is the end the relay pushes state from and delivers callbacks to.
   setOverlayHost(mainWindow)
+  // And the mini bar's: the host publishes its state and runs its calls.
+  setMiniBarHost(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
@@ -883,7 +900,11 @@ const MAIN_OWNED_SETTINGS = [
   // Forge Web's brain ops (electron/brain/ipc.ts), which also start and stop
   // the pane. A stale renderer copy posted back must not turn it off.
   'brainEnabled',
-  'brainEngine'
+  'brainEngine',
+  // Written by electron/minibar-window.ts when Steve drags the mini bar, which
+  // happens while the main window is minimised; the renderer's whole-object
+  // save would otherwise put its older copy back.
+  'miniBarBounds'
 ] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {
@@ -1618,6 +1639,10 @@ void app
       // Only the relay is registered here. No overlay window exists until the hub
       // is actually undocked — see electron/overlay-window.ts.
       registerOverlayIpc()
+      // The mini bar's and the desktop shot card's relays. Their windows are
+      // made on the first minimise and the first shot while minimised.
+      registerMiniBarIpc({ openMainWindow })
+      registerShotCardIpc()
     } catch (err) {
       reportStartupFailure('Part of Forge failed to start, so some of it will not work', err)
     }
@@ -1724,4 +1749,6 @@ app.on('before-quit', () => {
   // Last, and unconditional: an always-on-top window that outlived the app
   // would sit over everything with nothing behind it to close it.
   safely('disposeOverlay', disposeOverlay)
+  safely('disposeMiniBar', disposeMiniBar)
+  safely('disposeShotCard', disposeShotCard)
 })

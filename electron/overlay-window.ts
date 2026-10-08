@@ -83,8 +83,11 @@ function toOverlay(channel: string, payload: unknown): void {
  * `getDisplayMatching` rather than `getPrimaryDisplay` is what makes the
  * overlay a multi-monitor citizen — dropped on the second screen it is clamped
  * to the second screen, which is where Chrome usually is.
+ *
+ * Exported for the mini bar (electron/minibar-window.ts), which floats by the
+ * same rules.
  */
-function clampToScreen(bounds: OverlayBounds): Electron.Rectangle {
+export function clampToScreen(bounds: OverlayBounds): Electron.Rectangle {
   const width = Math.max(1, Math.round(bounds.width))
   const height = Math.max(1, Math.round(bounds.height))
   const wanted = { x: Math.round(bounds.x), y: Math.round(bounds.y), width, height }

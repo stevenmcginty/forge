@@ -354,6 +354,13 @@ function defaultSettings(): Settings {
     resumeSessions: true,
     // …and the backstop for everything resuming cannot bring back.
     confirmOnQuit: true,
+    // The mini bar and the desktop shot card: on, because minimising is how
+    // Steve steps away from Forge without leaving it. See docs/MINI-BAR.md.
+    miniBar: true,
+    miniGlobalKeys: true,
+    shotsOnDesktop: true,
+    miniSpeakUpdates: true,
+    miniChime: true,
     // The phone link (M9) is off, unconfigured and credential-less out of the
     // box. Nothing in electron/companion-sync.ts runs until all three change.
     companionEnabled: false,
@@ -945,6 +952,15 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // same reasoning as voiceEarcons above.
     resumeSessions: s.resumeSessions === undefined ? DEFAULT_SETTINGS.resumeSessions : Boolean(s.resumeSessions),
     confirmOnQuit: s.confirmOnQuit === undefined ? DEFAULT_SETTINGS.confirmOnQuit : Boolean(s.confirmOnQuit),
+    // The mini bar's switches: undefined is a settings.json written before it
+    // existed, and the answer for that file is the default (on).
+    miniBar: s.miniBar === undefined ? DEFAULT_SETTINGS.miniBar : Boolean(s.miniBar),
+    miniGlobalKeys: s.miniGlobalKeys === undefined ? DEFAULT_SETTINGS.miniGlobalKeys : Boolean(s.miniGlobalKeys),
+    shotsOnDesktop: s.shotsOnDesktop === undefined ? DEFAULT_SETTINGS.shotsOnDesktop : Boolean(s.shotsOnDesktop),
+    miniSpeakUpdates: s.miniSpeakUpdates === undefined ? DEFAULT_SETTINGS.miniSpeakUpdates : Boolean(s.miniSpeakUpdates),
+    miniChime: s.miniChime === undefined ? DEFAULT_SETTINGS.miniChime : Boolean(s.miniChime),
+    miniBarBounds: normaliseMiniBarBounds(s.miniBarBounds),
+    miniBarTucked: s.miniBarTucked === true,
     // Companion (M9). Trimmed, because every one of these is pasted by hand out
     // of the Firebase console and a trailing space in a URL is a mystery bug.
     // `enabled` is coerced rather than defaulted: a settings.json written before
@@ -1186,6 +1202,26 @@ function normaliseRailHeights(raw: unknown): Partial<Record<RailSectionId, numbe
     const n = Number(value)
     if (!Number.isFinite(n) || n <= 0) continue
     out[key] = Math.round(clamp(n, RAIL_SECTION_MIN_H, RAIL_SECTION_MAX_H))
+  }
+  return out
+}
+
+/**
+ * The mini bar's place per display id, made safe off disk. Only whole numbers
+ * survive, and only a sane width: electron/minibar-window.ts re-clamps every
+ * entry to the display it lands on anyway, so this only keeps junk out.
+ */
+function normaliseMiniBarBounds(raw: unknown): Record<string, { x: number; y: number; width: number }> {
+  const out: Record<string, { x: number; y: number; width: number }> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>).slice(0, 32)) {
+    if (!/^\d{1,20}$/.test(key) || !value || typeof value !== 'object') continue
+    const { x, y, width } = value as Record<string, unknown>
+    const nx = Number(x)
+    const ny = Number(y)
+    const nw = Number(width)
+    if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(nw) || nw <= 0) continue
+    out[key] = { x: Math.round(nx), y: Math.round(ny), width: Math.round(clamp(nw, 120, 10000)) }
   }
   return out
 }

@@ -15,6 +15,7 @@ import {
   answerConfirm,
   applyBrainSettings,
   askBrain,
+  brainOpenedPanes,
   brainStatus,
   disposeBrain,
   freshStartBrain,
@@ -89,6 +90,7 @@ export function registerBrainHandlers(): void {
     answerConfirm({ id: String(answer?.id ?? ''), allow: answer?.allow === true })
   )
   ipcMain.handle(IPC.brainFreshStart, (): Promise<BrainFreshStartResult> => freshStartBrain())
+  ipcMain.handle(IPC.brainOpenedPanes, (): string[] => brainOpenedPanes())
   ipcMain.handle(IPC.brainTranscriptWatch, (): boolean => watchBrainTranscript(toRenderer))
   ipcMain.handle(IPC.brainTranscriptStop, (): void => stopBrainTranscript())
   unsubscribe ??= onBrainStatus((status) => send(IPC.brainState, status))

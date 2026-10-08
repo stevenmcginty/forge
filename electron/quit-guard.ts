@@ -44,6 +44,24 @@ export function shouldConfirmClose(): boolean {
   return liveSessions().length > 0
 }
 
+/**
+ * What the dialog below would say, as numbers: for the mini bar, whose quit
+ * confirm is a row inside the bar rather than a native dialog (a dialog
+ * parented to a minimised window can open where nobody sees it). Same data as
+ * the dialog — `liveSessions()` split by whether each pane resumes — and the
+ * same rule for whether to ask at all.
+ */
+export function quitSummary(): { confirm: boolean; running: number; resume: number; lost: number } {
+  const live = liveSessions()
+  const resume = live.filter((s) => s.resumes).length
+  return {
+    confirm: getSettings().confirmOnQuit && live.length > 0,
+    running: live.length,
+    resume,
+    lost: live.length - resume
+  }
+}
+
 /** Up to `max` pane names, then a count — a dialog is not a list view. */
 function nameList(items: LiveSession[], max = 4): string {
   // The same "<project> — <pane>" label the phone shows for a remote session:

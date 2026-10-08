@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MAIN_AGENT_RULES } from '@shared/brain-persona'
+import type { PaneWords } from '../pane-reply'
 
 /**
  * Forge Brain's home: the folder its CLI runs in, and everything that folder
@@ -278,59 +279,10 @@ function oneLine(text: string, max: number): string {
   return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
 }
 
-/** What a Claude pane's transcript says about its stop. */
-export interface PaneWords {
-  /** Its last reply's text, or ''. */
-  lastWords: string
-  /** Background agents it started that have not reported back. */
-  agents: number
-}
-
-/**
- * A Claude pane's last words and its background agents still out, from the end
- * of its transcript (`body`: the tail, whose first line may be cut in half).
- * An agent started in the background is a tool result marked
- * `async_launched`; it is over once a `<task-notification>` names its id
- * (record shapes read from Claude Code 2.1.287 transcripts).
- */
-export function paneWords(body: string): PaneWords {
-  let lastWords = ''
-  const launched = new Set<string>()
-  const over = new Set<string>()
-  for (const line of body.split('\n')) {
-    let record: {
-      type?: unknown
-      isSidechain?: unknown
-      message?: { content?: unknown }
-      toolUseResult?: { status?: unknown; agentId?: unknown }
-    } | null
-    try {
-      record = JSON.parse(line)
-    } catch {
-      continue
-    }
-    if (!record || typeof record !== 'object' || record.isSidechain === true) continue
-    const content = record.message?.content
-    if (record.type === 'assistant') {
-      const blocks = Array.isArray(content) ? (content as Array<{ type?: unknown; text?: unknown }>) : []
-      const text = blocks
-        .filter((b) => b?.type === 'text' && typeof b.text === 'string')
-        .map((b) => String(b.text).trim())
-        .filter(Boolean)
-        .join(' ')
-      if (text) lastWords = text
-      continue
-    }
-    if (record.type !== 'user') continue
-    const launch = record.toolUseResult
-    if (launch?.status === 'async_launched' && typeof launch.agentId === 'string') launched.add(launch.agentId)
-    if (typeof content === 'string' && content.startsWith('<task-notification>')) {
-      const id = /<task-id>([^<]+)<\/task-id>/.exec(content)?.[1]
-      if (id) over.add(id)
-    }
-  }
-  return { lastWords, agents: [...launched].filter((id) => !over.has(id)).length }
-}
+// A Claude pane's last words: in ../pane-reply.ts since the mini bar's Peek
+// reads them too. Re-exported, so the brain's notes and checks keep one name.
+export { paneWords } from '../pane-reply'
+export type { PaneWords } from '../pane-reply'
 
 /** 'Pax in forge stopped after 4 min. It said: "…" 2 background agents still running.' */
 export function stopNote(label: string, workedMs: number | null, pane: PaneWords | null = null): string {

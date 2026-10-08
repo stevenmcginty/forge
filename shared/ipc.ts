@@ -280,6 +280,8 @@ export const IPC = {
   brainSays: BRAIN_IPC.says,
   brainAsk: BRAIN_IPC.ask,
   brainFreshStart: BRAIN_IPC.freshStart,
+  /** R→M invoke. The pane ids the brain opened; [] when it is off. For the mini bar's announcer. */
+  brainOpenedPanes: 'brain:openedPanes',
 
   // per-project agent memory (M7) — one markdown file per project, read into
   // the brain's system text and written back after every exchange.
@@ -915,6 +917,47 @@ export const IPC = {
   overlayLevel: 'overlay:level',
   /** A callback invoked on the overlay, run against the real engine on the host. */
   overlayCall: 'overlay:call',
+
+  /* ---------------------------------------------------------------- mini bar
+   *
+   * The floating bar shown while the main window is minimised, and the shot
+   * card that pops on the desktop. The same shape as the overlay: the main
+   * window's renderer is the host and the only writer of MiniBarState; the
+   * #minibar and #shotcard windows are views; main is the wire in between
+   * (electron/minibar-window.ts, electron/shot-card-window.ts). Payload types
+   * are in shared/minibar.ts. See docs/MINI-BAR.md, section 5.3.
+   */
+  /** Main → host: the bar is up (`{ on: true }`) or gone. Re-sent on the host's every load. */
+  minibarMode: 'minibar:mode',
+  /** Host → main: the whole MiniBarState. Main caches the last one for a freshly loaded view. */
+  minibarPublish: 'minibar:publish',
+  /** Main → view: the cached MiniBarState. */
+  minibarState: 'minibar:state',
+  /** View → main → host: a MiniBarCall. The shot card's picture click arrives here too. */
+  minibarCall: 'minibar:call',
+  /** View → main: `{ height, width? }`; the bottom edge stays put. */
+  minibarResize: 'minibar:resize',
+  /** View → main, invoke, (maximised?: boolean): restore Forge. */
+  minibarOpenMain: 'minibar:openMain',
+  /** View → main, invoke: MiniBarQuitInfo for the inline confirm. */
+  minibarQuitInfo: 'minibar:quitInfo',
+  /** View → main, invoke, ({ dontAskAgain? }): quit Forge, exactly like the main window's X. */
+  minibarQuit: 'minibar:quit',
+  /** View → main, invoke: a file picker parented to the bar. Returns the picked paths. */
+  minibarPickFiles: 'minibar:pickFiles',
+  /** Main → host: a RemoteKey (talk keys and summon from the global hook). */
+  keysRemote: 'keys:remote',
+  /** Main → shot card: `{ shot: Shot }`. */
+  shotcardShow: 'shotcard:show',
+  /** Shot card → main: the card has faded out; hide the window. */
+  shotcardDone: 'shotcard:done',
+  /** Shot card → main: the picture was clicked; relayed to the host as `{ t: 'paths' }`. */
+  shotcardToMiniBar: 'shotcard:toMiniBar',
+  /**
+   * Host → main, invoke, (paneId): a Claude pane's last reply from its session
+   * JSONL, `{ text, at } | null` (null for other panes or no transcript yet).
+   */
+  panesLastReply: 'panes:lastReply',
 
   // chat tabs: a chatbot website in a pane (electron/chat-panes/)
   /** Renderer → main, one-way: make (or keep) the page for a chat leaf. */

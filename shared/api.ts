@@ -135,6 +135,7 @@ import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
 import type { ChatBotId } from './chatbots'
 import type { BrainTestResult, BrainTestTarget } from './agent-brain'
+import type { MiniBarHostApi, MiniBarViewApi, ShotCardApi } from './minibar'
 import type {
   RealtimeGeminiTokenResult,
   RealtimeOpenAIConnectRequest,
@@ -527,6 +528,12 @@ export interface ForgeApi {
      * conversation that reads it first. Optional on top of `brain?`, like `ask`.
      */
     freshStart?(): Promise<BrainFreshStartResult>
+    /**
+     * The pane ids the brain opened ([] when it is off), so the mini bar's
+     * announcer does not tell Steve what the brain is about to tell him.
+     * Optional on top of `brain?`, like `ask`.
+     */
+    openedPanes?(): Promise<string[]>
   }
 
   /**
@@ -1396,6 +1403,29 @@ export interface ForgeApi {
     onLevel(cb: (level: number) => void): () => void
     /** Ask the host to run something on the real engine. Fire and forget. */
     call(message: unknown): void
+  }
+
+  /**
+   * The mini bar: a floating bar shown while the main window is minimised. A
+   * relay like `overlay` (electron/minibar-window.ts): `minibar` is the view's
+   * half, used in the #minibar window; `minibarHost` is the host's half, used
+   * in the main window, which is the only writer of MiniBarState. Shapes in
+   * shared/minibar.ts. All three are optional because the desktop hot-reloads
+   * the renderer but not the preload: call them as `window.forge.minibar?.…`.
+   */
+  minibar?: MiniBarViewApi
+  minibarHost?: MiniBarHostApi
+  /** The desktop shot card, in the #shotcard window (electron/shot-card-window.ts). */
+  shotCard?: ShotCardApi
+
+  /** Panes, from the main process's side. Optional, like `minibar`. */
+  panes?: {
+    /**
+     * A Claude pane's last reply (Markdown) from its session JSONL, and when
+     * the transcript was last written. Null for any other pane, or when there
+     * is no reply yet.
+     */
+    lastReply(paneId: string): Promise<{ text: string; at: number } | null>
   }
 
   /**

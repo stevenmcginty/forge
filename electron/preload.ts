@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AGENT_BRAIN_TEST_CHANNEL } from '@shared/agent-brain'
 import type { ForgeApi } from '@shared/api'
+import type { Shot } from '@shared/types'
+import type { MiniBarState } from '@shared/minibar'
 import { hubPreloadApi } from './hub-preload'
 import { browserApi } from './browser-panes/preload-api'
 
@@ -27,6 +29,28 @@ function subscribe2<A, B>(channel: string, cb: (a: A, b: B) => void): () => void
   return () => {
     ipcRenderer.removeListener(channel, listener)
   }
+}
+
+/**
+ * The mini bar's and the shot card's pushes, held from the moment this preload
+ * runs. Main sends the cached state (and the first shot) when the page has
+ * loaded, which can be before the React tree has subscribed; without this the
+ * view would sit blank until the host's next publish. Only in those windows.
+ */
+let miniBarLast: MiniBarState | null = null
+const shotsEarly: Shot[] = []
+let shotSubscribers = 0
+if (location.hash === '#minibar') {
+  ipcRenderer.on(IPC.minibarState, (_e, state: MiniBarState) => {
+    miniBarLast = state
+  })
+}
+if (location.hash === '#shotcard') {
+  ipcRenderer.on(IPC.shotcardShow, (_e, payload: { shot: Shot }) => {
+    if (shotSubscribers > 0) return
+    shotsEarly.push(payload.shot)
+    if (shotsEarly.length > 3) shotsEarly.shift()
+  })
 }
 
 const api: ForgeApi = {
@@ -158,7 +182,8 @@ const api: ForgeApi = {
     onTranscript: (cb) => subscribe(IPC.brainTranscript, cb),
     onSays: (cb) => subscribe(IPC.brainSays, cb),
     ask: (text, timeoutMs) => ipcRenderer.invoke(IPC.brainAsk, String(text ?? ''), timeoutMs),
-    freshStart: () => ipcRenderer.invoke(IPC.brainFreshStart)
+    freshStart: () => ipcRenderer.invoke(IPC.brainFreshStart),
+    openedPanes: () => ipcRenderer.invoke(IPC.brainOpenedPanes)
   },
 
   memory: {
@@ -459,6 +484,52 @@ const api: ForgeApi = {
     onState: (cb) => subscribe(IPC.overlayState, cb),
     onLevel: (cb) => subscribe(IPC.overlayLevel, cb),
     call: (message) => ipcRenderer.send(IPC.overlayCall, message)
+  },
+
+  /**
+   * The mini bar, both halves — a relay like the overlay's; see
+   * electron/minibar-window.ts. `isMiniBar` and `isShotCard` are read off the
+   * URL for the same reason `isOverlay` is: src/main.tsx picks its tree before
+   * it can await anything.
+   */
+  minibar: {
+    isMiniBar: () => location.hash === '#minibar',
+    onState: (cb) => {
+      if (miniBarLast) cb(miniBarLast)
+      return subscribe(IPC.minibarState, cb)
+    },
+    call: (c) => ipcRenderer.send(IPC.minibarCall, c),
+    resize: (size) => ipcRenderer.send(IPC.minibarResize, size),
+    openMain: (maximised) => ipcRenderer.invoke(IPC.minibarOpenMain, maximised === true),
+    quitInfo: () => ipcRenderer.invoke(IPC.minibarQuitInfo),
+    quit: (opts) => ipcRenderer.invoke(IPC.minibarQuit, { dontAskAgain: opts?.dontAskAgain === true }),
+    pickFiles: () => ipcRenderer.invoke(IPC.minibarPickFiles)
+  },
+
+  minibarHost: {
+    publish: (state) => ipcRenderer.send(IPC.minibarPublish, state),
+    onMode: (cb) => subscribe(IPC.minibarMode, cb),
+    onCall: (cb) => subscribe(IPC.minibarCall, cb),
+    onRemoteKey: (cb) => subscribe(IPC.keysRemote, cb)
+  },
+
+  shotCard: {
+    isShotCard: () => location.hash === '#shotcard',
+    onShow: (cb) => {
+      shotSubscribers += 1
+      for (const shot of shotsEarly.splice(0)) cb(shot)
+      const off = subscribe<{ shot: Shot }>(IPC.shotcardShow, (p) => cb(p.shot))
+      return () => {
+        shotSubscribers -= 1
+        off()
+      }
+    },
+    done: () => ipcRenderer.send(IPC.shotcardDone),
+    toMiniBar: (paths) => ipcRenderer.send(IPC.shotcardToMiniBar, paths)
+  },
+
+  panes: {
+    lastReply: (paneId) => ipcRenderer.invoke(IPC.panesLastReply, String(paneId ?? ''))
   },
 
   // The chat relay banner. Invokes only: every button waits for main's answer,
