@@ -97,6 +97,11 @@ export function useSurfaces(): CanvasSurface[] {
   return useSyncExternalStore(surfaces.subscribe, surfaces.get)
 }
 
+/** The registered surfaces right now, outside React (src/lib/showView.ts). */
+export function surfacesNow(): CanvasSurface[] {
+  return surfaces.get()
+}
+
 /**
  * The registered surface on screen, or null for the built-in modes (which live
  * in app state: agents, tasks, devices). Written only by the shell's

@@ -3,11 +3,12 @@ import type { VoiceAgentToolDeps } from '../agenttools'
 import { listTerminals } from '@shared/terminal-names'
 import { resolveNavTarget, type NavPane } from '../hubnav'
 import { getHubRuntime } from '../hubRuntime'
+import { runShowView } from '../showView'
 import type { RealtimeToolAnswer } from './session'
 
 /**
  * The main agent's tools, answered — open_agent_pane, type_into_pane,
- * help_prompt, read_pane. The specs are shared/brain-tools.ts; this is the one
+ * help_prompt, read_pane, show_view (../showView.ts). The specs are shared/brain-tools.ts; this is the one
  * implementation every brain reaches: realtime brains through
  * `runRealtimeTool`, the Claude session (and B8's CLI brains) through the
  * renderer bridge in ../agenttools.ts, pane agents through main's bridge link.
@@ -117,6 +118,12 @@ export async function runMainAgentTool(
         if (!found.ok && /more than one/.test(found.text)) return { ok: false, text: found.text }
         const text = await deps.readPane(target, Number(args['lines'] ?? 40))
         return { ok: !text.startsWith('FAILED'), text }
+      }
+
+      case 'show_view': {
+        // The same runner as Steve's key, so every way in says the same words.
+        const shown = await runShowView({ view: args['view'], tab: args['tab'] })
+        return { ok: shown.ok, text: `${shown.ok ? 'OK' : 'FAILED'}: ${shown.text}` }
       }
     }
   } catch (err) {

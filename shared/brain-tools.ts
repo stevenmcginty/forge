@@ -16,7 +16,7 @@
  * set; together they are what "the same tools on every brain" means.
  */
 
-export const MAIN_AGENT_TOOL_NAMES = ['open_agent_pane', 'type_into_pane', 'help_prompt', 'read_pane'] as const
+export const MAIN_AGENT_TOOL_NAMES = ['open_agent_pane', 'type_into_pane', 'help_prompt', 'read_pane', 'show_view'] as const
 
 export type MainAgentToolName = (typeof MAIN_AGENT_TOOL_NAMES)[number]
 
@@ -38,6 +38,10 @@ export interface BrainToolSpec {
 
 /** The refusal every launch guard and persona uses, word for word. */
 export const USE_OPEN_AGENT_PANE = 'Use open_agent_pane — agents open inside Forge.'
+
+/** show_view's description — word for word in bridge/forge-app-tools.mjs too (scripts/show-view-check.mjs holds them together). */
+export const SHOW_VIEW_DESCRIPTION =
+  'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. Use only when Steve asks to see something; never on your own.'
 
 export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
   {
@@ -103,6 +107,20 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
         lines: { type: 'integer', description: 'How many lines, default 40, at most 200' }
       },
       required: ['target']
+    }
+  },
+  {
+    // The one tool that may change what Steve sees — only on his ask
+    // (src/lib/showView.ts). Short: it rides in the voice manifest every turn.
+    name: 'show_view',
+    description: SHOW_VIEW_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: {
+        view: { type: 'string', description: 'What to show', enum: ['agents', 'browser', 'board'] },
+        tab: { type: 'string', description: 'Optional: a browser tab id from browser_list or browser_open; shows that tab' }
+      },
+      required: ['view']
     }
   }
 ]

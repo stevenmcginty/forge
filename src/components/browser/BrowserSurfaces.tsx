@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { AgentProfile } from '@shared/types'
 import type { BrowserSurfaceInfo } from '@shared/browser'
 import { popIn } from '@/lib/motion'
 import { AgentBadge } from '../AgentBadge'
 import { Icon } from '../Icon'
 import { browserBridge } from './bridge'
+import { browserFront } from './browserFront'
 import { BrowserSurface, hostOf, ownerOf } from './BrowserSurface'
 import { useBrowserSurfaces } from './useBrowserSurfaces'
 import '../shell/deck-tokens.css'
@@ -72,6 +73,27 @@ export function BrowserSurfaces({
     }
     if (!current) setActiveId(tabs.length ? tabs[tabs.length - 1]!.id : null)
   }, [tabs, activeId])
+
+  // A tab asked for from outside (show_view) comes to the front once it is in
+  // the list — after the rule above, so it wins on the same pass. A stale ask
+  // is dropped; one for a tab not listed yet waits for the list.
+  const asked = useSyncExternalStore(browserFront.subscribe, browserFront.pending)
+  useEffect(() => {
+    if (!asked) return
+    if (browserFront.requested() !== asked) {
+      browserFront.settle(asked)
+      return
+    }
+    if (!tabs.some((t) => t.id === asked)) return
+    setActiveId(asked)
+    browserFront.settle(asked)
+  }, [asked, tabs])
+
+  // Which tab is in front, for show_view's answer. Nothing while the list is
+  // still loading, so a remount does not forget the last one.
+  useEffect(() => {
+    if (active) browserFront.publish(active.id)
+  }, [active])
 
   useEffect(() => {
     if (!fresh.length) return undefined

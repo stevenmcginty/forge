@@ -106,6 +106,7 @@
     "web:phone-six": "node scripts/web-phone-six-check.mjs",
     "ask-ledger:check": "node scripts/ask-ledger-check.mjs",
     "reader:check": "node scripts/reader-check.mjs",
+    "show-view:check": "node scripts/show-view-check.mjs",
     "web:check": "node scripts/web-check.mjs",
     "web:e2e": "node scripts/web-e2e.mjs",
     "web:offline": "node scripts/web-offline.mjs",

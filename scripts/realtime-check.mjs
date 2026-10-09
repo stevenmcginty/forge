@@ -229,6 +229,7 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
     'type_into_pane',
     'help_prompt',
     'read_pane',
+    'show_view',
     'focus_pane_by_name',
     'list_panes_with_names',
     'run_saved_prompt',

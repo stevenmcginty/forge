@@ -1,5 +1,6 @@
 /**
- * Forge's app, as MCP tools for pane agents: open_agent_pane and open_in_reader.
+ * Forge's app, as MCP tools for pane agents: open_agent_pane, open_in_reader
+ * and show_view (answered by the renderer, like open_agent_pane).
  *
  * A Claude or Codex pane asked to "spawn a new agent" used to Start-Process a
  * Windows Terminal outside Forge. This tool opens the agent INSIDE Forge
@@ -23,6 +24,11 @@ import { browserAsk } from './browser-tools.mjs'
 
 export const OPEN_AGENT_PANE_DESCRIPTION =
   'Open a new coding-agent pane INSIDE Forge — the only way to start an agent. agent is who, in words: "claude", "codex", "gemini", "antigravity", "glm", "kimi", "opencode", "qwen", "grok", or a plain "shell". prompt is typed into the new pane once the agent is up (sent only when submit is true). name is the new terminal’s name, shown on its tab; omit it for the next free name. Never start an agent CLI any other way — no run_command, no open_desktop_app, no new console or terminal window. The answer says which pane opened, or why none did.'
+
+// ⚠ DUPLICATED from shared/brain-tools.ts SHOW_VIEW_DESCRIPTION, like the one above;
+// scripts/show-view-check.mjs asserts they agree.
+export const SHOW_VIEW_DESCRIPTION =
+  'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. Use only when Steve asks to see something; never on your own.'
 
 export const APP_INSTRUCTION_LINE = 'To start another agent, call open_agent_pane — never launch a CLI in a new window.'
 
@@ -54,6 +60,18 @@ export const APP_TOOLS = [
         path: { type: 'string', description: 'The .md file: absolute, or relative to your project folder' }
       },
       required: ['path']
+    }
+  },
+  {
+    name: 'show_view',
+    description: SHOW_VIEW_DESCRIPTION,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        view: { type: 'string', description: 'What to show', enum: ['agents', 'browser', 'board'] },
+        tab: { type: 'string', description: 'Optional: a browser tab id from browser_list or browser_open; shows that tab' }
+      },
+      required: ['view']
     }
   }
 ]
@@ -92,4 +110,19 @@ async function openInReader(args) {
   return reply?.ok ? { content: [{ type: 'text', text }] } : fail(text)
 }
 
-export const APP_HANDLERS = { open_agent_pane: openAgentPane, open_in_reader: openInReader }
+/** show_view: answered by the renderer's one runner (src/lib/showView.ts), the same words every brain gets. */
+async function showView(args) {
+  const view = typeof args?.view === 'string' ? args.view : ''
+  const tab = typeof args?.tab === 'string' ? args.tab : undefined
+  let reply
+  try {
+    reply = await browserAsk('show_view', { view, ...(tab ? { tab } : {}) })
+  } catch (err) {
+    if (err?.link) return fail('Forge is not reachable from here (no FORGE_BROWSER_LINK_FILE, or Forge is not running), so nothing was switched.')
+    return fail(`Nothing was switched: ${err?.message ?? err}`)
+  }
+  const text = String(reply?.text ?? 'Forge sent an empty answer.')
+  return reply?.ok ? { content: [{ type: 'text', text }] } : fail(text)
+}
+
+export const APP_HANDLERS = { open_agent_pane: openAgentPane, open_in_reader: openInReader, show_view: showView }

@@ -453,7 +453,8 @@ const api: ForgeApi = {
     close: () => ipcRenderer.send(IPC.windowClose),
     onState: (cb) => subscribe(IPC.windowState, cb),
     setTitlebar: (color, symbolColor) => ipcRenderer.send(IPC.windowTitlebar, color, symbolColor),
-    restoreAndFocus: () => ipcRenderer.send(IPC.windowRestoreFocus)
+    restoreAndFocus: () => ipcRenderer.send(IPC.windowRestoreFocus),
+    revealIfAway: () => ipcRenderer.invoke(IPC.windowRevealIfAway)
   },
 
   /**

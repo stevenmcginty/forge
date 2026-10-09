@@ -1380,6 +1380,15 @@ function registerAppHandlers(): void {
     mainWindow.focus()
   })
 
+  // show_view: back on screen only if it was away. A window already up stays
+  // exactly as it is — no focus steal, no resize.
+  ipcMain.handle(IPC.windowRevealIfAway, (): boolean => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false
+    if (!mainWindow.isMinimized() && mainWindow.isVisible()) return false
+    openMainWindow()
+    return true
+  })
+
   ipcMain.on(IPC.windowTitlebar, (_e, color: string, symbolColor: string) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     const hex = /^#[0-9a-fA-F]{6}$/

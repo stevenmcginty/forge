@@ -1356,6 +1356,11 @@ export interface ForgeApi {
      * screen while the main window is minimised behind Chrome.
      */
     restoreAndFocus(): void
+    /**
+     * Un-minimise or show Forge only when it is minimised or hidden; true when
+     * it did. Never resizes. For show_view. Absent on an older preload.
+     */
+    revealIfAway?(): Promise<boolean>
   }
 
   /**

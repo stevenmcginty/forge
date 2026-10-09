@@ -159,6 +159,12 @@ export const IPC = {
    * like it did nothing at all.
    */
   windowRestoreFocus: 'window:restore-focus',
+  /**
+   * Bring the main window back only when it is minimised or hidden (the mini
+   * bar, the tray); answers whether it did. For show_view (src/lib/showView.ts):
+   * a view switch Steve asked for has to be on screen. Never resizes.
+   */
+  windowRevealIfAway: 'window:reveal-if-away',
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',
