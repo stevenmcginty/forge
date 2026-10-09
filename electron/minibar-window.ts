@@ -36,10 +36,12 @@ import { isQuitting } from './tray'
 const BAR_HEIGHT = 52
 /** Default gap between the bar and the bottom of the work area (the taskbar). */
 const BOTTOM_GAP = 12
-/** Default width: 70% of the work area, within the big bar's own cap and a floor. */
-const WIDTH_SHARE = 0.7
-const MAX_WIDTH = 1240
+/** Default width: 94% of the work area, within a cap and a floor (wide, so more fits). */
+const WIDTH_SHARE = 0.94
+const MAX_WIDTH = 2400
 const MIN_WIDTH = 640
+/** The cap before the bar went wide. Wider than this, a saved width can only be a drag. */
+const OLD_MAX_WIDTH = 1240
 /** clampToScreen's margin, on both sides: the widest a bar can be is the work area less this twice. */
 const EDGE = 8
 /** A drag or an end-resize is saved once it settles. */
@@ -148,12 +150,43 @@ function clampRect(rect: Electron.Rectangle): Electron.Rectangle {
   return clampToScreen({ x: rect.x, y: rect.y, width, height: tall })
 }
 
+function defaultWidth(area: Electron.Rectangle): number {
+  return Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, area.width * WIDTH_SHARE)))
+}
+
+/**
+ * Once only (`miniBarWidened`): the default went from 70% to 94%, and a width
+ * saved under the old default would hide the new one. A saved width narrower
+ * than its display's new default becomes that default, centred, with the same
+ * bottom edge. A display not plugged in now cannot be measured: its entry is
+ * dropped unless it is wider than the old cap. After this, a deliberate drag
+ * narrower is saved and kept like any other.
+ */
+function widenOnce(): void {
+  const s = getSettings()
+  if (s.miniBarWidened) return
+  const displays = screen.getAllDisplays()
+  const next: Record<string, { x: number; y: number; width: number }> = {}
+  for (const [id, b] of Object.entries(s.miniBarBounds ?? {})) {
+    const display = displays.find((d) => String(d.id) === id)
+    if (!display) {
+      if (b.width > OLD_MAX_WIDTH) next[id] = b
+      continue
+    }
+    const area = display.workArea
+    const width = defaultWidth(area)
+    next[id] = b.width < width ? { x: Math.round(area.x + (area.width - width) / 2), y: b.y, width } : b
+  }
+  setSettings({ miniBarBounds: next, miniBarWidened: true })
+}
+
 /**
  * Where the bar goes when it shows: where Steve last put it on the display
  * the main window is on, else bottom centre of that display's work area,
  * 12 px above the taskbar.
  */
 function homeRect(): Electron.Rectangle {
+  widenOnce()
   // getNormalBounds, not getBounds: a minimised window's bounds on Windows
   // are parked far off screen.
   const display = hostAlive() ? screen.getDisplayMatching(host!.getNormalBounds()) : screen.getPrimaryDisplay()
@@ -163,7 +196,7 @@ function homeRect(): Electron.Rectangle {
     // Saved by its bottom edge: the bar grows upward, so that is what stays put.
     return clampRect({ x: saved.x, y: saved.y - height, width: saved.width, height })
   }
-  const width = Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, area.width * WIDTH_SHARE)))
+  const width = defaultWidth(area)
   return clampRect({
     x: Math.round(area.x + (area.width - width) / 2),
     y: area.y + area.height - BOTTOM_GAP - height,

@@ -911,7 +911,10 @@ const MAIN_OWNED_SETTINGS = [
   // Written by electron/minibar-window.ts when Steve drags the mini bar, which
   // happens while the main window is minimised; the renderer's whole-object
   // save would otherwise put its older copy back.
-  'miniBarBounds'
+  'miniBarBounds',
+  // Written once by the same file (the wider default); a stale copy saying
+  // "not yet" would drop Steve's deliberate narrower width again.
+  'miniBarWidened'
 ] as const
 
 function rendererOwned(patch: Partial<Settings>): Partial<Settings> {

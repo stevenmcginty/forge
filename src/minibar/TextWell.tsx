@@ -4,7 +4,7 @@ import { CueGlyph } from '@/components/DictationCueView'
 import { Icon } from '@/components/Icon'
 import { flashBarSent } from './BarCues'
 import { agentById, targetName } from './format'
-import { ListenGlyph, StopSquare, TurnArc } from './glyphs'
+import { EyeGlyph, ListenGlyph, StopSquare, TurnArc } from './glyphs'
 
 /** The box grows as the big bar's does (Composer): one line, then a line at a time to five, then scrolls. */
 const MIN_BOX_H = 34
@@ -13,7 +13,8 @@ const DRAFT_DEBOUNCE_MS = 250
 
 /**
  * The words: a sunken well holding dictation's word, the text box, and the
- * keys that act on the words — attach, dictate, Listen, Send (or Stop).
+ * keys that act on the words — attach, Screen (a look at the screen goes
+ * with each send), dictate, Listen, Send (or Stop).
  *
  * The box is the view's own. It reports what it holds with `setDraft`
  * (debounced), and takes the host's draft only when the host changed it for
@@ -134,6 +135,19 @@ export function TextWell({
           }}
         >
           <Icon name="paperclip" size={15} />
+        </button>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={state.screen}
+          className="mb-ibtn mb-ibtn--sm mb-screen"
+          data-on={state.screen ? 'true' : undefined}
+          title={state.screen ? 'Screen: on — each send includes a look at your screen' : 'Screen: off'}
+          aria-label="Screen"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => call({ t: 'screen', on: !state.screen })}
+        >
+          <EyeGlyph on={state.screen} />
         </button>
 
         <MicKey phase={d.phase} onClick={() => call({ t: 'dictate' })} />

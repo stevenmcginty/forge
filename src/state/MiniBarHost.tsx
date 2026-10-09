@@ -10,6 +10,7 @@ import { barDraft, setBarDraft } from '@/lib/barDraft'
 import { barSend, whenPaneReady } from '@/lib/barSend'
 import { setMiniBox } from '@/lib/miniBarDictation'
 import { activityOf } from '@/lib/paneActivity'
+import { lookAtScreen, screenNote } from '@/lib/screenLook'
 import { terminalHost, type PaneRuntime } from '@/lib/terminals'
 import { useApp, type AppState } from '@/state/AppState'
 import { agentReplyLine, isShellPrompt, useMiniNews } from './minibar/news'
@@ -122,6 +123,7 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
       peek: null,
       thread: [],
       speakUpdates: state.settings.miniSpeakUpdates !== false,
+      screen: state.settings.miniBarScreen !== false,
       tucked: state.settings.miniBarTucked === true
     }
     return { ...own, ...voice.slice, ...news.slice }
@@ -163,6 +165,9 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
 
   /* ---- the view's calls ---- */
 
+  /** The last send's words: the next send's words wait for them (the look at the screen can be slow). */
+  const sending = useRef<Promise<void>>(Promise.resolve())
+
   const send = (text: string): void => {
     const message = text.replace(/\s+$/, '')
     if (!message.trim()) return
@@ -175,13 +180,29 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
       draft.current = message
       setOut(message)
     }
-    const go = (): void => {
-      const sent = barSend(message, { paneId, toForge, ask: (m) => hubAsk(live.current.hub, m, 'typed') })
+    const go = (words: string): void => {
+      const sent = barSend(words, { paneId, toForge, ask: (m) => hubAsk(live.current.hub, m, 'typed') })
       if (sent === 'failed') giveBack()
     }
-    if (toForge || !paneId) return go()
+    // The Screen key: the words carry one line pointing at a fresh picture of
+    // the screen, taken now. No picture (off, old preload, failed, slow): as they are.
+    const words: Promise<string> =
+      s.settings.miniBarScreen !== false
+        ? lookAtScreen().then((look) => (look ? `${message}${screenNote(look)}` : message))
+        : Promise.resolve(message)
     // A brand-new agent is not listening yet: never paste into the shell under it.
-    void whenPaneReady(paneId, isShellPane(s, paneId)).then((ready) => (ready ? go() : giveBack()))
+    const ready: Promise<boolean> = toForge || !paneId ? Promise.resolve(true) : whenPaneReady(paneId, isShellPane(s, paneId))
+    // The words wait for the send before them to have its words, so a slow look
+    // never lets a later send overtake; readiness waits per pane, as before.
+    const turn = sending.current.then(() => words)
+    sending.current = turn.then(
+      () => undefined,
+      () => undefined
+    )
+    void Promise.all([turn, ready]).then(
+      ([w, ok]) => (ok ? go(w) : giveBack()),
+      () => giveBack()
+    )
   }
 
   /** Make `paneId` the app's current pane, in whichever project it lives. */
@@ -239,6 +260,9 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
         return
       case 'tuck':
         a.patchSettings({ miniBarTucked: c.on === true })
+        return
+      case 'screen':
+        a.patchSettings({ miniBarScreen: c.on === true })
         return
       default:
         return

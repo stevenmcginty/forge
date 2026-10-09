@@ -94,6 +94,8 @@ export interface MiniBarState {
   /** Last 10 turns with Forge. */
   thread: MiniBarTurn[]
   speakUpdates: boolean
+  /** The Screen key (`miniBarScreen`): each send carries a fresh look at the screen. */
+  screen: boolean
   tucked: boolean
 }
 
@@ -119,6 +121,7 @@ export type MiniBarCall =
   | { t: 'seen' }
   | { t: 'dismissToast'; id: string }
   | { t: 'speakUpdates'; on: boolean }
+  | { t: 'screen'; on: boolean }
   | { t: 'tuck'; on: boolean }
 
 export type RemoteKey =
@@ -180,4 +183,6 @@ export interface MiniBarSettings {
   miniChime: boolean // default true
   miniBarBounds?: Record<string, { x: number; y: number; width: number }> // key = display id
   miniBarTucked?: boolean
+  miniBarScreen: boolean // default true: each send carries a look at the screen
+  miniBarWidened?: boolean // main-owned: the one-time drop of narrow saved widths is done
 }

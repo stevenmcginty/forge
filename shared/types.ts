@@ -2029,6 +2029,13 @@ export interface Settings {
   miniBarBounds?: Record<string, { x: number; y: number; width: number }>
   /** The bar is tucked into its pill. */
   miniBarTucked?: boolean
+  /** Every send from the mini bar carries a fresh look at the screen (the bar's Screen key). */
+  miniBarScreen: boolean
+  /**
+   * Written once by main: saved bar widths narrower than the wider default
+   * were dropped, so a later deliberate drag narrower is kept.
+   */
+  miniBarWidened?: boolean
 
   /* ------------------------------------------------- forge companion (M9)
    *

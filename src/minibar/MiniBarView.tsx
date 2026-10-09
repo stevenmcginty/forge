@@ -26,9 +26,9 @@ import './MiniBar.css'
 
 /** Room around the surfaces for their shadow, inside the window. Mirrored by --mb-pad-* in MiniBar.css. */
 export const MB_PAD_X = 16
-/** The bar's own width limits (spec 4.2); the window is this plus the side room. */
+/** The bar's own width limits (spec 4.2, MAX_WIDTH in electron/minibar-window.ts); the window is this plus the side room. */
 export const MB_MIN_W = 640
-export const MB_MAX_W = 1240
+export const MB_MAX_W = 2400
 
 /** After this long without a publish, the host is presumed stuck. */
 const STALE_MS = 6000

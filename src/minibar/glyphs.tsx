@@ -172,6 +172,18 @@ export function SpeakerGlyph({ on }: { on: boolean }): ReactNode {
   )
 }
 
+/** Screen: an open eye when each send carries a look at the screen; off, the eye with a slash. */
+export function EyeGlyph({ on }: { on: boolean }): ReactNode {
+  return (
+    <G>
+      <path d="M1.6 8s2.4-4.4 6.4-4.4S14.4 8 14.4 8s-2.4 4.4-6.4 4.4S1.6 8 1.6 8z" />
+      <circle cx="8" cy="8" r="2" />
+      {/* Off: a slash through the eye. A shape, not a tint. */}
+      {on ? null : <path d="M2.2 13.8L13.8 2.2" strokeWidth={1.6} />}
+    </G>
+  )
+}
+
 /** Tuck: the bar folds down to a line. */
 export function TuckGlyph(): ReactNode {
   return (

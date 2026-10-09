@@ -56,6 +56,7 @@ export function baseState(now = Date.now()): MiniBarState {
     peek: null,
     thread: [],
     speakUpdates: true,
+    screen: true,
     tucked: false
   }
 }

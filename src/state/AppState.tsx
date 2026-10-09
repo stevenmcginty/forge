@@ -334,6 +334,7 @@ const FALLBACK_SETTINGS: Settings = {
   shotsOnDesktop: true,
   miniSpeakUpdates: true,
   miniChime: true,
+  miniBarScreen: true,
   // Companion (M9): the phone link, off and unconfigured until Steve says
   // otherwise. This fallback is only ever used before the first snapshot
   // arrives, so "off" is also the only safe answer here.

@@ -362,6 +362,8 @@ function defaultSettings(): Settings {
     shotsOnDesktop: true,
     miniSpeakUpdates: true,
     miniChime: true,
+    // The mini bar's Screen key: on, so "fill out this form" works first time.
+    miniBarScreen: true,
     // The phone link (M9) is off, unconfigured and credential-less out of the
     // box. Nothing in electron/companion-sync.ts runs until all three change.
     companionEnabled: false,
@@ -963,6 +965,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     miniChime: s.miniChime === undefined ? DEFAULT_SETTINGS.miniChime : Boolean(s.miniChime),
     miniBarBounds: normaliseMiniBarBounds(s.miniBarBounds),
     miniBarTucked: s.miniBarTucked === true,
+    miniBarScreen: s.miniBarScreen === undefined ? DEFAULT_SETTINGS.miniBarScreen : Boolean(s.miniBarScreen),
+    miniBarWidened: s.miniBarWidened === true,
     // Companion (M9). Trimmed, because every one of these is pasted by hand out
     // of the Firebase console and a trailing space in a URL is a mystery bug.
     // `enabled` is coerced rather than defaulted: a settings.json written before

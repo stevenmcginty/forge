@@ -934,7 +934,8 @@
   animation: mb-glyph-in var(--dur-pop) var(--spring-pop) both;
 }
 
-.mb-speak:not([data-on]) {
+.mb-speak:not([data-on]),
+.mb-screen:not([data-on]) {
   color: var(--text-dim);
 }
 
@@ -1034,6 +1035,23 @@
   }
   .mb-open__main {
     padding: 0 7px 0 10px;
+  }
+}
+
+/* A wide bar (the default is 94% of the screen): the box keeps a roomier
+   floor so the chips do not take it all, and names and the project show more. */
+@container mbbar (min-width: 1500px) {
+  .mb-proj {
+    max-width: 220px;
+  }
+  .mb-chip__name {
+    max-width: 150px;
+  }
+  .mb-well {
+    min-width: 440px;
+  }
+  .mb-well[data-dict] {
+    min-width: 560px;
   }
 }
 

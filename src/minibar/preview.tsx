@@ -19,7 +19,7 @@ const api = fakeApi((line) => {
 })
 
 const TASKBAR = 48
-const barW = Math.min(MB_MAX_W, Math.max(MB_MIN_W, Math.round(window.innerWidth * 0.7)))
+const barW = Math.min(MB_MAX_W, Math.max(MB_MIN_W, Math.round(window.innerWidth * 0.94)))
 const winW = barW + 2 * MB_PAD_X
 
 const host = document.getElementById('root')!
