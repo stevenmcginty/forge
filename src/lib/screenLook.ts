@@ -54,8 +54,8 @@ export function screenNote(look: Pick<ScreenLook, 'path' | 'front'>): string {
 }
 
 /**
- * The line for a realtime voice brain (Gemini Live, GPT Realtime), which
- * cannot open a file by path but has take_screenshot, leading space included:
+ * The line for Gemini Live, which cannot open a file by path but has
+ * take_screenshot and the window tools, leading space included:
  *
  *    [Screen: Forge is minimised · in front: Chrome "Sign up" · call take_screenshot to see it]
  */

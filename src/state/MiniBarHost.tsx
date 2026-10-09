@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { agentLogoFor } from '@shared/agent-logos'
-import { isRealtimeBrain } from '@shared/agent-brain'
 import { isShellProfile, resolveProfile } from '@shared/agents'
 import type { AgentStatus, MiniBarAgent, MiniBarCall, MiniBarState, MiniBarTarget } from '@shared/minibar'
 import { collectLeaves } from '@shared/splitTree'
@@ -188,8 +187,8 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
     // The Screen key: the words carry one line pointing at a fresh picture of
     // the screen, taken now. No picture (off, old preload, failed, slow): as they are.
     // A plain shell pane never gets it: the line would be run as a command.
-    // A realtime voice brain cannot open the picture's path, so it is told to take its own look.
-    const note = toForge && isRealtimeBrain(s.settings.agentBrain) ? liveScreenNote : screenNote
+    // Gemini Live cannot open the picture's path, so it is told to take its own look.
+    const note = toForge && s.settings.agentBrain === 'gemini-live' ? liveScreenNote : screenNote
     const words: Promise<string> =
       s.settings.miniBarScreen !== false && (toForge || !paneId || !isShellPane(s, paneId))
         ? lookAtScreen().then((look) => (look ? `${message}${note(look)}` : message))

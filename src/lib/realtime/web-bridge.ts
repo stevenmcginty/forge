@@ -13,7 +13,7 @@ import { currentVoiceAgentToolDeps } from '../agenttools'
 import { CONTEXT_MIN_GAP_MS } from './context'
 import { normaliseIdleTimeout } from './conversation'
 import { buildRealtimeInstructions } from './persona'
-import { REALTIME_TOOLS, runRealtimeTool } from './tools'
+import { realtimeToolsFor, runRealtimeTool } from './tools'
 import { runWebNavTool } from './web-nav'
 
 /**
@@ -90,7 +90,7 @@ export function buildWebVoiceSetup(
     model: spec.model,
     voice: resolveVoice(vendor, settings.voiceHubVoice?.[vendor]),
     instructions: `${buildRealtimeInstructions(carryover)}\n\n${WEB_VOICE_NOTE}`,
-    tools: REALTIME_TOOLS,
+    tools: realtimeToolsFor(provider, { web: true }),
     context,
     contextMinGapMs: CONTEXT_MIN_GAP_MS,
     idleTimeoutMs: normaliseIdleTimeout(settings.agentIdleTimeoutMs)

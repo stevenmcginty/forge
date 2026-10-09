@@ -151,6 +151,8 @@ const DESKTOP_CONFIRM =
 
 /** What a window tool says while the preload is older than `window.forge.desktop`. */
 export const DESKTOP_RESTART = 'FAILED: Desktop tools need a Forge restart.'
+/** What a window tool says from any session but the desk's Gemini Live (GPT Realtime, Forge Web). */
+export const DESKTOP_DESK_ONLY = 'FAILED: Desktop tools work only at the desk with Gemini Live.'
 
 export const DESKTOP_REALTIME_TOOLS: RealtimeToolSpec[] = [
   {
@@ -239,8 +241,9 @@ function desktopApi(): ForgeApi['desktop'] {
  */
 let lastShotScale: number | null = null
 
-async function runDesktopTool(name: string, args: Record<string, unknown>): Promise<RealtimeToolAnswer | null> {
+async function runDesktopTool(name: string, args: Record<string, unknown>, on: boolean): Promise<RealtimeToolAnswer | null> {
   if (!DESKTOP_TOOL_NAMES.has(name)) return null
+  if (!on) return { ok: false, text: DESKTOP_DESK_ONLY }
   const desktop = desktopApi()
   if (typeof desktop?.op !== 'function') return { ok: false, text: DESKTOP_RESTART }
   let opArgs = args
@@ -310,15 +313,41 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
   {
     name: 'take_screenshot',
     description:
-      'Look at Steve\'s whole screen now — any app, Forge minimised or not — and get the window in front and every open window by number. Call it first when he says "this", "my screen", "this page", "this form" or "this app". For tabs and panes use get_app_state.',
+      'Look at the primary display. For something visible that is not app structure — a rendered page, an error, a design. For tabs and panes use get_app_state.',
     parameters: NO_ARGS
   },
-  ...DESKTOP_REALTIME_TOOLS,
   ...MAIN_REALTIME_TOOLS,
   ...HUB_REALTIME_TOOLS,
   ...BROWSER_REALTIME_TOOLS,
   ...BRAIN_REALTIME_TOOLS
 ]
+
+/**
+ * The desk's Gemini Live session: REALTIME_TOOLS with the desktop tools after
+ * take_screenshot, whose words then say what one look gives.
+ */
+const GEMINI_DESK_TOOLS: RealtimeToolSpec[] = REALTIME_TOOLS.flatMap((t) =>
+  t.name === 'take_screenshot'
+    ? [
+        {
+          ...t,
+          description:
+            'Look at Steve\'s whole screen now — any app, Forge minimised or not — and get the window in front and every open window by number. Call it first when he says "this", "my screen", "this page", "this form" or "this app". For tabs and panes use get_app_state.'
+        },
+        ...DESKTOP_REALTIME_TOOLS
+      ]
+    : [t]
+)
+
+/** Whether a session has Steve's desktop: Gemini Live at the desk only, never GPT Realtime or Forge Web. */
+export function desktopToolsOn(provider: string, opts: { web?: boolean } = {}): boolean {
+  return provider === 'gemini-live' && opts.web !== true
+}
+
+/** The tools a realtime session is opened with. */
+export function realtimeToolsFor(provider: string, opts: { web?: boolean } = {}): RealtimeToolSpec[] {
+  return desktopToolsOn(provider, opts) ? GEMINI_DESK_TOOLS : REALTIME_TOOLS
+}
 
 /* ---------------------------------------------------------------- answers */
 
@@ -373,6 +402,8 @@ export interface RealtimeToolEnv {
   screenshot?: () => Promise<{ mime: string; base64: string } | null>
   /** How long ask_brain waits for the brain. A browser's call passes less: its requests die at 30 s. */
   brainWaitMs?: number
+  /** The desk's Gemini Live (`desktopToolsOn`): the window tools run and take_screenshot lists the windows. Off by default. */
+  desktop?: boolean
 }
 
 /**
@@ -394,7 +425,7 @@ export async function runRealtimeTool(
     if (browser) return browser
     const brain = await runBrainTool(name, args, env.brainWaitMs ?? BRAIN_ASK_WAIT_MS)
     if (brain) return brain
-    const desktop = await runDesktopTool(name, args)
+    const desktop = await runDesktopTool(name, args, env.desktop === true)
     if (desktop) return desktop
     switch (name) {
       case 'get_app_state':
@@ -407,7 +438,7 @@ export async function runRealtimeTool(
       }
 
       case 'take_screenshot': {
-        const summary = desktopSummary()
+        const summary = env.desktop === true ? desktopSummary() : Promise.resolve('')
         const shot = env.screenshot
           ? await env.screenshot()
           : await (async () => {

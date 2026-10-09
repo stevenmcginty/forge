@@ -49,7 +49,7 @@ import type {
   RealtimeToolCall
 } from '@/lib/realtime/session'
 import { buildRolloverSummary } from '@/lib/realtime/summary'
-import { REALTIME_TOOLS, realtimeResultLabel, realtimeToolLabel, runRealtimeTool } from '@/lib/realtime/tools'
+import { desktopToolsOn, realtimeResultLabel, realtimeToolLabel, realtimeToolsFor, runRealtimeTool } from '@/lib/realtime/tools'
 import { startBrainFeed, useBrain } from '@/components/brain/brainStore'
 import { useApp } from './AppState'
 import { useDictation } from './Dictation'
@@ -376,7 +376,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       const id = existingId ?? actionId()
       const at = Date.now()
       upsertAction({ id, tool: name, label: `${realtimeToolLabel(name, args)}…`, status: 'running', at })
-      const answer = await runRealtimeTool(name, args)
+      const answer = await runRealtimeTool(name, args, { desktop: desktopToolsOn(liveProviderRef.current ?? '') })
       upsertAction({
         id,
         tool: name,
@@ -462,14 +462,14 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       const spec = providerSpec(provider)
       const cfg = settingsRef.current
       const vendor = spec.vendor ?? 'openai'
-      let instructions = buildRealtimeInstructions(carryover)
+      let instructions = buildRealtimeInstructions(carryover, { desktop: desktopToolsOn(provider) })
       if (discussionRef.current) instructions += `\n\n${discussionNote(true)}`
 
       const session: RealtimeSession = createSession(provider, {
         model: spec.model,
         voice: resolveVoice(vendor, cfg.voiceHubVoice?.[vendor]),
         instructions,
-        tools: REALTIME_TOOLS,
+        tools: realtimeToolsFor(provider),
         events: {
           onState: (st, detail) => {
             if (sessionRef.current !== session) return
