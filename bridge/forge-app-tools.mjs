@@ -1,6 +1,7 @@
 /**
- * Forge's app, as MCP tools for pane agents: open_agent_pane, open_in_reader
- * and show_view (answered by the renderer, like open_agent_pane).
+ * Forge's app, as MCP tools for pane agents: open_agent_pane, open_in_reader,
+ * show_view and forge_command (both answered by the renderer, like
+ * open_agent_pane).
  *
  * A Claude or Codex pane asked to "spawn a new agent" used to Start-Process a
  * Windows Terminal outside Forge. This tool opens the agent INSIDE Forge
@@ -29,6 +30,11 @@ export const OPEN_AGENT_PANE_DESCRIPTION =
 // scripts/show-view-check.mjs asserts they agree.
 export const SHOW_VIEW_DESCRIPTION =
   'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. With view agents: pane shows that pane full screen, layout wall shows the Wall; maximise also maximises Forge’s window. Brings Forge back if it is minimised. Use only when Steve asks to see something; never on your own.'
+
+// ⚠ DUPLICATED from shared/brain-tools.ts FORGE_COMMAND_DESCRIPTION, like the ones above;
+// scripts/forge-command-check.mjs asserts they agree.
+export const FORGE_COMMAND_DESCRIPTION =
+  'Run any Forge command Steve could run from a key or the command palette, e.g. window-minimise, window-maximise, window-restore, next-mode, toggle-canvas-view. Call with no id to list them.'
 
 export const APP_INSTRUCTION_LINE = 'To start another agent, call open_agent_pane — never launch a CLI in a new window.'
 
@@ -75,6 +81,19 @@ export const APP_TOOLS = [
         maximise: { type: 'boolean', description: 'Optional: also maximise Forge’s window' }
       },
       required: ['view']
+    }
+  },
+  {
+    name: 'forge_command',
+    description: FORGE_COMMAND_DESCRIPTION,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The command id; omit to list them' },
+        arg: { type: 'string', description: 'Optional: the argument the list shows, e.g. set-mode <mode>' },
+        confirmed: { type: 'boolean', description: 'True only after Steve said yes to a command that closes something' }
+      },
+      required: []
     }
   }
 ]
@@ -131,4 +150,20 @@ async function showView(args) {
   return reply?.ok ? { content: [{ type: 'text', text }] } : fail(text)
 }
 
-export const APP_HANDLERS = { open_agent_pane: openAgentPane, open_in_reader: openInReader, show_view: showView }
+/** forge_command: answered by the renderer's one runner (src/lib/forgeCommand.ts), the palette's own bus. */
+async function forgeCommand(args) {
+  const id = typeof args?.id === 'string' ? args.id : undefined
+  const arg = typeof args?.arg === 'string' ? args.arg : undefined
+  const confirmed = args?.confirmed === true
+  let reply
+  try {
+    reply = await browserAsk('forge_command', { ...(id ? { id } : {}), ...(arg ? { arg } : {}), ...(confirmed ? { confirmed } : {}) })
+  } catch (err) {
+    if (err?.link) return fail('Forge is not reachable from here (no FORGE_BROWSER_LINK_FILE, or Forge is not running), so nothing was run.')
+    return fail(`Nothing was run: ${err?.message ?? err}`)
+  }
+  const text = String(reply?.text ?? 'Forge sent an empty answer.')
+  return reply?.ok ? { content: [{ type: 'text', text }] } : fail(text)
+}
+
+export const APP_HANDLERS = { open_agent_pane: openAgentPane, open_in_reader: openInReader, show_view: showView, forge_command: forgeCommand }

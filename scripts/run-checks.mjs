@@ -81,6 +81,7 @@ const CHECKS = [
   { name: 'voice:check', lane: 'fast', note: 'the live OpenRouter tier is opt-in via env' },
   { name: 'realtime:check', lane: 'fast', note: 'token shapes over fake fetches; sessions over fake WebRTC' },
   { name: 'show-view:check', lane: 'fast', note: 'show_view planner rules on built snapshots; the tool in every list' },
+  { name: 'forge-command:check', lane: 'fast', note: 'forge_command planner + the palette bus with stub handlers; the tool in every list' },
   { name: 'voice-alerts:check', lane: 'fast', note: 'pane alerts from voice-context text, poll by poll' },
   { name: 'brain-adapters:check', lane: 'fast', note: 'CLI brains via fake shims; no real CLI, no key' },
   { name: 'gemini-live:check', lane: 'fast', note: 'the worklets in a vm; the session over a fake WebSocket' },

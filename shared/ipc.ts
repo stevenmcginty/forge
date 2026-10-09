@@ -166,6 +166,12 @@ export const IPC = {
    * screen. Never resizes unless asked to maximise.
    */
   windowRevealIfAway: 'window:reveal-if-away',
+  /**
+   * forge_command's window commands (src/lib/windowCommands.ts): 'minimise',
+   * 'maximise', 'unmaximise' or 'state'; answers what the main window is now
+   * ('minimised' | 'maximised' | 'normal' | 'hidden').
+   */
+  windowControl: 'window:control',
 
   // voice agent (M4)
   voiceGemini: 'voice:gemini',

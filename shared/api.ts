@@ -1363,6 +1363,13 @@ export interface ForgeApi {
      * preload; an older main answers a bare boolean (`back`).
      */
     revealIfAway?(opts?: { maximise?: boolean }): Promise<{ back: boolean; maximised: boolean }>
+    /**
+     * Minimise, maximise or un-maximise the main window ('state' changes
+     * nothing) and answer what it is now. Maximise and un-maximise bring a
+     * minimised or hidden Forge back first. For forge_command's window
+     * commands (src/lib/windowCommands.ts). Absent on an older preload.
+     */
+    control?(action: 'minimise' | 'maximise' | 'unmaximise' | 'state'): Promise<'minimised' | 'maximised' | 'normal' | 'hidden'>
   }
 
   /**

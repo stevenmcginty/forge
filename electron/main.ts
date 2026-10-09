@@ -1392,6 +1392,27 @@ function registerAppHandlers(): void {
     return { back, maximised: true }
   })
 
+  // forge_command's window commands (src/lib/windowCommands.ts): minimise (the
+  // 'minimize' listeners above bring up the mini bar, as Steve's own minimise
+  // does), maximise / un-maximise (a minimised or hidden Forge comes back
+  // first, as show_view's maximise does), or just 'state'. Answers what the
+  // window is now.
+  ipcMain.handle(IPC.windowControl, (_e, action?: unknown): 'minimised' | 'maximised' | 'normal' | 'hidden' => {
+    if (!mainWindow || mainWindow.isDestroyed()) return 'hidden'
+    if (action === 'minimise') mainWindow.minimize()
+    else if (action === 'maximise' || action === 'unmaximise') {
+      if (mainWindow.isMinimized() || !mainWindow.isVisible()) openMainWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (action === 'maximise') mainWindow.maximize()
+        else mainWindow.unmaximize()
+      }
+    }
+    if (!mainWindow || mainWindow.isDestroyed()) return 'hidden'
+    if (mainWindow.isMinimized()) return 'minimised'
+    if (!mainWindow.isVisible()) return 'hidden'
+    return mainWindow.isMaximized() ? 'maximised' : 'normal'
+  })
+
   ipcMain.on(IPC.windowTitlebar, (_e, color: string, symbolColor: string) => {
     if (!mainWindow || mainWindow.isDestroyed()) return
     const hex = /^#[0-9a-fA-F]{6}$/

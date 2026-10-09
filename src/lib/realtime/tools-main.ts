@@ -3,12 +3,14 @@ import type { VoiceAgentToolDeps } from '../agenttools'
 import { listTerminals } from '@shared/terminal-names'
 import { resolveNavTarget, type NavPane } from '../hubnav'
 import { getHubRuntime } from '../hubRuntime'
+import { runForgeCommand } from '../forgeCommand'
 import { runShowView } from '../showView'
 import type { RealtimeToolAnswer } from './session'
 
 /**
  * The main agent's tools, answered — open_agent_pane, type_into_pane,
- * help_prompt, read_pane, show_view (../showView.ts). The specs are shared/brain-tools.ts; this is the one
+ * help_prompt, read_pane, show_view (../showView.ts), forge_command
+ * (../forgeCommand.ts). The specs are shared/brain-tools.ts; this is the one
  * implementation every brain reaches: realtime brains through
  * `runRealtimeTool`, the Claude session (and B8's CLI brains) through the
  * renderer bridge in ../agenttools.ts, pane agents through main's bridge link.
@@ -131,6 +133,10 @@ export async function runMainAgentTool(
         })
         return { ok: shown.ok, text: `${shown.ok ? 'OK' : 'FAILED'}: ${shown.text}` }
       }
+
+      case 'forge_command':
+        // Through the palette's own bus; failures already start with FAILED.
+        return await runForgeCommand({ id: args['id'], arg: args['arg'], confirmed: args['confirmed'] })
     }
   } catch (err) {
     return { ok: false, text: `FAILED: ${err instanceof Error ? err.message : String(err)}` }

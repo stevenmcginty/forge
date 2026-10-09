@@ -13,11 +13,14 @@ import { VoiceHubControllerProvider } from './state/VoiceHubController'
 import { registerBrowser } from './components/browser/registerBrowser'
 import { ReaderOpener } from './components/reader/ReaderOpener'
 import { registerReader } from './components/reader/registerReader'
+import { registerWindowCommands } from './lib/windowCommands'
 
 // The built-in browser's canvas surface and its open-browser command.
 registerBrowser()
 // The Read mode's canvas surface (Markdown files, read and edited).
 registerReader()
+// Minimise / maximise / un-maximise / restore Forge: palette, keymap and forge_command.
+registerWindowCommands()
 
 /**
  * The mini bar and the desktop shot card (docs/MINI-BAR.md): two more windows

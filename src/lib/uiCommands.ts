@@ -60,6 +60,8 @@ export interface UiCommandSpec {
   defaultKey?: string
   /** Takes an argument — for `set-mode`, the mode id. */
   arg?: string
+  /** The argument may be left out (`open-settings` with no section). */
+  argOptional?: boolean
 }
 
 const CORE: UiCommandSpec[] = [
@@ -75,7 +77,7 @@ const CORE: UiCommandSpec[] = [
   { id: 'toggle-composer', title: 'Composer focus', group: 'Shell' },
   // Ctrl+, stays the built-in app.settings; binding it twice would be a conflict.
   { id: 'toggle-settings', title: 'Settings', group: 'Shell' },
-  { id: 'open-settings', title: 'Open settings', group: 'Shell', arg: 'section' },
+  { id: 'open-settings', title: 'Open settings', group: 'Shell', arg: 'section', argOptional: true },
   { id: 'close-settings', title: 'Close settings', group: 'Shell' },
   { id: 'toggle-shelf', title: 'Menu: shelf & account', group: 'Shell', defaultKey: 'Ctrl+Shift+S' },
   { id: 'open-shelf', title: 'Open the shelf', group: 'Shell' },

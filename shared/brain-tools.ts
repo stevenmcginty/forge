@@ -16,7 +16,7 @@
  * set; together they are what "the same tools on every brain" means.
  */
 
-export const MAIN_AGENT_TOOL_NAMES = ['open_agent_pane', 'type_into_pane', 'help_prompt', 'read_pane', 'show_view'] as const
+export const MAIN_AGENT_TOOL_NAMES = ['open_agent_pane', 'type_into_pane', 'help_prompt', 'read_pane', 'show_view', 'forge_command'] as const
 
 export type MainAgentToolName = (typeof MAIN_AGENT_TOOL_NAMES)[number]
 
@@ -42,6 +42,10 @@ export const USE_OPEN_AGENT_PANE = 'Use open_agent_pane — agents open inside F
 /** show_view's description — word for word in bridge/forge-app-tools.mjs too (scripts/show-view-check.mjs holds them together). */
 export const SHOW_VIEW_DESCRIPTION =
   'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. With view agents: pane shows that pane full screen, layout wall shows the Wall; maximise also maximises Forge’s window. Brings Forge back if it is minimised. Use only when Steve asks to see something; never on your own.'
+
+/** forge_command's description — word for word in bridge/forge-app-tools.mjs too (scripts/forge-command-check.mjs holds them together). */
+export const FORGE_COMMAND_DESCRIPTION =
+  'Run any Forge command Steve could run from a key or the command palette, e.g. window-minimise, window-maximise, window-restore, next-mode, toggle-canvas-view. Call with no id to list them.'
 
 export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
   {
@@ -124,6 +128,21 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
         maximise: { type: 'boolean', description: 'Optional: also maximise Forge’s window' }
       },
       required: ['view']
+    }
+  },
+  {
+    // Every palette / key command by id (src/lib/forgeCommand.ts). Short: it
+    // rides in the voice manifest every turn, so the list is a call away.
+    name: 'forge_command',
+    description: FORGE_COMMAND_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The command id; omit to list them' },
+        arg: { type: 'string', description: 'Optional: the argument the list shows, e.g. set-mode <mode>' },
+        confirmed: { type: 'boolean', description: 'True only after Steve said yes to a command that closes something' }
+      },
+      required: []
     }
   }
 ]

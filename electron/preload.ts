@@ -454,7 +454,8 @@ const api: ForgeApi = {
     onState: (cb) => subscribe(IPC.windowState, cb),
     setTitlebar: (color, symbolColor) => ipcRenderer.send(IPC.windowTitlebar, color, symbolColor),
     restoreAndFocus: () => ipcRenderer.send(IPC.windowRestoreFocus),
-    revealIfAway: (opts) => ipcRenderer.invoke(IPC.windowRevealIfAway, { maximise: opts?.maximise === true })
+    revealIfAway: (opts) => ipcRenderer.invoke(IPC.windowRevealIfAway, { maximise: opts?.maximise === true }),
+    control: (action) => ipcRenderer.invoke(IPC.windowControl, action)
   },
 
   /**
