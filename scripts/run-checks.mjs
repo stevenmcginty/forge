@@ -84,6 +84,7 @@ const CHECKS = [
   { name: 'brain-adapters:check', lane: 'fast', note: 'CLI brains via fake shims; no real CLI, no key' },
   { name: 'gemini-live:check', lane: 'fast', note: 'the worklets in a vm; the session over a fake WebSocket' },
   { name: 'voice-hotkey:check', lane: 'fast' },
+  { name: 'copilot-key:check', lane: 'fast', note: 'F24 as a Listen tap; globalShortcut stubbed, no key pressed' },
   { name: 'agent-bar:check', lane: 'fast' },
   { name: 'web:check', lane: 'fast', note: 'loopback sockets only; the heaviest fast check' },
 

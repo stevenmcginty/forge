@@ -59,6 +59,7 @@ import { registerAgentProbeHandlers } from './agent-probe'
 import { disposeOverlay, registerOverlayIpc, setOverlayHost } from './overlay-window'
 import { disposeMiniBar, hideMiniBar, registerMiniBarIpc, setMiniBarHost, showMiniBar } from './minibar-window'
 import { disposeGlobalKeys, syncGlobalKeys } from './global-keys'
+import { disposeCopilotKey, startCopilotKey } from './copilot-key'
 import { disposeShotCard, registerShotCardIpc } from './shot-card-window'
 import { registerVoiceHandlers } from './voice-bridge'
 import {
@@ -1662,6 +1663,9 @@ void app
     }
 
     createWindow()
+    // The Copilot key (F24 via PowerToys) taps Listen from any app. After the
+    // window, which it talks to; a failed registration is a log line.
+    startCopilotKey(() => mainWindow)
     // After the window, because an inbox open brings it forward — and before
     // it, openMainWindow would have built a second one.
     try {
@@ -1765,5 +1769,6 @@ app.on('before-quit', () => {
   safely('disposeOverlay', disposeOverlay)
   safely('disposeMiniBar', disposeMiniBar)
   safely('disposeGlobalKeys', disposeGlobalKeys)
+  safely('disposeCopilotKey', disposeCopilotKey)
   safely('disposeShotCard', disposeShotCard)
 })

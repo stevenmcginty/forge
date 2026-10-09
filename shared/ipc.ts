@@ -177,6 +177,11 @@ export const IPC = {
    * old, empty key back over it.
    */
   voiceSpeechKeySaved: 'voice:speech-key-saved',
+  /**
+   * Main → host, no payload: the Copilot key (F24, electron/copilot-key.ts) was
+   * pressed. The host taps Listen, exactly as the voice.talk.agent command does.
+   */
+  voiceListenToggle: 'voice:listenToggle',
 
   // media generation (M6) — the same REST calls the MCP bridge makes, so the
   // voice agent's executor can generate images too.

@@ -136,7 +136,8 @@ const api: ForgeApi = {
     speak: (req) => ipcRenderer.invoke(IPC.voiceSpeak, req),
     cancelSpeak: (requestId) => ipcRenderer.invoke(IPC.voiceSpeakCancel, requestId),
     saveSpeechKey: (key) => ipcRenderer.invoke(IPC.voiceSaveSpeechKey, key),
-    onSpeechKeySaved: (cb) => subscribe(IPC.voiceSpeechKeySaved, () => cb())
+    onSpeechKeySaved: (cb) => subscribe(IPC.voiceSpeechKeySaved, () => cb()),
+    onListenToggle: (cb) => subscribe(IPC.voiceListenToggle, () => cb())
   },
 
   voiceAgent: {

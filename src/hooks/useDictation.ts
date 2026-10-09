@@ -633,6 +633,10 @@ export function useDictationEngine(): Dictation {
     }
   }, [applyIntent, applyAgentIntent])
 
+  // The Copilot key (F24, electron/copilot-key.ts), from any app: main sends a
+  // tap, and it goes the Listen command's way. Press only, so always 'toggle'.
+  useEffect(() => window.forge.voice.onListenToggle?.(() => applyAgentIntent('toggle')), [applyAgentIntent])
+
   // The quiet view (above): the last status that differed in more than its level.
   const quietStatus = useRef(status)
   if (!sameButLevel(quietStatus.current, status)) quietStatus.current = status

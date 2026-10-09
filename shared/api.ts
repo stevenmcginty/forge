@@ -412,6 +412,11 @@ export interface ForgeApi {
      * `store.snapshot()` and patches its settings. Optional, like `saveSpeechKey`.
      */
     onSpeechKeySaved?(cb: () => void): () => void
+    /**
+     * The Copilot key (F24) was pressed, from any app: tap Listen. Main sends
+     * it to the main window only. Optional, like `saveSpeechKey`.
+     */
+    onListenToggle?(cb: () => void): () => void
   }
 
   /**
