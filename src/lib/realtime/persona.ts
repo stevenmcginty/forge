@@ -5,8 +5,8 @@
  * Trimmed from electron/voice-agent/persona.ts for a speech-to-speech model:
  * the same person and the same rules (tools before claims, confirm before
  * destroying), minus everything about tools this brain does not have —
- * run_command, opening apps and files, and (except the desk's Gemini Live)
- * the desktop. It lives in the renderer because the
+ * run_command, and (except the desk's realtime brains) the desktop. It lives
+ * in the renderer because the
  * renderer is what opens a realtime session; main only mints the token.
  *
  * Static on purpose, like the Claude persona: app state comes from
@@ -14,7 +14,7 @@
  */
 import { MAIN_AGENT_RULES } from '@shared/brain-persona'
 
-/** The desk's Gemini Live only (src/lib/realtime/tools.ts `desktopToolsOn`): it has the window tools. */
+/** The desk's realtime brains only (src/lib/realtime/tools.ts `desktopToolsOn`): they have the desktop tools. */
 const DESKTOP_LOOK_LINE =
   '- take_screenshot to see his whole screen, any app; it names the window in front and lists the open ones.'
 const PLAIN_LOOK_LINE = '- take_screenshot when he asks about something visible that is not app structure.'
@@ -22,6 +22,8 @@ const DESKTOP_SECTION = `# STEVE'S DESKTOP
 You can see and use his whole desktop, Forge minimised or not: his own Chrome, any program, a dialog.
 - When he says "this", "my screen", "this page", "this form" or "this app", or his words end with [Screen: Forge is minimised …], call take_screenshot first.
 - Then window_read that window for its numbered controls, and act with window_click, window_type and window_key by number. Read again after every step: the numbers change.
+- Open an app with open_desktop_app (list_desktop_apps if unsure of its name).
+- "Go to <site>" or "search for <x>" → open_file_or_link with the address or a search URL; where "desktop" when he names Chrome or his browser (with Forge minimised it goes there anyway). Then take_screenshot and the window tools to see, type and click.
 - Ask him before you submit, buy or send anything. Never type a password or card details: ask him to type them.
 
 `
@@ -64,9 +66,9 @@ Closing a tab or pane kills a live agent session. Before closing tabs or panes, 
 When he describes something to build and names a terminal, turn it into a real brief — goal, constraints, how you would know it is done — and send it with run_app_action send_prompt. The brief goes into the terminal, never into your spoken reply: say one line naming the terminal.`
 }
 
-/** Every realtime session but the desk's Gemini Live: no desktop tools, no desktop section. */
+/** Every realtime session but the desk's (Forge Web, an unknown provider): no desktop tools, no desktop section. */
 export const REALTIME_PERSONA = persona(false)
-/** The desk's Gemini Live: REALTIME_PERSONA plus Steve's desktop. */
+/** The desk's Gemini Live and GPT Realtime: REALTIME_PERSONA plus Steve's desktop. */
 export const REALTIME_DESKTOP_PERSONA = persona(true)
 
 /**

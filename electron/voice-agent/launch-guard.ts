@@ -5,7 +5,8 @@ import { USE_OPEN_AGENT_PANE } from '@shared/brain-tools'
  * start an agent CLI, open a new console window, or put a web page in a desktop
  * browser. Those all happen INSIDE Forge — open_agent_pane for agents, the
  * built-in browser for the web — and the persona says so, but a persona is a
- * request. This is the refusal.
+ * request. This is the refusal. The one door to his own browser is
+ * open_file_or_link's, decided by `routeOpenTarget` below.
  *
  * Why it exists: Steve typed "spawn up a new Claude Code session" and got a
  * Start-Process'd Windows Terminal running `claude` outside Forge; he asked
@@ -241,14 +242,26 @@ export function refuseAppLaunch(name: string): string | null {
   return null
 }
 
+/** Where open_file_or_link puts a web address: Steve's own browser, or Forge's. */
+export type OpenWhere = 'desktop' | 'forge'
+
 /**
- * open_file_or_link: a web address goes to Forge's browser instead
- * (`{ web: url }`), an agent or console executable is refused, anything else
- * opens as before (`null`).
+ * open_file_or_link: a web address goes to Forge's browser (`{ web: url }`),
+ * or to Steve's default browser (`{ desktop: url }`) when `where` is
+ * 'desktop', or when `where` is omitted and Forge's main window is minimised
+ * (`away`) — he is looking at his desktop, not Forge. An agent or console
+ * executable is refused; anything else opens as before (`null`).
  */
-export function routeOpenTarget(target: string): { web: string } | { refuse: string } | null {
+export function routeOpenTarget(
+  target: string,
+  opts: { where?: unknown; away?: boolean } = {}
+): { web: string } | { desktop: string } | { refuse: string } | null {
   const t = unquote(String(target ?? '').trim())
-  if (isWebUrl(t)) return { web: /^www\./i.test(t) ? `https://${t}` : t }
+  if (isWebUrl(t)) {
+    const url = /^www\./i.test(t) ? `https://${t}` : t
+    const desktop = opts.where === 'desktop' || (opts.where !== 'forge' && opts.away === true)
+    return desktop ? { desktop: url } : { web: url }
+  }
   const name = exeName(t)
   if (/\.(exe|cmd|bat|ps1|lnk)$/i.test(t) && (AGENT_EXES.has(name) || CONSOLE_EXES.has(name))) return { refuse: AGENT_REFUSAL }
   return null

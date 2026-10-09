@@ -1451,7 +1451,8 @@ export interface ForgeApi {
   /**
    * Steve's desktop for the realtime voice agent: one op from
    * electron/desktop-hands-ipc.ts `desktopLinkOp` (window_list, window_read,
-   * window_click, window_type, window_key), answered in words. Optional: an
+   * window_click, window_type, window_key, list_desktop_apps, open_desktop_app,
+   * open_file_or_link), answered in words. Optional: an
    * older preload has none.
    */
   desktop?: {

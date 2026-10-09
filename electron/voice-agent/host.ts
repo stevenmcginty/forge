@@ -27,22 +27,15 @@ import { whichCommand } from '../which'
 import { isCodexClaudeModel } from '@shared/agent-brain'
 import { CLI_BRAIN_NAME, CliBrainRunner, isCliBrain, type CliBrainId, type CliBrainSetup } from './cli-brains'
 import { claudeSdkExecutable } from '../claude-exe'
-import {
-  closeDesktopWindow,
-  focusDesktopWindow,
-  launchDesktopApp,
-  listDesktopApps,
-  listOpenWindows,
-  openDesktopTarget,
-  sendKeysToWindow
-} from '../desktop-control'
+import { closeDesktopWindow, focusDesktopWindow, listOpenWindows, sendKeysToWindow } from '../desktop-control'
 import { click, frontWindow, key, noteLook, pngSize, readWindow, type } from '../desktop-hands'
 import { closeBrowser } from './chrome-control'
 import { defaultAssetsDir, listFiles, runCommand, saveAsset, writeTextFile } from './file-tools'
 import { VOICE_PERSONA } from './persona'
 import { brainHubTools } from '../hub-brain-tools'
 import { brainSpecAllowed, brainSpecTools } from '../brain-tools-mcp'
-import { refuseAppLaunch, refuseCommand, routeOpenTarget } from './launch-guard'
+import { refuseCommand } from './launch-guard'
+import { listAppsReply, openAppReply, openTargetReply } from './desktop-open'
 import { BRAIN_BROWSER_ALLOWED, brainBrowserTools } from '../browser-panes/brain'
 import { transcriptPath } from '../bridge/claude-transcripts'
 import { MAIN_AGENT_TOOL_SPECS, PROJECT_PROPERTY, withProjectArg } from '@shared/brain-tools'
@@ -182,6 +175,12 @@ export interface VoiceAgentDeps {
    * dir above.
    */
   getChromeProfileDir?(): string
+  /**
+   * True while Forge's main window is minimised: open_file_or_link then puts
+   * a web address in Steve's own browser unless told `where: 'forge'`.
+   * Absent (Forge Web's host, the smoke test) = never minimised.
+   */
+  isForgeMinimised?(): boolean
 }
 
 /* --------------------------------------------------------------- utilities */
@@ -826,30 +825,15 @@ export class VoiceAgentHost {
           'list_desktop_apps',
           'Every application installed on this PC that the Start menu can launch — names to use with open_desktop_app. Call it when Steve asks what is installed or when open_desktop_app cannot find what he said. Takes no arguments.',
           {},
-          async () => {
-            try {
-              const apps = await listDesktopApps()
-              return text(apps.map((a) => a.name).join('\n') || 'No launchable apps were found.')
-            } catch (err) {
-              return text(`Could not list the installed apps: ${errText(err)}`)
-            }
-          }
+          async () => text((await listAppsReply()).text)
         ),
 
         tool(
           'open_desktop_app',
           'Launch an installed application by name — "Spotify", "Google Chrome", "Notepad". Fuzzy: the spoken name is matched against what is installed, and the result says what actually launched, or lists the near-misses when nothing did. Report the result, not the request.',
           { name: z.string().describe('The app, as Steve said it') },
-          async (args) => {
-            // The hard guard: agents and consoles open inside Forge, never here.
-            const refused = refuseAppLaunch(args.name)
-            if (refused) return text(refused)
-            try {
-              return text(await launchDesktopApp(args.name))
-            } catch (err) {
-              return text(`Could not launch that: ${errText(err)}`)
-            }
-          }
+          // The hard guard (./desktop-open.ts): agents and consoles open inside Forge, never here.
+          async (args) => text((await openAppReply(args.name)).text)
         ),
 
         tool(
@@ -968,23 +952,17 @@ export class VoiceAgentHost {
 
         tool(
           'open_file_or_link',
-          "Open a file or a folder with whatever Windows uses for it — a folder opens in Explorer. An http(s) link opens in Forge's built-in browser, never a desktop browser. Paths must exist; say so rather than inventing one.",
-          { target: z.string().describe('An absolute path or an http(s) URL') },
-          async (args) => {
-            // Web pages go to Forge's browser; an agent or console is refused.
-            const route = routeOpenTarget(args.target)
-            if (route && 'refuse' in route) return text(route.refuse)
-            if (route && 'web' in route) {
-              const open = brainBrowserTools().find((t) => t.name === 'browser_open')
-              if (!open) return text("Forge's browser is not available, so the link was not opened.")
-              return open.handler({ url: route.web })
-            }
-            try {
-              return text(await openDesktopTarget(args.target))
-            } catch (err) {
-              return text(`Could not open that: ${errText(err)}`)
-            }
-          }
+          "Open a file or a folder with whatever Windows uses for it — a folder opens in Explorer. A web address (a search is a search URL) opens in Steve's own browser when where is \"desktop\" or Forge is minimised, otherwise in Forge's browser. Paths must exist; say so rather than inventing one.",
+          {
+            target: z.string().describe('An absolute path or an http(s) URL'),
+            where: z
+              .enum(['desktop', 'forge'])
+              .optional()
+              .describe('Web addresses only: "desktop" = his own browser, "forge" = Forge’s. Omit to go by whether Forge is minimised.')
+          },
+          // Web addresses go where ./launch-guard.ts `routeOpenTarget` says; an agent or console is refused.
+          async (args) =>
+            text((await openTargetReply(args.target, { where: args.where, away: this.deps.isForgeMinimised?.() === true })).text)
         ),
 
         tool(

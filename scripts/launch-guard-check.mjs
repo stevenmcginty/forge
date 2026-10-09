@@ -4,6 +4,8 @@
  * Nothing the hub brain runs may start an agent CLI or a new console window
  * outside Forge, or put a web page in a desktop browser. Every launch shape
  * seen in the wild is refused; every look-don't-launch command still passes.
+ * open_file_or_link's own route to his default browser (where "desktop", or
+ * Forge minimised) is the one door, and agents and consoles stay refused there.
  *
  *   node scripts/launch-guard-check.mjs
  */
@@ -130,6 +132,22 @@ expect('claude.exe refused', JSON.stringify(G.routeOpenTarget('C:\\tools\\claude
 expect('wt.exe refused', JSON.stringify(G.routeOpenTarget('C:\\Users\\steve\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe')), JSON.stringify({ refuse: AGENT }))
 expect('a folder opens as before', G.routeOpenTarget('C:\\Users\\steve\\Desktop'), null)
 expect('an image opens as before', G.routeOpenTarget('C:\\Users\\steve\\Pictures\\cat.png'), null)
+
+console.log("open_file_or_link: where a web address goes (his own browser, or Forge's)")
+const route = (target, opts) => JSON.stringify(G.routeOpenTarget(target, opts))
+const SEARCH = 'https://www.google.com/search?q=cafe+roma'
+expect('where desktop → his default browser', route(SEARCH, { where: 'desktop' }), JSON.stringify({ desktop: SEARCH }))
+expect('where desktop, Forge up → still his browser', route(SEARCH, { where: 'desktop', away: false }), JSON.stringify({ desktop: SEARCH }))
+expect('omitted + Forge minimised → his browser', route(SEARCH, { away: true }), JSON.stringify({ desktop: SEARCH }))
+expect('www. + Forge minimised → his browser (https)', route('www.example.com', { away: true }), JSON.stringify({ desktop: 'https://www.example.com' }))
+expect('omitted + Forge not minimised → Forge browser', route(SEARCH, { away: false }), JSON.stringify({ web: SEARCH }))
+expect('where forge + Forge minimised → Forge browser', route(SEARCH, { where: 'forge', away: true }), JSON.stringify({ web: SEARCH }))
+expect('an unknown where is omitted', route(SEARCH, { where: 'chrome', away: false }), JSON.stringify({ web: SEARCH }))
+expect('claude.exe still refused with where desktop', route('C:\\tools\\claude.exe', { where: 'desktop', away: true }), JSON.stringify({ refuse: AGENT }))
+expect('pwsh.exe still refused with Forge minimised', route('C:\\Program Files\\PowerShell\\7\\pwsh.exe', { away: true }), JSON.stringify({ refuse: AGENT }))
+expect('a folder opens as before with where desktop', G.routeOpenTarget('C:\\Users\\steve\\Desktop', { where: 'desktop', away: true }), null)
+expect('run_command still refuses a browser with a URL', G.refuseCommand(`Start-Process chrome '${SEARCH}'`), WEB)
+expect('open_desktop_app still refuses a URL as an app', G.refuseAppLaunch(SEARCH), WEB)
 
 console.log('pane agents: forge-bridge open_agent_pane matches the shared spec')
 const specs = await import('../shared/brain-tools.ts')

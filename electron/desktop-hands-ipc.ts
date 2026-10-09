@@ -3,6 +3,8 @@ import type { BrowserAgentReply } from '@shared/browser'
 import type { ScreenLookResult } from '@shared/screen'
 import { getDataDir } from './store'
 import { captureScreen } from './voice-agent/ipc'
+import { listAppsReply, openAppReply, openTargetReply } from './voice-agent/desktop-open'
+import { isMainMinimised } from './minibar-window'
 import {
   click,
   configureDesktopHands,
@@ -85,6 +87,15 @@ export async function desktopLinkOp(op: string, args: Record<string, unknown>): 
         return await type({ ref: args['ref'], text: args['text'], enter: args['enter'] })
       case 'window_key':
         return await key({ keys: args['keys'], window: args['window'] })
+      // The realtime brains' launch tools (window.forge.desktop.op only: not in
+      // DESKTOP_LINK_OPS, so the forge-bridge pipe never reaches them). The
+      // Claude brain's own tools answer through the same guarded functions.
+      case 'list_desktop_apps':
+        return await listAppsReply()
+      case 'open_desktop_app':
+        return await openAppReply(args['name'])
+      case 'open_file_or_link':
+        return await openTargetReply(args['target'], { where: args['where'], away: isMainMinimised() })
       default:
         return { ok: false, text: `There is no desktop op called ${op}.` }
     }

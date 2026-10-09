@@ -37,6 +37,12 @@ async function call(op: BrowserToolName, args: Record<string, unknown>): Promise
   return { content }
 }
 
+/** browser_open as the voice owner, as a reply: open_file_or_link's Forge route (../voice-agent/desktop-open.ts). */
+export async function brainBrowserOpen(url: string): Promise<BrowserAgentReply> {
+  if (!runner) return { ok: false, text: "Forge's browser is not running yet." }
+  return runner('browser_open', { url })
+}
+
 const id = z.string().optional().describe(BROWSER_PARAM_TEXT.id)
 
 /** Typed like electron/hub-brain-tools.ts `BrainHubTool`, so the host's `tool()` map compiles. */

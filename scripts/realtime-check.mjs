@@ -256,12 +256,20 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
   assert.equal(gem.find((d) => d.name === 'get_app_state').parameters, undefined, 'no empty schemas for Gemini')
   // Steve's desktop: the desk's Gemini Live and GPT Realtime get the window tools. Forge Web keeps the list above.
   const WINDOW_TOOLS = ['window_list', 'window_read', 'window_click', 'window_type', 'window_key']
+  // Hands outside Forge: launching apps and opening files / links. No run_command, ever.
+  const LAUNCH_TOOLS = ['list_desktop_apps', 'open_desktop_app', 'open_file_or_link']
   for (const provider of ['gemini-live', 'gpt-realtime', 'gpt-realtime-mini']) {
     assert.deepEqual(tools.realtimeToolsFor(provider, { web: true }).map((t) => t.name), names, `${provider} in Forge Web`)
     assert.equal(tools.desktopToolsOn(provider, { web: true }), false, `${provider} in Forge Web`)
+    const web = tools.realtimeToolsFor(provider, { web: true }).map((t) => t.name)
+    for (const n of [...LAUNCH_TOOLS, 'run_command', 'type_into_window']) assert.ok(!web.includes(n), `${provider} in Forge Web has no ${n}`)
   }
   const at = names.indexOf('take_screenshot') + 1
-  const deskNames = [...names.slice(0, at), ...WINDOW_TOOLS, ...names.slice(at)]
+  const deskNames = [...names.slice(0, at), ...WINDOW_TOOLS, ...LAUNCH_TOOLS, ...names.slice(at)]
+  for (const n of ['run_command', 'type_into_window']) assert.ok(!deskNames.includes(n), `the desk has no ${n}`)
+  const openSpec = tools.realtimeToolsFor('gemini-live').find((t) => t.name === 'open_file_or_link')
+  assert.deepEqual(openSpec.parameters.properties.where.enum, ['desktop', 'forge'])
+  assert.deepEqual(openSpec.parameters.required, ['target'])
   for (const provider of ['gemini-live', 'gpt-realtime', 'gpt-realtime-mini']) {
     assert.deepEqual(tools.realtimeToolsFor(provider).map((t) => t.name), deskNames, provider)
     assert.equal(tools.desktopToolsOn(provider), true, provider)
@@ -335,7 +343,7 @@ await check('B2 stubs, unknown tools and missing deps fail in words, never throw
   const bad = await tools.runRealtimeTool('run_app_action', {}, { deps })
   assert.equal(bad.ok, false)
   assert.match(bad.text, /no "kind"/)
-  for (const name of ['window_list', 'window_read', 'window_click', 'window_type', 'window_key']) {
+  for (const name of ['window_list', 'window_read', 'window_click', 'window_type', 'window_key', 'list_desktop_apps', 'open_desktop_app', 'open_file_or_link']) {
     // Any session but the desk's realtime brains (Forge Web): refused, never run.
     const off = await tools.runRealtimeTool(name, { text: 'x', keys: 'Tab' }, { deps })
     assert.deepEqual(off, { ok: false, text: tools.DESKTOP_DESK_ONLY }, name)
@@ -485,6 +493,7 @@ await check('an empty conversation carries nothing, and the persona is unchanged
   assert.equal(buildRealtimeInstructions('', { desktop: true }), REALTIME_DESKTOP_PERSONA)
   assert.match(REALTIME_DESKTOP_PERSONA, /# STEVE'S DESKTOP[\s\S]*window_read[\s\S]*Never type a password or card details/)
   assert.doesNotMatch(REALTIME_DESKTOP_PERSONA, /not app structure/)
+  assert.match(REALTIME_DESKTOP_PERSONA, /# STEVE'S DESKTOP[\s\S]*open_desktop_app[\s\S]*list_desktop_apps[\s\S]*open_file_or_link[\s\S]*search URL/)
 })
 
 console.log('provider fallback')
@@ -520,11 +529,11 @@ await check('voices fall back to the vendor default', () => {
 console.log('discussion mode')
 
 await check('holds anything that changes Forge, lets looking through', () => {
-  for (const name of ['run_app_action', 'remember', 'focus_pane_by_name', 'show_on_board', 'show_on_canvas', 'window_click', 'window_type', 'window_key', 'some_future_tool']) {
+  for (const name of ['run_app_action', 'remember', 'focus_pane_by_name', 'show_on_board', 'show_on_canvas', 'window_click', 'window_type', 'window_key', 'open_desktop_app', 'open_file_or_link', 'type_into_window', 'some_future_tool']) {
     assert.equal(discussion.discussionGate(true, name), 'plan', name)
     assert.equal(discussion.discussionGate(false, name), 'run', name)
   }
-  for (const name of ['get_app_state', 'read_pane', 'get_project_memory', 'take_screenshot', 'window_list', 'window_read']) {
+  for (const name of ['get_app_state', 'read_pane', 'get_project_memory', 'take_screenshot', 'window_list', 'window_read', 'list_desktop_apps']) {
     assert.equal(discussion.discussionGate(true, name), 'run', name)
   }
   // Every tool in the list is classified on purpose, not by accident.

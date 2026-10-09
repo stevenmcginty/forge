@@ -224,6 +224,40 @@ export const DESKTOP_REALTIME_TOOLS: RealtimeToolSpec[] = [
       },
       required: ['keys']
     }
+  },
+  // Launching and opening: the Claude brain's own tools, answered in main by the
+  // same guarded functions (electron/voice-agent/desktop-open.ts).
+  {
+    name: 'list_desktop_apps',
+    description: "Lists every app installed on Steve's PC that the Start menu can launch: names for open_desktop_app. Read-only.",
+    parameters: NO_ARGS
+  },
+  {
+    name: 'open_desktop_app',
+    description:
+      'Launches an installed app on Steve\'s desktop by name, e.g. "Spotify", "Notepad". It says what launched, or the near misses. Agents and consoles are refused: use open_agent_pane.',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The app, as Steve said it.' } },
+      required: ['name']
+    }
+  },
+  {
+    name: 'open_file_or_link',
+    description:
+      'Opens a file or folder in its Windows app, or a web address. A search is a search URL, e.g. https://www.google.com/search?q=… A web address opens in Steve\'s own browser when where is "desktop" or Forge is minimised, otherwise in Forge\'s browser.',
+    parameters: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', description: 'An absolute path or an http(s) URL.' },
+        where: {
+          type: 'string',
+          enum: ['desktop', 'forge'],
+          description: 'Web addresses only: "desktop" = his own browser (he names Chrome or his browser), "forge" = Forge\'s. Omit to go by whether Forge is minimised.'
+        }
+      },
+      required: ['target']
+    }
   }
 ]
 

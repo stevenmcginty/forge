@@ -11,6 +11,7 @@ import type {
 import { isCodexClaudeModel } from '@shared/agent-brain'
 import type { WebVoiceClaudeEvent } from '@shared/web'
 import { getDataDir, getSettings } from '../store'
+import { isMainMinimised } from '../minibar-window'
 import { bridgeConfigPath, resolveBridgeScript } from '../bridge/mcp-config'
 import type { BrowserLink } from '../browser-panes/link'
 import { createBrainLink, type LinkToolHost } from './brain-link'
@@ -130,7 +131,9 @@ function ensureHost(): VoiceAgentHost {
     // Jarvis's own Chrome profile, beside the data dir rather than inside
     // Steve's own browser: it is a dedicated persistent profile, so the
     // sign-ins he does in that window are still there next time Forge opens.
-    getChromeProfileDir: () => join(getDataDir(), 'chrome-jarvis')
+    getChromeProfileDir: () => join(getDataDir(), 'chrome-jarvis'),
+    // open_file_or_link: with Forge minimised, a web address goes to his own browser.
+    isForgeMinimised: isMainMinimised
   })
   return host
 }
