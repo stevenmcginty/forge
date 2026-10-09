@@ -151,8 +151,8 @@ const DESKTOP_CONFIRM =
 
 /** What a window tool says while the preload is older than `window.forge.desktop`. */
 export const DESKTOP_RESTART = 'FAILED: Desktop tools need a Forge restart.'
-/** What a window tool says from any session but the desk's Gemini Live (GPT Realtime, Forge Web). */
-export const DESKTOP_DESK_ONLY = 'FAILED: Desktop tools work only at the desk with Gemini Live.'
+/** What a window tool says from any session but the desk's realtime brain (Gemini Live, GPT Realtime), e.g. Forge Web. */
+export const DESKTOP_DESK_ONLY = 'FAILED: Desktop tools work only at the desk.'
 
 export const DESKTOP_REALTIME_TOOLS: RealtimeToolSpec[] = [
   {
@@ -323,10 +323,10 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
 ]
 
 /**
- * The desk's Gemini Live session: REALTIME_TOOLS with the desktop tools after
+ * The desk's realtime sessions (Gemini Live, GPT Realtime): REALTIME_TOOLS with the desktop tools after
  * take_screenshot, whose words then say what one look gives.
  */
-const GEMINI_DESK_TOOLS: RealtimeToolSpec[] = REALTIME_TOOLS.flatMap((t) =>
+const DESK_TOOLS: RealtimeToolSpec[] = REALTIME_TOOLS.flatMap((t) =>
   t.name === 'take_screenshot'
     ? [
         {
@@ -339,14 +339,14 @@ const GEMINI_DESK_TOOLS: RealtimeToolSpec[] = REALTIME_TOOLS.flatMap((t) =>
     : [t]
 )
 
-/** Whether a session has Steve's desktop: Gemini Live at the desk only, never GPT Realtime or Forge Web. */
+/** Whether a session has Steve's desktop: the desk's Gemini Live or GPT Realtime, never Forge Web. */
 export function desktopToolsOn(provider: string, opts: { web?: boolean } = {}): boolean {
-  return provider === 'gemini-live' && opts.web !== true
+  return (provider === 'gemini-live' || provider === 'gpt-realtime' || provider === 'gpt-realtime-mini') && opts.web !== true
 }
 
 /** The tools a realtime session is opened with. */
 export function realtimeToolsFor(provider: string, opts: { web?: boolean } = {}): RealtimeToolSpec[] {
-  return desktopToolsOn(provider, opts) ? GEMINI_DESK_TOOLS : REALTIME_TOOLS
+  return desktopToolsOn(provider, opts) ? DESK_TOOLS : REALTIME_TOOLS
 }
 
 /* ---------------------------------------------------------------- answers */
@@ -402,7 +402,7 @@ export interface RealtimeToolEnv {
   screenshot?: () => Promise<{ mime: string; base64: string } | null>
   /** How long ask_brain waits for the brain. A browser's call passes less: its requests die at 30 s. */
   brainWaitMs?: number
-  /** The desk's Gemini Live (`desktopToolsOn`): the window tools run and take_screenshot lists the windows. Off by default. */
+  /** The desk's realtime brain (`desktopToolsOn`): the window tools run and take_screenshot lists the windows. Off by default. */
   desktop?: boolean
 }
 

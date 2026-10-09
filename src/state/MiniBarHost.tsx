@@ -10,6 +10,7 @@ import { barDraft, setBarDraft } from '@/lib/barDraft'
 import { barSend, whenPaneReady } from '@/lib/barSend'
 import { setMiniBox } from '@/lib/miniBarDictation'
 import { activityOf } from '@/lib/paneActivity'
+import { desktopToolsOn } from '@/lib/realtime/tools'
 import { liveScreenNote, lookAtScreen, screenNote } from '@/lib/screenLook'
 import { terminalHost, type PaneRuntime } from '@/lib/terminals'
 import { useApp, type AppState } from '@/state/AppState'
@@ -187,8 +188,8 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
     // The Screen key: the words carry one line pointing at a fresh picture of
     // the screen, taken now. No picture (off, old preload, failed, slow): as they are.
     // A plain shell pane never gets it: the line would be run as a command.
-    // Gemini Live cannot open the picture's path, so it is told to take its own look.
-    const note = toForge && s.settings.agentBrain === 'gemini-live' ? liveScreenNote : screenNote
+    // A realtime brain (Gemini Live, GPT Realtime) cannot open the picture's path, so it is told to take its own look.
+    const note = toForge && desktopToolsOn(s.settings.agentBrain) ? liveScreenNote : screenNote
     const words: Promise<string> =
       s.settings.miniBarScreen !== false && (toForge || !paneId || !isShellPane(s, paneId))
         ? lookAtScreen().then((look) => (look ? `${message}${note(look)}` : message))

@@ -254,21 +254,20 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
   assert.equal(run.parameters.type, 'OBJECT')
   assert.equal(run.parameters.properties.kind.type, 'STRING')
   assert.equal(gem.find((d) => d.name === 'get_app_state').parameters, undefined, 'no empty schemas for Gemini')
-  // Steve's desktop: the desk's Gemini Live only. GPT Realtime and Forge Web keep the list above.
+  // Steve's desktop: the desk's Gemini Live and GPT Realtime get the window tools. Forge Web keeps the list above.
   const WINDOW_TOOLS = ['window_list', 'window_read', 'window_click', 'window_type', 'window_key']
-  for (const provider of ['gpt-realtime', 'gpt-realtime-mini']) {
-    assert.deepEqual(tools.realtimeToolsFor(provider).map((t) => t.name), names, provider)
-    assert.equal(tools.desktopToolsOn(provider), false, provider)
-  }
   for (const provider of ['gemini-live', 'gpt-realtime', 'gpt-realtime-mini']) {
     assert.deepEqual(tools.realtimeToolsFor(provider, { web: true }).map((t) => t.name), names, `${provider} in Forge Web`)
     assert.equal(tools.desktopToolsOn(provider, { web: true }), false, `${provider} in Forge Web`)
   }
-  const desk = tools.realtimeToolsFor('gemini-live').map((t) => t.name)
   const at = names.indexOf('take_screenshot') + 1
-  assert.deepEqual(desk, [...names.slice(0, at), ...WINDOW_TOOLS, ...names.slice(at)])
-  assert.equal(tools.desktopToolsOn('gemini-live'), true)
-  assert.deepEqual(tools.toGeminiTools(tools.realtimeToolsFor('gemini-live'))[0].functionDeclarations.map((d) => d.name), desk)
+  const deskNames = [...names.slice(0, at), ...WINDOW_TOOLS, ...names.slice(at)]
+  for (const provider of ['gemini-live', 'gpt-realtime', 'gpt-realtime-mini']) {
+    assert.deepEqual(tools.realtimeToolsFor(provider).map((t) => t.name), deskNames, provider)
+    assert.equal(tools.desktopToolsOn(provider), true, provider)
+  }
+  assert.equal(tools.desktopToolsOn('something-else'), false)
+  assert.deepEqual(tools.toGeminiTools(tools.realtimeToolsFor('gemini-live'))[0].functionDeclarations.map((d) => d.name), deskNames)
 })
 
 /** Deps shaped like the VoiceAgentProvider's, recording what they were asked. */
@@ -337,7 +336,7 @@ await check('B2 stubs, unknown tools and missing deps fail in words, never throw
   assert.equal(bad.ok, false)
   assert.match(bad.text, /no "kind"/)
   for (const name of ['window_list', 'window_read', 'window_click', 'window_type', 'window_key']) {
-    // Any session but the desk's Gemini Live (GPT Realtime, Forge Web): refused, never run.
+    // Any session but the desk's realtime brains (Forge Web): refused, never run.
     const off = await tools.runRealtimeTool(name, { text: 'x', keys: 'Tab' }, { deps })
     assert.deepEqual(off, { ok: false, text: tools.DESKTOP_DESK_ONLY }, name)
     // No window.forge.desktop (a preload from before it, or no window at all): the window tools say restart.
@@ -345,7 +344,7 @@ await check('B2 stubs, unknown tools and missing deps fail in words, never throw
     assert.deepEqual(r, { ok: false, text: tools.DESKTOP_RESTART }, name)
   }
   assert.match(tools.DESKTOP_RESTART, /Desktop tools need a Forge restart\./)
-  assert.match(tools.DESKTOP_DESK_ONLY, /only at the desk with Gemini Live/)
+  assert.match(tools.DESKTOP_DESK_ONLY, /only at the desk/)
 })
 
 await check('one name per terminal: the tab name resolves everywhere, and open_agent_pane keeps an explicit name', async () => {
