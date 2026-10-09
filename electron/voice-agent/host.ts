@@ -36,6 +36,7 @@ import {
   openDesktopTarget,
   sendKeysToWindow
 } from '../desktop-control'
+import { click, frontWindow, key, noteLook, pngSize, readWindow, type } from '../desktop-hands'
 import { closeBrowser } from './chrome-control'
 import { defaultAssetsDir, listFiles, runCommand, saveAsset, writeTextFile } from './file-tools'
 import { VOICE_PERSONA } from './persona'
@@ -790,8 +791,21 @@ export class VoiceAgentHost {
             try {
               const shot = await this.deps.captureScreen()
               if (!shot) return text('The screen could not be captured.')
+              // window_click x,y is in this picture's pixels.
+              const size = pngSize(Buffer.from(shot.base64.slice(0, 64), 'base64'))
+              if (size) noteLook(size.width, size.height)
+              let front = ''
+              try {
+                const w = await frontWindow()
+                front = w ? `In front: ${w.app} — ${w.title}.` : 'No window is in front apart from Forge.'
+              } catch {
+                /* the picture is still the answer */
+              }
               return {
-                content: [{ type: 'image' as const, data: shot.base64, mimeType: shot.mime }]
+                content: [
+                  { type: 'image' as const, data: shot.base64, mimeType: shot.mime },
+                  ...(front ? [{ type: 'text' as const, text: front }] : [])
+                ]
               }
             } catch (err) {
               return text(`The screen could not be captured: ${errText(err)}`)
@@ -886,6 +900,70 @@ export class VoiceAgentHost {
               return text(`Could not type into that window: ${errText(err)}`)
             }
           }
+        ),
+
+        /* ------------------------------------------- eyes and hands (UIA)
+         *
+         * ../desktop-hands.ts: a window read as numbered controls, then
+         * clicks and typing by number — the same engine pane agents reach
+         * through forge-bridge's window_* tools. Every answer is a sentence.
+         */
+
+        tool(
+          'window_read',
+          [
+            'Read one window on Steve’s desktop as a numbered list of its on-screen controls: [n] type "name" = "value" (ticked, disabled, password). Read-only; it brings nothing forward.',
+            'Works on his own Chrome and any other program. For Forge’s own browser tabs use browser_read instead.',
+            'The numbers are what window_click and window_type take, and they last only until the window changes — read again after every click or form step.'
+          ].join('\n'),
+          {
+            window: z
+              .string()
+              .optional()
+              .describe('Part of the window title or program name, e.g. "chrome". Omit for the window in front.')
+          },
+          async (args) => text((await readWindow({ window: args.window })).text)
+        ),
+
+        tool(
+          'window_click',
+          [
+            'Click a control by its number from your last window_read (its window comes forward first), or a point by x and y in your last take_screenshot picture. The answer says what happened, with the tick state when there is one.',
+            'Ask Steve first before anything that submits a form, buys something or sends a message.'
+          ].join('\n'),
+          {
+            ref: z.number().optional().describe('The number in square brackets from your last window_read'),
+            x: z.number().optional().describe('Instead of ref: left-to-right pixel in the last take_screenshot picture'),
+            y: z.number().optional().describe('Instead of ref: top-to-bottom pixel in the last take_screenshot picture')
+          },
+          async (args) => text((await click(args)).text)
+        ),
+
+        tool(
+          'window_type',
+          [
+            'Type text into Steve’s desktop. With ref (a number from your last window_read) that box’s text is replaced; without it the keys go where the cursor is in the window you last read, or the front window. enter: true presses Enter after.',
+            'Never type passwords or card details: a password box is refused, and Steve types those himself. Ask him first before anything that submits, buys or sends.'
+          ].join('\n'),
+          {
+            text: z.string().describe('The text, exactly as it should appear'),
+            ref: z.number().optional().describe('The number in square brackets from your last window_read'),
+            enter: z.boolean().optional().describe('Press Enter after typing')
+          },
+          async (args) => text((await type(args)).text)
+        ),
+
+        tool(
+          'window_key',
+          'Press keys in a window on Steve’s desktop (it comes forward first): "Tab", "Shift+Tab", "Enter", "Escape", "Down Down Enter", "Ctrl+A". Ctrl, Shift and Alt can be held; up to 30 keys. Ask Steve first before a key that submits, buys or sends.',
+          {
+            keys: z.string().describe('The keys, separated by spaces, e.g. "Tab Tab Enter"'),
+            window: z
+              .string()
+              .optional()
+              .describe('Part of the window title or program name. Omit for the window you last read, or the one in front.')
+          },
+          async (args) => text((await key(args)).text)
         ),
 
         tool(
@@ -1376,6 +1454,10 @@ export class VoiceAgentHost {
       'mcp__forge__list_windows',
       'mcp__forge__focus_window',
       'mcp__forge__type_into_window',
+      'mcp__forge__window_read',
+      'mcp__forge__window_click',
+      'mcp__forge__window_type',
+      'mcp__forge__window_key',
       'mcp__forge__open_file_or_link',
       'mcp__forge__close_window',
       'mcp__forge__list_files',

@@ -141,6 +141,10 @@ export function claudeHomeSettings(docsDir: string | null = null, statusLine: Re
         'mcp__forge-bridge__browser_list',
         'mcp__forge-bridge__browser_screenshot',
         'mcp__forge-bridge__browser_close',
+        // Steve's desktop, read-only: a look, the window list, a window's controls.
+        'mcp__forge-bridge__screen_look',
+        'mcp__forge-bridge__window_list',
+        'mcp__forge-bridge__window_read',
         'Read',
         'Glob',
         'Grep',

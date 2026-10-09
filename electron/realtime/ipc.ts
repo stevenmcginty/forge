@@ -9,7 +9,9 @@ import type {
 import { AGENT_BRAIN_TEST_CHANNEL, type BrainTestResult, type BrainTestTarget } from '@shared/agent-brain'
 import { testBrain } from '../agent-brain-test'
 import { getSettings } from '../store'
+import type { ScreenLookResult } from '@shared/screen'
 import { captureScreen } from '../voice-agent/ipc'
+import { ensureDesktopHands, screenLook } from '../desktop-hands-ipc'
 import { connectOpenAI, mintGeminiToken } from './tokens'
 
 /**
@@ -47,6 +49,17 @@ export function registerRealtimeHandlers(): void {
     try {
       const shot = await captureScreen()
       return shot ? { ok: true, base64: shot.base64, mime: shot.mime } : { ok: false, error: 'The screen could not be captured' }
+    } catch (err) {
+      return { ok: false, error: `The screen could not be captured: ${errText(err)}` }
+    }
+  })
+  // The mini bar's Screen button: the same capture, saved to a file, with the
+  // app in front named (../desktop-hands.ts). Configuring the hands here, at
+  // startup, also gives the voice agent's window_* tools Forge's process ids.
+  ensureDesktopHands()
+  ipcMain.handle(IPC.screenLook, async (): Promise<ScreenLookResult> => {
+    try {
+      return await screenLook()
     } catch (err) {
       return { ok: false, error: `The screen could not be captured: ${errText(err)}` }
     }

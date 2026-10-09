@@ -136,6 +136,7 @@ import type { CommandsFeed } from './commands'
 import type { ChatBotId } from './chatbots'
 import type { BrainTestResult, BrainTestTarget } from './agent-brain'
 import type { MiniBarHostApi, MiniBarViewApi, ShotCardApi } from './minibar'
+import type { ScreenLookResult } from './screen'
 import type {
   RealtimeGeminiTokenResult,
   RealtimeOpenAIConnectRequest,
@@ -1417,6 +1418,15 @@ export interface ForgeApi {
   minibarHost?: MiniBarHostApi
   /** The desktop shot card, in the #shotcard window (electron/shot-card-window.ts). */
   shotCard?: ShotCardApi
+
+  /**
+   * A look at Steve's whole screen, saved as a PNG under `<data dir>\screen-looks`,
+   * with the app in front that is not Forge (electron/desktop-hands.ts). For
+   * the mini bar's Screen button. Optional, like `minibar`.
+   */
+  screen?: {
+    look(): Promise<ScreenLookResult>
+  }
 
   /** Panes, from the main process's side. Optional, like `minibar`. */
   panes?: {

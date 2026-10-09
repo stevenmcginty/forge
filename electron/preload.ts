@@ -530,6 +530,10 @@ const api: ForgeApi = {
     setClickThrough: (on) => ipcRenderer.send(IPC.shotcardClickThrough, on === true)
   },
 
+  screen: {
+    look: () => ipcRenderer.invoke(IPC.screenLook)
+  },
+
   panes: {
     lastReply: (paneId) => ipcRenderer.invoke(IPC.panesLastReply, String(paneId ?? ''))
   },

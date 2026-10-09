@@ -237,6 +237,8 @@ export const IPC = {
   realtimeOpenAIConnect: 'realtime:openai-connect',
   realtimeGeminiToken: 'realtime:gemini-token',
   realtimeScreenshot: 'realtime:screenshot',
+  /** `window.forge.screen.look()`: the whole screen to a PNG file, plus the app in front. electron/desktop-hands.ts. */
+  screenLook: 'screen:look',
 
   /* ------------------------------------------------------------------ foreman
    *

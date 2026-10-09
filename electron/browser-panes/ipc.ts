@@ -7,6 +7,8 @@ import { askRendererTool } from '../voice-agent/ipc'
 import { askAnchoredAppAction } from '../foreman/ipc'
 import { anchoredOpenAction, paneOpenReply } from '../foreman/pane-caller'
 import { openInReader } from '../reader'
+import { DESKTOP_LINK_OPS } from '../desktop-hands'
+import { desktopLinkOp } from '../desktop-hands-ipc'
 import { setBrainBrowserRunner } from './brain'
 import { setBrowserLinkFile } from './env'
 import { BrowserService, type BrowserServiceDeps } from './service'
@@ -55,6 +57,10 @@ function openInReaderFor(args: Record<string, unknown>, caller: BrowserOwner): B
     : { ok: false, text: `No file was sent: ${opened.error}` }
 }
 
+function isDesktopOp(op: string): boolean {
+  return (DESKTOP_LINK_OPS as readonly string[]).includes(op)
+}
+
 /** Build the service and register the renderer's handlers. Call once, with the other handlers. */
 export function registerBrowserPanes(): void {
   if (service) return
@@ -68,8 +74,10 @@ export function registerBrowserPanes(): void {
     // pane (see ../foreman/pane-caller.ts). A caller that is not a pane has no
     // project of its own and gets the main agent's tool, in the one on screen.
     // open_in_reader never reaches the renderer: main owns the reader's route in.
+    // Nor do the desktop ops (screen_look, window_*): ../desktop-hands.ts runs them here.
     appOp: async (op, args, caller) => {
       if (op === 'open_in_reader') return openInReaderFor(args, caller)
+      if (isDesktopOp(op)) return desktopLinkOp(op, args)
       const anchored = op === 'open_agent_pane' ? anchoredOpenAction(args, caller.id) : null
       return paneOpenReply(anchored ? await askAnchoredAppAction(anchored) : await askRendererTool(op, args))
     }
