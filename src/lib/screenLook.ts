@@ -1,4 +1,4 @@
-import type { ScreenLook, ScreenLookResult } from '@shared/screen'
+import type { ScreenLook } from '@shared/screen'
 
 /**
  * A fresh look at Steve's screen for the mini bar's Screen key
@@ -11,14 +11,12 @@ import type { ScreenLook, ScreenLookResult } from '@shared/screen'
  * takes too long is no look: the words then go as they are, never held up.
  */
 
-/** The bridge as far as this file needs it; narrow, so an older preload type still fits. */
-type ScreenBridge = { screen?: { look?: () => Promise<ScreenLookResult> } }
-
 /** Default wait for the picture before the words go without it. */
 const LOOK_TIMEOUT_MS = 2500
 
 export async function lookAtScreen(timeoutMs = LOOK_TIMEOUT_MS): Promise<ScreenLook | null> {
-  const look = (window.forge as unknown as ScreenBridge | undefined)?.screen?.look
+  // `screen` is optional in ForgeApi: an older preload has none.
+  const look = window.forge?.screen?.look
   if (typeof look !== 'function') return null
   let timer = 0
   const late = new Promise<null>((resolve) => {

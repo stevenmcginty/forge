@@ -186,8 +186,9 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
     }
     // The Screen key: the words carry one line pointing at a fresh picture of
     // the screen, taken now. No picture (off, old preload, failed, slow): as they are.
+    // A plain shell pane never gets it: the line would be run as a command.
     const words: Promise<string> =
-      s.settings.miniBarScreen !== false
+      s.settings.miniBarScreen !== false && (toForge || !paneId || !isShellPane(s, paneId))
         ? lookAtScreen().then((look) => (look ? `${message}${screenNote(look)}` : message))
         : Promise.resolve(message)
     // A brand-new agent is not listening yet: never paste into the shell under it.
