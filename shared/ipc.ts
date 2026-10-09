@@ -161,8 +161,9 @@ export const IPC = {
   windowRestoreFocus: 'window:restore-focus',
   /**
    * Bring the main window back only when it is minimised or hidden (the mini
-   * bar, the tray); answers whether it did. For show_view (src/lib/showView.ts):
-   * a view switch Steve asked for has to be on screen. Never resizes.
+   * bar, the tray), and maximise it when asked; answers what it did. For
+   * show_view (src/lib/showView.ts): a view switch Steve asked for has to be on
+   * screen. Never resizes unless asked to maximise.
    */
   windowRevealIfAway: 'window:reveal-if-away',
 

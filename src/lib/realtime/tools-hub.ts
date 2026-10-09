@@ -11,6 +11,7 @@ import {
   showOnBoard,
   type NavViews
 } from '../hubRuntime'
+import { AWAY_NOTE, forgeIsAway } from '../showView'
 
 /**
  * The hub's voice tools for every brain. Spread `HUB_REALTIME_TOOLS` into the
@@ -51,8 +52,11 @@ export async function runHubTool(
   try {
     switch (tool) {
       case 'focus_pane_by_name': {
+        // Never brings Forge back: in the mini bar, "go to Viggo" re-targets
+        // the bar. It says so instead, and points at show_view.
         const r = goTo(String(args?.['name'] ?? ''), 'voice', viewsFrom(deps))
-        return { ok: r.ok, text: r.ok ? `OK: ${r.summary}` : `FAILED: ${r.summary}` }
+        const away = r.ok && forgeIsAway() ? ` ${AWAY_NOTE}` : ''
+        return { ok: r.ok, text: r.ok ? `OK: ${r.summary}${away}` : `FAILED: ${r.summary}` }
       }
       case 'list_panes_with_names':
         return { ok: true, text: listPanesWithNames() }

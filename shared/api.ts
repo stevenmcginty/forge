@@ -1357,10 +1357,12 @@ export interface ForgeApi {
      */
     restoreAndFocus(): void
     /**
-     * Un-minimise or show Forge only when it is minimised or hidden; true when
-     * it did. Never resizes. For show_view. Absent on an older preload.
+     * Un-minimise or show Forge only when it is minimised or hidden (`back`),
+     * and maximise it when `maximise` is set, even if it was already up
+     * (`maximised`). Never resizes otherwise. For show_view. Absent on an older
+     * preload; an older main answers a bare boolean (`back`).
      */
-    revealIfAway?(): Promise<boolean>
+    revealIfAway?(opts?: { maximise?: boolean }): Promise<{ back: boolean; maximised: boolean }>
   }
 
   /**

@@ -1381,12 +1381,15 @@ function registerAppHandlers(): void {
   })
 
   // show_view: back on screen only if it was away. A window already up stays
-  // exactly as it is — no focus steal, no resize.
-  ipcMain.handle(IPC.windowRevealIfAway, (): boolean => {
-    if (!mainWindow || mainWindow.isDestroyed()) return false
-    if (!mainWindow.isMinimized() && mainWindow.isVisible()) return false
-    openMainWindow()
-    return true
+  // exactly as it is — no focus steal, no resize — unless Steve asked for it
+  // maximised, which the mini bar's "Open maximised" does the same way.
+  ipcMain.handle(IPC.windowRevealIfAway, (_e, opts?: { maximise?: unknown }): { back: boolean; maximised: boolean } => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { back: false, maximised: false }
+    const back = mainWindow.isMinimized() || !mainWindow.isVisible()
+    if (back) openMainWindow()
+    if (opts?.maximise !== true || !mainWindow || mainWindow.isDestroyed()) return { back, maximised: false }
+    mainWindow.maximize()
+    return { back, maximised: true }
   })
 
   ipcMain.on(IPC.windowTitlebar, (_e, color: string, symbolColor: string) => {

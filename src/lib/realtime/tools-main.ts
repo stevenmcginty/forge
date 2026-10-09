@@ -122,7 +122,13 @@ export async function runMainAgentTool(
 
       case 'show_view': {
         // The same runner as Steve's key, so every way in says the same words.
-        const shown = await runShowView({ view: args['view'], tab: args['tab'] })
+        const shown = await runShowView({
+          view: args['view'],
+          tab: args['tab'],
+          pane: args['pane'],
+          layout: args['layout'],
+          maximise: args['maximise']
+        })
         return { ok: shown.ok, text: `${shown.ok ? 'OK' : 'FAILED'}: ${shown.text}` }
       }
     }

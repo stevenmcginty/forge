@@ -18,6 +18,7 @@ import { ACTION_SPECS, buildStateSection, type ManifestSnapshot } from './appman
 import { collectLeaves } from './splitTree'
 import { runHubTool } from './realtime/tools-hub'
 import { runMainAgentTool } from './realtime/tools-main'
+import { AWAY_NOTE, forgeIsAway } from './showView'
 
 /**
  * The renderer's answer to the voice brain's questions.
@@ -207,7 +208,10 @@ export async function answerVoiceAgentTool(
       case 'run_app_action': {
         const action = asAction(args)
         if (!action) return { ok: false, error: 'that action had no "kind" — see the tool description' }
-        return { ok: true, result: describeOutcome(await deps.runAction(action)) }
+        const outcome = await deps.runAction(action)
+        // Neither brings a minimised Forge back (only show_view does); say so.
+        const unseen = outcome.ok && (action.kind === 'set_view' || action.kind === 'focus_tab') && forgeIsAway()
+        return { ok: true, result: unseen ? `${describeOutcome(outcome)}\n${AWAY_NOTE}` : describeOutcome(outcome) }
       }
 
       case 'get_project_memory': {

@@ -28,7 +28,7 @@ export const OPEN_AGENT_PANE_DESCRIPTION =
 // ⚠ DUPLICATED from shared/brain-tools.ts SHOW_VIEW_DESCRIPTION, like the one above;
 // scripts/show-view-check.mjs asserts they agree.
 export const SHOW_VIEW_DESCRIPTION =
-  'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. Use only when Steve asks to see something; never on your own.'
+  'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. With view agents: pane shows that pane full screen, layout wall shows the Wall; maximise also maximises Forge’s window. Brings Forge back if it is minimised. Use only when Steve asks to see something; never on your own.'
 
 export const APP_INSTRUCTION_LINE = 'To start another agent, call open_agent_pane — never launch a CLI in a new window.'
 
@@ -69,7 +69,10 @@ export const APP_TOOLS = [
       type: 'object',
       properties: {
         view: { type: 'string', description: 'What to show', enum: ['agents', 'browser', 'board'] },
-        tab: { type: 'string', description: 'Optional: a browser tab id from browser_list or browser_open; shows that tab' }
+        tab: { type: 'string', description: 'Optional: a browser tab id from browser_list or browser_open; shows that tab' },
+        pane: { type: 'string', description: 'Optional, view agents: a pane by name, as focus_pane_by_name takes it' },
+        layout: { type: 'string', description: 'Optional, view agents: full (one pane, the default with pane) or wall', enum: ['full', 'wall'] },
+        maximise: { type: 'boolean', description: 'Optional: also maximise Forge’s window' }
       },
       required: ['view']
     }
@@ -114,9 +117,12 @@ async function openInReader(args) {
 async function showView(args) {
   const view = typeof args?.view === 'string' ? args.view : ''
   const tab = typeof args?.tab === 'string' ? args.tab : undefined
+  const pane = typeof args?.pane === 'string' ? args.pane : undefined
+  const layout = typeof args?.layout === 'string' ? args.layout : undefined
+  const maximise = args?.maximise === true
   let reply
   try {
-    reply = await browserAsk('show_view', { view, ...(tab ? { tab } : {}) })
+    reply = await browserAsk('show_view', { view, ...(tab ? { tab } : {}), ...(pane ? { pane } : {}), ...(layout ? { layout } : {}), ...(maximise ? { maximise } : {}) })
   } catch (err) {
     if (err?.link) return fail('Forge is not reachable from here (no FORGE_BROWSER_LINK_FILE, or Forge is not running), so nothing was switched.')
     return fail(`Nothing was switched: ${err?.message ?? err}`)

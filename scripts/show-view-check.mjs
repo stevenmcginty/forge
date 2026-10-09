@@ -10,7 +10,7 @@
  */
 import './ts-hooks.mjs'
 
-const { planShowView, SHOW_VIEW_LIST_MAX } = await import('../src/lib/showView.ts')
+const { planShowView, SHOW_VIEW_LIST_MAX, AWAY_NOTE, forgeIsAway } = await import('../src/lib/showView.ts')
 const specs = await import('../shared/brain-tools.ts')
 const APP = await import('../bridge/forge-app-tools.mjs')
 
@@ -213,6 +213,111 @@ console.log('rule 9: long titles, long lists')
   ok(!plan.text.includes('[b-508]') && plan.text.includes('[b-507]'), 'the first eight are the ones listed')
 }
 
+/* --------------------------------------------------------------- rule 10 */
+console.log('rule 10: a pane full screen, the Wall, maximise')
+{
+  // Panes as runShowView builds them: buildActionPanes per project, plus the project.
+  const counts = {}
+  function pane(paneId, name, project, profileName = 'Claude Code') {
+    const number = (counts[project] = (counts[project] ?? 0) + 1)
+    return {
+      paneId,
+      tabId: `t-${paneId}`,
+      tabNumber: number,
+      tabTitle: name,
+      number,
+      name,
+      profileId: profileName.toLowerCase().split(' ')[0],
+      profileName,
+      live: true,
+      focused: false,
+      agent: true,
+      lastFocusedAt: 0,
+      project
+    }
+  }
+  const zebP = pane('z1', 'Zeb', 'p1')
+  const viggo = pane('v1', 'Viggo', 'p1', 'Codex')
+  const kira = pane('k1', 'Kira', 'p2')
+  const panes = [zebP, viggo, kira]
+  const on = (over = {}) => snap({ panes, activePane: 'z1', viewMode: 'tabs', ...over })
+
+  const full = planShowView({ view: 'agents', pane: 'Viggo' }, on({ mode: 'browser', viewMode: 'mosaic' }))
+  ok(full.ok && full.revealPane === 'v1' && full.viewMode === 'tabs', 'a pane found: revealed, Full screen by default', JSON.stringify(full))
+  ok(full.switchTo === 'agents' && full.switchProject === null && full.frontTab === null, 'and the desktop goes to Agents, same project', JSON.stringify(full))
+  ok(full.text === 'Showing Viggo full screen.' && full.maximise === false, 'the exact words; no maximise unasked', full.text)
+
+  const spoken = planShowView({ view: 'agents', pane: 'the codex one' }, on())
+  ok(spoken.ok && spoken.revealPane === 'v1' && spoken.viewMode === null, 'the focus_pane_by_name matcher ("the codex one"); already Full screen: layout left', JSON.stringify(spoken))
+  const near = planShowView({ view: 'agents', pane: 'Vigo' }, on())
+  ok(near.ok && near.revealPane === 'v1', 'a near miss is found the same way', JSON.stringify(near))
+
+  const there = planShowView({ view: 'agents', pane: 'Kira' }, on())
+  ok(there.ok && there.switchProject === 'p2' && there.revealPane === 'k1' && there.viewMode === 'tabs', 'a pane in another project: switch project, reveal, set Full screen there', JSON.stringify(there))
+  ok(there.text === 'Showing Kira full screen, in project Cafe.', 'and says which project', there.text)
+
+  const missing = planShowView({ view: 'agents', pane: 'Bob' }, on({ mode: 'board' }))
+  ok(!missing.ok && missing.reason === 'no-such-pane', 'no such pane: refused', JSON.stringify(missing))
+  ok(
+    missing.switchTo === null && missing.switchProject === null && missing.revealPane === null && missing.viewMode === null && missing.maximise === false,
+    'and nothing changes, the window included',
+    JSON.stringify(missing)
+  )
+  ok(missing.text === 'No pane called "Bob". Panes: Zeb · Viggo · Kira in Cafe. The desktop stays on the Board.', 'names the panes, other projects’ with theirs', missing.text)
+  const many = Array.from({ length: 11 }, (_, i) => pane(`m${i}`, `Pane${String.fromCharCode(65 + i)}`, 'p1'))
+  const capped = planShowView({ view: 'agents', pane: 'Nobody' }, on({ panes: many }))
+  ok(capped.text.startsWith(`No pane called "Nobody". Panes: PaneA · `) && capped.text.includes('PaneH · +3 more.') && !capped.text.includes('PaneI'), `at most ${SHOW_VIEW_LIST_MAX} names, then "+N more"`, capped.text)
+  const nothing = planShowView({ view: 'agents', pane: 'Bob' }, on({ panes: [] }))
+  ok(!nothing.ok && nothing.text === 'No pane called "Bob". No panes are open. The desktop stays on Agents.', 'no panes at all: says so', nothing.text)
+
+  const active = planShowView({ view: 'agents', layout: 'full' }, on({ activePane: 'v1', viewMode: 'mosaic' }))
+  ok(active.ok && active.revealPane === 'v1' && active.viewMode === 'tabs' && active.text === 'Showing Viggo full screen.', 'layout full, no pane: the active pane (the bar’s)', JSON.stringify(active))
+  const empty = planShowView({ view: 'agents', layout: 'full' }, on({ panes: [kira], activePane: null }))
+  ok(!empty.ok && empty.reason === 'no-panes' && empty.revealPane === null && empty.viewMode === null, 'layout full with no panes here: refused, nothing changes', JSON.stringify(empty))
+  ok(empty.text === 'No agent panes are open, so there is nothing to show full screen. The desktop stays on Agents.', 'the exact words', empty.text)
+
+  const wall = planShowView({ view: 'agents', layout: 'wall' }, on({ mode: 'read' }))
+  ok(wall.ok && wall.viewMode === 'mosaic' && wall.revealPane === null && wall.switchTo === 'agents', 'layout wall: the mosaic, on Agents', JSON.stringify(wall))
+  ok(wall.text === 'Showing the Wall (2 panes).', 'counts the panes in the project', wall.text)
+  const wallPane = planShowView({ view: 'agents', layout: 'WALL', pane: 'Viggo' }, on())
+  ok(wallPane.ok && wallPane.viewMode === 'mosaic' && wallPane.revealPane === 'v1', 'a pane with the wall: active inside it', JSON.stringify(wallPane))
+  const saidWall = planShowView({ view: 'agents', pane: 'the wall' }, on())
+  ok(saidWall.ok && saidWall.viewMode === 'mosaic' && saidWall.text === 'Showing the Wall (2 panes).', '"the wall" as the pane: the Wall', JSON.stringify(saidWall))
+  const onWall = planShowView({ view: 'agents', layout: 'wall' }, on({ viewMode: 'mosaic' }))
+  ok(onWall.ok && onWall.viewMode === null, 'already on the Wall: layout left', JSON.stringify(onWall))
+  const noWall = planShowView({ view: 'agents', layout: 'wall' }, on({ panes: [] }))
+  ok(!noWall.ok && noWall.reason === 'no-panes' && noWall.viewMode === null, 'the Wall with no panes: refused', noWall.text)
+
+  const noView = planShowView({ pane: 'Zeb' }, on({ mode: 'board' }))
+  ok(noView.ok && noView.switchTo === 'agents' && noView.revealPane === 'z1', 'a pane with no view: Agents', JSON.stringify(noView))
+  for (const [req, label] of [
+    [{ view: 'browser', pane: 'Zeb' }, 'browser + pane'],
+    [{ view: 'board', layout: 'wall' }, 'board + layout'],
+    [{ view: 'agents', tab: 'b-1', pane: 'Zeb' }, 'tab + pane']
+  ]) {
+    const r = planShowView(req, on())
+    ok(
+      !r.ok && r.reason === 'agents-only' && r.text === 'Use view agents with pane or layout. The desktop stays on Agents.' && r.switchTo === null && r.revealPane === null,
+      `${label}: refused, nothing changes`,
+      JSON.stringify(r)
+    )
+  }
+  const odd = planShowView({ view: 'agents', layout: 'grid' }, on())
+  ok(!odd.ok && odd.text.startsWith('Unknown layout "grid". Use full or wall.'), 'an unknown layout: refused', odd.text)
+  const board = planShowView({ view: 'agents', pane: 'the board' }, on())
+  ok(!board.ok && board.reason === 'no-such-pane' && board.text.includes('For the Board, use view board.'), '"the board" as a pane: refused, pointed at view board', board.text)
+
+  const big = planShowView({ view: 'agents', pane: 'Zeb', maximise: true }, on())
+  ok(big.ok && big.maximise === true, 'maximise passes through with a pane', JSON.stringify(big))
+  const bigBoard = planShowView({ view: 'board', maximise: true }, on())
+  ok(bigBoard.ok && bigBoard.maximise === true && bigBoard.switchTo === 'board', 'and with any view', JSON.stringify(bigBoard))
+  const loose = planShowView({ view: 'agents', maximise: 'yes' }, on())
+  ok(loose.ok && loose.maximise === false, 'only maximise true maximises', JSON.stringify(loose))
+
+  ok(AWAY_NOTE === 'Forge is minimised, so this is not on screen. Use show_view to bring it up.', 'the minimised note, word for word', AWAY_NOTE)
+  ok(forgeIsAway() === false, 'headless (no window): never minimised')
+}
+
 /* ------------------------------------------------------------- the tool */
 console.log('the tool, everywhere it is offered')
 {
@@ -221,6 +326,9 @@ console.log('the tool, everywhere it is offered')
   ok(!!spec && JSON.stringify(spec.parameters.required) === '["view"]', 'the shared spec takes view (required) and tab', JSON.stringify(spec?.parameters))
   ok(JSON.stringify(spec?.parameters.properties.view.enum) === '["agents","browser","board"]', 'view is one of agents, browser, board')
   ok(spec?.description.includes('Use only when Steve asks to see something; never on your own.'), 'the description says: only on his ask', spec?.description)
+  ok(spec?.description.includes('Brings Forge back if it is minimised.'), 'and that it brings Forge back', spec?.description)
+  const props = spec?.parameters.properties ?? {}
+  ok(props.pane?.type === 'string' && JSON.stringify(props.layout?.enum) === '["full","wall"]' && props.maximise?.type === 'boolean', 'it takes pane, layout (full or wall) and maximise', JSON.stringify(props))
 
   const bridge = APP.APP_TOOLS.find((t) => t.name === 'show_view')
   ok(!!bridge, 'show_view is a forge-bridge APP_TOOLS tool (pane agents)')
