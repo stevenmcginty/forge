@@ -10,6 +10,10 @@ import { IPC } from '@shared/ipc'
  * file only reacts to the F24. It never starts Forge: with Forge closed there
  * is no registration and F24 does nothing.
  *
+ * Opt-in (`copilotKeyListen`, off by default): Forge ships to PCs with no
+ * Copilot key, and a registered F24 is taken from every other app. While the
+ * setting is off, nothing is registered.
+ *
  * Electron `globalShortcut` (RegisterHotKey), not the uiohook hook in
  * electron/global-keys.ts: the hotkey takes F24 off the input stream, so a
  * focused Forge window never sees it a second time; it hears this one key and
@@ -48,11 +52,16 @@ let registered = false
 let warned = false
 
 /**
- * Register F24 (after app ready). `getHost` returns the main window, the one
- * that owns the agent; with no live host a press is dropped. A failed
- * registration (another app owns F24) is logged once and never throws.
+ * F24 registered when `on`, let go when not (after app ready; again whenever
+ * `copilotKeyListen` changes). `getHost` returns the main window, the one that
+ * owns the agent; with no live host a press is dropped. A failed registration
+ * (another app owns F24) is logged once and never throws.
  */
-export function startCopilotKey(getHost: () => BrowserWindow | null, now: () => number = Date.now): void {
+export function syncCopilotKey(on: boolean, getHost: () => BrowserWindow | null, now: () => number = Date.now): void {
+  if (!on) {
+    disposeCopilotKey()
+    return
+  }
   if (registered) return
   const fresh = createRepeatGate()
   const onPress = (): void => {
@@ -75,7 +84,7 @@ export function startCopilotKey(getHost: () => BrowserWindow | null, now: () => 
   }
 }
 
-/** Let go of F24 (before-quit). */
+/** Let go of F24 (the setting turned off, or before-quit). */
 export function disposeCopilotKey(): void {
   if (!registered) return
   registered = false

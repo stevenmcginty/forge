@@ -354,6 +354,9 @@ function defaultSettings(): Settings {
     resumeSessions: true,
     // …and the backstop for everything resuming cannot bring back.
     confirmOnQuit: true,
+    // F24 as a Listen key: off, because only a PC with its Copilot key remapped
+    // to F24 (PowerToys) wants it, and a registered F24 is taken from every app.
+    copilotKeyListen: false,
     // The mini bar and the desktop shot card: off, so a minimised Forge does
     // exactly what it always did until Steve turns the bar on. The four switches
     // under it keep their own answer (on) for the day it is. See docs/MINI-BAR.md.
@@ -955,6 +958,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     // same reasoning as voiceEarcons above.
     resumeSessions: s.resumeSessions === undefined ? DEFAULT_SETTINGS.resumeSessions : Boolean(s.resumeSessions),
     confirmOnQuit: s.confirmOnQuit === undefined ? DEFAULT_SETTINGS.confirmOnQuit : Boolean(s.confirmOnQuit),
+    copilotKeyListen: s.copilotKeyListen === undefined ? DEFAULT_SETTINGS.copilotKeyListen : Boolean(s.copilotKeyListen),
     // The mini bar's switches: undefined is a settings.json written before it
     // existed, and the answer for that file is the default (the bar off, the
     // four switches under it on).

@@ -9,7 +9,9 @@
  *
  *   - the repeat gate: a first press passes, a press inside the gap is
  *     dropped, a press after it passes, a steady repeat stream passes once
- *   - start registers F24 once; a press sends one voice:listenToggle to the
+ *   - the setting (copilotKeyListen): off registers nothing, on registers F24,
+ *     on → off lets it go, off → on takes it again
+ *   - sync registers F24 once; a press sends one voice:listenToggle to the
  *     host and nothing else; a held key's repeats send nothing more
  *   - no host, or a destroyed one: the press is dropped without a throw
  *   - F24 taken by another app (register false or a throw): one warning, no throw
@@ -127,13 +129,41 @@ async function capturingWarn(into, fn) {
   ok(first(0) === true, 'the very first press passes, even at time 0')
 }
 
+// ---- the setting: off by default, nothing registered while off ---------------
+{
+  const { C, shortcut, sent, host, clock, press } = await rig()
+  C.syncCopilotKey(false, () => host, () => clock.t)
+  ok(shortcut.registers.length === 0 && shortcut.keys.size === 0, 'setting off: nothing registered')
+  press()
+  ok(sent.length === 0, 'setting off: F24 sends nothing')
+  C.syncCopilotKey(true, () => host, () => clock.t)
+  ok(same(shortcut.registers, ['F24']) && shortcut.keys.has('F24'), 'setting on: F24 registered')
+  C.syncCopilotKey(false, () => host, () => clock.t)
+  ok(same(shortcut.unregisters, ['F24']) && !shortcut.keys.has('F24'), 'setting on → off: F24 let go')
+  C.syncCopilotKey(false, () => host, () => clock.t)
+  ok(shortcut.unregisters.length === 1, 'off again: no second unregister')
+  C.syncCopilotKey(true, () => host, () => clock.t)
+  ok(same(shortcut.registers, ['F24', 'F24']) && shortcut.keys.has('F24'), 'setting off → on: F24 taken again')
+  press()
+  ok(sent.length === 1, 'and a press toggles again', String(sent.length))
+  C.disposeCopilotKey()
+}
+{
+  // The real defaults, by source: electron/store.ts and src/state/AppState.tsx.
+  const { readFileSync } = await import('node:fs')
+  const store = readFileSync(new URL('../electron/store.ts', import.meta.url), 'utf8')
+  const appState = readFileSync(new URL('../src/state/AppState.tsx', import.meta.url), 'utf8')
+  ok(/^\s*copilotKeyListen: false,$/m.test(store), 'store default: copilotKeyListen false')
+  ok(/^\s*copilotKeyListen: false,$/m.test(appState), 'renderer default: copilotKeyListen false')
+}
+
 // ---- routing: F24 → one voice:listenToggle to the host ------------------------
 {
   const { C, shortcut, sent, host, clock, press } = await rig()
   ok(IPC.voiceListenToggle === 'voice:listenToggle', 'the channel is voice:listenToggle')
-  C.startCopilotKey(() => host, () => clock.t)
-  C.startCopilotKey(() => host, () => clock.t)
-  ok(same(shortcut.registers, ['F24']), 'start registers F24, once', JSON.stringify(shortcut.registers))
+  C.syncCopilotKey(true, () => host, () => clock.t)
+  C.syncCopilotKey(true, () => host, () => clock.t)
+  ok(same(shortcut.registers, ['F24']), 'sync(on) registers F24, once', JSON.stringify(shortcut.registers))
 
   press()
   ok(same(sent, [[IPC.voiceListenToggle]]), 'a press sends one listen toggle, no payload', JSON.stringify(sent))
@@ -159,7 +189,7 @@ async function capturingWarn(into, fn) {
 {
   const { C, sent, host, clock, press } = await rig()
   let current = null
-  C.startCopilotKey(() => current, () => clock.t)
+  C.syncCopilotKey(true, () => current, () => clock.t)
   let threw = null
   try {
     press()
@@ -184,8 +214,8 @@ async function capturingWarn(into, fn) {
   let threw = null
   await capturingWarn(warnings, () => {
     try {
-      C.startCopilotKey(() => host)
-      C.startCopilotKey(() => host)
+      C.syncCopilotKey(true, () => host)
+      C.syncCopilotKey(true, () => host)
     } catch (err) {
       threw = err
     }
@@ -204,13 +234,13 @@ async function capturingWarn(into, fn) {
   let threw = null
   await capturingWarn(warnings, () => {
     try {
-      C.startCopilotKey(() => host)
-      C.startCopilotKey(() => host)
+      C.syncCopilotKey(true, () => host)
+      C.syncCopilotKey(true, () => host)
     } catch (err) {
       threw = err
     }
   })
-  ok(!threw, 'register throws: no throw out of start')
+  ok(!threw, 'register throws: no throw out of sync')
   ok(warnings.length === 1, 'register throws: one warning, once', JSON.stringify(warnings))
 }
 

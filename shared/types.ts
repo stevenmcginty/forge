@@ -1999,6 +1999,12 @@ export interface Settings {
    * halfway through, a shell with unsaved work, an agent that is not Claude.
    */
   confirmOnQuit: boolean
+  /**
+   * F24 taps Listen from any app (electron/copilot-key.ts). Off by default and
+   * personal: it is for a PC whose Copilot key PowerToys remaps to F24. While
+   * off, F24 is not registered and every other app keeps it.
+   */
+  copilotKeyListen: boolean
 
   /* ---------------------------------------------------------- mini bar
    *

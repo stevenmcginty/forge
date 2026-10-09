@@ -59,7 +59,7 @@ import { registerAgentProbeHandlers } from './agent-probe'
 import { disposeOverlay, registerOverlayIpc, setOverlayHost } from './overlay-window'
 import { disposeMiniBar, hideMiniBar, registerMiniBarIpc, setMiniBarHost, showMiniBar } from './minibar-window'
 import { disposeGlobalKeys, syncGlobalKeys } from './global-keys'
-import { disposeCopilotKey, startCopilotKey } from './copilot-key'
+import { disposeCopilotKey, syncCopilotKey } from './copilot-key'
 import { disposeShotCard, registerShotCardIpc } from './shot-card-window'
 import { registerVoiceHandlers } from './voice-bridge'
 import {
@@ -1045,6 +1045,7 @@ function registerAppHandlers(): void {
     // the hook down at once; turning the bar off takes the bar down with it.
     if (before.miniBar && !next.miniBar) hideMiniBar()
     if (before.miniGlobalKeys !== next.miniGlobalKeys || before.miniBar !== next.miniBar) syncGlobalKeys()
+    if (before.copilotKeyListen !== next.copilotKeyListen) syncCopilotKey(next.copilotKeyListen, () => mainWindow)
     // The bridge's mcp.json carries the Gemini key and image model, so it has to
     // be rewritten when either changes — otherwise a key pasted today would not
     // reach make_image until the next launch. (Panes still have to be reopened:
@@ -1663,9 +1664,10 @@ void app
     }
 
     createWindow()
-    // The Copilot key (F24 via PowerToys) taps Listen from any app. After the
-    // window, which it talks to; a failed registration is a log line.
-    startCopilotKey(() => mainWindow)
+    // The Copilot key (F24 via PowerToys) taps Listen from any app, when
+    // copilotKeyListen is on. After the window, which it talks to; a failed
+    // registration is a log line.
+    syncCopilotKey(getSettings().copilotKeyListen, () => mainWindow)
     // After the window, because an inbox open brings it forward — and before
     // it, openMainWindow would have built a second one.
     try {
