@@ -1,4 +1,5 @@
 import { BRAIN_ASK_WAIT_MS } from '@shared/brain'
+import type { ForgeApi } from '@shared/api'
 import type { RealtimeToolSpec } from '@shared/realtime'
 import {
   answerVoiceAgentTool,
@@ -131,9 +132,154 @@ async function runBrainTool(name: string, args: Record<string, unknown>, waitMs:
     : { ok: false, text: `FAILED: ${sent.error}` }
 }
 
-/* ---------------------------------------------------------------- the list */
-
 const NO_ARGS = { type: 'object', properties: {} }
+
+/* ------------------------------------------------------------ the desktop */
+
+/**
+ * Steve's own desktop — his Chrome, any program, a dialog — read as numbered
+ * controls and worked by number: the same engine (electron/desktop-hands.ts)
+ * and the same names and args as forge-bridge's window_* tools
+ * (bridge/desktop-tools.mjs), reached through `window.forge.desktop.op`.
+ * take_screenshot is the look: it also names the window in front and lists
+ * the open ones.
+ */
+const DESKTOP_SCOPE =
+  "Acts on Steve's own desktop apps and his own Chrome, not Forge. For Forge's own browser tabs use the browser_* tools instead."
+const DESKTOP_CONFIRM =
+  'Ask Steve before submitting a form, buying anything or sending a message. Never type passwords or card details — ask Steve to type them himself.'
+
+/** What a window tool says while the preload is older than `window.forge.desktop`. */
+export const DESKTOP_RESTART = 'FAILED: Desktop tools need a Forge restart.'
+
+export const DESKTOP_REALTIME_TOOLS: RealtimeToolSpec[] = [
+  {
+    name: 'window_list',
+    description: `Lists every open window on Steve's desktop, front first: number, app and title. Forge's own windows are left out. Read-only. ${DESKTOP_SCOPE}`,
+    parameters: NO_ARGS
+  },
+  {
+    name: 'window_read',
+    description: [
+      `Reads one window's on-screen controls as a numbered list: [n] type "name" = "value" (ticked, disabled, password). Read-only — it brings nothing forward. ${DESKTOP_SCOPE}`,
+      'The numbers are what window_click and window_type take. They last until the window changes: read again after every click or form step, and never act on a number you did not just receive.'
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        window: {
+          type: 'string',
+          description: 'Which window: its number from take_screenshot or window_list, or words from its title or app name, e.g. "chrome". Omit for the window in front.'
+        }
+      }
+    }
+  },
+  {
+    name: 'window_click',
+    description: [
+      `Clicks a control by its number from your last window_read (the window is brought forward first), or a point by x and y in your last take_screenshot picture. It says what happened. ${DESKTOP_SCOPE}`,
+      DESKTOP_CONFIRM
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'number', description: 'The number in square brackets from your last window_read.' },
+        x: { type: 'number', description: 'Instead of ref: left-to-right pixel in the last take_screenshot picture.' },
+        y: { type: 'number', description: 'Instead of ref: top-to-bottom pixel in the last take_screenshot picture.' }
+      }
+    }
+  },
+  {
+    name: 'window_type',
+    description: [
+      `Types text. With ref (a number from your last window_read) that box's text is replaced; without it the keys go where the cursor is in the window you last read (or the front window). enter: true presses Enter after. A password box is refused. ${DESKTOP_SCOPE}`,
+      DESKTOP_CONFIRM
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'number', description: 'Optional: the number in square brackets from your last window_read.' },
+        text: { type: 'string', description: 'The text to type, exactly as it should appear.' },
+        enter: { type: 'boolean', description: 'Optional: press Enter after typing (usually submits).' }
+      },
+      required: ['text']
+    }
+  },
+  {
+    name: 'window_key',
+    description: [
+      `Presses keys in a window (brought forward first): e.g. "Tab", "Shift+Tab", "Enter", "Escape", "Down Down Enter", "Ctrl+A". Up to 30 keys. ${DESKTOP_SCOPE}`,
+      DESKTOP_CONFIRM
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        keys: { type: 'string', description: 'The keys, separated by spaces, e.g. "Tab Tab Enter" or "Ctrl+A".' },
+        window: {
+          type: 'string',
+          description: 'Which window: its number from window_list, or words from its title or app name. Omit for the window you last read, or the one in front.'
+        }
+      },
+      required: ['keys']
+    }
+  }
+]
+
+const DESKTOP_TOOL_NAMES = new Set(DESKTOP_REALTIME_TOOLS.map((t) => t.name))
+
+/** `window.forge.desktop`, or undefined: an older preload, or no window at all (the check scripts). */
+function desktopApi(): ForgeApi['desktop'] {
+  return typeof window === 'undefined' ? undefined : window.forge?.desktop
+}
+
+/**
+ * The last take_screenshot picture's width over the screen capture's: the
+ * model sees a shrunk copy, and main's window_click x,y are in the capture's
+ * pixels (it notes that size when it takes the shot). null = no shot yet.
+ */
+let lastShotScale: number | null = null
+
+async function runDesktopTool(name: string, args: Record<string, unknown>): Promise<RealtimeToolAnswer | null> {
+  if (!DESKTOP_TOOL_NAMES.has(name)) return null
+  const desktop = desktopApi()
+  if (typeof desktop?.op !== 'function') return { ok: false, text: DESKTOP_RESTART }
+  let opArgs = args
+  if (name === 'window_click' && args.ref == null && (args.x != null || args.y != null)) {
+    if (lastShotScale === null) {
+      return { ok: false, text: 'FAILED: Nothing was clicked: call take_screenshot first, then give x and y in that picture.' }
+    }
+    const scale = lastShotScale
+    opArgs = { ...args, x: Math.round(Number(args.x) / scale), y: Math.round(Number(args.y) / scale) }
+  }
+  const reply = await desktop.op(name, opArgs)
+  return { ok: reply.ok, text: `${reply.ok ? 'OK' : 'FAILED'}: ${reply.text}` }
+}
+
+/**
+ * The words that go with a take_screenshot picture: the window in front and
+ * every open window, so one look says what Steve is in and what to
+ * window_read. '' with no desktop tools (an older preload) or when the list fails.
+ */
+async function desktopSummary(): Promise<string> {
+  const desktop = desktopApi()
+  if (typeof desktop?.op !== 'function') return ''
+  try {
+    const reply = await desktop.op('window_list', {})
+    if (!reply.ok) return ''
+    const rows = reply.text.split('\n').filter((l) => /^\d+\. /.test(l))
+    const front = rows.find((l) => !/\(minimised\)$/.test(l))
+    return [
+      `In front: ${front ? front.replace(/^\d+\. /, '') : 'nothing apart from Forge'}.`,
+      'Open windows, front first (Forge left out):',
+      rows.length ? rows.join('\n') : 'none',
+      'To act in one: window_read it by number or name, then window_click / window_type / window_key by the numbers it gives.'
+    ].join('\n')
+  } catch {
+    return ''
+  }
+}
+
+/* ---------------------------------------------------------------- the list */
 
 /** Tools B2 fills in. Declared now so both providers already know the names. */
 export const STUB_TOOL_NAMES: readonly string[] = []
@@ -164,9 +310,10 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
   {
     name: 'take_screenshot',
     description:
-      'Look at the primary display. For something visible that is not app structure — a rendered page, an error, a design. For tabs and panes use get_app_state.',
+      'Look at Steve\'s whole screen now — any app, Forge minimised or not — and get the window in front and every open window by number. Call it first when he says "this", "my screen", "this page", "this form" or "this app". For tabs and panes use get_app_state.',
     parameters: NO_ARGS
   },
+  ...DESKTOP_REALTIME_TOOLS,
   ...MAIN_REALTIME_TOOLS,
   ...HUB_REALTIME_TOOLS,
   ...BROWSER_REALTIME_TOOLS,
@@ -200,7 +347,7 @@ export function realtimeResultLabel(name: string, answer: RealtimeToolAnswer): s
  * WebRTC channel refuses messages over 256 KB, and a 1080p PNG in base64 is
  * several megabytes. 1024 wide JPEG is plenty for "what's on my screen".
  */
-async function shrinkScreenshot(base64: string, mime: string): Promise<{ mime: string; base64: string }> {
+async function shrinkScreenshot(base64: string, mime: string): Promise<{ mime: string; base64: string; scale: number }> {
   const img = new Image()
   img.src = `data:${mime};base64,${base64}`
   await img.decode()
@@ -212,7 +359,7 @@ async function shrinkScreenshot(base64: string, mime: string): Promise<{ mime: s
   if (!g) throw new Error('no 2D canvas')
   g.drawImage(img, 0, 0, canvas.width, canvas.height)
   const url = canvas.toDataURL('image/jpeg', 0.6)
-  return { mime: 'image/jpeg', base64: url.slice(url.indexOf(',') + 1) }
+  return { mime: 'image/jpeg', base64: url.slice(url.indexOf(',') + 1), scale: canvas.width / Math.max(1, img.naturalWidth) }
 }
 
 function errText(err: unknown): string {
@@ -247,6 +394,8 @@ export async function runRealtimeTool(
     if (browser) return browser
     const brain = await runBrainTool(name, args, env.brainWaitMs ?? BRAIN_ASK_WAIT_MS)
     if (brain) return brain
+    const desktop = await runDesktopTool(name, args)
+    if (desktop) return desktop
     switch (name) {
       case 'get_app_state':
       case 'get_project_memory':
@@ -258,16 +407,20 @@ export async function runRealtimeTool(
       }
 
       case 'take_screenshot': {
+        const summary = desktopSummary()
         const shot = env.screenshot
           ? await env.screenshot()
           : await (async () => {
               const res = await window.forge.realtime?.screenshot()
               if (!res) return null
               if (!res.ok) throw new Error(res.error)
-              return shrinkScreenshot(res.base64, res.mime)
+              const small = await shrinkScreenshot(res.base64, res.mime)
+              lastShotScale = small.scale
+              return { mime: small.mime, base64: small.base64 }
             })()
         if (!shot) return { ok: false, text: 'FAILED: screen capture is not available in this build.' }
-        return { ok: true, text: 'OK: the screenshot follows as an image.', image: shot }
+        const words = await summary
+        return { ok: true, text: `OK: the screenshot follows as an image.${words ? `\n${words}` : ''}`, image: shot }
       }
 
       default:

@@ -6,7 +6,7 @@
  * remember, and the B2 tools that move focus or put things on the canvas — is
  * answered with a refusal the model reads, and the call is kept as the plan.
  * Read-only tools (get_app_state, read_pane, get_project_memory,
- * take_screenshot) still run: planning needs to look.
+ * take_screenshot, window_list, window_read) still run: planning needs to look.
  *
  * "Go" turns it off and runs the kept plan in order; the model is then told
  * what ran, so it reports rather than repeats it. Pure, so
@@ -18,7 +18,14 @@
  * nobody remembered to list — counts as changing something, so a new tool is
  * held by discussion mode until someone decides it is safe.
  */
-export const READ_ONLY_TOOLS: readonly string[] = ['get_app_state', 'get_project_memory', 'read_pane', 'take_screenshot']
+export const READ_ONLY_TOOLS: readonly string[] = [
+  'get_app_state',
+  'get_project_memory',
+  'read_pane',
+  'take_screenshot',
+  'window_list',
+  'window_read'
+]
 
 export function isSideEffecting(name: string): boolean {
   return !READ_ONLY_TOOLS.includes(name)

@@ -137,6 +137,7 @@ import type { ChatBotId } from './chatbots'
 import type { BrainTestResult, BrainTestTarget } from './agent-brain'
 import type { MiniBarHostApi, MiniBarViewApi, ShotCardApi } from './minibar'
 import type { ScreenLookResult } from './screen'
+import type { BrowserAgentReply } from './browser'
 import type {
   RealtimeGeminiTokenResult,
   RealtimeOpenAIConnectRequest,
@@ -1426,6 +1427,16 @@ export interface ForgeApi {
    */
   screen?: {
     look(): Promise<ScreenLookResult>
+  }
+
+  /**
+   * Steve's desktop for the realtime voice agent: one op from
+   * electron/desktop-hands-ipc.ts `desktopLinkOp` (window_list, window_read,
+   * window_click, window_type, window_key), answered in words. Optional: an
+   * older preload has none.
+   */
+  desktop?: {
+    op(op: string, args?: Record<string, unknown>): Promise<BrowserAgentReply>
   }
 
   /** Panes, from the main process's side. Optional, like `minibar`. */

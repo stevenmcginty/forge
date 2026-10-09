@@ -10,8 +10,10 @@ import { AGENT_BRAIN_TEST_CHANNEL, type BrainTestResult, type BrainTestTarget } 
 import { testBrain } from '../agent-brain-test'
 import { getSettings } from '../store'
 import type { ScreenLookResult } from '@shared/screen'
+import type { BrowserAgentReply } from '@shared/browser'
 import { captureScreen } from '../voice-agent/ipc'
-import { ensureDesktopHands, screenLook } from '../desktop-hands-ipc'
+import { desktopLinkOp, ensureDesktopHands, screenLook } from '../desktop-hands-ipc'
+import { noteLook, pngSize } from '../desktop-hands'
 import { connectOpenAI, mintGeminiToken } from './tokens'
 
 /**
@@ -48,7 +50,11 @@ export function registerRealtimeHandlers(): void {
   ipcMain.handle(IPC.realtimeScreenshot, async (): Promise<RealtimeScreenshotResult> => {
     try {
       const shot = await captureScreen()
-      return shot ? { ok: true, base64: shot.base64, mime: shot.mime } : { ok: false, error: 'The screen could not be captured' }
+      if (!shot) return { ok: false, error: 'The screen could not be captured' }
+      // window_click x,y: the renderer scales them back to this picture's pixels.
+      const size = pngSize(Buffer.from(shot.base64.slice(0, 64), 'base64'))
+      if (size) noteLook(size.width, size.height)
+      return { ok: true, base64: shot.base64, mime: shot.mime }
     } catch (err) {
       return { ok: false, error: `The screen could not be captured: ${errText(err)}` }
     }
@@ -64,4 +70,11 @@ export function registerRealtimeHandlers(): void {
       return { ok: false, error: `The screen could not be captured: ${errText(err)}` }
     }
   })
+  // The realtime voice agent's window_* tools: the same ops the forge-bridge
+  // pipe answers, in words. desktopLinkOp never rejects.
+  ipcMain.handle(
+    IPC.desktopOp,
+    async (_e, op: unknown, args: unknown): Promise<BrowserAgentReply> =>
+      desktopLinkOp(String(op ?? ''), args && typeof args === 'object' ? (args as Record<string, unknown>) : {})
+  )
 }

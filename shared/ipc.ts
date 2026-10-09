@@ -239,6 +239,8 @@ export const IPC = {
   realtimeScreenshot: 'realtime:screenshot',
   /** `window.forge.screen.look()`: the whole screen to a PNG file, plus the app in front. electron/desktop-hands.ts. */
   screenLook: 'screen:look',
+  /** `window.forge.desktop.op(op, args)`: one desktop op (window_list, window_read, window_click…) for the realtime voice agent. electron/desktop-hands-ipc.ts. */
+  desktopOp: 'desktop:op',
 
   /* ------------------------------------------------------------------ foreman
    *

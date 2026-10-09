@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { agentLogoFor } from '@shared/agent-logos'
+import { isRealtimeBrain } from '@shared/agent-brain'
 import { isShellProfile, resolveProfile } from '@shared/agents'
 import type { AgentStatus, MiniBarAgent, MiniBarCall, MiniBarState, MiniBarTarget } from '@shared/minibar'
 import { collectLeaves } from '@shared/splitTree'
@@ -10,7 +11,7 @@ import { barDraft, setBarDraft } from '@/lib/barDraft'
 import { barSend, whenPaneReady } from '@/lib/barSend'
 import { setMiniBox } from '@/lib/miniBarDictation'
 import { activityOf } from '@/lib/paneActivity'
-import { lookAtScreen, screenNote } from '@/lib/screenLook'
+import { liveScreenNote, lookAtScreen, screenNote } from '@/lib/screenLook'
 import { terminalHost, type PaneRuntime } from '@/lib/terminals'
 import { useApp, type AppState } from '@/state/AppState'
 import { agentReplyLine, isShellPrompt, useMiniNews } from './minibar/news'
@@ -187,9 +188,11 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
     // The Screen key: the words carry one line pointing at a fresh picture of
     // the screen, taken now. No picture (off, old preload, failed, slow): as they are.
     // A plain shell pane never gets it: the line would be run as a command.
+    // A realtime voice brain cannot open the picture's path, so it is told to take its own look.
+    const note = toForge && isRealtimeBrain(s.settings.agentBrain) ? liveScreenNote : screenNote
     const words: Promise<string> =
       s.settings.miniBarScreen !== false && (toForge || !paneId || !isShellPane(s, paneId))
-        ? lookAtScreen().then((look) => (look ? `${message}${screenNote(look)}` : message))
+        ? lookAtScreen().then((look) => (look ? `${message}${note(look)}` : message))
         : Promise.resolve(message)
     // A brand-new agent is not listening yet: never paste into the shell under it.
     const ready: Promise<boolean> = toForge || !paneId ? Promise.resolve(true) : whenPaneReady(paneId, isShellPane(s, paneId))

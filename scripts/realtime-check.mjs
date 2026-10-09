@@ -225,6 +225,11 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
     'get_project_memory',
     'remember',
     'take_screenshot',
+    'window_list',
+    'window_read',
+    'window_click',
+    'window_type',
+    'window_key',
     'open_agent_pane',
     'type_into_pane',
     'help_prompt',
@@ -319,6 +324,12 @@ await check('B2 stubs, unknown tools and missing deps fail in words, never throw
   const bad = await tools.runRealtimeTool('run_app_action', {}, { deps })
   assert.equal(bad.ok, false)
   assert.match(bad.text, /no "kind"/)
+  // No window.forge.desktop (a preload from before it, or no window at all): the window tools say restart.
+  for (const name of ['window_list', 'window_read', 'window_click', 'window_type', 'window_key']) {
+    const r = await tools.runRealtimeTool(name, { text: 'x', keys: 'Tab' }, { deps })
+    assert.deepEqual(r, { ok: false, text: tools.DESKTOP_RESTART }, name)
+  }
+  assert.match(tools.DESKTOP_RESTART, /Desktop tools need a Forge restart\./)
 })
 
 await check('one name per terminal: the tab name resolves everywhere, and open_agent_pane keeps an explicit name', async () => {
@@ -488,11 +499,11 @@ await check('voices fall back to the vendor default', () => {
 console.log('discussion mode')
 
 await check('holds anything that changes Forge, lets looking through', () => {
-  for (const name of ['run_app_action', 'remember', 'focus_pane_by_name', 'show_on_board', 'show_on_canvas', 'some_future_tool']) {
+  for (const name of ['run_app_action', 'remember', 'focus_pane_by_name', 'show_on_board', 'show_on_canvas', 'window_click', 'window_type', 'window_key', 'some_future_tool']) {
     assert.equal(discussion.discussionGate(true, name), 'plan', name)
     assert.equal(discussion.discussionGate(false, name), 'run', name)
   }
-  for (const name of ['get_app_state', 'read_pane', 'get_project_memory', 'take_screenshot']) {
+  for (const name of ['get_app_state', 'read_pane', 'get_project_memory', 'take_screenshot', 'window_list', 'window_read']) {
     assert.equal(discussion.discussionGate(true, name), 'run', name)
   }
   // Every tool in the list is classified on purpose, not by accident.

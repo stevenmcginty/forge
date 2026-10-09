@@ -534,6 +534,10 @@ const api: ForgeApi = {
     look: () => ipcRenderer.invoke(IPC.screenLook)
   },
 
+  desktop: {
+    op: (op, args) => ipcRenderer.invoke(IPC.desktopOp, String(op ?? ''), args ?? {})
+  },
+
   panes: {
     lastReply: (paneId) => ipcRenderer.invoke(IPC.panesLastReply, String(paneId ?? ''))
   },

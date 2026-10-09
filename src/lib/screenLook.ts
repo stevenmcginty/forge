@@ -46,11 +46,26 @@ function oneLine(text: string): string {
  * The "in front" part is left out when main could not tell which app it was.
  */
 export function screenNote(look: Pick<ScreenLook, 'path' | 'front'>): string {
-  const app = look.front ? oneLine(look.front.app).replace(/"/g, "'") : ''
-  const title = look.front ? oneLine(look.front.title).replace(/"/g, "'") : ''
-  const who = app || title ? ` · in front: ${[app, title ? `"${title}"` : ''].filter(Boolean).join(' ')}` : ''
+  const who = inFront(look.front)
   return (
     ` [Screen now: "${oneLine(look.path)}"${who}` +
     ' · open the picture to see what Steve sees; act with window_read / window_click / window_type]'
   )
+}
+
+/**
+ * The line for a realtime voice brain (Gemini Live, GPT Realtime), which
+ * cannot open a file by path but has take_screenshot, leading space included:
+ *
+ *    [Screen: Forge is minimised · in front: Chrome "Sign up" · call take_screenshot to see it]
+ */
+export function liveScreenNote(look: Pick<ScreenLook, 'front'>): string {
+  return ` [Screen: Forge is minimised${inFront(look.front)} · call take_screenshot to see it]`
+}
+
+/** ` · in front: Chrome "Sign up"`, or '' when main could not tell which app it was. */
+function inFront(front: ScreenLook['front']): string {
+  const app = front ? oneLine(front.app).replace(/"/g, "'") : ''
+  const title = front ? oneLine(front.title).replace(/"/g, "'") : ''
+  return app || title ? ` · in front: ${[app, title ? `"${title}"` : ''].filter(Boolean).join(' ')}` : ''
 }
