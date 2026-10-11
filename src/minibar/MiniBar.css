@@ -286,37 +286,74 @@
 
 /* ----------------------------------------------------------- project pill */
 
+/*
+ * The project: the first thing the eye finds. The dock's plate
+ * (Composer.css .comp__project): an opaque tint of the project's own colour
+ * (--project, Bar.tsx), a keyline of it, and a disc of it holding the folder.
+ * The name keeps the bar's ink, so it reads on any project colour.
+ */
 .mb-proj {
+  --plate: color-mix(in srgb, var(--project) 17%, var(--bg-panel-raised));
+  --plate-hover: color-mix(in srgb, var(--project) 24%, var(--bg-panel-raised));
+  --plate-line: color-mix(in srgb, var(--project) 46%, transparent);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex: none;
   max-width: 156px;
   height: 34px;
   margin-bottom: 3px;
-  padding: 0 9px 0 10px;
+  padding: 0 10px 0 7px;
   border-radius: var(--r-full);
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
-  box-shadow: inset 0 0 0 1px var(--glass-line);
+  color: var(--text-primary);
+  background: var(--plate);
+  box-shadow:
+    inset 0 0 0 1px var(--plate-line),
+    inset 0 1px 0 var(--glass-hi);
   transition:
     color var(--dur-fast) var(--ease-out),
     background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
     transform var(--dur-instant) var(--ease-out);
+}
+
+:root[data-appearance='light'] .mb-proj {
+  --plate: color-mix(in srgb, var(--project) 26%, var(--bg-panel-raised));
+  --plate-hover: color-mix(in srgb, var(--project) 36%, var(--bg-panel-raised));
+  --plate-line: color-mix(in srgb, color-mix(in srgb, var(--project) 50%, var(--text-primary)) 45%, transparent);
 }
 
 .mb-proj:hover,
 .mb-proj[data-open='true'] {
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  background: var(--plate-hover);
+}
+
+/* Open: the keyline goes solid and the chevron flips — a shape, not only a shade. */
+.mb-proj[data-open='true'] {
+  box-shadow:
+    inset 0 0 0 1.5px var(--project),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+:root[data-appearance='light'] .mb-proj[data-open='true'] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--project) 55%, var(--text-primary));
 }
 
 .mb-proj:active {
   transform: scale(0.97);
 }
 
-.mb-proj > svg {
+/* Every project colour is a light one (ACCENT_PALETTE), so dark ink always reads on the disc. */
+.mb-proj__mark {
+  display: inline-grid;
+  place-items: center;
   flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: #0b0c0e;
+  background: var(--project);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
 
 .mb-proj__name {
@@ -325,14 +362,15 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 
 /* The list rises, so the chevron points up, and flips to close. */
 .mb-proj__chev {
-  color: var(--text-dim);
+  flex: none;
+  color: var(--text-secondary);
   transform: rotate(180deg);
   transition: transform var(--dur-glide) var(--spring-glide);
 }
@@ -862,6 +900,63 @@
   animation: mb-slide-in var(--dur-glide) var(--spring-glide) both;
 }
 
+/*
+ * Screenshot (TextWell.tsx ScreenshotKey): on, each send takes a picture of
+ * the screen. On is a lit key that says so — glyph and word, Listen's shape in
+ * the bar's own bone, not the accent (it is a standing setting, not a live
+ * thing). Off is the bare round key, its glyph slashed and dim.
+ */
+.mb-shot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: none;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--r-full);
+  color: var(--text-dim);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.mb-shot:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mb-shot:active {
+  transform: scale(0.95);
+}
+
+.mb-shot[data-on='true'] {
+  padding: 0 10px 0 7px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  box-shadow: inset 0 0 0 1px var(--glass-line-strong);
+}
+
+.mb-shot[data-on='true']:hover {
+  background: color-mix(in srgb, var(--text-primary) 14%, transparent);
+}
+
+.mb-shot__glyph {
+  display: inline-grid;
+  place-items: center;
+  animation: mb-glyph-in var(--dur-pop) var(--spring-pop) both;
+}
+
+.mb-shot__word {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  animation: mb-slide-in var(--dur-glide) var(--spring-glide) both;
+}
+
 .mb-send {
   display: inline-grid;
   place-items: center;
@@ -951,8 +1046,7 @@
   animation: mb-glyph-in var(--dur-pop) var(--spring-pop) both;
 }
 
-.mb-speak:not([data-on]),
-.mb-screen:not([data-on]) {
+.mb-speak:not([data-on]) {
   color: var(--text-dim);
 }
 
@@ -1046,6 +1140,13 @@
   }
   .mb-well__keys {
     gap: 1px;
+  }
+  /* Screenshot keeps its lit disc and unslashed glyph; only the word goes. */
+  .mb-shot__word {
+    display: none;
+  }
+  .mb-shot[data-on='true'] {
+    padding: 0;
   }
   .mb-open__word {
     display: none;

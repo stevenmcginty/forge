@@ -36,7 +36,7 @@ export function baseState(now = Date.now()): MiniBarState {
     rev: 1,
     at: now,
     look: LOOK_DARK,
-    project: { id: 'forge', name: 'forge' },
+    project: { id: 'forge', name: 'forge', color: '#7FD1FF' },
     projects: [
       { id: 'forge', name: 'forge', running: 4 },
       { id: 'api', name: 'api', running: 2 },
@@ -146,6 +146,8 @@ export function scene(name: string, light = false, now = Date.now()): MiniBarSta
       return { ...s, at: now - 9000 }
     case 'empty':
       return { ...s, project: null, projects: [], agents: [], events: [], unseen: 0 }
+    case 'screenoff':
+      return { ...s, screen: false }
     case 'listening':
       return { ...s, draft: '', dictation: { phase: 'listening', level: 0.55 }, listen: { on: true, speaking: false, muted: false } }
     default:
@@ -153,7 +155,7 @@ export function scene(name: string, light = false, now = Date.now()): MiniBarSta
   }
 }
 
-export const SCENES = ['connecting', 'idle', 'toasts', 'peek', 'asking', 'chat', 'activity', 'tucked', 'quit', 'stale', 'empty', 'listening']
+export const SCENES = ['connecting', 'idle', 'toasts', 'peek', 'asking', 'chat', 'activity', 'tucked', 'quit', 'stale', 'empty', 'listening', 'screenoff']
 
 /** A view API that only logs: every call lands in the console and in `log`. */
 export function fakeApi(log: (line: string) => void = (l) => console.log(l)): MiniBarViewApi {

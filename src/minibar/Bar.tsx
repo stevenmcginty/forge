@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from 'react'
+import { useRef, type CSSProperties, type ReactNode } from 'react'
 import type { MiniBarCall, MiniBarQuitInfo, MiniBarState, MiniBarViewApi } from '@shared/minibar'
 import { Icon } from '@/components/Icon'
 import { barEdge, BarCues } from './BarCues'
@@ -102,10 +102,13 @@ export function Bar({
               data-open={panel === 'projects' ? 'true' : undefined}
               aria-expanded={panel === 'projects'}
               title={`Project: ${state.project?.name ?? ''} — switch project`}
+              style={{ '--project': state.project?.color ?? 'var(--accent)' } as CSSProperties}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => toggle('projects')}
             >
-              <Icon name="folder" size={14} />
+              <span className="mb-proj__mark" aria-hidden="true">
+                <Icon name="folder" size={12} />
+              </span>
               <span className="mb-proj__name">{state.project?.name}</span>
               <Icon name="chevronDown" size={12} className="mb-proj__chev" />
             </button>

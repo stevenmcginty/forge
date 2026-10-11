@@ -172,13 +172,16 @@ export function SpeakerGlyph({ on }: { on: boolean }): ReactNode {
   )
 }
 
-/** Screen: an open eye when each send carries a look at the screen; off, the eye with a slash. */
-export function EyeGlyph({ on }: { on: boolean }): ReactNode {
+/**
+ * Screenshot: a screen inside a camera's corner marks — a picture of the
+ * screen. Off: the same with a slash through it. A shape, not a tint.
+ */
+export function ScreenshotGlyph({ on }: { on: boolean }): ReactNode {
   return (
     <G>
-      <path d="M1.6 8s2.4-4.4 6.4-4.4S14.4 8 14.4 8s-2.4 4.4-6.4 4.4S1.6 8 1.6 8z" />
-      <circle cx="8" cy="8" r="2" />
-      {/* Off: a slash through the eye. A shape, not a tint. */}
+      <path d="M1.8 5V3.4a1.6 1.6 0 0 1 1.6-1.6H5M11 1.8h1.6a1.6 1.6 0 0 1 1.6 1.6V5M14.2 11v1.6a1.6 1.6 0 0 1-1.6 1.6H11M5 14.2H3.4a1.6 1.6 0 0 1-1.6-1.6V11" />
+      <rect x="4.6" y="5" width="6.8" height="4.6" rx="0.9" />
+      <path d="M8 9.6v1.6M6.4 11.2h3.2" />
       {on ? null : <path d="M2.2 13.8L13.8 2.2" strokeWidth={1.6} />}
     </G>
   )

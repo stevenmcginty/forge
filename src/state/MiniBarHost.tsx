@@ -105,7 +105,7 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
       rev: 0,
       at: 0,
       look: lookOf(),
-      project: active ? { id: active.id, name: active.name } : null,
+      project: active ? { id: active.id, name: active.name, color: active.color } : null,
       projects: state.projects.map((p) => ({
         id: p.id,
         name: p.name,
@@ -185,7 +185,7 @@ function Live({ draft }: { draft: MutableRefObject<string> }): null {
       const sent = barSend(words, { paneId, toForge, ask: (m) => hubAsk(live.current.hub, m, 'typed') })
       if (sent === 'failed') giveBack()
     }
-    // The Screen key: the words carry one line pointing at a fresh picture of
+    // The Screenshot key: the words carry one line pointing at a fresh picture of
     // the screen, taken now. No picture (off, old preload, failed, slow): as they are.
     // A plain shell pane never gets it: the line would be run as a command.
     // A realtime brain (Gemini Live, GPT Realtime) cannot open the picture's path, so it is told to take its own look.

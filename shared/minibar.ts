@@ -72,7 +72,8 @@ export interface MiniBarState {
   at: number
   /** data-* attributes of the host's <html> (theme and look), applied as-is to the view's <html>. */
   look: Record<string, string>
-  project: { id: string; name: string } | null
+  /** `color` is the project's own colour (Project.color); the project button wears it. Optional: an older host leaves it out. */
+  project: { id: string; name: string; color?: string } | null
   projects: { id: string; name: string; running: number }[]
   /** Every agent pane in every project; the view filters by project. */
   agents: MiniBarAgent[]
@@ -94,7 +95,7 @@ export interface MiniBarState {
   /** Last 10 turns with Forge. */
   thread: MiniBarTurn[]
   speakUpdates: boolean
-  /** The Screen key (`miniBarScreen`): each send carries a fresh look at the screen. */
+  /** The Screenshot key (`miniBarScreen`): each send carries a fresh picture of the screen. */
   screen: boolean
   tucked: boolean
 }

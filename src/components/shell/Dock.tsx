@@ -58,7 +58,9 @@ function ProjectPill(): ReactNode {
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => toggleSheet('projects')}
     >
-      <span className="dock__project-dot" aria-hidden="true" />
+      <span className="dock__project-mark" aria-hidden="true">
+        <Icon name="folder" size={12} />
+      </span>
       <span className="dock__project-name truncate">{project?.name ?? 'No project'}</span>
       <Icon name="chevronDown" size={11} className="dock__chev" />
     </button>

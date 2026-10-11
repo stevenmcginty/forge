@@ -82,13 +82,18 @@
   max-width: 220px;
 }
 
-.dock__project-dot {
+/* The project's colour as a disc, holding the folder in dark ink: every
+   project colour is a light one (ACCENT_PALETTE), so the ink always reads. */
+.dock__project-mark {
+  display: inline-grid;
+  place-items: center;
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
+  color: #0b0c0e;
   background: var(--project);
-  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--project) 60%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
 
 .dock__project-name {

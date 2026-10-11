@@ -4,7 +4,7 @@ import { CueGlyph } from '@/components/DictationCueView'
 import { Icon } from '@/components/Icon'
 import { flashBarSent } from './BarCues'
 import { agentById, targetName } from './format'
-import { EyeGlyph, ListenGlyph, StopSquare, TurnArc } from './glyphs'
+import { ListenGlyph, ScreenshotGlyph, StopSquare, TurnArc } from './glyphs'
 
 /** The box grows as the big bar's does (Composer): one line, then a line at a time to five, then scrolls. */
 const MIN_BOX_H = 34
@@ -13,8 +13,8 @@ const DRAFT_DEBOUNCE_MS = 250
 
 /**
  * The words: a sunken well holding dictation's word, the text box, and the
- * keys that act on the words — attach, Screen (a look at the screen goes
- * with each send), dictate, Listen, Send (or Stop).
+ * keys that act on the words — attach, Screenshot (a picture of the screen
+ * goes with each send), dictate, Listen, Send (or Stop).
  *
  * The box is the view's own. It reports what it holds with `setDraft`
  * (debounced), and takes the host's draft only when the host changed it for
@@ -136,19 +136,7 @@ export function TextWell({
         >
           <Icon name="paperclip" size={15} />
         </button>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={state.screen}
-          className="mb-ibtn mb-ibtn--sm mb-screen"
-          data-on={state.screen ? 'true' : undefined}
-          title={state.screen ? 'Screen: on — each send includes a look at your screen' : 'Screen: off'}
-          aria-label="Screen"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => call({ t: 'screen', on: !state.screen })}
-        >
-          <EyeGlyph on={state.screen} />
-        </button>
+        <ScreenshotKey on={state.screen} onClick={() => call({ t: 'screen', on: !state.screen })} />
 
         <MicKey phase={d.phase} onClick={() => call({ t: 'dictate' })} />
         <ListenKey listen={state.listen} onClick={() => call({ t: 'listen' })} />
@@ -265,6 +253,36 @@ function MicKey({ phase, onClick }: { phase: MiniBarState['dictation']['phase'];
       <span key={look} className="mb-mic__glyph">
         {look === 'rec' ? <StopSquare /> : look === 'busy' ? <TurnArc size={14} /> : <Icon name="mic" size={16} />}
       </span>
+    </button>
+  )
+}
+
+/**
+ * Screenshot: on, every send takes a picture of the screen for the agent. On
+ * reads by shape and word: a lit key that says "Screenshot". Off is the bare
+ * glyph, slashed and dim.
+ */
+function ScreenshotKey({ on, onClick }: { on: boolean; onClick: () => void }): ReactNode {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      className="mb-shot"
+      data-on={on ? 'true' : undefined}
+      title={
+        on
+          ? 'Screenshot is on: each message you send takes a picture of your screen, so the agent sees what you see. Press to turn it off'
+          : 'Screenshot is off: messages go without a picture of your screen. Press to turn it on'
+      }
+      aria-label="Screenshot with each message"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+    >
+      <span key={on ? 'on' : 'off'} className="mb-shot__glyph">
+        <ScreenshotGlyph on={on} />
+      </span>
+      {on ? <span className="mb-shot__word">Screenshot</span> : null}
     </button>
   )
 }
