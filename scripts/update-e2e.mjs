@@ -318,7 +318,12 @@ function seed(project) {
   mkdirSync(project, { recursive: true })
   writeFileSync(
     join(DATA, 'settings.json'),
-    JSON.stringify({ onboarded: true, webAccountPromptDismissed: true, lastNotesVersion: OLD }, null, 2)
+    JSON.stringify(
+      // speechKeyReminderOff: no Groq key on the runner, so the "Turn on dictation" card would sit over the window.
+      { onboarded: true, webAccountPromptDismissed: true, speechKeyReminderOff: true, lastNotesVersion: OLD },
+      null,
+      2
+    )
   )
   writeFileSync(
     join(DATA, 'projects.json'),
@@ -357,24 +362,36 @@ async function launch(installDir, label) {
   const page = await mainWindow(app)
   await page.waitForFunction(() => Boolean(window.forge?.updates), null, { timeout: 60_000 })
   log(`launched Forge ${version} (${label}), main pid ${pid}, window ${page.url()}`)
-  await dismissWhatsNew(page)
+  await dismissOverlays(page)
   return { app, page, pid, version, proc }
 }
 
 /**
- * The "what's new" card opens over the window when the bundled notes are newer
- * than settings' lastNotesVersion. Both test builds carry the checkout's notes
- * (0.3.0, not 50.0.x), so it shows on the first launch; it is dismissed the way
- * a person would, and stays dismissed after that.
+ * Cards that open over the window on a launch. The "what's new" card opens
+ * when the bundled notes are newer than settings' lastNotesVersion — both test
+ * builds carry the checkout's notes (0.3.0, not 50.0.x), so it shows on the
+ * first launch — and the first-run cards are seeded away but closed here too if
+ * one turns up. Each is closed with its own dismiss button, as a person would.
  */
-async function dismissWhatsNew(page) {
-  const card = page.locator('.wnew')
-  const shown = await card.waitFor({ timeout: 8_000 }).then(() => true, () => false)
-  if (!shown) return
-  await page.screenshot({ path: join(ART, `whats-new-${Date.now()}.png`) }).catch(() => undefined)
-  await page.locator('.wnew__dismiss').click()
-  await card.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined)
-  log(`dismissed the what's new card (${await card.count()} left)`)
+async function dismissOverlays(page) {
+  const cards = [
+    ['.wnew', '.wnew__dismiss'],
+    ['.onboard', '.onboard__dismiss']
+  ]
+  const until = Date.now() + 8_000
+  while (Date.now() < until) {
+    let closed = false
+    for (const [card, dismiss] of cards) {
+      if ((await page.locator(card).count()) === 0) continue
+      const label = await page.locator(card).first().getAttribute('aria-label').catch(() => card)
+      await page.screenshot({ path: join(ART, `overlay-${Date.now()}.png`) }).catch(() => undefined)
+      await page.locator(dismiss).first().click({ timeout: 10_000 })
+      await page.locator(card).first().waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined)
+      log(`dismissed the overlay "${label}"`)
+      closed = true
+    }
+    if (!closed) await sleep(500)
+  }
 }
 
 async function mainWindow(app) {
