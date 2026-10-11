@@ -28,6 +28,9 @@
 #   resources/icon-dev.ico              ← ditto, for the dev channel
 #   resources/foreman-kit/              ← electron/foreman/kit-path.ts
 #                                          foremanKitDir()
+#   resources/updater/apply-update.ps1  ← electron/update-apply.ts
+#                                          (copied to a work dir before it
+#                                           runs: see the entry below)
 
 appId: dev.forge.app
 productName: Forge
@@ -74,6 +77,12 @@ extraResources:
     to: watchdog/watchdog.mjs
   - from: Start Forge Watchdog.vbs
     to: watchdog/Start Forge Watchdog.vbs
+  # The update helper installs a new version from outside the install folder
+  # and puts the old one back if that fails — see scripts/apply-update.ps1.
+  # Forge copies it out to %LOCALAPPDATA%\forge-updater before running it,
+  # because the folder it ships in is the very one it renames away.
+  - from: scripts/apply-update.ps1
+    to: updater/apply-update.ps1
   - from: build/icon-dev.ico
     to: icon-dev.ico
   - from: bridge-dist

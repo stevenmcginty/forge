@@ -76,6 +76,7 @@ const CHECKS = [
   { name: 'tail:check', lane: 'fast' },
   { name: 'theme:check', lane: 'fast' },
   { name: 'updates:check', lane: 'fast' },
+  { name: 'update-apply:check', lane: 'fast', note: 'the real apply-update.ps1 against fake installs in the temp dir; ~70 s, Windows-only' },
   { name: 'watchdog:check', lane: 'fast', note: 'the real watchdog on an injected clock — no waiting out its timeouts' },
   { name: 'dictation:check', lane: 'fast', note: 'talk-key gestures + warm-start wiring' },
   { name: 'voice:check', lane: 'fast', note: 'the live OpenRouter tier is opt-in via env' },

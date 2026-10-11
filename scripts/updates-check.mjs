@@ -58,6 +58,11 @@ const {
   gitFailureReason,
   isNewer,
   isNoFeedError,
+  isUpdateBusy,
+  statusAfterUpdateError,
+  shouldWriteUpdateHealth,
+  decideUpdateReconcile,
+  installDirFromBackup,
   npmLatestUrl,
   parseNpmLatest,
   parseVersion,
@@ -425,10 +430,152 @@ ok(updaterMode({ SOMETHING_ELSE: '1.2.3' }, false) === 'off', 'an unrelated vari
   )
   ok(source.includes('autoDownload = false'), 'auto-download is off — a banner comes first')
   ok(source.includes('autoInstallOnAppQuit = false'), 'auto-install on quit is off')
+  // This used to assert quitAndInstall sat behind the real-mode check. It is
+  // gone (see below); the one call that can change disk now is applyUpdate().
   ok(
-    /mode !== 'real'[\s\S]{0,600}quitAndInstall/.test(source),
-    'quitAndInstall is behind a real-mode check'
+    /mode !== 'real'[\s\S]{0,1600}applyUpdate\(/.test(source),
+    'applyUpdate is behind a real-mode check'
   )
+}
+
+// Structural: quitAndInstall ran NSIS while Forge was alive, and NSIS deletes
+// the old app before copying the new one. No file under electron/ may call it
+// again — mentions in comments are fine, calls are not.
+{
+  const { readdirSync, statSync } = await import('node:fs')
+  const walk = (dir) =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name)
+      return statSync(path).isDirectory() ? walk(path) : /\.(ts|mts|cts|js|mjs)$/.test(name) ? [path] : []
+    })
+  const offenders = []
+  for (const file of walk(join(ROOT, 'electron'))) {
+    const code = readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1')
+    if (/quitAndInstall\s*\(/.test(code) || /\[\s*['"`]quitAndInstall['"`]\s*\]/.test(code)) offenders.push(file)
+  }
+  ok(offenders.length === 0, 'nothing under electron/ calls quitAndInstall', offenders.join(', '))
+  const updater = readFileSync(join(ROOT, 'electron', 'updater.ts'), 'utf8')
+  ok(!/logger\s*=\s*null/.test(updater), 'electron-updater logs to the file, not to null')
+  ok(updater.includes('updater.logger = updaterLogger'), 'electron-updater uses the file logger')
+}
+
+/* ------------------------------------------------- updater error routing */
+
+console.log('\nupdater errors by step')
+{
+  const ready = { phase: 'ready', version: '0.3.271' }
+  const downloading = { phase: 'downloading', version: '0.3.271', percent: 40 }
+  // THE BUG: a background check's error replaced `ready`, and the Restart
+  // button vanished with no word said.
+  ok(statusAfterUpdateError(ready, 'check', 'HttpError: 500 Internal Server Error') === null, 'a check error does not clobber ready')
+  ok(statusAfterUpdateError(ready, 'check', 'getaddrinfo ENOTFOUND github.com') === null, 'nor does going offline')
+  ok(statusAfterUpdateError(downloading, 'check', 'HttpError: 500') === null, 'a check error does not clobber a download')
+  for (const phase of ['installing', 'updated', 'failed']) {
+    ok(statusAfterUpdateError({ phase }, 'check', 'boom') === null, `a check error does not clobber ${phase}`)
+  }
+  ok(isUpdateBusy('ready') && isUpdateBusy('downloading') && !isUpdateBusy('idle') && !isUpdateBusy('error'), 'busy phases')
+  // Still true for a plain check: no feed is not news.
+  ok(statusAfterUpdateError({ phase: 'idle' }, 'check', 'HttpError: 404 Not Found')?.phase === 'idle', 'a check 404 is still idle')
+  const checkErr = statusAfterUpdateError({ phase: 'idle' }, 'check', 'HttpError: 500 Internal Server Error')
+  ok(checkErr?.phase === 'error' && checkErr.step === 'check', 'a real check failure is an error, step=check', JSON.stringify(checkErr))
+  // A 404 while downloading is the installer missing from a release that does
+  // exist — it used to become a silent `idle`.
+  const dl404 = statusAfterUpdateError(downloading, 'download', 'HttpError: 404 Not Found')
+  ok(dl404?.phase === 'error', 'a download 404 is an error, not idle', JSON.stringify(dl404))
+  ok(dl404?.step === 'download' && dl404.version === '0.3.271', 'it says the download step and the version')
+  const dlOffline = statusAfterUpdateError(downloading, 'download', 'getaddrinfo ENOTFOUND github.com')
+  ok(dlOffline?.phase === 'error' && dlOffline.step === 'download', 'going offline mid-download is an error too')
+  const inst = statusAfterUpdateError(ready, 'install', 'The updater did not start.')
+  ok(inst?.phase === 'error' && inst.step === 'install', 'an install error says step=install')
+  ok((statusAfterUpdateError(ready, 'download', 'x'.repeat(500))?.error ?? '').length === 200, 'messages are capped at 200')
+}
+
+/* ------------------------------------------- apply helper: health + reconcile */
+
+console.log('\napply helper — health file')
+{
+  const base = { id: 'u1', from: '0.3.270', to: '0.3.271', at: '2026-10-11T12:00:00.000Z', helperPid: 4242 }
+  ok(shouldWriteUpdateHealth({ ...base, phase: 'launching' }, '0.3.271'), 'launching + new version → write')
+  ok(shouldWriteUpdateHealth({ ...base, phase: 'waiting-for-health' }, '0.3.271'), 'waiting-for-health + new version → write')
+  // An old Forge must never vouch for a new one.
+  ok(!shouldWriteUpdateHealth({ ...base, phase: 'waiting-for-health' }, '0.3.270'), 'the OLD version never writes health')
+  ok(!shouldWriteUpdateHealth({ ...base, phase: 'waiting-for-health' }, '0.3.272'), 'nor a different version')
+  for (const phase of ['starting', 'preflight', 'waiting-for-exit', 'installing', 'verifying', 'succeeded', 'rolling-back', 'rolled-back']) {
+    ok(!shouldWriteUpdateHealth({ ...base, phase }, '0.3.271'), `no health at ${phase}`)
+  }
+  ok(!shouldWriteUpdateHealth({ ...base, id: '', phase: 'launching' }, '0.3.271'), 'no id, no health')
+  ok(!shouldWriteUpdateHealth(null, '0.3.271'), 'no state, no health')
+}
+
+console.log('\napply helper — startup reconcile')
+{
+  const base = { id: 'u1', from: '0.3.270', to: '0.3.271', at: '2026-10-11T12:00:00.000Z', helperPid: 4242 }
+  const NEW = '0.3.271'
+  const OLD = '0.3.270'
+  const d = (state, version, alive, written) => decideUpdateReconcile(state, version, alive, written)
+  const is = (got, want) => Object.entries(want).every(([k, v]) => got[k] === v)
+
+  ok(is(d(null, NEW, false), { action: 'none', why: 'no-state' }), 'no file → nothing')
+
+  // The happy path, as the NEW Forge sees it.
+  ok(is(d({ ...base, phase: 'launching' }, NEW, true), { action: 'write-health' }), 'launching, new version → write health')
+  ok(is(d({ ...base, phase: 'waiting-for-health' }, NEW, true), { action: 'write-health' }), 'waiting-for-health → write health')
+  ok(is(d({ ...base, phase: 'waiting-for-health' }, NEW, true, true), { action: 'watch' }), 'health written → watch for succeeded')
+  ok(
+    is(d({ ...base, phase: 'waiting-for-health' }, NEW, false, true), { action: 'show', outcome: 'interrupted' }),
+    'health written but the helper died → interrupted'
+  )
+  // updated is shown ONLY from a verified succeeded.
+  ok(is(d({ ...base, phase: 'succeeded' }, NEW, false), { action: 'show', outcome: 'succeeded' }), 'succeeded + new version → updated')
+  ok(
+    is(d({ ...base, phase: 'succeeded' }, OLD, false), { action: 'none', why: 'version-mismatch' }),
+    'succeeded but this Forge is not the new version → never "updated"'
+  )
+  ok(
+    is(d({ ...base, phase: 'waiting-for-health' }, OLD, true), { action: 'watch' }),
+    'version mismatch while the helper waits → no health, just watch'
+  )
+  ok(
+    is(d({ ...base, phase: 'launching' }, OLD, false), { action: 'show', outcome: 'interrupted' }),
+    'version mismatch with a dead helper → interrupted'
+  )
+
+  // Final failures carry the helper's reason.
+  for (const phase of ['aborted', 'rolled-back', 'rollback-failed']) {
+    const got = d({ ...base, phase, reason: `because ${phase}` }, OLD, false)
+    ok(is(got, { action: 'show', outcome: phase, reason: `because ${phase}` }), `${phase} → failed with its reason`)
+  }
+
+  // Acknowledged results do not come back.
+  for (const phase of ['succeeded', 'aborted', 'rolled-back', 'rollback-failed', 'starting', 'installing']) {
+    ok(
+      is(d({ ...base, phase, acknowledged: true }, phase === 'succeeded' ? NEW : OLD, false), { action: 'none', why: 'acknowledged' }),
+      `acknowledged ${phase} → nothing on screen`
+    )
+  }
+  ok(
+    is(d({ ...base, phase: 'launching', acknowledged: true }, OLD, false), { action: 'none', why: 'acknowledged' }),
+    'an acknowledged dead launch stays dismissed'
+  )
+
+  // Interrupted: an intermediate phase whose helper is dead.
+  ok(
+    is(d({ ...base, phase: 'starting', helperPid: undefined }, OLD, false), { action: 'show', outcome: 'interrupted' }),
+    'starting left behind → the updater did not start'
+  )
+  for (const phase of ['preflight', 'waiting-for-exit', 'stopping-processes', 'backing-up', 'installing', 'verifying', 'rolling-back']) {
+    ok(is(d({ ...base, phase }, OLD, true), { action: 'watch' }), `${phase}, helper alive → watch`)
+    const dead = d({ ...base, phase }, OLD, false)
+    ok(
+      is(dead, { action: 'show', outcome: 'interrupted' }) && /stopped unexpectedly/.test(dead.reason ?? ''),
+      `${phase}, helper dead → interrupted, said in words`,
+      JSON.stringify(dead)
+    )
+  }
+  ok(is(d({ ...base, phase: 'constructor' }, OLD, false), { action: 'none', why: 'unknown-phase' }), 'an unknown phase is ignored')
+  ok(installDirFromBackup('C:\\Users\\a\\AppData\\Local\\Programs\\forge.update-backup') === 'C:\\Users\\a\\AppData\\Local\\Programs\\forge', 'backup dir → install dir')
 }
 
 /* ------------------------------------------------------- no-feed handling */

@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, powerMonitor } from 'electron'
+import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
+import { basename } from 'node:path'
 import { IPC } from '@shared/ipc'
-import { isNoFeedError, updaterMode } from '@shared/tools'
-import type { UpdateStatus } from '@shared/types'
-import { allowClose } from './quit-guard'
-import { killSttSidecarSync } from './stt-sidecar'
+import { isUpdateBusy, statusAfterUpdateError, updaterMode } from '@shared/tools'
+import type { UpdateResult, UpdateStatus, UpdateStep } from '@shared/types'
+import { acknowledgeUpdateResult, applyUpdate, canApplyUpdate, setUpdateResultSink } from './update-apply'
+import { logUpdate, updateLogPath, updaterLogger } from './update-log'
 
 /**
  * Forge updating itself.
@@ -21,12 +22,19 @@ import { killSttSidecarSync } from './stt-sidecar'
  *     somebody clicks it Forge has done nothing but one HTTPS GET.
  *  3. **No feed is not an error.** The GitHub repo may not exist yet, the
  *     laptop may be on a train. Both come back from electron-updater as
- *     exceptions, and both mean "no update" — see isNoFeedError().
+ *     exceptions, and both mean "no update" — see isNoFeedError(). That holds
+ *     for a *check* only: a 404 while downloading is a release whose installer
+ *     is missing, and that is an error (statusAfterUpdateError()).
+ *  4. **Never quitAndInstall.** The install is handed to the apply helper
+ *     (electron/update-apply.ts), which can put the old version back. Every
+ *     step is logged to <userData>\logs\updater.log (electron/update-log.ts).
  *
  * FORGE_FAKE_UPDATE=x.y.z runs the entire banner flow — offered, downloading
  * with a progress bar, ready, restart — against a version that does not exist,
  * without electron-updater and without the ability to install anything. It is
- * how the banner is developed and how it was verified.
+ * how the banner is developed and how it was verified. Restart there shows
+ * `installing` for two seconds and then `updated` — or `failed` with
+ * FORGE_FAKE_UPDATE_FAIL=1 — and nothing closes.
  */
 
 /** Let the window paint and the panes start before touching the network. */
@@ -61,11 +69,61 @@ let target: BrowserWindow | null = null
 let lastCheckAt = 0
 /** electron-updater's AppUpdater, loaded lazily and only in `real` mode. */
 let autoUpdater: import('electron-updater').AppUpdater | null = null
+/** What `update-downloaded` handed over: the installer the helper will run. */
+let downloaded: { version: string; file: string; sha512: string } | null = null
+/** The last install attempt, carried on every status for Settings. */
+let lastResult: UpdateResult | null = null
+/** Which network step is in flight, for the error event's log line. */
+let inFlight: UpdateStep | null = null
 
 function broadcast(next: UpdateStatus): void {
-  status = next
+  status = lastResult ? { ...next, lastResult } : next
+  logUpdate(`status: ${describeStatus(status)}`)
   if (!target || target.isDestroyed()) return
   target.webContents.send(IPC.updateStatusEvent, status)
+}
+
+function describeStatus(s: UpdateStatus): string {
+  const parts: string[] = [s.phase]
+  if (s.version) parts.push(`v${s.version}`)
+  if (s.phase === 'downloading') parts.push(`${s.percent ?? 0}%`)
+  if (s.step) parts.push(`step=${s.step}`)
+  if (s.closing) parts.push('closing')
+  if (s.outcome) parts.push(`outcome=${s.outcome}`)
+  if (s.from || s.to) parts.push(`${s.from ?? '?'} → ${s.to ?? '?'}`)
+  if (s.error) parts.push(`error="${s.error}"`)
+  if (s.reason) parts.push(`reason="${s.reason}"`)
+  if (s.simulated) parts.push('simulated')
+  return parts.join(' ')
+}
+
+/** A result as the banner's status: `updated` only for a verified success. */
+function resultStatus(result: UpdateResult): UpdateStatus {
+  if (result.outcome === 'succeeded') {
+    return { phase: 'updated', version: result.to, from: result.from, to: result.to }
+  }
+  return {
+    phase: 'failed',
+    version: result.to,
+    from: result.from,
+    to: result.to,
+    outcome: result.outcome,
+    ...(result.reason ? { reason: result.reason } : {}),
+    ...(result.backupDir ? { backupDir: result.backupDir } : {}),
+    ...(result.installDir ? { installDir: result.installDir } : {}),
+    logPath: updateLogPath()
+  }
+}
+
+/** An updater error, routed by the step it came from (see statusAfterUpdateError). */
+function onUpdaterError(step: UpdateStep, message: string): void {
+  logUpdate(`${step} failed: ${message}`)
+  const next = statusAfterUpdateError(status, step, message)
+  if (!next) {
+    logUpdate(`${step} error ignored — the ${status.phase} state stays on screen`)
+    return
+  }
+  broadcast(next.phase === 'error' ? { ...next, logPath: updateLogPath() } : next)
 }
 
 export function setUpdateTarget(win: BrowserWindow | null): void {
@@ -94,6 +152,33 @@ export function getUpdateStatus(): UpdateStatus {
  */
 function simulatedVersion(): string {
   return (process.env['FORGE_FAKE_UPDATE'] ?? '').trim()
+}
+
+/** The fake install: two seconds of `installing`, then the result. Nothing closes. */
+function simulateInstall(version: string): { ok: boolean; reason?: string } {
+  broadcast({ phase: 'installing', version, closing: true, simulated: true })
+  if (simulatedTimer) clearInterval(simulatedTimer)
+  simulatedTimer = setTimeout(() => {
+    simulatedTimer = null
+    const fail = process.env['FORGE_FAKE_UPDATE_FAIL'] === '1'
+    const from = app.getVersion()
+    lastResult = {
+      outcome: fail ? 'rolled-back' : 'succeeded',
+      from,
+      to: version,
+      current: fail ? from : version,
+      ...(fail
+        ? {
+            reason:
+              'Simulated failure (FORGE_FAKE_UPDATE_FAIL=1): the new version did not report in, so the old one was put back.'
+          }
+        : {}),
+      at: new Date().toISOString(),
+      acknowledged: false
+    }
+    broadcast({ ...resultStatus(lastResult), simulated: true })
+  }, 2000)
+  return { ok: true }
 }
 
 function simulateDownload(): void {
@@ -141,21 +226,23 @@ async function loadAutoUpdater(): Promise<import('electron-updater').AppUpdater 
 
     updater.autoDownload = false
     // Installing on quit behind your back is the same sin as downloading behind
-    // your back, one step later. The only install is quitAndInstall(), from the
-    // banner, after you clicked it.
+    // your back, one step later. The only install is installUpdate(), from the
+    // banner, after you clicked it and confirmed.
     updater.autoInstallOnAppQuit = false
-    updater.logger = null
+    updater.logger = updaterLogger
 
+    // A check never replaces a download, a waiting installer or a result on
+    // screen — see isUpdateBusy().
     updater.on('checking-for-update', () => {
-      if (status.phase === 'downloading' || status.phase === 'ready') return
+      if (isUpdateBusy(status.phase)) return
       broadcast({ phase: 'checking' })
     })
     updater.on('update-available', (info: { version: string }) => {
-      if (status.phase === 'downloading' || status.phase === 'ready') return
+      if (isUpdateBusy(status.phase)) return
       broadcast({ phase: 'available', version: info?.version ?? '' })
     })
     updater.on('update-not-available', () => {
-      if (status.phase === 'downloading' || status.phase === 'ready') return
+      if (isUpdateBusy(status.phase)) return
       broadcast({ phase: 'idle' })
     })
     updater.on('download-progress', (p: { percent?: number; bytesPerSecond?: number }) => {
@@ -166,18 +253,18 @@ async function loadAutoUpdater(): Promise<import('electron-updater').AppUpdater 
         bytesPerSecond: Math.round(p?.bytesPerSecond ?? 0)
       })
     })
-    updater.on('update-downloaded', (info: { version: string }) => {
-      broadcast({ phase: 'ready', version: info?.version ?? status.version ?? '' })
+    updater.on('update-downloaded', (info: DownloadedInfo) => {
+      const version = info?.version ?? status.version ?? ''
+      downloaded = { version, file: info?.downloadedFile ?? '', sha512: installerSha512(info) }
+      logUpdate(`downloaded ${version}: ${downloaded.file} (sha512 ${downloaded.sha512 ? 'present' : 'MISSING'})`)
+      broadcast({ phase: 'ready', version })
     })
+    // Log only. checkForUpdates() and downloadUpdate() both reject with the
+    // same error, and their catch blocks know which step failed — this event
+    // does not, and deciding here is how a background check used to wipe out
+    // a finished download.
     updater.on('error', (err: Error) => {
-      const message = err?.message ?? String(err)
-      if (isNoFeedError(message)) {
-        // No releases yet, or no network. Neither is news.
-        broadcast({ phase: 'idle' })
-        return
-      }
-      console.error('[updater]', message)
-      broadcast({ phase: 'error', error: message.slice(0, 200) })
+      logUpdate(`electron-updater error event${inFlight ? ` during ${inFlight}` : ''}: ${err?.message ?? String(err)}`)
     })
 
     autoUpdater = updater
@@ -194,8 +281,9 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
   if (mode === 'off') return status
   if (mode === 'simulated') {
     // The fake feed always has something, otherwise there would be nothing to
-    // look at. Re-checking while a fake download is in flight is a no-op.
-    if (status.phase === 'downloading' || status.phase === 'ready') return status
+    // look at. Re-checking while a fake download, install or result is on
+    // screen is a no-op.
+    if (isUpdateBusy(status.phase)) return status
     broadcast({ phase: 'available', version: simulatedVersion(), simulated: true })
     return status
   }
@@ -205,19 +293,22 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
     return status
   }
   lastCheckAt = Date.now()
+  inFlight = 'check'
   try {
     await updater.checkForUpdates()
   } catch (err) {
-    const message = (err as Error)?.message ?? String(err)
-    if (isNoFeedError(message)) broadcast({ phase: 'idle' })
-    else broadcast({ phase: 'error', error: message.slice(0, 200) })
+    onUpdaterError('check', (err as Error)?.message ?? String(err))
+  } finally {
+    if (inFlight === 'check') inFlight = null
   }
   return status
 }
 
 export async function downloadUpdate(): Promise<UpdateStatus> {
   if (mode === 'off') return status
-  if (status.phase !== 'available') return status
+  // "Try again" after a failed download is the same click as the first one.
+  const retry = status.phase === 'error' && status.step === 'download'
+  if (status.phase !== 'available' && !retry) return status
   if (mode === 'simulated') {
     broadcast({ phase: 'downloading', version: simulatedVersion(), percent: 0, simulated: true })
     simulateDownload()
@@ -226,35 +317,135 @@ export async function downloadUpdate(): Promise<UpdateStatus> {
   const updater = await loadAutoUpdater()
   if (!updater) return status
   broadcast({ phase: 'downloading', ...(status.version ? { version: status.version } : {}), percent: 0 })
+  inFlight = 'download'
   try {
     await updater.downloadUpdate()
   } catch (err) {
-    broadcast({ phase: 'error', error: ((err as Error)?.message ?? String(err)).slice(0, 200) })
+    onUpdaterError('download', (err as Error)?.message ?? String(err))
+  } finally {
+    if (inFlight === 'download') inFlight = null
   }
   return status
 }
 
+const RELEASES_URL = 'https://github.com/stevenmcginty/forge/releases/latest'
+
 /**
- * Quit and install. The one function here that can change what is on disk, and
- * it is unreachable in every mode but `real`: a simulated "Restart to finish"
- * says so and does nothing, because restarting into an installer for a version
- * that does not exist would be a genuinely bad joke.
+ * Install. The one function here that can change what is on disk, and it is
+ * unreachable in every mode but `real`: the simulated flow fakes the result
+ * and closes nothing.
+ *
+ * It never calls electron-updater's quit-and-install. The downloaded installer
+ * goes to the apply helper (electron/update-apply.ts), and Forge quits only
+ * once the helper says it is ready — the banner's "Update now" was the
+ * confirmation. If this copy of Forge is not an install the helper can update,
+ * the answer is the installer download page, never a fallback to the path that
+ * could leave nobody with a working Forge.
+ *
+ * "Try again" from a failure lands here too: with the installer still in hand
+ * it installs again; without it (the failure came from the last launch) it
+ * dismisses the result and checks, so the banner offers the download afresh.
  */
-export function installUpdate(): boolean {
-  if (mode !== 'real' || status.phase !== 'ready' || !autoUpdater) return false
-  // "Restart to finish" is the confirmation; being asked a second time whether
-  // to close Forge would be the update dialog arguing with itself.
-  allowClose()
-  // The speech engine lives in resources/stt-bin — inside the directory the
-  // installer is about to replace. It has to be *dead*, not merely asked to
-  // leave, before quitAndInstall hands over, or NSIS finds its exe locked and
-  // dies with "Failed to uninstall old application files".
-  killSttSidecarSync()
-  // isSilent: false so the NSIS installer's window is visible — an unsigned
-  // installer running invisibly is exactly the shape SmartScreen dislikes, and
-  // exactly the shape a person should be able to see happening.
-  autoUpdater.quitAndInstall(false, true)
+export async function installUpdate(): Promise<{ ok: boolean; reason?: string }> {
+  const retry = status.phase === 'failed' || (status.phase === 'error' && status.step === 'install')
+  if (status.phase !== 'ready' && !retry) return { ok: false, reason: 'There is no downloaded update to install.' }
+  const version = status.to ?? status.version ?? ''
+  logUpdate(`install requested for ${version || '?'}${retry ? ' (try again)' : ''}`)
+
+  if (mode === 'simulated') return simulateInstall(version || simulatedVersion())
+  if (mode !== 'real') return { ok: false, reason: 'Updates are off in this build.' }
+
+  if (!downloaded || (version && downloaded.version !== version)) {
+    if (!retry) return { ok: false, reason: 'The download is missing — check for the update again.' }
+    await dismissUpdateResult()
+    return { ok: false, reason: 'Checking for the update again.' }
+  }
+  if (!downloaded.file || !downloaded.sha512) {
+    const reason = 'The downloaded installer has no checksum to verify.'
+    onUpdaterError('install', reason)
+    return { ok: false, reason }
+  }
+
+  const can = canApplyUpdate()
+  if (!can.ok) {
+    logUpdate(`install refused: ${can.reason ?? 'unknown'}`)
+    const reason = `Forge cannot update itself from this folder (${can.reason ?? 'unknown'}). Download the installer from ${RELEASES_URL}`
+    broadcast({ phase: 'error', step: 'install', version: downloaded.version, error: reason, logPath: updateLogPath() })
+    return { ok: false, reason }
+  }
+
+  const to = downloaded.version
+  const from = app.getVersion()
+  broadcast({ phase: 'installing', version: to })
+  const result = await applyUpdate({ from, to, file: downloaded.file, sha512: downloaded.sha512 }, () =>
+    broadcast({ phase: 'installing', version: to, closing: true })
+  )
+  if (result.ok) return result
+  if (result.aborted) {
+    // The helper's preflight said no; nothing changed and Forge stays open.
+    lastResult = {
+      outcome: 'aborted',
+      from,
+      to,
+      current: from,
+      reason: result.reason,
+      at: result.aborted.at || new Date().toISOString(),
+      acknowledged: false
+    }
+    broadcast(resultStatus(lastResult))
+  } else {
+    broadcast({ phase: 'error', step: 'install', version: to, error: result.reason, logPath: updateLogPath() })
+  }
+  return { ok: false, reason: result.reason }
+}
+
+/** The person dismissed `updated` / `failed`. Settings keeps it as the last update. */
+export async function dismissUpdateResult(): Promise<boolean> {
+  if (status.phase !== 'updated' && status.phase !== 'failed') return false
+  if (mode === 'real') await acknowledgeUpdateResult()
+  if (lastResult) lastResult = { ...lastResult, acknowledged: true }
+  broadcast({ phase: 'idle', ...(mode === 'simulated' ? { simulated: true } : {}) })
+  // A result held the banner; whatever was released meanwhile is offered now.
+  if (mode === 'real') void checkForUpdate()
   return true
+}
+
+/** Open the updater log in the default editor (writing a line first, so it exists). */
+export async function openUpdateLog(): Promise<boolean> {
+  logUpdate('log opened from the app')
+  const error = await shell.openPath(updateLogPath())
+  if (error) logUpdate(`could not open the log: ${error}`)
+  return !error
+}
+
+type DownloadedInfo = {
+  version: string
+  downloadedFile?: string
+  sha512?: string
+  files?: Array<{ url?: string; sha512?: string }>
+}
+
+/**
+ * The installer's base64 SHA-512 from latest.yml: the entry whose file name is
+ * the one downloaded, else the first .exe (what NsisUpdater picks), else the
+ * first entry, else the deprecated top-level field.
+ */
+function installerSha512(info: DownloadedInfo | undefined): string {
+  const files = Array.isArray(info?.files) ? info.files : []
+  const name = basename(info?.downloadedFile ?? '').toLowerCase()
+  const fileName = (url: string | undefined): string => {
+    const raw = basename(url ?? '')
+    try {
+      return decodeURIComponent(raw).toLowerCase()
+    } catch {
+      return raw.toLowerCase()
+    }
+  }
+  const match =
+    (name ? files.find((f) => fileName(f.url) === name) : undefined) ??
+    files.find((f) => /\.exe$/i.test(f.url ?? '')) ??
+    files[0]
+  return match?.sha512 ?? info?.sha512 ?? ''
 }
 
 /* ------------------------------------------------------------ lifecycle */
@@ -267,6 +458,13 @@ export function initUpdater(): void {
   }
 
   status = { phase: 'idle', ...(mode === 'simulated' ? { simulated: true } : {}) }
+  logUpdate(`updater started: mode ${mode}, Forge ${app.getVersion()}`)
+
+  // The last install attempt, from reconcileUpdateOnStartup().
+  setUpdateResultSink((result, show) => {
+    lastResult = result
+    broadcast(show ? resultStatus(result) : status)
+  })
 
   firstTimer = setTimeout(() => {
     void checkForUpdate()
@@ -288,6 +486,8 @@ export function registerUpdateHandlers(): void {
   ipcMain.handle(IPC.updateCheck, () => checkForUpdate())
   ipcMain.handle(IPC.updateDownload, () => downloadUpdate())
   ipcMain.handle(IPC.updateInstall, () => installUpdate())
+  ipcMain.handle(IPC.updateDismissResult, () => dismissUpdateResult())
+  ipcMain.handle(IPC.updateOpenLog, () => openUpdateLog())
 }
 
 export function disposeUpdater(): void {
@@ -300,4 +500,5 @@ export function disposeUpdater(): void {
   firstTimer = null
   simulatedTimer = null
   target = null
+  setUpdateResultSink(null)
 }

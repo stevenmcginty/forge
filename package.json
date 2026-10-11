@@ -71,6 +71,7 @@
     "web:theme": "node scripts/web-theme-check.mjs",
     "watchdog:check": "node scripts/watchdog-check.mjs",
     "updates:check": "node scripts/updates-check.mjs",
+    "update-apply:check": "node scripts/update-apply-check.mjs",
     "agents:check": "node scripts/agents-check.mjs",
     "agent-pane:check": "node scripts/agent-pane-check.mjs",
     "commands:check": "node scripts/commands-check.mjs",

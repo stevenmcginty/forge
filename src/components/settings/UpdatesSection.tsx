@@ -12,10 +12,11 @@ import {
   sanitiseCustomTool,
   updateCommandFor
 } from '@shared/tools'
-import type { ToolId, ToolLatest, ToolProbe, ToolSpec, UpdateStatus } from '@shared/types'
+import type { ToolId, ToolLatest, ToolProbe, ToolSpec, UpdateResult, UpdateStatus } from '@shared/types'
 import { whatsNew } from '@/lib/whatsnew'
 import { useApp } from '@/state/AppState'
 import { Icon } from '../Icon'
+import { showUpdateBar } from '../UpdateBanner'
 import { Card, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
 
 /**
@@ -772,10 +773,47 @@ function ForgeUpdateCard({
               Change log
             </button>
           ) : null}
+          {/*
+            "Later" on the banner hides it until the next launch; these are the
+            way back to the same offer without restarting.
+          */}
+          {phase === 'available' ? (
+            <button
+              type="button"
+              className="ghost-btn sbtn"
+              onClick={() => {
+                showUpdateBar()
+                void window.forge.updates.download()
+              }}
+            >
+              Download {status?.version}
+            </button>
+          ) : null}
+          {phase === 'ready' ? (
+            <button
+              type="button"
+              className="ghost-btn sbtn"
+              title="Opens the confirm in the update bar at the top"
+              onClick={() => showUpdateBar(true)}
+            >
+              Restart and update
+            </button>
+          ) : null}
           {dev ? null : (
             <button type="button" className="ghost-btn sbtn" onClick={() => void window.forge.updates.check()}>
               <Icon name="restart" size={12} />
               Check now
+            </button>
+          )}
+          {dev ? null : (
+            <button
+              type="button"
+              className="ghost-btn sbtn"
+              title="The updater's log: every check, download and install step"
+              onClick={() => void window.forge.updates.openLog?.()}
+            >
+              <Icon name="file" size={12} />
+              Open update log
             </button>
           )}
         </>
@@ -805,6 +843,7 @@ function ForgeUpdateCard({
         <StateChip tone={forgeTone(phase)}>{forgeLabel(status)}</StateChip>
       </Row>
       {status?.error ? <p className="scard__hint">{status.error}</p> : null}
+      {status?.lastResult ? <LastUpdateRow result={status.lastResult} /> : null}
       {status?.simulated ? (
         <p className="scard__hint">
           <span className="mono">FORGE_FAKE_UPDATE</span> is set, so this is a simulation — no release feed is being
@@ -815,9 +854,58 @@ function ForgeUpdateCard({
   )
 }
 
+/**
+ * The last install attempt — kept after the banner's result is dismissed, so
+ * "did that update actually work?" has an answer here. Words first; the chip's
+ * tone only repeats them.
+ */
+function LastUpdateRow({ result }: { result: UpdateResult }): ReactNode {
+  const ok = result.outcome === 'succeeded'
+  const when = Date.parse(result.at)
+  return (
+    <>
+      <Row
+        label="Last update"
+        hint={`v${result.from} → v${result.to}${Number.isFinite(when) ? `, ${new Date(when).toLocaleString()}` : ''}`}
+      >
+        <StateChip tone={ok ? 'ok' : 'danger'}>{ok ? 'updated, started fine' : outcomeLabel(result)}</StateChip>
+      </Row>
+      {!ok ? (
+        <p className="scard__hint">
+          {result.reason ?? 'No reason was recorded.'}
+          {result.outcome === 'rollback-failed' && result.backupDir ? (
+            <>
+              {' '}
+              Rename <span className="mono">{result.backupDir}</span> to{' '}
+              <span className="mono">{result.installDir ?? 'the Forge folder'}</span>.
+            </>
+          ) : (
+            ` Forge is on v${result.current}.`
+          )}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
+function outcomeLabel(result: UpdateResult): string {
+  switch (result.outcome) {
+    case 'aborted':
+      return 'did not start, nothing changed'
+    case 'rolled-back':
+      return 'failed, old version put back'
+    case 'rollback-failed':
+      return 'failed, old version NOT restored'
+    case 'interrupted':
+      return 'stopped part-way'
+    default:
+      return 'did not finish'
+  }
+}
+
 function forgeTone(phase: UpdateStatus['phase']): ChipTone {
-  if (phase === 'error') return 'danger'
-  if (phase === 'available' || phase === 'ready') return 'warn'
+  if (phase === 'error' || phase === 'failed') return 'danger'
+  if (phase === 'available' || phase === 'ready' || phase === 'installing') return 'warn'
   if (phase === 'unsupported') return 'soon'
   return 'ok'
 }
@@ -832,8 +920,14 @@ function forgeLabel(status: UpdateStatus | null): string {
       return `downloading ${status.percent ?? 0}%`
     case 'ready':
       return 'ready to install'
+    case 'installing':
+      return 'installing'
+    case 'updated':
+      return `updated to ${status.to ?? status.version}`
+    case 'failed':
+      return 'update failed'
     case 'error':
-      return 'check failed'
+      return status.step === 'download' ? 'download failed' : status.step === 'install' ? 'install failed' : 'check failed'
     case 'idle':
       return 'up to date'
     default:

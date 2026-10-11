@@ -417,6 +417,8 @@ const api: ForgeApi = {
     check: () => ipcRenderer.invoke(IPC.updateCheck),
     download: () => ipcRenderer.invoke(IPC.updateDownload),
     install: () => ipcRenderer.invoke(IPC.updateInstall),
+    dismissResult: () => ipcRenderer.invoke(IPC.updateDismissResult),
+    openLog: () => ipcRenderer.invoke(IPC.updateOpenLog),
     onStatus: (cb) => subscribe(IPC.updateStatusEvent, cb)
   },
 

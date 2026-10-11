@@ -1242,8 +1242,15 @@ export interface ForgeApi {
     check(): Promise<UpdateStatus>
     /** Start the download. Only ever called from the banner, by a click. */
     download(): Promise<UpdateStatus>
-    /** Quit and run the installer. False when there is nothing ready. */
-    install(): Promise<boolean>
+    /**
+     * Hand the downloaded installer to the apply helper; Forge closes once the
+     * helper is ready. `ok: false` carries the reason Forge stayed open.
+     */
+    install(): Promise<{ ok: boolean; reason?: string }>
+    /** Dismiss an `updated` / `failed` result (it stays in Settings). */
+    dismissResult(): Promise<boolean>
+    /** Open the updater log in the default text editor. */
+    openLog(): Promise<boolean>
     onStatus(cb: (s: UpdateStatus) => void): () => void
   }
 

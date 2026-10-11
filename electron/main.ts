@@ -122,6 +122,8 @@ import {
   setStaleTarget
 } from './stale-watcher'
 import { disposeUpdater, initUpdater, registerUpdateHandlers, setUpdateTarget } from './updater'
+import { reconcileUpdateOnStartup } from './update-apply'
+import { rotateUpdateLog } from './update-log'
 import { forwardRendererConsole } from './renderer-log'
 import {
   disposeReader,
@@ -1714,7 +1716,12 @@ void app
     // After the window, so the first status event has somewhere to go — and it
     // is a no-op in a dev run: initUpdater() returns immediately unless this is
     // a packaged build or FORGE_FAKE_UPDATE is set. See electron/updater.ts.
+    rotateUpdateLog()
     initUpdater()
+    // What the last install attempt left in <userData>\updates: a new version
+    // vouching for itself to the apply helper, or the result for the banner.
+    // A no-op unless this is a packaged Windows build with a state file.
+    if (mainWindow) reconcileUpdateOnStartup(mainWindow)
     // The other side of that coin, and a no-op in a packaged build for the exact
     // opposite reason: there, out/ cannot change under the running process. In a
     // checkout it takes the mtimes of the bundles we just booted from, which is
