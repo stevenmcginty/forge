@@ -279,14 +279,24 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
   ]
 
   let helperPid: number | undefined
-  let exitCode: number | null | undefined
+  let launcherExit: number | null | undefined
   let spawnError: string | null = null
   try {
-    const child = spawn('powershell.exe', args, {
+    // Not `detached: true`: that is DETACHED_PROCESS on Windows, and Windows
+    // PowerShell 5.1 with no console exits 0 at once without running the
+    // script. Nor a plain child: libuv puts those in a kill-on-close job, so
+    // the helper would die with Forge. So cmd.exe, hidden and in the job, runs
+    // `start /b`, and the helper it starts shares that hidden console but is
+    // outside the job (silent breakaway) and outlives Forge. cmd re-reads the
+    // line, so every argument is quoted here (none can contain a quote), with
+    // a trailing backslash doubled so it cannot escape the closing quote.
+    const quote = (arg: string): string => `"${arg.replace(/\\+$/, (tail) => tail + tail)}"`
+    const line = ['/d', '/c', 'start', '""', '/b', 'powershell.exe', ...args.map(quote)]
+    const child = spawn('cmd.exe', line, {
       cwd: workDir,
-      detached: true,
       stdio: 'ignore',
       windowsHide: true,
+      windowsVerbatimArguments: true,
       env: helperEnv()
     })
     helperPid = child.pid
@@ -295,11 +305,11 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
       logUpdate(`apply ${id}: helper spawn error: ${err.message}`)
     })
     child.on('exit', (code) => {
-      exitCode = code
-      logUpdate(`apply ${id}: helper exited with code ${code}`)
+      launcherExit = code
+      logUpdate(`apply ${id}: helper launcher exited with code ${code}`)
     })
     child.unref()
-    logUpdate(`apply ${id}: helper spawned, pid ${helperPid ?? 'unknown'}`)
+    logUpdate(`apply ${id}: helper launcher spawned, pid ${helperPid ?? 'unknown'}`)
   } catch (err) {
     spawnError = (err as Error).message
     logUpdate(`apply ${id}: helper spawn threw: ${spawnError}`)
@@ -308,7 +318,7 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
   // The handshake: poll the state file and log every phase seen.
   const deadline = Date.now() + HANDSHAKE_TIMEOUT_MS
   let lastPhase = 'starting'
-  let exitedAt = 0
+  let failedAt = 0
   while (Date.now() < deadline) {
     await sleep(HANDSHAKE_POLL_MS)
     const state = readApplyState()
@@ -339,18 +349,18 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
       }
     }
     if (spawnError) break
-    // An exited helper that never got past preflight is not going to; give the
-    // file one more poll to land, then stop waiting.
-    if (exitCode !== undefined) {
-      if (!exitedAt) exitedAt = Date.now()
-      else if (Date.now() - exitedAt > 1000) break
+    // The launcher exits as soon as it has started the helper; only a failed
+    // launch is news. Give the file one more poll to land, then stop waiting.
+    if (launcherExit !== undefined && launcherExit !== 0) {
+      if (!failedAt) failedAt = Date.now()
+      else if (Date.now() - failedAt > 1000) break
     }
   }
 
   const reason = spawnError
     ? `The updater did not start (${spawnError}).`
-    : exitCode !== undefined
-      ? `The updater did not start (it exited with code ${exitCode}).`
+    : launcherExit !== undefined && launcherExit !== 0
+      ? `The updater did not start (its launcher exited with code ${launcherExit}).`
       : 'The updater did not start.'
   logUpdate(`apply ${id}: handshake failed at ${lastPhase} — ${reason} Forge stays open.`)
   killTree(helperPid)
