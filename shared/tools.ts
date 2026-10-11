@@ -1,5 +1,15 @@
 import { commandExe } from './agents'
-import type { ToolId, ToolLatest, ToolLatestSource, ToolSpec } from './types'
+import type {
+  ToolId,
+  ToolLatest,
+  ToolLatestSource,
+  ToolSpec,
+  UpdateApplyState,
+  UpdateOutcome,
+  UpdatePhase,
+  UpdateStatus,
+  UpdateStep
+} from './types'
 
 /**
  * The tools Forge knows how to *report on*, and the pure logic for reading
@@ -808,6 +818,127 @@ export function isNoFeedError(message: string): boolean {
     m.includes('getaddrinfo') ||
     m.includes('net::err_internet_disconnected')
   )
+}
+
+/**
+ * Phases a background check must leave alone. A check that fails (or finds
+ * nothing) while a download is running, an installer is waiting, or an install
+ * result is on screen used to replace that state — the Restart button vanished
+ * under the person's cursor. See statusAfterUpdateError().
+ */
+const UPDATE_BUSY_PHASES: readonly UpdatePhase[] = ['downloading', 'ready', 'installing', 'updated', 'failed']
+
+export function isUpdateBusy(phase: UpdatePhase): boolean {
+  return UPDATE_BUSY_PHASES.includes(phase)
+}
+
+/**
+ * What an updater error turns the status into, by the step that failed. Null
+ * means "keep the current status" — the caller logs the error instead.
+ *
+ *  - check:    no feed / offline is `idle` (isNoFeedError), and a check never
+ *              clobbers a busy phase (download, ready, install, result).
+ *  - download: always a real error. A 404 here is the installer asset missing
+ *              from a release that does exist, which is news.
+ *  - install:  always a real error.
+ */
+export function statusAfterUpdateError(current: UpdateStatus, step: UpdateStep, message: string): UpdateStatus | null {
+  const full = String(message ?? '')
+  const error = full.slice(0, 200) || 'Unknown error'
+  if (step === 'check') {
+    if (isUpdateBusy(current.phase)) return null
+    if (isNoFeedError(full)) return { phase: 'idle' }
+    return { phase: 'error', step, error }
+  }
+  return { phase: 'error', step, error, ...(current.version ? { version: current.version } : {}) }
+}
+
+/** Phases in which the apply helper is still at work and owns the outcome. */
+const HELPER_WORKING: Readonly<Record<string, string>> = {
+  preflight: 'checking the update',
+  'waiting-for-exit': 'waiting for Forge to close',
+  'stopping-processes': "closing Forge's processes",
+  'backing-up': 'moving the old version aside',
+  installing: 'installing',
+  verifying: 'checking the installed files',
+  launching: 'starting the new version',
+  'waiting-for-health': 'waiting for the new version to start',
+  'rolling-back': 'putting the old version back'
+}
+
+/**
+ * The health file is written only when the helper is waiting for exactly this
+ * Forge: phase `launching` / `waiting-for-health`, an id to echo, and this
+ * process IS the version being installed. An old Forge must never vouch for a
+ * new one. (The did-finish-load + 5 s + no-crash half is electron/update-apply.ts.)
+ */
+export function shouldWriteUpdateHealth(state: UpdateApplyState | null, appVersion: string): boolean {
+  if (!state || !state.id || !state.to) return false
+  if (state.phase !== 'launching' && state.phase !== 'waiting-for-health') return false
+  return appVersion === state.to
+}
+
+export type UpdateReconcileAction =
+  | { action: 'none'; why: 'no-state' | 'acknowledged' | 'version-mismatch' | 'unknown-phase' }
+  | { action: 'write-health' }
+  | { action: 'watch' }
+  | { action: 'show'; outcome: UpdateOutcome; reason?: string }
+
+/**
+ * What a starting (or watching) Forge does about the helper's state file.
+ *
+ * `helperAlive` is whether `state.helperPid` is a live process; `healthWritten`
+ * is whether this process already wrote the health file. `updated` is only
+ * ever shown from a `succeeded` whose `to` is the running version — a verified
+ * success, never an assumed one.
+ */
+export function decideUpdateReconcile(
+  state: UpdateApplyState | null,
+  appVersion: string,
+  helperAlive: boolean,
+  healthWritten = false
+): UpdateReconcileAction {
+  if (!state || typeof state.phase !== 'string') return { action: 'none', why: 'no-state' }
+  const phase = state.phase
+
+  if (phase === 'launching' || phase === 'waiting-for-health') {
+    if (shouldWriteUpdateHealth(state, appVersion) && !healthWritten) return { action: 'write-health' }
+    if (helperAlive) return { action: 'watch' }
+    // The helper died mid-launch and nobody will ever finish this record; once
+    // the person has dismissed it, it must not come back on every launch.
+    if (state.acknowledged === true) return { action: 'none', why: 'acknowledged' }
+    return { action: 'show', outcome: 'interrupted', reason: interruptedReason(phase) }
+  }
+
+  if (state.acknowledged === true) return { action: 'none', why: 'acknowledged' }
+
+  if (phase === 'succeeded') {
+    return appVersion === state.to
+      ? { action: 'show', outcome: 'succeeded' }
+      : { action: 'none', why: 'version-mismatch' }
+  }
+  if (phase === 'aborted' || phase === 'rolled-back' || phase === 'rollback-failed') {
+    return { action: 'show', outcome: phase, ...(state.reason ? { reason: state.reason } : {}) }
+  }
+  if (phase === 'starting') {
+    // Forge wrote this and the helper never replaced it: it did not start.
+    return { action: 'show', outcome: 'interrupted', reason: 'The updater did not start.' }
+  }
+  if (Object.prototype.hasOwnProperty.call(HELPER_WORKING, phase)) {
+    if (helperAlive) return { action: 'watch' }
+    return { action: 'show', outcome: 'interrupted', reason: interruptedReason(phase) }
+  }
+  return { action: 'none', why: 'unknown-phase' }
+}
+
+function interruptedReason(phase: string): string {
+  const words = Object.prototype.hasOwnProperty.call(HELPER_WORKING, phase) ? HELPER_WORKING[phase] : phase
+  return `The updater stopped unexpectedly while ${words}.`
+}
+
+/** `C:\…\forge.update-backup` → `C:\…\forge`: where a rollback-failed copy belongs. */
+export function installDirFromBackup(backupDir: string): string {
+  return backupDir.replace(/\.update-backup[\\/]*$/i, '')
 }
 
 /* -------------------------------------------------------- source updater */

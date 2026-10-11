@@ -887,6 +887,8 @@ export const IPC = {
   updateCheck: 'update:check',
   updateDownload: 'update:download',
   updateInstall: 'update:install',
+  updateDismissResult: 'update:dismiss-result',
+  updateOpenLog: 'update:open-log',
 
   // dev-run staleness (the other half of the above). Checkouts only; in a
   // packaged build these are safe to call and answer "not stale", forever.

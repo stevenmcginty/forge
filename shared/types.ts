@@ -1210,7 +1210,39 @@ export type UpdatePhase =
   | 'available'
   | 'downloading'
   | 'ready'
+  /** "Update now" was clicked: the apply helper is starting, then Forge closes. */
+  | 'installing'
+  /** The helper reported `succeeded` and this Forge is the version it installed. */
+  | 'updated'
+  /** The update did not finish; `outcome` says how far it got. */
+  | 'failed'
   | 'error'
+
+/** Which step an `error` came from — the banner says so in words. */
+export type UpdateStep = 'check' | 'download' | 'install'
+
+/**
+ * How an install attempt ended, as far as the apply helper's state file says.
+ * `interrupted` is Forge's own word: the helper stopped part-way (it died, or
+ * never started) without writing a final phase.
+ */
+export type UpdateOutcome = 'succeeded' | 'aborted' | 'rolled-back' | 'rollback-failed' | 'interrupted'
+
+/** The last install attempt, for the banner's result and Settings → Updates. */
+export interface UpdateResult {
+  outcome: UpdateOutcome
+  from: string
+  to: string
+  /** The version this Forge is running. */
+  current: string
+  reason?: string
+  /** rollback-failed only: where the old copy is, and where it belongs. */
+  backupDir?: string
+  installDir?: string
+  at: string
+  /** The person dismissed it; Settings still shows it. */
+  acknowledged: boolean
+}
 
 export interface UpdateStatus {
   phase: UpdatePhase
@@ -1220,8 +1252,64 @@ export interface UpdateStatus {
   percent?: number
   bytesPerSecond?: number
   error?: string
+  /** `error`: the step that failed. */
+  step?: UpdateStep
+  /** `installing`: the helper is ready and Forge is closing now. */
+  closing?: boolean
+  /** `updated` / `failed`: from → to, and why it failed. */
+  from?: string
+  to?: string
+  reason?: string
+  outcome?: UpdateOutcome
+  backupDir?: string
+  installDir?: string
+  /** Where the updater log lives, so the failure can point at it. */
+  logPath?: string
+  /** The last install attempt's result, kept after it is dismissed. */
+  lastResult?: UpdateResult
   /** True when this status came from FORGE_FAKE_UPDATE rather than a real feed. */
   simulated?: boolean
+}
+
+/**
+ * The apply helper's state file — `<userData>\updates\update-state.json`. The
+ * schema is the contract with scripts/apply-update.ps1: Forge writes `starting`
+ * (and later `acknowledged`), the helper owns every other phase.
+ */
+export type UpdateApplyPhase =
+  | 'starting'
+  | 'preflight'
+  | 'aborted'
+  | 'waiting-for-exit'
+  | 'stopping-processes'
+  | 'backing-up'
+  | 'installing'
+  | 'verifying'
+  | 'launching'
+  | 'waiting-for-health'
+  | 'succeeded'
+  | 'rolling-back'
+  | 'rolled-back'
+  | 'rollback-failed'
+
+export interface UpdateApplyState {
+  id: string
+  from: string
+  to: string
+  phase: UpdateApplyPhase
+  reason?: string
+  backupDir?: string
+  helperPid?: number
+  at: string
+  acknowledged?: boolean
+}
+
+/** `<userData>\updates\update-health.json`, written by the NEW Forge. */
+export interface UpdateHealth {
+  id: string
+  version: string
+  pid: number
+  at: string
 }
 
 /** The two bundles a dev run rebuilds but cannot hot-reload into itself. */
