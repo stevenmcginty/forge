@@ -1,0 +1,76 @@
+name: Update e2e
+
+# The packaged update path with nothing faked: two real NSIS installers, a real
+# install on a throwaway runner, and a real in-app update driven through the
+# banner — once to success, once to a forced rollback. See scripts/update-e2e.mjs.
+#
+# Never on master and never publishing: it builds with --publish never, serves
+# its own feed on 127.0.0.1, and gets no token beyond read access to the repo.
+
+on:
+  push:
+    branches: [updater-rollback]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out the pushed commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Legible screenshots: the runner's desktop starts at 1024x768.
+      - name: Widen the desktop (best effort)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.SystemInformation]::VirtualScreen
+
+      # The JS is built once; both versions are packaged from the same out/.
+      # The speech engine is a placeholder (build-stt --optional): Forge starts
+      # without it and dictation is not under test here.
+      - name: Build the app once
+        run: |
+          npm run build
+          npm run mobile:build
+          node scripts/build-stt.mjs --optional
+          node scripts/build-bridge.mjs
+          node scripts/make-icon.mjs
+
+      - name: Package Forge 50.0.0 and 50.0.1
+        run: node scripts/update-e2e.mjs build
+
+      - name: Install, update, roll back
+        run: node scripts/update-e2e.mjs run
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-e2e
+          path: |
+            release/e2e-artifacts/
+            release/e2e-*/latest.yml
+            release/e2e-feed/latest.yml
+            release/e2e-builder-*.yml
+          if-no-files-found: warn
