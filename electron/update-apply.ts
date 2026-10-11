@@ -321,6 +321,8 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
       if (state.phase === 'aborted') {
         const reason = state.reason || 'The updater stopped before changing anything.'
         logUpdate(`apply ${id}: aborted — Forge stays open`)
+        // Shown live by this session's banner; a later launch need not repeat it.
+        await writeJsonAtomic(statePath(), { ...state, acknowledged: true }).catch(() => undefined)
         return { ok: false, reason, aborted: state }
       }
       if (state.phase !== 'starting' && state.phase !== 'preflight') {
@@ -352,6 +354,17 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
       : 'The updater did not start.'
   logUpdate(`apply ${id}: handshake failed at ${lastPhase} — ${reason} Forge stays open.`)
   killTree(helperPid)
+  // The helper never got past preflight, so nothing changed. Record that rather
+  // than leave `starting`, which the next launch would read as an interrupted update.
+  await writeJsonAtomic(statePath(), {
+    id,
+    from: req.from,
+    to: req.to,
+    phase: 'aborted',
+    reason,
+    at: new Date().toISOString(),
+    acknowledged: true
+  } satisfies UpdateApplyState).catch(() => undefined)
   return { ok: false, reason }
 }
 
