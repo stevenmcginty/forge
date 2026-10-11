@@ -543,6 +543,14 @@ const { WEB_PROTO, WEB_SUBPROTOCOL, WEB_WS_PATH } = await import('../shared/web.
 // The channel name, from the file that owns it: a literal here would keep
 // passing after somebody renamed the real one.
 const { IPC } = await import('../shared/ipc.ts')
+// The desk's asks go to the window electron/main-window.ts holds, not to
+// getAllWindows()[0] (that is the mini bar whenever Forge is minimised), so a
+// phase that installs a stand-in window has to register it there as well.
+const mainWindow = await import('../electron/main-window.ts')
+function setWindows(list) {
+  globalThis.__forgeWindows = list
+  mainWindow.setMainWindow(list[0] ?? null)
+}
 
 const ipc = globalThis.__forgeIpc
 const invoke = (channel, ...args) => {
@@ -945,7 +953,7 @@ log(
 )
 
 const added = []
-globalThis.__forgeWindows = [
+setWindows([
   {
     isDestroyed: () => false,
     webContents: {
@@ -958,7 +966,7 @@ globalThis.__forgeWindows = [
       }
     }
   }
-]
+])
 
 const addedOk = await ask({ kind: 'project-add', path: browseDir })
 log(addedOk.kind === 'ok', `a folder that is really there is added (${addedOk.kind})`)
@@ -1008,7 +1016,7 @@ log(
 const madeDots = await ask({ kind: 'project-create', name: '..', parentDir: 'desktop' })
 log(madeDots.kind === 'failed', `and ".." is not a folder name at all ("${madeDots.message ?? ''}")`)
 
-globalThis.__forgeWindows = []
+setWindows([])
 
 const noWindowMake = await ask({ kind: 'project-create', name: 'web-orphan', parentDir: 'desktop' })
 log(
@@ -1719,7 +1727,7 @@ held.socket.on('message', (raw) => {
  */
 
 const watched = []
-globalThis.__forgeWindows = [
+setWindows([
   {
     isDestroyed: () => false,
     webContents: {
@@ -1728,7 +1736,7 @@ globalThis.__forgeWindows = [
       }
     }
   }
-]
+])
 
 /*
  * The desk's own half, through the handlers electron/main.ts registers rather
@@ -1859,7 +1867,7 @@ await waitFor(namesTray, 5000, 'the re-attach')
  * takes this one with its very next wish and no typing at all. No window is also
  * the honest state for the rest of this run.
  */
-globalThis.__forgeWindows = []
+setWindows([])
 ptyHost.setPtyTarget(null)
 sendFrame(held, { type: 'resize', sessionId: 'tray-1', cols: 104, rows: 27 })
 await waitFor(() => paneNow().cols === 104 && paneNow().rows === 27, 6000, "the browser's geometry with no window open")
