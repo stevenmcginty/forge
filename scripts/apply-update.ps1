@@ -7,11 +7,15 @@
   failure after that point (a locked file, a Cancel, a power cut) leaves the
   user with no working Forge. So Forge never calls quitAndInstall. It verifies
   the installer, copies it and this script into
-  %LOCALAPPDATA%\forge-updater\apply\<id>\, starts this script hidden and
-  quits when the state file says `waiting-for-exit`. This script then:
+  %LOCALAPPDATA%\forge-updater\apply\<id>\, starts this script hidden and,
+  when the state file says `waiting-for-exit`, writes update-go.json with this
+  id and quits. This script then:
 
     1. preflight            checks everything; touches nothing
-    2. waiting-for-exit     pauses the watchdog, waits for Forge to quit
+    2. waiting-for-exit     waits up to ConfirmTimeoutSec for Forge's go file;
+                            without it: `aborted`, Forge and the disk untouched,
+                            nothing relaunched. With it: pauses the watchdog,
+                            waits for Forge to quit
     3. stopping-processes   kills the watchdog launcher and every process
                             running from the install folder
     4. backing-up           renames the install folder to <dir>.update-backup
@@ -58,6 +62,7 @@ param(
   [int]$ExitTimeoutSec = 30,
   [int]$InstallTimeoutSec = 600,
   [int]$HealthTimeoutSec = 120,
+  [int]$ConfirmTimeoutSec = 10,
   [switch]$NoUi,
   [switch]$LaunchHidden,
   [switch]$SkipRegistry
@@ -90,6 +95,7 @@ $script:Utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $script:Ell = [string][char]0x2026
 $script:StateFile = Join-Path $StateDir 'update-state.json'
 $script:HealthFile = Join-Path $StateDir 'update-health.json'
+$script:GoFile = Join-Path $StateDir 'update-go.json'
 $script:PauseFile = Join-Path $DataRoot 'watchdog.pause'
 $script:Backup = ''
 $script:Stage = 'preflight'        # preflight | waiting | moved | rolling | done
@@ -143,13 +149,14 @@ function Wait-Ms([int]$Ms) {
 
 # The state file is Forge's only view of what happened, so it is written
 # atomically: a *.tmp beside it, then swapped in. A reader never sees half.
-function Write-State([string]$Phase, [string]$Reason = '', [string]$BackupDir = '') {
+# -Acknowledged only for an abort a still-running Forge has already reported.
+function Write-State([string]$Phase, [string]$Reason = '', [string]$BackupDir = '', [bool]$Acknowledged = $false) {
   $o = [ordered]@{ id = $Id; from = $FromVersion; to = $ToVersion; phase = $Phase }
   if ($Reason) { $o['reason'] = $Reason }
   if ($BackupDir) { $o['backupDir'] = $BackupDir }
   $o['helperPid'] = $PID
   $o['at'] = Get-NowIso
-  $o['acknowledged'] = $false
+  $o['acknowledged'] = $Acknowledged
   $json = New-Object PSObject -Property $o | ConvertTo-Json -Compress
   $tmp = $script:StateFile + '.tmp'
   $written = $false
@@ -392,10 +399,11 @@ function Get-Sha512Base64([string]$Path) {
   return [Convert]::ToBase64String($bytes)
 }
 
-function Read-Health {
-  if (-not (Test-Path -LiteralPath $script:HealthFile)) { return $null }
+# A small JSON file (state, health, go), or $null when missing, torn or empty.
+function Read-JsonFile([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return $null }
   try {
-    $t = [IO.File]::ReadAllText($script:HealthFile, $script:Utf8NoBom)
+    $t = [IO.File]::ReadAllText($Path, $script:Utf8NoBom)
     if ($t.Length -gt 0 -and $t[0] -eq [char]0xFEFF) { $t = $t.Substring(1) }
     if (-not $t.Trim()) { return $null }
     return ($t | ConvertFrom-Json)
@@ -403,6 +411,8 @@ function Read-Health {
     return $null
   }
 }
+
+function Read-Health { return (Read-JsonFile $script:HealthFile) }
 
 # -------------------------------------------------------------- the app
 
@@ -568,6 +578,27 @@ function Test-Preflight {
     Write-Log 'removed the stale backup'
   }
   return ''
+}
+
+# Forge writes update-go.json with this id once it has seen waiting-for-exit
+# and committed to quitting. Forge gives up on the handshake after 20 s and
+# tells the user the update failed; a helper that only gets here after that
+# (a slow start, an antivirus scan) must then leave Forge and the disk alone.
+# Returns $true when the go file for this id arrived in time.
+function Wait-Go {
+  Write-Log "waiting up to $ConfirmTimeoutSec s for Forge to confirm via $($script:GoFile)"
+  $deadline = [DateTime]::UtcNow.AddSeconds($ConfirmTimeoutSec)
+  $lastBad = ''
+  while ($true) {
+    $g = Read-JsonFile $script:GoFile
+    if ($g) {
+      $gid = [string]$g.id
+      if ($gid -ceq $Id) { Write-Log "Forge confirmed at $($g.at)"; return $true }
+      if ($gid -ne $lastBad) { Write-Log "ignoring a go file for another update (id $gid)"; $lastBad = $gid }
+    }
+    if ([DateTime]::UtcNow -ge $deadline) { return $false }
+    Wait-Ms 100
+  }
 }
 
 function Wait-AppExit {
@@ -776,10 +807,23 @@ function Invoke-Update {
   }
   Write-Log 'preflight passed'
 
+  # The handshake. Nothing may touch Forge, the watchdog or the disk until
+  # Forge has confirmed, so $script:Stage stays 'preflight' (an error here
+  # aborts without relaunching anything).
+  Write-State 'waiting-for-exit'
+  if (-not (Wait-Go)) {
+    # A Forge still running has already shown the user a failure (or will,
+    # from this state), so its next launch need not show it again.
+    $ack = ($null -ne $script:AppProc -and -not $script:AppProc.HasExited)
+    Write-State 'aborted' 'Forge did not confirm the update in time; nothing was changed.' '' $ack
+    Write-Log 'aborted before touching anything: no go file from Forge; nothing is relaunched'
+    $script:Stage = 'done'
+    return 1
+  }
+
   $script:Stage = 'waiting'
   Show-Ui
   Suspend-Watchdog
-  Write-State 'waiting-for-exit'
   Set-Ui "Waiting for Forge to close$($script:Ell)"
   Wait-AppExit
 
@@ -822,15 +866,24 @@ try {
   Write-Log ("helper started: id $Id, $FromVersion -> $ToVersion, pid $PID, Forge pid $AppPid, install $InstallDir, " +
     "installer $Installer, exe $ExeName, args '$InstallerArgs', timeouts exit $ExitTimeoutSec s install $InstallTimeoutSec s health $HealthTimeoutSec s, " +
     "ui $(-not $NoUi), hidden launch $LaunchHidden, registry $(-not $SkipRegistry), watchdog task '$WatchdogTask'")
-  # A handle now pins the process: a pid looked up later could be reused.
-  try {
-    $script:AppProc = [Diagnostics.Process]::GetProcessById($AppPid)
-    $null = $script:AppProc.Handle
-  } catch {
-    $script:AppProc = $null
-    Write-Log "Forge (pid $AppPid) is not running"
+  # Forge records `aborted` itself when the handshake times out. A helper that
+  # starts after that has nothing to do: Forge told the user it failed.
+  $prior = Read-JsonFile $script:StateFile
+  if ($prior -and ([string]$prior.id -ceq $Id) -and ([string]$prior.phase -ceq 'aborted')) {
+    Write-Log 'the state file already says aborted for this update (Forge gave up on the handshake); exiting without touching anything'
+    $script:Stage = 'done'
+    $exitCode = 1
+  } else {
+    # A handle now pins the process: a pid looked up later could be reused.
+    try {
+      $script:AppProc = [Diagnostics.Process]::GetProcessById($AppPid)
+      $null = $script:AppProc.Handle
+    } catch {
+      $script:AppProc = $null
+      Write-Log "Forge (pid $AppPid) is not running"
+    }
+    $exitCode = Invoke-Update
   }
-  $exitCode = Invoke-Update
 } catch {
   $msg = "$($_.Exception.Message) ($($_.InvocationInfo.ScriptLineNumber))"
   Write-Log "unexpected error during stage $($script:Stage): $msg"

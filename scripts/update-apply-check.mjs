@@ -19,9 +19,10 @@
  *   - each version's `Forge.cmd` is a fake app: it logs that it was launched,
  *     reads update-state.json and writes update-health.json by the contract's
  *     rules - or never does, or lies about its version
- *   - "Forge" itself is a hidden ping.exe whose pid goes in as -AppPid; the
- *     harness kills it when the state says `waiting-for-exit`, which is the
- *     handshake the real Forge answers by quitting
+ *   - "Forge" itself is a hidden ping.exe whose pid goes in as -AppPid; when
+ *     the state says `waiting-for-exit` the harness writes update-go.json and
+ *     kills it, which is the handshake the real Forge answers by confirming
+ *     and quitting
  *
  * The helper always runs with -NoUi -LaunchHidden -SkipRegistry and short
  * timeouts, so nothing opens a window, nothing touches HKCU, and the whole
@@ -41,6 +42,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync
 } from 'node:fs'
@@ -217,9 +219,12 @@ async function waitFor(fn, ms, step = 100) {
 /**
  * opts: installer 'ok' | 'fail-midway'; v2Mode 'healthy' | 'silent' | 'reckless';
  * v2Version (what v2 thinks it is); badSha; appInside (Forge never exits and
- * runs from the install folder); survivor; holder; staleBackup; prePause.
+ * runs from the install folder); survivor; holder; staleBackup; prePause;
+ * noGo (Forge never confirms: no go file, never quits); preAborted (Forge
+ * already recorded `aborted` for this id before the helper starts).
  * expect: exit, phase, reason (RegExp or null), tree 'v1' | 'v2', launches,
- * logs [RegExp], noLogs [RegExp].
+ * logs [RegExp], noLogs [RegExp], acknowledged (default false),
+ * stateUnchanged (the state file is byte for byte what Forge wrote).
  */
 async function scenario(name, opts, expect) {
   const procs = []
@@ -242,6 +247,7 @@ async function scenario(name, opts, expect) {
   const backup = s.install + '.update-backup'
   const pauseFile = join(s.dataRoot, 'watchdog.pause')
   const stateFile = join(s.stateDir, 'update-state.json')
+  const goFile = join(s.stateDir, 'update-go.json')
   const id = `check-${name.replace(/\W+/g, '-')}-${Date.now()}`
   let helper = null
   try {
@@ -319,8 +325,12 @@ async function scenario(name, opts, expect) {
     const app = hidden(appExe, ['-n', '600', '127.0.0.1'], { cwd: root })
     procs.push(app)
 
-    // Forge writes `starting` before it spawns the helper.
-    writeFileSync(stateFile, JSON.stringify({ id, from: FROM, to: TO, phase: 'starting', at: new Date().toISOString(), acknowledged: false }))
+    // Forge writes `starting` before it spawns the helper - or, in the
+    // late-helper case, has already given up and recorded `aborted`.
+    const initialState = opts.preAborted
+      ? JSON.stringify({ id, from: FROM, to: TO, phase: 'aborted', reason: 'The updater did not start.', at: new Date().toISOString(), acknowledged: true })
+      : JSON.stringify({ id, from: FROM, to: TO, phase: 'starting', at: new Date().toISOString(), acknowledged: false })
+    writeFileSync(stateFile, initialState)
 
     helper = hidden(
       POWERSHELL,
@@ -350,16 +360,27 @@ async function scenario(name, opts, expect) {
     helper.stdout.on('data', (d) => (output += d))
     helper.stderr.on('data', (d) => (output += d))
 
-    // Watch the phases go by, and play Forge's half of the handshake.
+    // Watch the phases go by, and play Forge's half of the handshake: at
+    // waiting-for-exit, write the go file (atomically) and quit.
     const phases = []
     let pauseAtWaiting = null
+    let pauseAfterGo = null
+    let goWritten = false
     const watcher = setInterval(() => {
       const st = readState(stateFile)
       if (!st || st.phase === phases[phases.length - 1]) return
       phases.push(st.phase)
       if (st.phase === 'waiting-for-exit') {
         pauseAtWaiting = readText(pauseFile)?.toString('utf8') ?? ''
-        if (!opts.appInside) killTree(app.pid)
+        if (!opts.noGo) {
+          writeFileSync(goFile + '.tmp', JSON.stringify({ id, at: new Date().toISOString() }))
+          renameSync(goFile + '.tmp', goFile)
+          goWritten = true
+          if (!opts.appInside) killTree(app.pid)
+        }
+      } else if (goWritten && pauseAfterGo === null) {
+        // The first phase after the go: the watchdog must be paused by now.
+        pauseAfterGo = readText(pauseFile)?.toString('utf8') ?? ''
       }
     }, 50)
     const code = await waitExit(helper, HELPER_TIMEOUT_MS)
@@ -387,8 +408,10 @@ async function scenario(name, opts, expect) {
     if (st) {
       check(st.phase === expect.phase, `phase ${st.phase}, expected ${expect.phase}`)
       check(st.id === id && st.from === FROM && st.to === TO, 'state id/from/to wrong')
-      check(st.helperPid === helper.pid, `helperPid ${st.helperPid}, expected ${helper.pid}`)
-      check(st.acknowledged === false, 'acknowledged is not false')
+      if (expect.stateUnchanged) check(stateBuf.toString('utf8') === initialState, 'state file was changed')
+      else check(st.helperPid === helper.pid, `helperPid ${st.helperPid}, expected ${helper.pid}`)
+      const ack = expect.acknowledged ?? false
+      check(st.acknowledged === ack, `acknowledged is not ${ack}`)
       check(!Number.isNaN(Date.parse(st.at)), 'at is not a date')
       if (expect.reason) check(typeof st.reason === 'string' && expect.reason.test(st.reason), `reason ${JSON.stringify(st.reason)} !~ ${expect.reason}`)
       else check(st.reason === undefined, `unexpected reason ${JSON.stringify(st.reason)}`)
@@ -410,8 +433,12 @@ async function scenario(name, opts, expect) {
     } else {
       check(!existsSync(pauseFile), 'pause file left behind')
       if (reachedWaiting) {
-        const until = Number(pauseAtWaiting)
-        check(Number.isFinite(until) && until > Date.now(), `no live pause file at waiting-for-exit (${JSON.stringify(pauseAtWaiting)})`)
+        // Nothing before Forge's go; a live pause once it has confirmed.
+        check(pauseAtWaiting === '', `paused the watchdog before Forge confirmed (${JSON.stringify(pauseAtWaiting)})`)
+        if (!opts.noGo) {
+          const until = Number(pauseAfterGo)
+          check(Number.isFinite(until) && until > Date.now(), `no live pause file after Forge confirmed (${JSON.stringify(pauseAfterGo)})`)
+        }
       }
     }
     if (reachedWaiting) check(phases.includes('waiting-for-exit'), `never saw waiting-for-exit (saw ${phases.join(',')})`)
@@ -419,6 +446,11 @@ async function scenario(name, opts, expect) {
       check(!phases.includes('waiting-for-exit'), `reached waiting-for-exit at preflight abort (saw ${phases.join(',')})`)
       check(pauseAtWaiting === null, 'paused the watchdog at a preflight abort')
       check(alive(app.pid), 'Forge was killed at a preflight abort')
+    }
+    if (opts.noGo) {
+      check(alive(app.pid), 'Forge was killed although it never confirmed')
+      const early = ['starting', 'preflight', 'waiting-for-exit', 'aborted']
+      check(phases.every((p) => early.includes(p)), `went past waiting-for-exit without a go file (saw ${phases.join(',')})`)
     }
 
     const logBuf = readText(s.logFile)
@@ -504,7 +536,18 @@ const SCENARIOS = [
     [{ prePause: '0' }, {
       exit: 0, phase: 'succeeded', reason: null, tree: 'v2', launches: [TO], logs: [/pause file already exists \('0'\)/], noLogs: [/watchdog paused until/, /watchdog pause file removed/]
     }]
-  ]]
+  ]],
+  // Forge gave up on the handshake (or never confirmed): the helper must not
+  // touch Forge, the watchdog or the install, and must not relaunch anything.
+  ['Forge never confirms: helper aborts untouched', { noGo: true }, {
+    exit: 1, phase: 'aborted', reason: /^Forge did not confirm the update in time; nothing was changed\.$/, tree: 'v1', launches: [], acknowledged: true,
+    logs: [/phase -> waiting-for-exit/, /waiting up to 10 s for Forge to confirm/, /aborted before touching anything/],
+    noLogs: [/watchdog launcher running/, /watchdog paused/, /phase -> stopping-processes/, /waiting up to \d+ s for Forge \(pid/, /killed /, /started the /]
+  }],
+  ['helper starting after Forge recorded aborted exits untouched', { preAborted: true }, {
+    exit: 1, phase: 'aborted', reason: /^The updater did not start\.$/, tree: 'v1', launches: [], preflight: true, acknowledged: true, stateUnchanged: true,
+    logs: [/already says aborted for this update/], noLogs: [/phase -> /, /installer sha512/, /killed /, /started the /]
+  }]
 ]
 
 const started = Date.now()

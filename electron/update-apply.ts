@@ -21,8 +21,10 @@ import { taskName } from './watchdog-host'
  * while Forge was still alive, and NSIS deletes the old app before copying the
  * new one, so any failure part-way left no working Forge. Instead Forge copies
  * the verified installer and the helper script OUTSIDE the install dir, writes
- * `starting`, spawns the helper, and waits for it to say `waiting-for-exit`
- * before quitting. The helper moves the old install aside, installs into the
+ * `starting`, spawns the helper, and waits for it to say `waiting-for-exit`;
+ * then it writes `update-go.json` (its id) and quits. The helper touches
+ * nothing until that go file arrives (10 s), so a helper that starts after
+ * Forge gave up on the handshake aborts instead. The helper moves the old install aside, installs into the
  * empty dir, launches the new Forge, waits for that Forge to write the health
  * file, and otherwise puts the old dir back.
  *
@@ -56,6 +58,11 @@ function statePath(): string {
 
 function healthPath(): string {
   return join(stateDir(), 'update-health.json')
+}
+
+/** Forge's "I am quitting now" for one apply id; the helper touches nothing without it. */
+function goPath(): string {
+  return join(stateDir(), 'update-go.json')
 }
 
 function helperSource(): string {
@@ -211,7 +218,8 @@ export type ApplyResult =
 
 /**
  * Start the helper and wait for its handshake. `waiting-for-exit` → Forge
- * quits (after `onClosing`, so the banner can say so); `aborted` → Forge stays
+ * writes the go file and quits (after `onClosing`, so the banner can say so);
+ * a go file that cannot be written is a failure like a timeout; `aborted` → Forge stays
  * open with the helper's reason; anything else after 20 s → Forge stays open,
  * "The updater did not start", and the helper is killed if it is still there.
  */
@@ -229,6 +237,7 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
     await copyFile(helperSource(), helper)
     await copyFile(req.file, installer)
     await rm(healthPath(), { force: true })
+    await rm(goPath(), { force: true })
     const starting: UpdateApplyState = {
       id,
       from: req.from,
@@ -319,6 +328,7 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
   const deadline = Date.now() + HANDSHAKE_TIMEOUT_MS
   let lastPhase = 'starting'
   let failedAt = 0
+  let goError: string | null = null
   while (Date.now() < deadline) {
     await sleep(HANDSHAKE_POLL_MS)
     const state = readApplyState()
@@ -337,6 +347,17 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
       }
       if (state.phase !== 'starting' && state.phase !== 'preflight') {
         // waiting-for-exit (or later): the helper is ready for Forge to go.
+        // The go file commits Forge to quitting; the helper waits for it
+        // before it touches anything, so a helper that comes up after this
+        // loop gave up can never close a Forge that said the update failed.
+        try {
+          await writeJsonAtomic(goPath(), { id, at: new Date().toISOString() })
+          logUpdate(`apply ${id}: go file written`)
+        } catch (err) {
+          goError = (err as Error).message
+          logUpdate(`apply ${id}: could not write the go file: ${goError}`)
+          break
+        }
         logUpdate(`apply ${id}: handshake complete at ${state.phase} — quitting`)
         onClosing?.()
         // "Update now" was the confirmation; no second "close Forge?" prompt.
@@ -357,11 +378,13 @@ export async function applyUpdate(req: ApplyRequest, onClosing?: () => void): Pr
     }
   }
 
-  const reason = spawnError
-    ? `The updater did not start (${spawnError}).`
-    : launcherExit !== undefined && launcherExit !== 0
-      ? `The updater did not start (its launcher exited with code ${launcherExit}).`
-      : 'The updater did not start.'
+  const reason = goError
+    ? `Could not hand the update to the updater (${goError}).`
+    : spawnError
+      ? `The updater did not start (${spawnError}).`
+      : launcherExit !== undefined && launcherExit !== 0
+        ? `The updater did not start (its launcher exited with code ${launcherExit}).`
+        : 'The updater did not start.'
   logUpdate(`apply ${id}: handshake failed at ${lastPhase} — ${reason} Forge stays open.`)
   killTree(helperPid)
   // The helper never got past preflight, so nothing changed. Record that rather

@@ -25,22 +25,38 @@ verified installer to a helper that runs outside the install folder.
 2. **Click "Update now" and confirm.** `installUpdate` (`updater.ts:350`)
    refuses unless the install folder is sane (`canApplyUpdate`,
    `update-apply.ts:181`). It needs the installer file and its sha-512.
-3. **Hand-off.** `applyUpdate` (`update-apply.ts:218`) copies the helper and the
-   installer into `%LOCALAPPDATA%\forge-updater\apply\<id>\`, writes state
-   `starting`, and spawns `powershell.exe` detached.
+3. **Hand-off.** `applyUpdate` (`update-apply.ts:226`) copies the helper and the
+   installer into `%LOCALAPPDATA%\forge-updater\apply\<id>\`, deletes any stale
+   health and go file, writes state `starting`, and starts the helper with
+   `cmd.exe /d /c start "" /b powershell.exe ...` (hidden, `update-apply.ts:293-321`).
+   Not `detached: true`: that is `DETACHED_PROCESS`, and Windows PowerShell 5.1
+   with no console exits 0 without running the script. Not a plain child either:
+   libuv puts it in a kill-on-close job, so it would die with Forge. `cmd` exits
+   at once, so until the first state write the pid Forge holds is the launcher's.
 4. **Preflight (helper).** Checks the install folder, the installer, its sha-512,
    free disk space (3x installer size) and removes a stale `.update-backup`
    (`apply-update.ps1:536-571`). On failure the state is `aborted`. Forge stays
    open and nothing has changed.
 5. **Handshake.** Forge polls the state file for up to 20 s
-   (`update-apply.ts:37,309-345`). On `waiting-for-exit` it shows "Closing
-   Forge...", allows close, kills the speech sidecar and quits. On `aborted` it
+   (`update-apply.ts:39,327-401`). On `waiting-for-exit` it writes
+   `update-go.json` (`{ "id", "at" }`, atomic) to commit to quitting, then shows
+   "Closing Forge...", allows close, kills the speech sidecar and quits. If the go
+   file cannot be written, Forge stays open as on a timeout. On `aborted` it
    stays open and shows the reason. On timeout it kills the helper and reports
    "The updater did not start".
-6. **Helper phases** (`apply-update.ps1:768-816`):
+   The helper waits up to 10 s after `waiting-for-exit` for a go file with its
+   id and touches nothing before it: no watchdog pause, no wait, no kill. With
+   no go file it writes `aborted` ("Forge did not confirm the update in time;
+   nothing was changed.", acknowledged if Forge is still running, so the next
+   launch shows it only in Settings) and exits 1, relaunching nothing. A helper
+   that starts when the state already says `aborted` for its id exits 1 without
+   writing anything. So a helper that starts after Forge gave up can never close
+   Forge or touch the install (`apply-update.ps1:588-602`, `:809-826`, `:869-875`).
+6. **Helper phases** (`apply-update.ps1:799-857`):
    `preflight` -> `waiting-for-exit` -> `stopping-processes` -> `backing-up` ->
    `installing` -> `verifying` -> `launching` -> `waiting-for-health` ->
    `succeeded`.
+   - It waits for Forge's go file (step 5); without it: `aborted`, nothing touched.
    - It pauses the watchdog (`watchdog.pause` in the data root).
    - It waits `ExitTimeoutSec` (30 s) for Forge, then kills Forge and its children.
    - It kills the watchdog's `wscript`/`cscript` launcher, then every process
@@ -127,8 +143,9 @@ Old code = `HEAD:`. Harness = `npm run update-apply:check` (`scripts/update-appl
 |---|---|---|
 | Updater log | `%APPDATA%\Forge\logs\updater.log` (`<userData>\logs`, `update-log.ts:23`) | Forge `[main]`, helper `[helper]` |
 | Old log | `updater.old.log` beside it. Made at startup when the log is over 1 MB (`update-log.ts:21,28`) | Forge |
-| State | `<userData>\updates\update-state.json` (`update-apply.ts:49-55`) | Forge writes `starting` and `acknowledged`; the helper writes the rest |
+| State | `<userData>\updates\update-state.json` (`update-apply.ts:49-55`) | Forge writes `starting` and `acknowledged`; the helper writes the rest (its "did not confirm" abort is written acknowledged while Forge still runs) |
 | Health | `<userData>\updates\update-health.json` | The new Forge |
+| Go | `<userData>\updates\update-go.json` (`{ "id", "at" }`) | Forge only, when it commits to quitting; deleted when the next apply is prepared |
 | Work dir | `%LOCALAPPDATA%\forge-updater\apply\<id>\` (installer copy, helper copy, `.reg` backups) | Forge, helper |
 | Backup | `%LOCALAPPDATA%\Programs\forge.update-backup` | Helper |
 | Pause file | `<userData>\watchdog.pause` (holds an expiry in epoch ms) | Helper |
@@ -146,7 +163,9 @@ A healthy run reads, in order:
 [helper] helper started: id <id>, 0.3.270 -> 0.3.271 ...
 [helper] phase -> preflight / installer sha512 ... / preflight passed
 [helper] phase -> waiting-for-exit
+[main]   apply <id>: go file written
 [main]   apply <id>: handshake complete at waiting-for-exit - quitting
+[helper] Forge confirmed at <time>
 [helper] Forge (pid N) exited / phase -> stopping-processes / backing-up
 [helper] renamed ...\forge -> ...\forge.update-backup (attempt 1)
 [helper] phase -> installing / installer exit code 0 / verified the new install
