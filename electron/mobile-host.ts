@@ -35,6 +35,7 @@ import type {
   MobileWatchEvent,
   Settings
 } from '@shared/types'
+import { getMainWindow } from './main-window'
 import { MobileAuth, PAIR_TTL_MS } from './mobile/auth'
 import { DiscoveryResponder } from './mobile/discovery'
 import { canDriveDesktop, driveDesktop, stopDesktopInput } from './mobile/input'
@@ -353,8 +354,8 @@ async function dispatchOp(op: OpFrame, deviceName: string): Promise<string | nul
     if (result.error !== UNSUPPORTED) return result.error
   }
 
-  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-  if (windows.length === 0) return 'Forge has no window open on the desktop, so it cannot change tabs.'
+  const win = getMainWindow()
+  if (!win) return 'Forge has no window open on the desktop, so it cannot change tabs.'
 
   const requestId = randomUUID()
   return new Promise<string | null>((resolve) => {
@@ -363,7 +364,7 @@ async function dispatchOp(op: OpFrame, deviceName: string): Promise<string | nul
       resolve('The desktop did not answer in time.')
     }, OP_TIMEOUT_MS)
     pendingOps.set(requestId, { resolve, timer })
-    windows[0].webContents.send(IPC.mobileCommand, { requestId, op, deviceName })
+    win.webContents.send(IPC.mobileCommand, { requestId, op, deviceName })
   })
 }
 
@@ -381,8 +382,8 @@ function dispatchHandoffStart(
   request: { paneId: string; target: HandoffStartRemoteEvent['target'] },
   deviceName: string
 ): Promise<string | null> {
-  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-  if (windows.length === 0) {
+  const win = getMainWindow()
+  if (!win) {
     return Promise.resolve('Forge has no window open on the desktop, so it cannot hand a pane over.')
   }
   const requestId = randomUUID()
@@ -392,7 +393,7 @@ function dispatchHandoffStart(
       resolve('The desktop did not answer in time.')
     }, OP_TIMEOUT_MS)
     pendingOps.set(requestId, { resolve, timer })
-    windows[0].webContents.send(IPC.handoffStartRemote, {
+    win.webContents.send(IPC.handoffStartRemote, {
       requestId,
       deviceName,
       paneId: request.paneId,
@@ -416,8 +417,7 @@ function dispatchHandoffStart(
 
 /** The window the mirror runs in, or null when Forge has none open. */
 function mirrorWindow(): BrowserWindow | null {
-  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-  return windows[0] ?? null
+  return getMainWindow()
 }
 
 function sendMirror(event: MobileMirrorEvent): void {
@@ -625,7 +625,7 @@ function notifyApproval(ask: MobileApprovalAsk): void {
     body: `"${ask.deviceName}" is asking to ${ask.known ? 'reconnect' : 'pair'}. Its screen should be showing ${ask.words}. Open Forge to allow or deny.`
   })
   note.on('click', () => {
-    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+    const win = getMainWindow()
     if (win) {
       if (win.isMinimized()) win.restore()
       win.show()

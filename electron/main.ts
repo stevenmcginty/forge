@@ -58,6 +58,7 @@ import { disposeSttModel, registerSttModelHandlers, setSttModelTarget } from './
 import { registerAgentProbeHandlers } from './agent-probe'
 import { disposeOverlay, registerOverlayIpc, setOverlayHost } from './overlay-window'
 import { disposeMiniBar, hideMiniBar, registerMiniBarIpc, setMiniBarHost, showMiniBar } from './minibar-window'
+import { setMainWindow } from './main-window'
 import { disposeGlobalKeys, syncGlobalKeys } from './global-keys'
 import { disposeCopilotKey, syncCopilotKey } from './copilot-key'
 import { disposeShotCard, registerShotCardIpc } from './shot-card-window'
@@ -529,6 +530,7 @@ function createWindow(): void {
     setOverlayHost(null)
     // And the mini bar, for the same reason.
     setMiniBarHost(null)
+    setMainWindow(null)
     syncPresence()
   })
 
@@ -587,6 +589,7 @@ function createWindow(): void {
   setOverlayHost(mainWindow)
   // And the mini bar's: the host publishes its state and runs its calls.
   setMiniBarHost(mainWindow)
+  setMainWindow(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {

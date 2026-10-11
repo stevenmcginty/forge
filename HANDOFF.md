@@ -1,5 +1,14 @@
 # Handoff
 
+## Forge browser Agent button: "did not answer within 8 seconds" (2026-10-11; pushed to master)
+
+- **Asked (Steve):** on Forge browser (remote) dictation works but the Agent button keeps failing with the 8 s timeout.
+- **Cause (proven):** main sent renderer asks to `BrowserWindow.getAllWindows()[0]`. Electron lists windows newest first (tested: ids 1,2,3 → 3,2,1). With Forge minimised the mini bar window is newest (also the Browser-copy web-mirror, overlay, shot card), so the voice `setup` ask went there, nothing answered, `askVoice` hit `VOICE_ASK_MS`. Dictation never asks the renderer, so it worked.
+- **Built:** new `electron/main-window.ts` (`setMainWindow` / `getMainWindow`), set beside `setMiniBarHost` in `electron/main.ts`. `electron/web-host.ts` (askRenderer, askVoice, dispatchProjectCreate, mirrorWindow) and `electron/mobile-host.ts` (dispatchOp, dispatchHandoffStart, mirrorWindow, approval notification click) now use it. Same bug was hitting the screen mirror and phone tab/handoff ops.
+- **Checked:** typecheck 0. Steve tested live after a restart: Agent works on Forge browser.
+- **Next:** nothing.
+- **Undo:** `git revert` the commit "Send renderer asks to the main window", then restart Forge.
+
 ## Phone's new agent stuck while the desktop shows the browser (2026-10-07; committed and pushed to master)
 
 - **Asked (Steve):** on the phone, a new agent in a project with no terminals did not start while the desktop was on the Browser view; it started only when he went back to Agents on the desktop.

@@ -45,6 +45,7 @@ import type {
   WebWatchEvent,
   Workspace
 } from '@shared/types'
+import { getMainWindow } from './main-window'
 import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxFile, saveInboxImage } from './web/inbox'
@@ -736,8 +737,8 @@ const OP_TIMEOUT_MS = 8000
  * things to be told.
  */
 function askRenderer(channel: string, payload: object, noWindow: string): Promise<string | null> {
-  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-  if (windows.length === 0) return Promise.resolve(noWindow)
+  const win = getMainWindow()
+  if (!win) return Promise.resolve(noWindow)
 
   const requestId = randomUUID()
   return new Promise<string | null>((resolve) => {
@@ -746,7 +747,7 @@ function askRenderer(channel: string, payload: object, noWindow: string): Promis
       resolve('The desktop did not answer in time.')
     }, OP_TIMEOUT_MS)
     pendingOps.set(requestId, { resolve, timer })
-    windows[0].webContents.send(channel, { ...payload, requestId })
+    win.webContents.send(channel, { ...payload, requestId })
   })
 }
 
@@ -787,9 +788,9 @@ const VOICE_TOOL_MS = 25_000
  * `IPC.webVoiceResult`, because the reply is a payload rather than a sentence.
  */
 function askVoice(payload: VoiceAskPayload, timeoutMs: number, late?: string): Promise<WebVoiceAskReply> {
-  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
+  const win = getMainWindow()
   const requestId = randomUUID()
-  if (windows.length === 0) {
+  if (!win) {
     return Promise.resolve({
       requestId,
       error: 'Forge has no window open on the desktop, so the voice agent cannot run.'
@@ -801,7 +802,7 @@ function askVoice(payload: VoiceAskPayload, timeoutMs: number, late?: string): P
       resolve({ requestId, error: late ?? `The desktop did not answer within ${Math.round(timeoutMs / 1000)} seconds.` })
     }, timeoutMs)
     pendingVoice.set(requestId, { resolve, timer })
-    windows[0].webContents.send(IPC.webVoiceAsk, { ...payload, requestId })
+    win.webContents.send(IPC.webVoiceAsk, { ...payload, requestId })
   })
 }
 
@@ -934,7 +935,7 @@ async function dispatchProjectCreate(
   parentDir: string,
   deviceName: string
 ): Promise<{ ok: true } | { ok: false; error: string; existingPath?: string }> {
-  if (BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).length === 0) {
+  if (getMainWindow() === null) {
     return { ok: false, error: 'Forge has no window open on the desktop, so it cannot add a project.' }
   }
   const nominated = getSettings().projectsRoot?.trim()
@@ -985,8 +986,7 @@ async function dispatchProjectCreate(
 
 /** The window the capture runs in, or null when Forge has none open. */
 function mirrorWindow(): BrowserWindow | null {
-  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
-  return windows[0] ?? null
+  return getMainWindow()
 }
 
 function sendMirror(event: WebMirrorEvent): void {
