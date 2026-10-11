@@ -331,14 +331,6 @@ function seed(project) {
   log(`seeded ${DATA}`)
 }
 
-/** Keep the "what's new" card for the version being launched out of the way. */
-function markNotesSeen(version) {
-  const file = join(DATA, 'settings.json')
-  const s = readJson(file) ?? {}
-  s.lastNotesVersion = version
-  writeFileSync(file, JSON.stringify(s, null, 2))
-}
-
 function snapshot(name) {
   if (existsSync(STATE)) copyFileSync(STATE, join(ART, name))
 }
@@ -365,7 +357,24 @@ async function launch(installDir, label) {
   const page = await mainWindow(app)
   await page.waitForFunction(() => Boolean(window.forge?.updates), null, { timeout: 60_000 })
   log(`launched Forge ${version} (${label}), main pid ${pid}, window ${page.url()}`)
+  await dismissWhatsNew(page)
   return { app, page, pid, version, proc }
+}
+
+/**
+ * The "what's new" card opens over the window when the bundled notes are newer
+ * than settings' lastNotesVersion. Both test builds carry the checkout's notes
+ * (0.3.0, not 50.0.x), so it shows on the first launch; it is dismissed the way
+ * a person would, and stays dismissed after that.
+ */
+async function dismissWhatsNew(page) {
+  const card = page.locator('.wnew')
+  const shown = await card.waitFor({ timeout: 8_000 }).then(() => true, () => false)
+  if (!shown) return
+  await page.screenshot({ path: join(ART, `whats-new-${Date.now()}.png`) }).catch(() => undefined)
+  await page.locator('.wnew__dismiss').click()
+  await card.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined)
+  log(`dismissed the what's new card (${await card.count()} left)`)
 }
 
 async function mainWindow(app) {
@@ -614,7 +623,6 @@ async function stageRollback(installDir) {
 
   log(`before ${tag}: ${await stopForge(installDir, `before ${tag}`)}`)
   serveLyingFeed()
-  markNotesSeen(NEW)
 
   const live = await launch(installDir, `${tag}-${NEW}`)
   check(`${tag}: launched Forge is ${NEW}`, live.version === NEW, live.version)
