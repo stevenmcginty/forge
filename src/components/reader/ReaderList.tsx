@@ -92,6 +92,7 @@ export function ReaderList({
   recent,
   current,
   projectName,
+  restart = false,
   onOpen
 }: {
   /** null while the first list is loading. */
@@ -99,6 +100,8 @@ export function ReaderList({
   recent: ReaderEntry[]
   current: string | null
   projectName: string | null
+  /** The preload predates Read, so the empty list means "restart", not "no files". */
+  restart?: boolean
   onOpen: (path: string) => void
 }): ReactNode {
   const [filter, setFilter] = useState('')
@@ -179,7 +182,7 @@ export function ReaderList({
           {entries === null ? (
             <p className="rlist__quiet">Looking for Markdown…</p>
           ) : projectCount === 0 ? (
-            <p className="rlist__quiet">{q ? 'No file matches.' : projectName ? 'No Markdown files in this project.' : 'No project open.'}</p>
+            <p className="rlist__quiet">{restart ? 'Restart Forge to list files.' : q ? 'No file matches.' : projectName ? 'No Markdown files in this project.' : 'No project open.'}</p>
           ) : (
             groups.map((g) => {
               const open = !g.folder || q !== '' || flipped.has(g.folder) === folded

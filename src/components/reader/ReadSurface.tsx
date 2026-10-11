@@ -23,10 +23,10 @@ function Welcome({ restart, hasFiles }: { restart: boolean; hasFiles: boolean })
           <span className="rwelcome__glyph" aria-hidden="true">
             <Icon name="book" size={26} />
           </span>
-          <h2 className="rwelcome__title">Nothing open yet</h2>
+          <h2 className="rwelcome__title">{restart ? 'Restart Forge to use Read' : 'Nothing open yet'}</h2>
           <p className="rwelcome__lede">
             {restart
-              ? 'Read needs a restart of Forge before it can open files.'
+              ? 'This Forge started before Read was added, so it cannot list or open files yet. Quit Forge and start it again.'
               : 'Markdown files open here to read — plans, handoffs, reports — and to edit when you need to.'}
           </p>
           <ul className="rwelcome__ways">
@@ -135,7 +135,7 @@ export function ReadSurface({ active }: SurfaceProps): ReactNode {
   return (
     <div className="reader" data-active={active ? 'true' : undefined}>
       <aside className="reader__side" aria-label="Markdown files">
-        <ReaderList entries={entries} recent={recent ?? []} current={reader.current} projectName={project?.name ?? null} onOpen={open} />
+        <ReaderList entries={entries} recent={recent ?? []} current={reader.current} projectName={project?.name ?? null} restart={missing} onOpen={open} />
       </aside>
       {reader.current && !missing ? (
         <ReaderPage path={reader.current} projectRoot={root} projectName={project?.name ?? null} active={active} />
