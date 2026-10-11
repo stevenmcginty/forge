@@ -1626,10 +1626,10 @@ void app
         open: openMainWindow,
         quit: quitForReal,
         // Quit means quit: without this the watchdog has Forge back in ten
-        // seconds. Half an hour is long enough to do whatever Quit was for.
+        // seconds. Ten minutes is long enough to do whatever Quit was for.
         pauseWatchdog: () => {
           try {
-            pauseWatchdog(30)
+            pauseWatchdog(10)
           } catch (err) {
             console.error('[watchdog] could not pause before quit:', err)
           }
