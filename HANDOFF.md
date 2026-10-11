@@ -1,5 +1,15 @@
 # Handoff
 
+## Mini bar: drag fixed, Screenshot key, project plate (2026-10-11; master 016f266 + 5c15da7, local only, NOT pushed)
+
+- **Asked (Steve):** the mini bar cannot be dragged; the Screen key's eye icon is ugly and confusing; the active project button (bottom left, dock and mini bar) must stand out with its own background.
+- **Cause of the drag bug (strong hypothesis, not proven on screen):** the bar used `-webkit-app-region: drag`. On Windows the page gets no pointer events inside a drag region, so `useClickThrough` never saw the pointer arrive on the grip from the see-through padding. The window stayed click-through and the press fell to the app below. The grip was also only 16 px.
+- **Built (foreman → builder + designer, worktree `C:\Users\steve\Desktop\forge-worktrees\forge-minibar-move`, branch `minibar-move`, fast-forwarded):** 016f266: no app-region rules any more; JS move in `src/minibar/useWindowDrag.ts` (3 px threshold, rAF) → IPC `minibarMove` → `moveBy()` in `electron/minibar-window.ts`, saved once at the end. Grip is 28 px wide, full row height. Double-click the grip → `minibarHome` clears the saved place for that display. 5c15da7: `ScreenshotGlyph` (monitor in camera corners, slash when off) + the word "Screenshot" when on (hidden below 1040 px); the project pill is a plate tinted with the project's colour, folder in a colour disc, same in the dock and the mini bar (`MiniBarState.project.color`).
+- **Checked:** typecheck 0, lint:hooks 0 (both jobs). Headless renders of the mini bar preview and the dock CSS. Merge hot-reloaded the live renderer cleanly 18:08.
+- **Not checked:** a real drag, double-click home, click-through at the press, mixed-DPI displays. Tucked pill: the whole wide window moves with it, so the pill cannot reach the far left/right edges.
+- **Next:** Steve restarts Forge (main + preload changed; until then the old preload has no `move` and the bar just stays put). Then minimise and drag by the `⋮⋮` grip. Push on his OK (push auto-releases). Then `git worktree remove C:\Users\steve\Desktop\forge-worktrees\forge-minibar-move`.
+- **Undo:** `git revert 5c15da7 016f266`, then restart Forge.
+
 ## Packaged updates: apply helper with backup, health check and rollback (2026-10-11; branch `updater-rollback` 9f1aa56 merged to master and pushed 2026-10-11 on Steve's OK, so it auto-released; Forge restarted)
 
 - **Asked:** users' update bar sometimes does nothing, half-updates or crashes, and can leave Forge broken; Steve's checkout works. Hard rule: download + verify, close cleanly, apply atomically or roll back, relaunch, and claim success only after the new version runs. Deferral allowed before confirming.
