@@ -509,7 +509,9 @@ const api: ForgeApi = {
     quitInfo: () => ipcRenderer.invoke(IPC.minibarQuitInfo),
     quit: (opts) => ipcRenderer.invoke(IPC.minibarQuit, { dontAskAgain: opts?.dontAskAgain === true }),
     pickFiles: () => ipcRenderer.invoke(IPC.minibarPickFiles),
-    setClickThrough: (on) => ipcRenderer.send(IPC.minibarClickThrough, on === true)
+    setClickThrough: (on) => ipcRenderer.send(IPC.minibarClickThrough, on === true),
+    move: (m) => ipcRenderer.send(IPC.minibarMove, m),
+    home: () => ipcRenderer.send(IPC.minibarHome)
   },
 
   minibarHost: {

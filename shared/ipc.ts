@@ -967,6 +967,10 @@ export const IPC = {
   minibarResize: 'minibar:resize',
   /** View → main, (on: boolean): the pointer is over see-through room, so clicks fall through (or not). */
   minibarClickThrough: 'minibar:clickThrough',
+  /** View → main, MiniBarMove: Steve drags the bar by its grip or its bare surface. Saved once, at the end. */
+  minibarMove: 'minibar:move',
+  /** View → main: forget where the bar was put on its display and go back to bottom centre (double-click the grip). */
+  minibarHome: 'minibar:home',
   /** View → main, invoke, (maximised?: boolean): restore Forge. */
   minibarOpenMain: 'minibar:openMain',
   /** View → main, invoke: MiniBarQuitInfo for the inline confirm. */

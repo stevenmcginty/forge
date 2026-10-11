@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
 import { IPC } from '@shared/ipc'
-import type { MiniBarCall, MiniBarQuitInfo, MiniBarState, RemoteKey } from '@shared/minibar'
+import type { MiniBarCall, MiniBarMove, MiniBarQuitInfo, MiniBarState, RemoteKey } from '@shared/minibar'
 import { clampToScreen } from './overlay-window'
 import { lastReply, type PanePlace } from './pane-reply'
 import { allowClose, quitSummary } from './quit-guard'
@@ -44,7 +44,7 @@ const MIN_WIDTH = 640
 const OLD_MAX_WIDTH = 1240
 /** clampToScreen's margin, on both sides: the widest a bar can be is the work area less this twice. */
 const EDGE = 8
-/** A drag or an end-resize is saved once it settles. */
+/** An OS move or an end-resize is saved once it settles. */
 const SAVE_MS = 400
 
 /** The main window: the host. */
@@ -68,6 +68,8 @@ let lastDraft: string | null = null
 let height = BAR_HEIGHT
 /** Set while we move the window ourselves, so our own setBounds is not saved as a drag. */
 let placing = false
+/** The bar's bounds when Steve's drag started (minibar:move), until it ends. */
+let dragFrom: Electron.Rectangle | null = null
 let saveTimer: NodeJS.Timeout | null = null
 let openMain: (() => void) | null = null
 
@@ -196,6 +198,11 @@ function homeRect(): Electron.Rectangle {
     // Saved by its bottom edge: the bar grows upward, so that is what stays put.
     return clampRect({ x: saved.x, y: saved.y - height, width: saved.width, height })
   }
+  return defaultRect(area)
+}
+
+/** Bottom centre of a work area, 12 px above the taskbar, at the default width. */
+function defaultRect(area: Electron.Rectangle): Electron.Rectangle {
   const width = defaultWidth(area)
   return clampRect({
     x: Math.round(area.x + (area.width - width) / 2),
@@ -260,6 +267,56 @@ function resize(size: { height?: unknown; width?: unknown }): void {
   if (Number.isFinite(wantW) && lastState?.tucked !== true) scheduleSave()
 }
 
+/**
+ * Steve drags the bar (the view's useWindowDrag). Not the OS's drag: a drag
+ * region is non-client on Windows, so the page never sees the pointer there
+ * and the bar's click-through cannot tell it is over the grip. `dx`/`dy` are
+ * screen DIP from the press, so a lost or late message costs nothing. The
+ * window follows by its bottom edge (it may grow upward mid-drag), stays on a
+ * display's work area, and is saved once, at the end, for the display it ends on.
+ */
+function moveBy(m: MiniBarMove): void {
+  if (!barAlive()) return
+  if (m?.phase === 'start') {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = null
+    dragFrom = bar!.getBounds()
+    return
+  }
+  if (!dragFrom) return
+  if (m?.phase === 'end') {
+    dragFrom = null
+    saveBounds()
+    return
+  }
+  if (m?.phase !== 'move') return
+  const dx = Number(m.dx)
+  const dy = Number(m.dy)
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
+  const b = bar!.getBounds()
+  place(
+    clampRect({
+      x: Math.round(dragFrom.x + dx),
+      y: Math.round(dragFrom.y + dragFrom.height + dy) - b.height,
+      width: b.width,
+      height: b.height
+    })
+  )
+}
+
+/** Double-click on the grip: forget the place saved for the bar's display and go back to its default. */
+function goHome(): void {
+  if (!barAlive()) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = null
+  dragFrom = null
+  const display = screen.getDisplayMatching(bar!.getBounds())
+  const saved = { ...(getSettings().miniBarBounds ?? {}) }
+  delete saved[String(display.id)]
+  setSettings({ miniBarBounds: saved })
+  place(defaultRect(display.workArea))
+}
+
 /** Displays came, went or changed (DPI, taskbar): pull the bar back onto one. */
 function reclamp(): void {
   if (!barAlive()) return
@@ -306,10 +363,10 @@ function createBar(): BrowserWindow {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   win.setMenuBarVisibility(false)
 
-  // A drag by the grip is the only move worth saving; our own place() calls
-  // are filtered by `placing`.
+  // An OS move (Win+Shift+arrow) is saved. Our own place() calls are
+  // filtered by `placing`, and Steve's drag (moveBy) saves once, at its end.
   win.on('moved', () => {
-    if (!placing) scheduleSave()
+    if (!placing && !dragFrom) scheduleSave()
   })
 
   // Some shell interactions quietly demote a topmost window. See overlay-window.ts.
@@ -336,6 +393,8 @@ function createBar(): BrowserWindow {
   win.webContents.on('did-finish-load', () => {
     // A fresh page has not said where the pointer is: take clicks until it does.
     setClickThrough(win, false)
+    // Nor is it dragging: a drag the old page started will never end.
+    dragFrom = null
     if (lastState) toBar(IPC.minibarState, lastState)
   })
 
@@ -449,6 +508,16 @@ export function registerMiniBarIpc(deps: { openMainWindow: () => void }): void {
     resize(size ?? {})
   })
 
+  ipcMain.on(IPC.minibarMove, (e, m: MiniBarMove) => {
+    if (!barAlive() || e.sender !== bar!.webContents) return
+    moveBy(m)
+  })
+
+  ipcMain.on(IPC.minibarHome, (e) => {
+    if (!barAlive() || e.sender !== bar!.webContents) return
+    goHome()
+  })
+
   ipcMain.handle(IPC.minibarOpenMain, (_e, maximised: unknown) => {
     openMain?.()
     if (maximised === true && hostAlive()) host!.maximize()
@@ -487,6 +556,7 @@ export function disposeMiniBar(): void {
   screen.removeListener('display-metrics-changed', reclamp)
   const win = bar
   bar = null
+  dragFrom = null
   ready = false
   mode = false
   lastDraft = null

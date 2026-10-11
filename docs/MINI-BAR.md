@@ -71,7 +71,8 @@ The mini bar is a remote control, like the phone. The main window's renderer kee
 - **Shows** when the main window is minimised by any route (title-bar button, taskbar click, Win+Down) and the setting is on. It shows without taking focus (`showInactive`), so the app Steve switches to keeps the keyboard.
 - **Hides** when the main window is restored, shown or focused (taskbar, the bar's Open Forge button, tray, a second launch, double-clicking a .md). The draft goes back to the big bar.
 - **Never shows** while Forge is quitting, when the setting is off, or when there is no main window.
-- **Position:** where Steve last dragged it, per display. Default: bottom centre of the work area of the display the main window was on, 12 px above the taskbar. Re-clamped when displays, DPI or the taskbar change.
+- **Position:** where Steve last dragged it, per display (saved once, when the drag ends, for the display it ends on). Default: bottom centre of the work area of the display the main window was on, 12 px above the taskbar. Double-click the grip to forget the saved place for that display and go back to the default. Re-clamped when displays, DPI or the taskbar change.
+- **Moving:** drag the grip or the bar's bare surface (the pill's too). The page tracks the press and main moves the window (`src/minibar/useWindowDrag.ts`, `minibar:move`); it stays on a display's work area. Not `-webkit-app-region: drag`: on Windows a drag region is non-client, so the page never sees the pointer over it, the click-through hit-test misses it and the press falls through to the app below. An OS move (Win+Shift+arrow) is still saved.
 - **Win+D (show desktop):** the bar must stay visible. UNVERIFIED; live test.
 
 ### 4.2 Layout
@@ -99,7 +100,7 @@ Two layers: the **bar** (one row, always there) and a **stage** above it, where 
 +--------------------------------------------------------------------------------------------------------------+
 ```
 
-- **Grip** (`::`): drag to move.
+- **Grip** (`::`, the row's full height): drag to move; double-click to put the bar back at bottom centre.
 - **Project pill:** current project. Click: a list of projects with the number of running agents. Pick one to switch.
 - **Agent chips:** every agent pane in the current project. Each shows the agent's brand logo, the pane name, and its state as a word plus a shape: Working, Waiting, Asking, Idle, Starting. Never colour alone (Steve is red-green colourblind). Click a chip to make it the send target and open its Peek (4.10). The list's last entry, "All agents", shows every agent in every project, grouped by project, each with its state and its last line; picking one switches project and target. When chips do not fit, the extra ones fold into "+3 more".
 - **+ (New agent):** a new agent in the current project, the same as Ctrl+T.

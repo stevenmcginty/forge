@@ -15,8 +15,11 @@
  * that shows is the bar, the stage and the toasts; the window is sized to them
  * by the main process. The room around them (--mb-pad-*) is for their shadow.
  *
- * DRAGGING IS THE OS's: the bar's and the pill's surfaces are drag regions;
- * every control opts out, or it would be a dead button.
+ * DRAGGING IS THE PAGE's (useWindowDrag.ts): the grip and the bare surface
+ * of the bar and the pill move the window. No -webkit-app-region anywhere: on
+ * Windows a drag region is non-client, so the page never sees the pointer
+ * over it, the click-through hit-test misses it, and presses on it fall
+ * through to the app below.
  *
  * Motion: arrivals only — sheets rise, toasts slide up, a chip's shape pops
  * when its state changes and rings once when it turns Done. The one loop is
@@ -89,7 +92,6 @@
   background: var(--mb-surface);
   border: 1px solid var(--glass-line-strong);
   box-shadow: var(--mb-edge);
-  -webkit-app-region: drag;
   transition: border-color var(--dur-fast) var(--ease-out);
 }
 
@@ -161,13 +163,6 @@
   min-height: 40px;
 }
 
-/* Everything that is pressed, typed in or dragged opts out of the window drag. */
-.mb-bar :is(button, textarea, input, label, a, .mb-end, .mb-well, .mb-chips, .mb-bar__notice),
-.mb-pill button,
-.mb-stage {
-  -webkit-app-region: no-drag;
-}
-
 /* -------------------------------------------------------- ends and grip */
 
 .mb-end {
@@ -206,19 +201,41 @@
   opacity: 0.7;
 }
 
+/*
+ * The grip: the whole row's height and wide enough for a touchpad to find
+ * first time. Dots that read at a glance, a tint under the pointer, and the
+ * hand closes while the bar moves (data-moving, useWindowDrag.ts).
+ */
 .mb-grip {
   display: inline-grid;
   place-items: center;
   flex: none;
-  width: 16px;
-  height: 40px;
-  color: var(--text-dim);
+  align-self: stretch;
+  width: 28px;
+  min-height: 40px;
+  border-radius: 14px;
+  color: var(--text-muted);
   cursor: grab;
-  transition: color var(--dur-fast) var(--ease-out);
+  user-select: none;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
 }
 
 .mb-grip:hover {
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+:is(.mb-bar, .mb-pill)[data-moving] .mb-grip {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+/* While the bar moves, the closed hand wins over every control's own cursor. */
+:is(.mb-bar, .mb-pill)[data-moving],
+:is(.mb-bar, .mb-pill)[data-moving] * {
+  cursor: grabbing !important;
 }
 
 /* ------------------------------------------------------------- keys */
@@ -2110,12 +2127,14 @@
   background: var(--mb-surface);
   border: 1px solid var(--glass-line-strong);
   box-shadow: var(--mb-edge);
-  -webkit-app-region: drag;
   animation: mb-sheet-in var(--dur-pop) var(--spring-pop) both;
 }
 
 .mb-grip--pill {
+  align-self: center;
+  min-height: 0;
   height: 36px;
+  border-radius: 18px;
 }
 
 .mb-pill__body {

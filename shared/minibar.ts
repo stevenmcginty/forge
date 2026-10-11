@@ -151,7 +151,14 @@ export interface MiniBarViewApi {
   pickFiles(): Promise<string[]>
   /** True while the pointer is over see-through room: clicks there fall through to the app below. */
   setClickThrough(on: boolean): void
+  /** A drag of the whole bar: start, then moves by the distance from the press (DIP), then end. Main saves at the end. */
+  move(m: MiniBarMove): void
+  /** Forget where the bar was put on its display and go back to the default place, bottom centre. */
+  home(): void
 }
+
+/** One step of a move gesture, from the view to main. `dx`/`dy` are from the press, not from the last move. */
+export type MiniBarMove = { phase: 'start' } | { phase: 'move'; dx: number; dy: number } | { phase: 'end' }
 
 /** window.forge.minibarHost in the main window. */
 export interface MiniBarHostApi {

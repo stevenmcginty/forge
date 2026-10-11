@@ -198,7 +198,7 @@ export function MiniBarView({ state, api }: { state: MiniBarState | null; api: M
           }}
           onChatHold={setChatHeld}
         />
-        <Pill state={state} call={call} />
+        <Pill state={state} call={call} api={api} />
       </Shell>
     )
   }

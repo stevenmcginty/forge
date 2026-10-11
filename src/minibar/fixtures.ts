@@ -173,6 +173,8 @@ export function fakeApi(log: (line: string) => void = (l) => console.log(l)): Mi
       log('pickFiles')
       return ['C:\\Users\\steve\\Desktop\\shot.png']
     },
-    setClickThrough: (on) => log(`setClickThrough ${on}`)
+    setClickThrough: (on) => log(`setClickThrough ${on}`),
+    move: (m) => log(`move ${JSON.stringify(m)}`),
+    home: () => log('home')
   }
 }

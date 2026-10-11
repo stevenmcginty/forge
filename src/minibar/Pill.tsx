@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react'
-import type { AgentStatus, MiniBarCall, MiniBarState } from '@shared/minibar'
+import type { AgentStatus, MiniBarCall, MiniBarState, MiniBarViewApi } from '@shared/minibar'
 import { Icon } from '@/components/Icon'
+import { Grip } from './Bar'
 import { STATUS_WORD } from './format'
-import { BellGlyph, GripGlyph, StateMark, StopSquare } from './glyphs'
+import { BellGlyph, StateMark, StopSquare } from './glyphs'
+import { useWindowDrag } from './useWindowDrag'
 
 /** The states worth a count on the pill, in the order they are read. */
 const COUNTED: AgentStatus[] = ['asking', 'done', 'working', 'waiting', 'stopped']
@@ -11,18 +13,25 @@ const COUNTED: AgentStatus[] = ['asking', 'done', 'working', 'waiting', 'stopped
  * Tucked: the bar folded to a pill at the same spot (spec 4.12) —
  * `( :: forge · ?1 ✓2 ◌3 · mic )`. Counts per state, each with its shape;
  * the mic still dictates; a press on the middle unfolds the bar. Toasts and
- * spoken updates carry on above it.
+ * spoken updates carry on above it. The grip and the pill's rim move it, as the bar's do.
  */
-export function Pill({ state, call }: { state: MiniBarState; call: (c: MiniBarCall) => void }): ReactNode {
+export function Pill({
+  state,
+  call,
+  api
+}: {
+  state: MiniBarState
+  call: (c: MiniBarCall) => void
+  api: MiniBarViewApi
+}): ReactNode {
   const counts = COUNTED.map((s) => ({ s, n: state.agents.filter((a) => a.status === s).length })).filter((c) => c.n > 0)
   const recording = state.dictation.phase === 'listening'
   const said = counts.map((c) => `${c.n} ${STATUS_WORD[c.s].toLowerCase()}`).join(', ')
+  const drag = useWindowDrag(api.move)
 
   return (
-    <div className="mb-pill">
-      <span className="mb-grip mb-grip--pill" title="Drag to move">
-        <GripGlyph />
-      </span>
+    <div className="mb-pill" {...drag}>
+      <Grip api={api} pill />
       <button
         type="button"
         className="mb-pill__body"

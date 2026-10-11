@@ -8,6 +8,7 @@ import { fmtDuration } from './format'
 import { QuitConfirm } from './QuitConfirm'
 import type { Panel } from './Stage'
 import { TextWell } from './TextWell'
+import { useWindowDrag } from './useWindowDrag'
 
 /**
  * The bar: one row, always there.
@@ -18,8 +19,8 @@ import { TextWell } from './TextWell'
  *   news     bell (Activity), speaker (spoken updates)
  *   window   tuck, Open (with Open maximised), a gap, then Quit
  *
- * The bar's own surface is a drag region; every control opts out
- * (MiniBar.css). Rows that are about the whole app (quit confirm, "not
+ * The grip and the bar's bare surface move the window (useWindowDrag.ts);
+ * the controls do not. Rows that are about the whole app (quit confirm, "not
  * answering") grow out of the top of the same surface, in place. Its outline
  * carries the big bar's live cues (BarCues.tsx): the voice edge and the sent flash.
  */
@@ -53,6 +54,7 @@ export function Bar({
   const bar = useRef<HTMLDivElement | null>(null)
   const noProject = state.project === null
   const edge = barEdge(state)
+  const drag = useWindowDrag(api.move)
 
   return (
     <div
@@ -61,6 +63,7 @@ export function Bar({
       data-stale={stale ? 'true' : undefined}
       data-confirm={quit ? 'true' : undefined}
       data-edge={edge?.variant}
+      {...drag}
     >
       <BarCues state={state} edge={edge} />
       <WidthEnd side="left" bar={bar} onWidth={onWidth} />
@@ -81,7 +84,7 @@ export function Bar({
       ) : null}
 
       <div className="mb-bar__row" inert={quit ? true : undefined}>
-        <Grip />
+        <Grip api={api} />
 
         {noProject ? (
           <div className="mb-empty">
@@ -227,10 +230,19 @@ function OpenSplit({
   )
 }
 
-/** Drag to move. (A drag region never hands the page a double-click on Windows.) */
-function Grip(): ReactNode {
+/**
+ * Drag to move (useWindowDrag, on the surface round it); double-click to put
+ * the bar back at bottom centre. The bar's and the pill's.
+ */
+export function Grip({ api, pill = false }: { api: MiniBarViewApi; pill?: boolean }): ReactNode {
   return (
-    <span className="mb-grip" title="Drag to move">
+    <span
+      className={pill ? 'mb-grip mb-grip--pill' : 'mb-grip'}
+      title="Drag to move. Double-click to put it back."
+      onDoubleClick={() => {
+        if (typeof api.home === 'function') api.home()
+      }}
+    >
       <GripGlyph />
     </span>
   )
@@ -296,11 +308,12 @@ export function ConnectingBar({
   quit: MiniBarQuitInfo | null
   onQuitCancel: () => void
 }): ReactNode {
+  const drag = useWindowDrag(api.move)
   return (
-    <div className="mb-bar" data-quiet="true" data-confirm={quit ? 'true' : undefined}>
+    <div className="mb-bar" data-quiet="true" data-confirm={quit ? 'true' : undefined} {...drag}>
       {quit ? <QuitConfirm info={quit} api={api} onCancel={onQuitCancel} /> : null}
       <div className="mb-bar__row">
-        <Grip />
+        <Grip api={api} />
         <span className="mb-connecting">
           <StateMark status="starting" size={11} />
           Connecting…
