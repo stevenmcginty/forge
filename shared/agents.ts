@@ -771,6 +771,10 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'kimi-for-coding-highspeed', label: 'K2.7 HighSpeed', note: 'same coding model, ~6× faster' }
   ],
   agy: [
+    // Gemini 4 Argon reached Antigravity 2026-10-13 (AI Ultra only). Not yet in
+    // `agy models` on this machine; ids follow the Pro high/low pattern.
+    { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)', note: 'newest frontier model, deepest effort' },
+    { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)', note: 'newest frontier model, faster' },
     { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)', note: 'newest Flash, deepest effort' },
     { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)', note: 'newest Flash, balanced' },
     { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)', note: 'newest Flash, fastest' },
