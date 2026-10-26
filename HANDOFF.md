@@ -1,12 +1,28 @@
 # Handoff
 
-## Codex picker: GPT-6.1 Terra (2026-10-26; uncommitted on master)
+## Forge TV: accepts dictated text from River Hub (2026-10-26 19:20; uncommitted on master, mobile/dist rebuilt and live)
+
+- **Asked (Steve):** hold the Fire TV remote's mic button and talk; the words land in Forge's TV typing box. River Hub (`C:\Users\steve\Desktop\river-hub`, VoiceService) records the remote mic and transcribes with Groq; this is the page side.
+- **Built (F1, foreman → builder):** `mobile/src/lib/tv-bridge.ts` listens for `forge:voice-text` `{id, seq, text, final}` and acks `window.ForgeTvNative.voiceTextUsed(id, seq, used)`; `mobile/src/components/TvDashboard.tsx` registers the zoomed terminal pane's box (opens it if needed) and the mirror's "Talk or type" box. Appends with a space, never presses Enter. On the wall view it acks false (River Hub then shows the text in its bubble).
+- **Checked:** typecheck 0, `mobile:build` 0, live :8420 serves `index-CFn5CT8Z.js` with the listener. Emulator round trip acked within ~10 ms. NOT checked on the stick: `used=true` into a real typing box.
+- **Next:** commit with River Hub's side when Steve says. Then the TV voice agent (plan pending Steve's pick: brain on the PC in Forge with adb TV tools, or on the TV).
+
+## Forge TV: typed line in a terminal pane would not send (2026-10-26 19:05; uncommitted on master)
+
+- **Asked (Steve):** on the TV, a line typed into a terminal pane's box does not send when he presses Enter.
+- **Cause (from code, not seen on the stick):** the pane's box in `TvPaneView` had no `<form>` and no `enterKeyHint`. TvMirrorView's comment already records that without both, the Fire OS keyboard shows "Next", which moves focus and sends no Enter.
+- **Built:** `mobile/src/components/TvDashboard.tsx` `TvPaneView`: the `.tv-type` div is now a `<form>` whose submit calls `sendLine()`; the input has `type="text"`, `name="line"`, `enterKeyHint="send"`, `inputMode="text"`; `onInputKey` also matches `NumpadEnter` and `keyCode 13`. No send-on-blur (a stray blur would submit a prompt).
+- **Checked:** `npm run typecheck` 0; `NODE_ENV=production npm run mobile:build` 0; Forge on :8420 serves `index-BBziowUo.js` with the fix. NOT checked on the stick.
+- **Note:** the same file and `mobile/src/lib/tv-bridge.ts` also hold another session's uncommitted River Hub voice seam (`registerVoiceTarget`, `forge:voice-text`); the build includes it. Commit the two together or split by hunk.
+- **Next:** Steve closes and reopens the Forge tile on the TV, types a line in a pane, presses Send/Enter. Then commit + push on his OK.
+
+## Codex picker: GPT-6.1 Terra (2026-10-26; 26f295b pushed on Steve's D.m.p; released v0.3.277, web live 26f295b)
 
 - **Asked (Steve):** add GPT-6.1 Terra ("rolling out") to every form of the app.
 - **Built:** `shared/agents.ts` codex family: `gpt-6.1-terra` first; GPT-6 Luna loses "newest". Desktop, web and phone share this list. The picker only sends `/model <id>` to a running pane, so the default model does not change.
 - **Checked:** typecheck 0. Steve's ChatGPT login does NOT have it yet: `codex exec -m gpt-6.1-terra` gave `model_not_found`, and the 18:15 `~/.codex/models_cache.json` lacks it. Picking it before the rollout reaches him will fail in the pane.
 - **Also seen:** OpenAI dropped `gpt-5.5` from Steve's live list today; the picker still shows it.
-- **Next:** commit + push on Steve's OK (push auto-releases). Re-check `models_cache.json` for `gpt-6.1-terra`.
+- **Next:** when Steve's login gets it, re-check `models_cache.json` for `gpt-6.1-terra`; then consider dropping `gpt-5.5`.
 
 ## Forge TV: Enter key on the terminal key row (2026-10-26 17:20; pushed to master on Steve's OK)
 

@@ -72,10 +72,38 @@ export type TvBridgeEvent =
 export const TV_FOUND_EVENT = 'forge:tv-found'
 
 
+/**
+ * The third seam, native → page: words a shell heard.
+ *
+ * River Hub, the home screen that hosts this page on Steve's Fire TV, turns a
+ * held remote button and a spoken sentence into text, and hands it over as
+ *
+ *     window.dispatchEvent(new CustomEvent('forge:voice-text', { detail }))
+ *
+ * with `detail` a `VoiceText`. The page puts the words into whichever typing
+ * box is open — never presses Enter, never sends: what was heard is a draft,
+ * and Steve submits it himself with the Enter cap — and answers each event
+ * exactly once through `ForgeTvNative.voiceTextUsed(id, seq, used)`, so the
+ * shell can say "nowhere to put that" rather than let the words vanish.
+ *
+ * The contract belongs to the shell; this side only reads it.
+ */
+export const VOICE_TEXT_EVENT = 'forge:voice-text'
+
+/** One heard phrase, as the shell sends it. */
+export interface VoiceText {
+  id: string
+  seq: number
+  text: string
+  final: boolean
+}
+
 /** What the native side exposes. Absent in a browser, and that is a normal
  *  state — the address field is the fallback and always has been. */
 interface TvNative {
   discover?: () => void
+  /** River Hub's half of the voice seam. Older shells and Forge's own APK lack it. */
+  voiceTextUsed?: (id: string, seq: number, used: boolean) => void
 }
 
 function native(): TvNative | null {
@@ -126,3 +154,70 @@ export const tvBridge = {
     return () => window.removeEventListener(TV_BRIDGE_EVENT, listen)
   }
 }
+
+/**
+ * A typing box that will take heard words. Returns whether it did — false is
+ * "I am here but closed", which lets the next one down be asked.
+ */
+export type VoiceTarget = (text: string) => boolean
+
+/** Registered boxes, oldest first. Asked newest first. */
+const voiceTargets: VoiceTarget[] = []
+
+/**
+ * Offer heard words to the typing boxes on screen. The most recently
+ * registered box that takes them wins; the cleanup takes the box back out, in
+ * the same function-returning-cleanup shape every effect in this app uses.
+ */
+export function registerVoiceTarget(fn: VoiceTarget): () => void {
+  voiceTargets.push(fn)
+  return () => {
+    const at = voiceTargets.lastIndexOf(fn)
+    if (at >= 0) voiceTargets.splice(at, 1)
+  }
+}
+
+/**
+ * The draft with heard words added on the end: trimmed, and one space between
+ * when the draft has words of its own that do not already end in whitespace.
+ */
+export function appendVoiceText(draft: string, text: string): string {
+  const words = text.trim()
+  if (!words) return draft
+  return draft && !/\s$/.test(draft) ? `${draft} ${words}` : `${draft}${words}`
+}
+
+/** Hand words to the first box that takes them. Answers whether one did. */
+export function deliverVoiceText(text: string): boolean {
+  const words = text.trim()
+  if (!words) return false
+  for (let i = voiceTargets.length - 1; i >= 0; i--) {
+    try {
+      if (voiceTargets[i](words)) return true
+    } catch {
+      /* a box that throws is a box that did not take them; ask the next */
+    }
+  }
+  return false
+}
+
+/**
+ * The one listener, bound at load so an event that arrives while no box is on
+ * screen — the wall, the menu — is still answered, with `used: false`.
+ * A detail without an id and a seq cannot be answered at all and is ignored.
+ */
+function onVoiceText(event: Event): void {
+  const detail = (event as CustomEvent<Partial<VoiceText> | null>).detail
+  if (!detail || typeof detail.id !== 'string' || typeof detail.seq !== 'number') return
+  const used = typeof detail.text === 'string' && deliverVoiceText(detail.text)
+  const layer = (window as unknown as { ForgeTvNative?: TvNative }).ForgeTvNative
+  if (layer && typeof layer.voiceTextUsed === 'function') {
+    try {
+      layer.voiceTextUsed(detail.id, detail.seq, used)
+    } catch {
+      /* the shell went away mid-answer; nothing here can do better */
+    }
+  }
+}
+
+if (typeof window !== 'undefined') window.addEventListener(VOICE_TEXT_EVENT, onVoiceText)

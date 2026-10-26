@@ -9,7 +9,7 @@ import { mirrorListeners, startMirrorViewer } from '../lib/mirror'
 import type { DesktopStats, MirrorViewer, ScreenStats } from '../lib/mirror'
 import { startPointer } from '../lib/pointer'
 import type { PointerHandle, PointerMode } from '../lib/pointer'
-import { tvBridge } from '../lib/tv-bridge'
+import { appendVoiceText, registerVoiceTarget, tvBridge } from '../lib/tv-bridge'
 import { formatBytes } from '../lib/manifest'
 import { CURRENT_VERSION_NAME, download as downloadUpdate, install as installUpdate, updateStore } from '../lib/update'
 import type { UpdateState } from '../lib/update'
@@ -1588,6 +1588,21 @@ function TvPaneView({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Words River Hub heard (lib/tv-bridge.ts). This is the pane on screen, so
+  // they are always taken: into the open box, or into the box opened for them,
+  // as if OK had been pressed. Straight into the draft and not through
+  // `onDraft`, whose one-key-at-a-time mode would send an armed Ctrl+<letter>
+  // instead of the sentence — and never sent: the Enter cap is Steve's.
+  useEffect(
+    () =>
+      registerVoiceTarget((text) => {
+        setDraft((current) => appendVoiceText(current, text))
+        if (!typingRef.current) setTyping(true)
+        return true
+      }),
+    []
+  )
+
   // The whole line, with its Enter. An empty draft still sends '\r',
   // because answering a prompt with a bare Enter is a real need.
   const sendLine = (): void => {
@@ -1597,7 +1612,9 @@ function TvPaneView({
   }
 
   const onInputKey = (event: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key === 'Enter') {
+    // Every spelling of the same press, as in TvMirrorView: the remote's OK is
+    // a plain Enter, the Fire OS keyboard's Send a synthesised one.
+    if (event.key === 'Enter' || event.key === 'NumpadEnter' || event.keyCode === 13) {
       event.preventDefault()
       sendLine()
       return
@@ -1640,12 +1657,27 @@ function TvPaneView({
       <div className={`tv-pane-term${stale ? ' is-stale' : ''}`} ref={well}>
         <div className="tv-pane-grid" ref={holder} />
       </div>
+      {/* A form around the field and `enterKeyHint`, for the reason
+          TvMirrorView gives: without both, the Fire OS keyboard offers "Next",
+          which moves focus and never sends an Enter, so a typed line could
+          not be submitted. The form's submit is the fallback for a keyboard
+          that sends no key at all. */}
       {typing && (
-        <div className="tv-type">
+        <form
+          className="tv-type"
+          onSubmit={(event) => {
+            event.preventDefault()
+            sendLine()
+          }}
+        >
           <input
             ref={inputEl}
             className="tv-type-input"
+            type="text"
+            name="line"
             value={draft}
+            enterKeyHint="send"
+            inputMode="text"
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
@@ -1737,7 +1769,7 @@ function TvPaneView({
               </button>
             ))}
           </div>
-        </div>
+        </form>
       )}
       {/* Keyed on what it says: in split view this line is a pill that fades
           out (tv.css), and a changed sentence should get its six seconds too —
@@ -1997,6 +2029,22 @@ function TvMirrorView({
   /** The teardown below calls this, and must call the current one. */
   const commitRef = useRef(commit)
   commitRef.current = commit
+
+  // Words River Hub heard (lib/tv-bridge.ts), into this box only while it is
+  // open — a closed box is not an invitation to type on the desktop. The ref
+  // moves with the state, so a `commit` that fires before the next paint still
+  // sends them; nothing is sent from here.
+  useEffect(
+    () =>
+      registerVoiceTarget((text) => {
+        if (!typingRef.current) return false
+        const next = appendVoiceText(draftRef.current, text)
+        draftRef.current = next
+        setDraft(next)
+        return true
+      }),
+    []
+  )
   /** What the desktop last said about its sending. See lib/mirror.ts. */
   const desk = useRef<DesktopStats | null>(null)
   /** The same pair, snapshotted for rendering — see the polling effect below. */
