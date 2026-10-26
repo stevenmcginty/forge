@@ -1588,14 +1588,18 @@ function TvPaneView({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // The whole line, with its Enter. An empty draft still sends '\r',
+  // because answering a prompt with a bare Enter is a real need.
+  const sendLine = (): void => {
+    onWrite(`${draft}\r`)
+    setDraft('')
+    reveal.current()
+  }
+
   const onInputKey = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'Enter') {
-      // The whole line, with its Enter. An empty draft still sends '\r',
-      // because answering a prompt with a bare Enter is a real need.
       event.preventDefault()
-      onWrite(`${draft}\r`)
-      setDraft('')
-      reveal.current()
+      sendLine()
       return
     }
     const el = event.currentTarget
@@ -1662,8 +1666,17 @@ function TvPaneView({
               Shift+Tab, which is how its permission mode cycles) comes first,
               because every cap after the first costs a press of Right to
               reach. Words on the caps where a word exists, as everywhere on
-              this wall: a sofa reads labels, not glyphs. */}
+              this wall: a sofa reads labels, not glyphs.
+
+              Enter is first. A remote has no Enter of its own, and text
+              dictated straight into the terminal never passes through this
+              box, so until this cap it could not be submitted from the sofa.
+              It sends the line like OK does: a bare Enter when the box is
+              empty. */}
           <div className="tv-type-keys" ref={keysEl} onKeyDown={(e) => walkCaps(e, keysEl.current, inputEl.current)}>
+            <button type="button" className="tv-type-key" tabIndex={-1} onClick={sendLine}>
+              Enter
+            </button>
             <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => sendRaw(ESC)}>
               Esc
             </button>
@@ -1731,7 +1744,7 @@ function TvPaneView({
           remounting is what restarts a one-shot CSS animation. */}
       <div className="tv-pane-foot" key={typing ? 'typing' : wide ? 'wide' : 'watching'}>
         {typing
-          ? 'OK sends the line · Down for Esc, Tab and the rest · Back puts the keyboard away'
+          ? 'OK sends the line · Down for Enter, Esc, Tab and the rest · Back puts the keyboard away'
           : wide
             ? 'OK to type · Up and Down scroll · Left and Right for the rest of each line · Back returns to the wall'
             : 'OK to type · Up and Down scroll · Back returns to the wall'}

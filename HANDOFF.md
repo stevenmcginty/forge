@@ -1,5 +1,12 @@
 # Handoff
 
+## Forge TV: Enter key on the terminal key row (2026-10-26 17:20; pushed to master on Steve's OK)
+
+- **Asked (Steve):** on the TV, text dictated into a terminal pane reached Claude Code's prompt but was never submitted; the remote has no Enter.
+- **Built:** `mobile/src/components/TvDashboard.tsx`: new `sendLine()` (draft + `\r`, same as OK in the box); an **Enter** cap is now the first key in the pane's key row (Down from the box lands on it); foot hint says "Down for Enter, Esc, Tab and the rest".
+- **Checked:** `npm run typecheck` 0; `NODE_ENV=production npm run mobile:build` 0; Forge on :8420 serves the new bundle (`index-C-rHlovo.js` has the new hint). NOT checked on the stick.
+- **Next:** Steve reopens the Forge tile on the TV and tests. Pushed (auto-releases).
+
 ## Mini bar: drag fixed, Screenshot key, project plate (2026-10-11; master 016f266 + 5c15da7, local only, NOT pushed)
 
 - **Asked (Steve):** the mini bar cannot be dragged; the Screen key's eye icon is ugly and confusing; the active project button (bottom left, dock and mini bar) must stand out with its own background.
