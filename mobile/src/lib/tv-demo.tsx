@@ -59,6 +59,53 @@ const CLAUDE_SCREEN = [
   `${fg(209, '✻')} Checking the wall at 960×540… ${dim('(esc to interrupt)')}`
 ]
 
+/**
+ * A wide pane (LONG_COLS) whose prose runs to the right-hand edge, the way an
+ * agent's answer does once the desktop pane is wider than the television can
+ * show at a readable size, ending in Claude Code's input box with the cursor
+ * parked inside it and the hint line underneath.
+ */
+const LONG_COLS = 150
+const LONG_ROWS = 40
+const wrap = (text: string, indent: string, width = LONG_COLS - 2): string[] => {
+  const lines: string[] = []
+  let line = ''
+  for (const word of text.split(' ')) {
+    if (line && indent.length + line.length + 1 + word.length > width) {
+      lines.push(indent + line)
+      line = word
+    } else line = line ? `${line} ${word}` : word
+  }
+  if (line) lines.push(indent + line)
+  return lines
+}
+const answer = (text: string): string[] => {
+  const [first = '', ...rest] = wrap(text, '  ')
+  return [`${fg(114, '●')}${first.slice(1)}`, ...rest, '']
+}
+const LONG_SCREEN = [
+  `${fg(250, '>')} Why does the TV wall say "quiet" for a pane that is clearly still building?`,
+  '',
+  ...answer(
+    'The wall decides "working" from the age of the last byte it heard, not from what the process is doing: TvDashboard keeps a Feed per session with lastDataAt, and anything older than WORKING_MS (five seconds) reads as quiet. Gradle prints nothing for long stretches while it compiles Kotlin, so a build that is genuinely busy can sit silent for twenty seconds at a time and the wall honestly reports what it can see, which is silence.'
+  ),
+  ...answer(
+    'There are two ways to make that truer. The cheap one is to widen the window for panes whose last line looks like a build tool (a "> Task" prefix, "Compiling", "BUILD RUNNING"), so a quiet compiler keeps its lamplight for a minute. The honest one is for the desktop to send a busy flag it already knows from the PTY (a foreground child process that is not the shell), which needs a new field in the session frame.'
+  ),
+  `${fg(114, '●')} ${bold('Read')}(electron/pty/grid-owner.ts)`,
+  '  ⎿  Read 212 lines',
+  '',
+  ...answer(
+    'I would start with the cheap one because it is TV-only and reversible, and keep the protocol change for when the phone wants the same signal; both screens would then read one source of truth instead of guessing from output timing, which is the root of the disagreement you are seeing tonight.'
+  ),
+  dim('─'.repeat(LONG_COLS)),
+  `${fg(250, '>')} `,
+  dim('─'.repeat(LONG_COLS)),
+  dim('  ? for shortcuts                                                                                          ◯ IDE disconnected · auto-accept edits on'),
+  // Back into the box, after the prompt: where Claude Code leaves its cursor.
+  `${ESC}[3A${ESC}[5G`
+]
+
 const SHELL_SCREEN = [
   'PowerShell 7.5.2',
   '',
@@ -116,6 +163,7 @@ const screens: Record<string, string[]> = {
   s4: ['> Task :agents:compileDebugKotlin', 'BUILD RUNNING'],
   s5: CODEX_SCREEN,
   s6: ['  ▲ Next.js 15.2', '  - Local: http://localhost:3000', ' ✓ Ready in 1.9s'],
+  s8: LONG_SCREEN,
   s7: [
     `${fg(209, '✻')} ${bold('Welcome to Claude Code!')}`,
     '',
@@ -153,7 +201,13 @@ function demoPicture(): LinkPicture {
     project('night-filter', 'Night Filter', '#FF8FA3')
   ]
   const workspaces: Record<string, Workspace> = {
-    forge: { tabs: [tab('t1', 'River look', leaf('s1', 'claude', 'TV redesign'), leaf('s2x', 'pwsh'))], activeTabId: 't1' },
+    forge: {
+      tabs: [
+        tab('t1', 'River look', leaf('s1', 'claude', 'TV redesign'), leaf('s2x', 'pwsh')),
+        tab('t7', 'Wall', leaf('s8', 'claude', 'Long lines'))
+      ],
+      activeTabId: 't1'
+    },
     'river-hub': {
       tabs: [tab('t2', 'Build', leaf('s2', 'pwsh')), tab('t3', 'Weather', leaf('s3', 'claude', 'Forecast pill'))],
       activeTabId: 't2'
@@ -179,7 +233,11 @@ function demoPicture(): LinkPicture {
     profiles: BUILTIN_AGENT_PROFILES,
     workspaces,
     // s2x is a leaf with no session: a terminal that has exited.
-    sessions: ['s1', 's2', 's3', 's4', 's5', 's6', 's7'].map((id) => session(id)),
+    // s1 is the 118×32 pane that fills every row; s8 is wider than the TV.
+    sessions: [
+      ...['s1', 's2', 's3', 's4', 's5', 's6', 's7'].map((id) => session(id)),
+      session('s8', LONG_COLS, LONG_ROWS)
+    ],
     canControl: true,
     foreman: {},
     handoff: {},

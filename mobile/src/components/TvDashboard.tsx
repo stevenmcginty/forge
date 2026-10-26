@@ -259,6 +259,69 @@ const SPLIT_FONT = 14
 const SPLIT_LEADING = 1.1
 
 /**
+ * The zoomed terminal's type size on the whole television: as large as the
+ * desktop's grid allows across the width, never below the split view's 14 and
+ * never above 18. Width only — rows that do not fit are not shrunk to fit,
+ * they are scrolled to (see `placeGrid`), because a pane is read along its
+ * lines and the newest of them is at the cursor, not at the top.
+ */
+const ZOOM_FONT_MIN = SPLIT_FONT
+const ZOOM_FONT_MAX = 18
+
+/**
+ * Rows kept in view below the cursor when the grid is taller than the well —
+ * room for an agent's footer under its input box (Claude Code's hint line).
+ */
+const ROWS_BELOW_CURSOR = 2
+
+/**
+ * The grid on the well: where the window onto the desktop's terminal sits.
+ *
+ * The full-screen zoom holds the desktop's own cols×rows (nobody else's shape
+ * is changed by a television watching), and at a size a sofa can read that
+ * grid is usually bigger than the screen. So the well is a window that moves:
+ * vertically it follows the cursor — the newest output and the line an agent
+ * is waiting on — and horizontally it starts at column one and slides by the
+ * remote (Left and Right). When the grid fits on an axis it is centred on it,
+ * or pinned top-left in split view, where the grid was fitted to the box.
+ *
+ * `view` is measured by the caller on resize (the well's padding and inner
+ * size, the grid's size), so a render costs arithmetic and one transform.
+ * Returns the edges where the grid runs on past the well, for the fades.
+ */
+function placeGrid(
+  term: Terminal,
+  grid: HTMLElement,
+  view: { padX: number; padY: number; w: number; h: number; gw: number; gh: number },
+  pan: { x: number },
+  centre: boolean
+): { above: boolean; below: boolean; left: boolean; right: boolean } {
+  const { padX, padY, w, h, gw, gh } = view
+  if (w <= 0 || h <= 0 || gw <= 0 || gh <= 0) return { above: false, below: false, left: false, right: false }
+  let x: number
+  if (gw <= w) {
+    pan.x = 0
+    x = centre ? (w - gw) / 2 : 0
+  } else {
+    pan.x = Math.min(Math.max(pan.x, 0), gw - w)
+    x = -pan.x
+  }
+  let y: number
+  if (gh <= h) {
+    y = centre ? (h - gh) / 2 : 0
+  } else {
+    // Scrolled back into history, the bottom of xterm's own viewport is the
+    // newest line on show; otherwise the cursor's row is, plus the footer room.
+    const buffer = term.buffer.active
+    const live = buffer.viewportY >= buffer.baseY
+    const last = live ? Math.min(term.rows, buffer.cursorY + 1 + ROWS_BELOW_CURSOR) : term.rows
+    y = Math.min(0, Math.max(h - gh, h - (last * gh) / term.rows))
+  }
+  grid.style.transform = `translate(${Math.round(padX + x)}px, ${Math.round(padY + y)}px)`
+  return { above: y < -0.5, below: y + gh > h + 0.5, left: x < -0.5, right: x + gw > w + 0.5 }
+}
+
+/**
  * PTY bytes → words. CSI, OSC, the DCS family and lone escapes go first, then
  * every control character except `\n` and `\r`, which the line logic needs.
  * Applied to the whole kept tail on read rather than chunk-by-chunk, so an
@@ -828,21 +891,29 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
             matters. Nothing else on the wall can settle it: an app too old to
             update itself and an app already up to date both show no update
             row, for opposite reasons. */}
-        <span className="tv-head-meta">
-          Desktop v{picture.appVersion} · TV {CURRENT_VERSION_NAME} · {picture.projects.length}{' '}
-          {picture.projects.length === 1 ? 'project' : 'projects'} · {live.size} live
-        </span>
-        {/* In split view the zoomed pane's own header row is given up to the
-            terminal (see tv.css), so the one header line left has to say which
-            pane this is. Only rendered when both facts are true — full screen
-            keeps its two-row arrangement untouched. */}
-        {split && zoom?.at === 'pane' && (
+        {zoom?.at !== 'pane' && (
+          <span className="tv-head-meta">
+            Desktop v{picture.appVersion} · TV {CURRENT_VERSION_NAME} · {picture.projects.length}{' '}
+            {picture.projects.length === 1 ? 'project' : 'projects'} · {live.size} live
+          </span>
+        )}
+        {/* A zoomed pane has no header row of its own — that row is given to
+            the terminal, a line of output more — so this one header line says
+            which pane it is, in place of the wall's counts. The desktop's
+            grid shape rides along on the whole television, where the well is
+            a window onto that grid and the shape explains why it scrolls. */}
+        {zoom?.at === 'pane' && (
           <span className="tv-head-pane">
             <span className="tv-head-pane-context">{zoom.context} · </span>
             {zoom.title}
           </span>
         )}
         <span className="tv-head-spring" />
+        {zoom?.at === 'pane' && zoomSession && !split && (
+          <span className="tv-pane-geom">
+            {zoomSession.cols}×{zoomSession.rows}
+          </span>
+        )}
         {/* The burger. In the walk like any row — up past the screen tile
             lands here — and absent while something is zoomed, because a verb
             that cannot be reached must not be shown. */}
@@ -866,8 +937,6 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
         <TvPaneView
           key={zoom.id}
           session={zoomSession}
-          title={zoom.title}
-          context={zoom.context}
           stale={stale}
           split={split}
           onClose={() => setZoom(null)}
@@ -1192,8 +1261,12 @@ function ProjectCard({
  *
  * A real xterm, and *whose* geometry it draws depends on how much television
  * there is. Full screen, it is held at the desktop's: the desktop owns this
- * PTY's cols×rows and the phone may be driving it right now, so the TV picks
- * the font size that fits that grid on this screen and centres the result.
+ * PTY's cols×rows and the phone may be driving it right now, so the TV never
+ * reshapes it. It used to pick the font that fitted the whole grid on screen,
+ * which for an ordinary 118×32 pane was a 10px font nobody could read from the
+ * sofa. Now the type is set for the sofa (ZOOM_FONT_MIN..MAX, fitted to the
+ * width) and the well is a window onto the grid that follows the cursor — see
+ * `placeGrid`.
  *
  * In split view that bargain collapses. Half a 1080p panel cannot show a
  * 130-column grid at any size a sofa can read — fitting it means a 6px font,
@@ -1220,13 +1293,13 @@ function ProjectCard({
  *
  * stdin is disabled for the same reason the wall has no buttons: this surface
  * watches. Up/Down walk the scrollback in a plain shell (a full-screen TUI
- * owns its own screen and ignores them, which is right); Escape — the
- * remote's Back — returns to the wall.
+ * owns its own screen and ignores them, which is right); Left/Right slide the
+ * window along a grid wider than the screen; Escape — the remote's Back —
+ * returns to the wall. The pane's name is in the header line, not here: every
+ * row given to chrome is a row of output the sofa does not get.
  */
 function TvPaneView({
   session,
-  title,
-  context,
   stale,
   split,
   onClose,
@@ -1236,8 +1309,6 @@ function TvPaneView({
   onResize
 }: {
   session: MobileSession
-  title: string
-  context: string
   stale: boolean
   /** Half the television. Decides who owns the PTY's shape — see above. */
   split: boolean
@@ -1249,8 +1320,19 @@ function TvPaneView({
   /** A geometry request for the desktop, guarded there against dead panes. */
   onResize: (id: string, cols: number, rows: number) => void
 }): React.JSX.Element {
+  /** The glass well: the window onto the grid. */
+  const well = useRef<HTMLDivElement | null>(null)
+  /** The xterm's own box, moved about inside the well by `placeGrid`. */
   const holder = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
+  /** How far the remote has slid the window along a grid wider than it. */
+  const pan = useRef({ x: 0 })
+  /** Re-place the grid now — set by the mount effect, called by the keys. */
+  const place = useRef<() => void>(() => {})
+  /** Slide the window to the cursor's column if it is off-screen — typing. */
+  const reveal = useRef<() => void>(() => {})
+  /** Whether the grid is wider than the well, which the foot has to say. */
+  const [wide, setWide] = useState(false)
   /**
    * Typing mode. The pane stays the watch surface it always was until OK is
    * pressed; then a real text input appears and takes focus, which is the only
@@ -1283,10 +1365,13 @@ function TvPaneView({
   const original = useRef({ cols: session.cols, rows: session.rows })
   /** Whether this window ever reshaped the PTY, so only a debt is repaid. */
   const reshaped = useRef(false)
+  /** Only a grid fitted to its box has to be rebuilt when the box changes. */
+  const refitOnTyping = split && typing
 
   useEffect(() => {
     const container = holder.current
-    if (!container) return
+    const box = well.current
+    if (!container || !box) return
     const shared = {
       fontFamily: "'Cascadia Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
       disableStdin: true,
@@ -1325,22 +1410,84 @@ function TvPaneView({
       }
     } else {
       // The whole television: the desktop owns this PTY's cols×rows and the
-      // phone may be driving it right now, so no resize is ever sent — the
-      // font that fits that grid is picked instead. 0.62 and 1.35 are
-      // conservative cell-metric estimates for the mono stack; erring small
-      // costs a few px of margin, erring big clips rows.
-      const font = Math.max(
-        10,
-        Math.min(
-          26,
-          Math.floor(container.clientWidth / (session.cols * 0.62)),
-          Math.floor(container.clientHeight / (session.rows * 1.35))
-        )
-      )
-      term = new Terminal({ ...shared, cols: session.cols, rows: session.rows, fontSize: font })
+      // phone may be driving it right now, so no resize is ever sent. The
+      // type is set for the sofa and fitted to the width below, once the
+      // real cell metrics exist; the rows are followed, not squeezed.
+      term = new Terminal({
+        ...shared,
+        cols: session.cols,
+        rows: session.rows,
+        fontSize: ZOOM_FONT_MIN,
+        lineHeight: SPLIT_LEADING
+      })
       term.open(container)
     }
     termRef.current = term
+
+    // The window onto the grid. Measured on resize only — the well changes
+    // size when the type row or the Fire keyboard comes and goes, the grid
+    // when the font settles — so a render, which can be every frame while an
+    // agent streams, costs a little arithmetic and one transform.
+    const view = { padX: 0, padY: 0, w: 0, h: 0, gw: 0, gh: 0 }
+    let fittedTo = -1
+    let edges = ''
+    const doPlace = (): void => {
+      const at = placeGrid(term, container, view, pan.current, !split)
+      const next = [at.above && 'above', at.below && 'below', at.left && 'left', at.right && 'right']
+        .filter(Boolean)
+        .join(' ')
+      if (next !== edges) {
+        edges = next
+        box.dataset.edges = next
+      }
+      setWide(at.left || at.right)
+    }
+    const measure = (): void => {
+      const screen = container.querySelector<HTMLElement>('.xterm-screen')
+      if (!screen) return
+      const style = getComputedStyle(box)
+      view.padX = parseFloat(style.paddingLeft) || 0
+      view.padY = parseFloat(style.paddingTop) || 0
+      view.w = box.clientWidth - view.padX * 2
+      view.h = box.clientHeight - view.padY * 2
+      // Full screen, the type is fitted to the width — once per width, so two
+      // neighbouring sizes whose rounded cells straddle the edge cannot take
+      // turns. The grid resizes when it lands, which brings this back round.
+      if (!split && view.w > 0 && view.w !== fittedTo && screen.offsetWidth > 0) {
+        fittedTo = view.w
+        const size = term.options.fontSize ?? ZOOM_FONT_MIN
+        const fits = Math.floor((size * view.w) / screen.offsetWidth)
+        const next = Math.min(ZOOM_FONT_MAX, Math.max(ZOOM_FONT_MIN, fits))
+        if (next !== size) term.options.fontSize = next
+      }
+      view.gw = screen.offsetWidth
+      view.gh = screen.offsetHeight
+      doPlace()
+    }
+    place.current = doPlace
+    // Typing must see its own echo: keep the slide if the cursor's column is
+    // on show, else go back to column one when that shows it, else just far
+    // enough right. Two cells of air past the cursor for what comes next.
+    reveal.current = (): void => {
+      if (view.w <= 0 || view.gw <= view.w) return
+      const cell = view.gw / term.cols
+      const left = term.buffer.active.cursorX * cell
+      const right = left + cell * 2
+      if (left >= pan.current.x && right <= pan.current.x + view.w) return
+      pan.current.x = right <= view.w ? 0 : right - view.w
+      doPlace()
+    }
+    const rendered = term.onRender(doPlace)
+    const watcher = new ResizeObserver(measure)
+    watcher.observe(box)
+    const screenEl = container.querySelector('.xterm-screen')
+    if (screenEl) watcher.observe(screenEl)
+    measure()
+    // The glide (tv.css) waits for the replay to have landed, so the first
+    // picture is simply there rather than sliding in from the top.
+    const settle = window.setTimeout(() => {
+      box.dataset.settled = ''
+    }, 700)
     attach(session.id, (data, replay) => {
       // The replay is the whole screen; without the reset a reconnect stacks
       // a second copy of the scrollback under the first (see PaneView).
@@ -1355,17 +1502,26 @@ function TvPaneView({
       term.write(data)
     })
     return () => {
+      window.clearTimeout(settle)
+      delete box.dataset.settled
+      watcher.disconnect()
+      rendered.dispose()
+      place.current = () => {}
+      reveal.current = () => {}
       detach()
       termRef.current = null
       term.dispose()
     }
-    // `typing` is a real dependency: the type row shortens the well, so the
-    // terminal is remounted at the size that is actually there. The attach()
-    // inside re-subscribes, and the desktop's replay repaints the screen —
-    // the same bargain opening the zoom makes. `split` is one for the same
-    // reason with the panels: crossing between half and whole television
+    // In split view `typing` is a real dependency: the type row shortens the
+    // box the grid was fitted to, so the terminal is remounted at the size
+    // that is actually there. The attach() inside re-subscribes, and the
+    // desktop's replay repaints the screen — the same bargain opening the
+    // zoom makes. Full screen the grid is the desktop's whatever the well
+    // does, so the type row only moves the window (the ResizeObserver) and
+    // the screen does not blank and repaint under the keyboard. `split` is a
+    // dependency for the panels: crossing between half and whole television
     // rebuilds the terminal under the geometry rule that now applies.
-  }, [session.id, session.cols, session.rows, attach, detach, typing, split, onResize])
+  }, [session.id, session.cols, session.rows, attach, detach, refitOnTyping, split, onResize])
 
   // The hand-back. Leaving the split window — Back to the wall, the pane
   // dying, or the panels folding to full screen — returns the PTY to the shape
@@ -1386,7 +1542,10 @@ function TvPaneView({
   // Entering typing mode is what summons the keyboard: focus must land on the
   // input, and it does not exist until this render has committed.
   useEffect(() => {
-    if (typing) inputEl.current?.focus()
+    if (typing) {
+      inputEl.current?.focus()
+      reveal.current()
+    }
   }, [typing])
 
   useEffect(() => {
@@ -1414,6 +1573,15 @@ function TvPaneView({
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
         event.preventDefault()
         termRef.current?.scrollLines(event.key === 'ArrowUp' ? -3 : 3)
+        return
+      }
+      // Half a well per press: the band that was at one edge is still on
+      // screen afterwards to read the new position against. placeGrid clamps.
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault()
+        const step = Math.round((well.current?.clientWidth ?? 0) / 2)
+        pan.current.x += event.key === 'ArrowRight' ? step : -step
+        place.current()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -1427,6 +1595,7 @@ function TvPaneView({
       event.preventDefault()
       onWrite(`${draft}\r`)
       setDraft('')
+      reveal.current()
       return
     }
     const el = event.currentTarget
@@ -1461,16 +1630,12 @@ function TvPaneView({
   }
 
   return (
-    <div className="tv-pane">
-      <div className="tv-pane-head">
-        <span className="tv-pane-context">{context}</span>
-        <strong className="tv-pane-title">{title}</strong>
-        <span className="tv-head-spring" />
-        <span className="tv-pane-geom">
-          {session.cols}×{session.rows}
-        </span>
+    <div className={`tv-pane${typing ? ' is-typing' : ''}`}>
+      {/* The edge fades are worn as data-edges, written by placeGrid's caller
+          straight onto this node, so a render never has to go through React. */}
+      <div className={`tv-pane-term${stale ? ' is-stale' : ''}`} ref={well}>
+        <div className="tv-pane-grid" ref={holder} />
       </div>
-      <div className={`tv-pane-term${stale ? ' is-stale' : ''}`} ref={holder} />
       {typing && (
         <div className="tv-type">
           <input
@@ -1564,10 +1729,12 @@ function TvPaneView({
       {/* Keyed on what it says: in split view this line is a pill that fades
           out (tv.css), and a changed sentence should get its six seconds too —
           remounting is what restarts a one-shot CSS animation. */}
-      <div className="tv-pane-foot" key={typing ? 'typing' : 'watching'}>
+      <div className="tv-pane-foot" key={typing ? 'typing' : wide ? 'wide' : 'watching'}>
         {typing
           ? 'OK sends the line · Down for Esc, Tab and the rest · Back puts the keyboard away'
-          : 'OK to type into this terminal · Back returns to the wall'}
+          : wide
+            ? 'OK to type · Up and Down scroll · Left and Right for the rest of each line · Back returns to the wall'
+            : 'OK to type · Up and Down scroll · Back returns to the wall'}
       </div>
     </div>
   )

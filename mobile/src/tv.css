@@ -267,7 +267,7 @@
 }
 
 .tv-head-meta {
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
@@ -736,15 +736,16 @@
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: calc(var(--u) * 42);
-  height: calc(var(--u) * 42);
+  width: calc(var(--u) * 48);
+  height: calc(var(--u) * 48);
   border-radius: 50%;
   box-shadow:
     inset 0 calc(var(--u) * -4) calc(var(--u) * 7) rgb(0 0 0 / 0.32),
     inset 0 calc(var(--u) * 2) calc(var(--u) * 3) rgb(255 255 255 / 0.4),
     0 calc(var(--u) * 3) calc(var(--u) * 10) rgb(0 0 0 / 0.3);
-  font-size: calc(var(--u) * 16);
+  font-size: calc(var(--u) * 24);
   font-weight: 700;
+  letter-spacing: -0.03em;
   color: #0b0f1a;
 }
 
@@ -753,7 +754,7 @@
   padding: calc(var(--u) * 2) calc(var(--u) * 12);
   border-radius: calc(var(--u) * 999);
   background: rgb(255 255 255 / 0.08);
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
   white-space: nowrap;
 }
@@ -775,7 +776,7 @@
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: calc(var(--u) * 10);
+  gap: calc(var(--u) * 14);
   font-size: calc(var(--u) * 24);
   color: var(--dim);
   white-space: nowrap;
@@ -855,12 +856,13 @@
   flex-direction: column;
   justify-content: flex-end;
   overflow: hidden;
-  padding-left: calc(var(--u) * 56);
+  /* Under the name: the badge's 48 and the row's 14 of gap. */
+  padding-left: calc(var(--u) * 62);
 }
 
 .tv-tail div {
   font-family: 'Cascadia Mono', ui-monospace, 'Roboto Mono', 'Droid Sans Mono', monospace;
-  font-size: calc(var(--u) * 23);
+  font-size: calc(var(--u) * 24);
   line-height: calc(var(--u) * 33);
   color: rgb(214 224 244 / 0.7);
   overflow: hidden;
@@ -883,7 +885,7 @@
 
 .tv-more {
   padding: calc(var(--u) * 4) calc(var(--u) * 8) 0;
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
 }
 
@@ -895,6 +897,10 @@
   gap: calc(var(--u) * 16);
   padding-top: calc(var(--u) * 28);
   padding-bottom: calc(var(--u) * 28);
+  /* Less side margin than the wall: every column here is a column of
+     somebody's output. */
+  padding-left: calc(var(--u) * 40);
+  padding-right: calc(var(--u) * 40);
 }
 
 .tv.is-zoomed .tv-head {
@@ -919,9 +925,10 @@
   font-size: calc(var(--u) * 24);
 }
 
-/* One terminal, full screen. The xterm keeps the desktop's own cols x rows and
-   sits centred in a deep glass well — near-opaque night, so the text reads at
-   full contrast and only the rim tells you it is glass. */
+/* One terminal, full screen. The xterm keeps the desktop's own cols x rows at
+   a size the sofa can read, in a deep glass well — near-opaque night, so the
+   text reads at full contrast and only the rim tells you it is glass. The well
+   is a window onto that grid (placeGrid in TvDashboard.tsx). */
 .tv-pane {
   flex: 1 1 auto;
   min-height: 0;
@@ -959,22 +966,29 @@
   border-radius: calc(var(--u) * 999);
   background: rgb(255 255 255 / 0.08);
   font-family: 'Cascadia Mono', ui-monospace, 'Roboto Mono', monospace;
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   line-height: 1.3;
   color: var(--dim);
   white-space: nowrap;
 }
 
 /* The well's fill is the terminal's own background (TvPaneView's theme), so
-   the canvas and the glass meet without a seam. */
+   the canvas and the glass meet without a seam. The padding is the band where
+   a row cut by the window's edge shows as a sliver under the fade — the sign
+   that there is more that way. */
 .tv-pane-term {
+  --well-x: calc(var(--u) * 20);
+  --well-y: calc(var(--u) * 14);
+  --fade: calc(var(--u) * 30);
+  --fade-above: none;
+  --fade-below: none;
+  --fade-left: none;
+  --fade-right: none;
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
-  padding: calc(var(--u) * 16);
+  padding: var(--well-y) var(--well-x);
   background: #0a0f1c;
   border: 1px solid rgb(255 255 255 / 0.13);
   border-radius: calc(var(--u) * 28);
@@ -989,11 +1003,64 @@
   opacity: 0.35;
 }
 
+/* The xterm's own box, moved inside the well by a transform alone. Full screen
+   it shrinks to the grid; split, it is the box the grid is fitted to. The
+   glide is switched on only once the screen has landed (data-settled), so
+   opening a pane never slides its first picture into place. */
+.tv-pane-grid {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.tv-pane-term[data-settled] .tv-pane-grid {
+  transition: transform 0.28s var(--ease);
+}
+
+.tv.is-split .tv-pane-grid {
+  width: calc(100% - var(--well-x) * 2);
+  height: calc(100% - var(--well-y) * 2);
+}
+
+/* No scrollbar: there is no cursor here to drag one, and Up and Down already
+   walk the scrollback. A grey bar down the text is chrome the sofa cannot use. */
+.tv-pane-term .xterm-scrollable-element > .scrollbar {
+  display: none;
+}
+
+/* Where the grid runs on past the window, the edge fades into the night:
+   static fills that simply switch, written as data-edges by TvPaneView. */
+.tv-pane-term::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background: var(--fade-above), var(--fade-below), var(--fade-left), var(--fade-right);
+  pointer-events: none;
+}
+
+.tv-pane-term[data-edges~='above'] {
+  --fade-above: linear-gradient(180deg, #0a0f1c 0, rgb(10 15 28 / 0) calc(var(--well-y) + var(--fade)));
+}
+
+.tv-pane-term[data-edges~='below'] {
+  --fade-below: linear-gradient(0deg, #0a0f1c 0, rgb(10 15 28 / 0) calc(var(--well-y) + var(--fade)));
+}
+
+.tv-pane-term[data-edges~='left'] {
+  --fade-left: linear-gradient(90deg, #0a0f1c 0, rgb(10 15 28 / 0) calc(var(--well-x) + var(--fade) * 2));
+}
+
+.tv-pane-term[data-edges~='right'] {
+  --fade-right: linear-gradient(270deg, #0a0f1c 0, rgb(10 15 28 / 0) calc(var(--well-x) + var(--fade) * 2));
+}
+
 /* The way out, said at the bottom where a television puts its hints. */
 .tv-pane-foot {
   flex: 0 0 auto;
   text-align: center;
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
 }
 
@@ -1268,7 +1335,7 @@
 .tv-stats-col > strong {
   display: block;
   margin-bottom: calc(var(--u) * 10);
-  font-size: calc(var(--u) * 20);
+  font-size: calc(var(--u) * 24);
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1281,7 +1348,7 @@
   grid-template-columns: auto 1fr;
   gap: calc(var(--u) * 4) calc(var(--u) * 16);
   margin: 0;
-  font-size: calc(var(--u) * 21);
+  font-size: calc(var(--u) * 24);
 }
 
 .tv-stats-col dt {
@@ -1299,7 +1366,7 @@
 
 .tv-stats-col p {
   margin: 0;
-  font-size: calc(var(--u) * 21);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
 }
 
@@ -1386,7 +1453,7 @@
 }
 
 .tv-menu-crumbs {
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1399,7 +1466,8 @@
   letter-spacing: -0.01em;
 }
 
-/* Room around the rows for the lift and the glow. */
+/* Room around the rows for the lift and the glow — the glow's whole 30, plus
+   the lift, or the list's clip draws a hard line through it under the title. */
 .tv-menu-list {
   flex: 1 1 auto;
   min-height: 0;
@@ -1407,8 +1475,8 @@
   display: flex;
   flex-direction: column;
   gap: calc(var(--u) * 8);
-  margin: calc(var(--u) * -24) calc(var(--u) * -32) 0;
-  padding: calc(var(--u) * 24) calc(var(--u) * 32) calc(var(--u) * 8);
+  margin: calc(var(--u) * -40) calc(var(--u) * -40) calc(var(--u) * -24);
+  padding: calc(var(--u) * 40) calc(var(--u) * 40) calc(var(--u) * 32);
 }
 
 .tv-menu-row {
@@ -1445,7 +1513,7 @@
 
 .tv-menu-sub {
   flex: 0 0 auto;
-  font-size: calc(var(--u) * 23);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
@@ -1466,7 +1534,7 @@
 .tv-menu-foot {
   padding-top: calc(var(--u) * 20);
   text-align: center;
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
 }
 
@@ -1553,7 +1621,7 @@
   border-radius: calc(var(--u) * 999);
   box-shadow: inset 0 calc(var(--u) * 2) calc(var(--u) * 6) rgb(0 0 0 / 0.4);
   font-family: 'Cascadia Mono', ui-monospace, 'Roboto Mono', monospace;
-  font-size: calc(var(--u) * 26);
+  font-size: calc(var(--u) * 28);
   color: var(--ink);
   caret-color: var(--alive);
 }
@@ -1610,6 +1678,30 @@
     0 0 0 calc(var(--u) * 3) rgb(255 207 122 / 0.4);
 }
 
+/* The Fire keyboard is up. It takes the bottom of the television by
+   shortening this window, and `--u` (a share of the window's height) shrinks
+   with it — so while it is up the header and the hint stand down, the well
+   keeps what height there is, and the line being typed keeps a floor of real
+   pixels instead of following `--u` down to unreadable. */
+@media (max-height: 420px) {
+  .tv.is-zoomed:has(.tv-pane.is-typing) .tv-head,
+  .tv-pane.is-typing .tv-pane-foot {
+    display: none;
+  }
+
+  .tv-pane.is-typing .tv-type-input {
+    height: max(32px, calc(var(--u) * 64));
+    font-size: max(14px, calc(var(--u) * 28));
+  }
+
+  .tv-pane.is-typing .tv-type-key {
+    min-width: max(32px, calc(var(--u) * 64));
+    height: max(28px, calc(var(--u) * 60));
+    padding: 0 max(10px, calc(var(--u) * 22));
+    font-size: max(12px, calc(var(--u) * 24));
+  }
+}
+
 /* The desktop's own keys over the mirror: caps only, centred, on one dense
    glass shelf so a label reads over whatever is underneath. */
 .tv-keys {
@@ -1646,16 +1738,21 @@
 }
 
 .tv.is-split .tv-clock-sec {
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
 }
 
-/* The zoomed pane's identity, folded into the one header line while split and
-   zoomed (TvDashboard.tsx renders it only then). */
+/* The zoomed pane's identity, folded into the one header line (TvDashboard.tsx
+   renders it whenever a pane is zoomed): a hairline off the Forge mark, the
+   project and tab small and dim, the pane's own name large. Split, the line
+   is shorter and so is the type. */
 .tv-head-pane {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: calc(var(--u) * 26);
+  padding-left: calc(var(--u) * 22);
+  border-left: 1px solid rgb(255 255 255 / 0.18);
+  font-size: calc(var(--u) * 32);
   font-weight: 500;
+  letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1663,7 +1760,19 @@
 
 .tv-head-pane-context {
   color: var(--dim);
+  font-size: calc(var(--u) * 25);
   font-weight: 400;
+  letter-spacing: 0;
+}
+
+.tv.is-split .tv-head-pane {
+  padding-left: 0;
+  border-left: 0;
+  font-size: calc(var(--u) * 26);
+}
+
+.tv.is-split .tv-head-pane-context {
+  font-size: inherit;
 }
 
 /* The rows the header line just absorbed. */
@@ -1675,13 +1784,12 @@
   gap: calc(var(--u) * 10);
 }
 
-/* Top-left anchored: the split terminal fits itself to this box, but for the
-   beat before the desktop's reflow lands the clipped edge must be the far one,
-   because terminal lines begin on the left. */
+/* Top-left anchored (placeGrid, centre off): the split terminal fits itself to
+   this box, but for the beat before the desktop's reflow lands the clipped
+   edge must be the far one, because terminal lines begin on the left. */
 .tv.is-split .tv-pane-term {
-  align-items: flex-start;
-  justify-content: flex-start;
-  padding: calc(var(--u) * 10);
+  --well-x: calc(var(--u) * 10);
+  --well-y: calc(var(--u) * 10);
   border-radius: calc(var(--u) * 18);
 }
 
@@ -1819,6 +1927,8 @@
   font-weight: 300;
   line-height: 1.35;
   color: var(--ink);
+  /* Two even lines rather than a long one and an orphaned word. */
+  text-wrap: balance;
 }
 
 .tv-connect-ask + .tv-connect-lead,
@@ -1891,7 +2001,7 @@
 }
 
 .tv-connect-where {
-  font-size: calc(var(--u) * 23);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
 }
 
@@ -1957,7 +2067,7 @@
 
 .tv-connect-foot {
   margin: calc(var(--u) * 8) 0 0;
-  font-size: calc(var(--u) * 22);
+  font-size: calc(var(--u) * 24);
   color: var(--dim);
 }
 
