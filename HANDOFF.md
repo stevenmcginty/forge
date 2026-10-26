@@ -1,5 +1,13 @@
 # Handoff
 
+## Codex picker: GPT-6.1 Terra (2026-10-26; uncommitted on master)
+
+- **Asked (Steve):** add GPT-6.1 Terra ("rolling out") to every form of the app.
+- **Built:** `shared/agents.ts` codex family: `gpt-6.1-terra` first; GPT-6 Luna loses "newest". Desktop, web and phone share this list. The picker only sends `/model <id>` to a running pane, so the default model does not change.
+- **Checked:** typecheck 0. Steve's ChatGPT login does NOT have it yet: `codex exec -m gpt-6.1-terra` gave `model_not_found`, and the 18:15 `~/.codex/models_cache.json` lacks it. Picking it before the rollout reaches him will fail in the pane.
+- **Also seen:** OpenAI dropped `gpt-5.5` from Steve's live list today; the picker still shows it.
+- **Next:** commit + push on Steve's OK (push auto-releases). Re-check `models_cache.json` for `gpt-6.1-terra`.
+
 ## Forge TV: Enter key on the terminal key row (2026-10-26 17:20; pushed to master on Steve's OK)
 
 - **Asked (Steve):** on the TV, text dictated into a terminal pane reached Claude Code's prompt but was never submitted; the remote has no Enter.

@@ -759,7 +759,10 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'glm-4.7', label: 'GLM 4.7', note: 'the older Coding Plan model' }
   ],
   codex: [
-    { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: 'newest — fast and affordable' },
+    // GPT-6.1 Terra is rolling out (2026-10-26). Not yet on Steve's ChatGPT
+    // login: the 18:15 models list lacks it and a test run said model_not_found.
+    { id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra', note: 'newest balanced model, rolling out' },
+    { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: 'fast and affordable' },
     { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', note: 'older balanced model, straightforward work' },
     { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', note: 'older fast and efficient model' },
     { id: 'gpt-5.5', label: 'GPT-5.5', note: 'legacy coding model' }
