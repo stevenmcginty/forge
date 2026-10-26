@@ -186,7 +186,10 @@ export function TvConnect({
     const words = detail.split(' ')
     return (
       <div className="tv-connect">
-        <h1 className="tv-connect-mark">Forge</h1>
+        <Mark />
+        {/* The one thing to do, first and biggest; the sentences under it say
+            why and how to be sure. */}
+        <h2 className="tv-connect-ask">Allow this television on the desktop</h2>
         <p className="tv-connect-lead">
           {known
             ? 'The desktop has moved to a new address, so it is checking this is really your television. Look at it — it is showing two words.'
@@ -202,6 +205,12 @@ export function TvConnect({
         <p className="tv-connect-lead">
           Check they match, then choose <strong>Allow</strong> over there. This screen moves on by itself.
         </p>
+        <span className="tv-connect-wait" role="status">
+          <i />
+          <i />
+          <i />
+          Waiting for the desktop
+        </span>
         <p className="tv-connect-foot">Back gives up on this attempt</p>
       </div>
     )
@@ -215,7 +224,7 @@ export function TvConnect({
 
   return (
     <div className="tv-connect">
-      <h1 className="tv-connect-mark">Forge</h1>
+      <Mark />
       <p className="tv-connect-lead">{lead({ known, busy, searching, searched, canSearch, foundCount: found.length })}</p>
 
       {trouble && <p className="tv-connect-trouble">{trouble}</p>}
@@ -241,6 +250,21 @@ export function TvConnect({
 
       <p className="tv-connect-foot">Up and Down to choose · OK to connect</p>
     </div>
+  )
+}
+
+/**
+ * Forge as River Hub would show it: a glass pebble with its name underneath.
+ * The heading stays the screen's one h1.
+ */
+function Mark(): React.JSX.Element {
+  return (
+    <h1 className="tv-connect-mark">
+      <span className="tv-mark-pebble" aria-hidden="true">
+        F
+      </span>
+      Forge
+    </h1>
   )
 }
 

@@ -812,9 +812,14 @@ export function TvDashboard({ link, picture, state, detail, notice }: TvDashboar
   }
 
   return (
-    <div className={`tv${split ? ' is-split' : ''}`}>
+    <div className={`tv${split ? ' is-split' : ''}${zoom ? ' is-zoomed' : ''}`}>
       <header className="tv-head">
-        <strong className="tv-mark">Forge</strong>
+        <strong className="tv-mark">
+          <span className="tv-mark-pebble" aria-hidden="true">
+            F
+          </span>
+          Forge
+        </strong>
         {/* Two versions, each labelled, because an unlabelled one is the
             desktop's and the question people actually have is about this
             television. "Is the app on the Fire Stick the one that updates
@@ -1121,13 +1126,13 @@ function ProjectCard({
   const workingCount = rows.filter((r) => workingOf(r.leaf.id)).length
 
   return (
-    <section className="tv-card">
+    <section className={`tv-card ${workingCount > 0 ? 'is-working' : liveCount > 0 ? 'is-live' : 'is-idle'}`}>
       <div className="tv-card-head">
-        <span className="tv-card-dot" style={{ background: color }} />
+        <span className="tv-card-dot" style={{ background: color, color }} />
         <h2 className="tv-card-name">{name}</h2>
         <span className="tv-card-meta">
           {workingCount > 0 && <em className="tv-card-working">{workingCount} working</em>}
-          {liveCount > 0 ? `${liveCount} live` : 'idle'}
+          <span>{liveCount > 0 ? `${liveCount} live` : 'idle'}</span>
         </span>
       </div>
 
@@ -1138,7 +1143,9 @@ function ProjectCard({
         const lines = feeds.get(leaf.id)?.lines ?? []
         return (
           <div
-            className={`tv-session${focusId === leaf.id ? ' is-focus' : ''}`}
+            className={`tv-session ${working ? 'is-working' : running ? 'is-quiet' : 'is-off'}${
+              focusId === leaf.id ? ' is-focus' : ''
+            }`}
             key={leaf.id}
             // Only a live pane is a place the remote can go: focusable, and
             // openable. A dead row is information, not a destination.
@@ -1285,11 +1292,13 @@ function TvPaneView({
       disableStdin: true,
       cursorBlink: false,
       scrollback: 4000,
+      // The well's own night (tv.css .tv-pane-term), so canvas and glass meet
+      // without a seam; lamplight for the cursor, as for everything alive.
       theme: {
-        background: '#0B0C0E',
-        foreground: '#E8EAED',
-        cursor: '#C6FF4A',
-        selectionBackground: '#2A3A12'
+        background: '#0A0F1C',
+        foreground: '#ECF0F8',
+        cursor: '#FFCF7A',
+        selectionBackground: '#2C3756'
       }
     } as const
     let term: Terminal
@@ -2506,7 +2515,15 @@ function Clock(): React.JSX.Element {
     const timer = window.setInterval(() => setAt(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [])
-  return <span className="tv-clock">{clockOf(at)}</span>
+  // Hours and minutes large, seconds small beside them: River Hub's clock,
+  // keeping the tick that proves the wall is alive.
+  const time = clockOf(at)
+  return (
+    <span className="tv-clock">
+      {time.slice(0, 5)}
+      <span className="tv-clock-sec">{time.slice(5)}</span>
+    </span>
+  )
 }
 
 function StaleBanner({

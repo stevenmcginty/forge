@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { MOBILE_PORT, MOBILE_PROTO, type MobileSession } from '@shared/mobile'
 import { isClaudeCommand, isShellProfile, resolveProfile } from '@shared/agents'
 import { collectLeaves } from '@shared/splitTree'
@@ -60,7 +60,34 @@ type Screen =
   | { at: 'pane'; session: MobileSession; title: string }
   | { at: 'chat'; projectId: string; leafId: string }
 
+/**
+ * DEV ONLY: `?tv&demo` draws the TV screens from a fixture (lib/tv-demo.tsx)
+ * with no desktop paired. Both flags are build-time constants, so in a build
+ * the lazy import below is dead code and the fixture never ships. MODE as well
+ * as DEV because DEV follows NODE_ENV, and a shell that exports
+ * NODE_ENV=development makes `vite build` report DEV true; MODE is
+ * 'development' only under the dev server.
+ */
+const TvDemo =
+  import.meta.env.DEV &&
+  import.meta.env.MODE === 'development' &&
+  isTv() &&
+  new URLSearchParams(window.location.search).has('demo')
+    ? lazy(() => import('./lib/tv-demo'))
+    : null
+
 export function App(): React.JSX.Element {
+  if (TvDemo) {
+    return (
+      <Suspense fallback={null}>
+        <TvDemo />
+      </Suspense>
+    )
+  }
+  return <LiveApp />
+}
+
+function LiveApp(): React.JSX.Element {
   const [state, setState] = useState<LinkState>('idle')
   const [detail, setDetail] = useState('')
   const [picture, setPicture] = useState<LinkPicture | null>(null)
