@@ -1,13 +1,15 @@
 # Handoff
 
-## PTY sends: one Enter = one submit (2026-10-27 20:45; branch tv-dictate-send, not merged)
+## PTY sends: one Enter = one submit (2026-10-27; merged 1389dcf and pushed 21:18 on Steve's D.m.p, auto-releases)
 
 - **Asked:** TV dictation / pane_send text lands in Claude Code's box but does not submit.
 - **Cause (proved on a real Claude Code 2.1.311/312 under node-pty):** (1) `text\r` in one write: over ~60 chars Claude Code reads the burst as a paste and the `\r` is not Enter (55 chars submitted, 70 and 450 did not). TV `sendLine` (TvDashboard.tsx), `pane_send` (share-link.ts) and Foreman wrote it that way. (2) Any Unicode Cf char (U+200B, U+2060, U+FEFF, U+00AD, U+200E...) makes Claude Code hold the message: "Removed 1 invisible character · review and press Enter".
 - **Built:** `electron/pty/submit-split.ts` + `SessionManager.write`: strip Cf (emoji ZWJ kept); a write ending in `\r` goes as words, then `\r` alone 80 ms later; writes in that beat queue behind it. Check: `npm run submit-split:check`.
 - **Not Forge:** Steve's 20:30 "Claude · Sending…" was Agent Box (com.steve.agentbox AgentActivity, TV logcat 20:29:00–20:30:53), not the Forge TV page.
 - **Auto-send (same branch, 2nd commit):** TV pane box (`TvPaneView`): 3+ chars added at once (dictation, or a `forge:voice-text` segment) arms 1.2 s; any non-IME key or a small change cancels; then `sendLine` as the Enter cap. Cap "Auto-send on/off" after Enter, default On, `localStorage forge.tv.autoSend`. Logic in `mobile/src/lib/auto-send.ts`, `npm run auto-send:check`. Mirror box ("Talk or type") not changed. Not tried on the stick.
-- **Next:** D.m.p on Steve's OK: release (main-process PTY fix) AND `mobile:build` (TV page), then Forge restart and reopen the Forge tile on the TV.
+- **Shipped 21:18:** master 1389dcf pushed (Checks / Forge Web / Publish Forge runs started). `NODE_ENV=production npm run mobile:build` done; :8420 serves `index-BCpxOxT7.js` with `forge.tv.autoSend` (TV page live). Review fixes 37b324c: Ctrl+C / lone Esc skip the held Enter, kill/exit drop it, flag tags and script ZWNJ/ZWJ kept, `
+` split.
+- **Next:** the PTY fix runs in the main process, so it is live only after a Forge restart. Then Steve reopens the Forge tile on the TV and dictates. Not yet tried on the stick.
 
 ## Forge TV: accepts dictated text from River Hub (2026-10-26 19:20; uncommitted on master, mobile/dist rebuilt and live)
 
