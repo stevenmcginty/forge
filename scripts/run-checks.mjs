@@ -60,6 +60,7 @@ const CHECKS = [
   { name: 'agent-pane:check', lane: 'fast', note: 'caller-anchored opens, one paste per brief, no brief into a shell' },
   { name: 'commands:check', lane: 'fast' },
   { name: 'draft:check', lane: 'fast' },
+  { name: 'auto-send:check', lane: 'fast', note: 'TV box dictation sends itself after 1.2 s quiet' },
   { name: 'feed:check', lane: 'fast' },
   { name: 'foreman:check', lane: 'fast', note: 'the real loop, driven by a stub brain — no SDK subprocess' },
   { name: 'foreman-kit:check', lane: 'fast', note: 'the real assets/foreman-kit, into a mkdtemp Claude home' },

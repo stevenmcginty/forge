@@ -26,6 +26,7 @@
     "release": "node scripts/release.mjs",
     "pty:smoke": "node scripts/pty-smoke.mjs",
     "submit-split:check": "node scripts/submit-split-check.mjs",
+    "auto-send:check": "node scripts/auto-send-check.mjs",
     "shots:smoke": "node scripts/shots-smoke.mjs",
     "stt:manager": "node scripts/stt-manager-test.mjs",
     "dictation:check": "node scripts/dictation-check.mjs",
