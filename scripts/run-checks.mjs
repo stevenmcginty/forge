@@ -125,6 +125,7 @@ const CHECKS = [
   { name: 'mobile:smoke', lane: 'heavy', ci: true, note: 'real pwsh session over a real WebSocket' },
   { name: 'packaged:check', lane: 'heavy', note: 'launches the packaged exe with CDP' },
   { name: 'pty:smoke', lane: 'heavy', ci: true, note: 'real pwsh through node-pty' },
+  { name: 'submit-split:check', lane: 'heavy', ci: true, note: 'text and its Enter as two PTY reads, invisibles stripped' },
   { name: 'remote:check', lane: 'heavy', note: 'spawns a Claude RC pane through node-pty' },
   { name: 'session:check', lane: 'heavy', note: 'runs the claude CLI to check its error surface' },
   { name: 'voice:brain', lane: 'heavy', note: 'spawns a live claude session' },

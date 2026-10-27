@@ -1,5 +1,13 @@
 # Handoff
 
+## PTY sends: one Enter = one submit (2026-10-27 20:45; branch tv-dictate-send, not merged)
+
+- **Asked:** TV dictation / pane_send text lands in Claude Code's box but does not submit.
+- **Cause (proved on a real Claude Code 2.1.311/312 under node-pty):** (1) `text\r` in one write: over ~60 chars Claude Code reads the burst as a paste and the `\r` is not Enter (55 chars submitted, 70 and 450 did not). TV `sendLine` (TvDashboard.tsx), `pane_send` (share-link.ts) and Foreman wrote it that way. (2) Any Unicode Cf char (U+200B, U+2060, U+FEFF, U+00AD, U+200E...) makes Claude Code hold the message: "Removed 1 invisible character · review and press Enter".
+- **Built:** `electron/pty/submit-split.ts` + `SessionManager.write`: strip Cf (emoji ZWJ kept); a write ending in `\r` goes as words, then `\r` alone 80 ms later; writes in that beat queue behind it. Check: `npm run submit-split:check`.
+- **Not Forge:** Steve's 20:30 "Claude · Sending…" was Agent Box (com.steve.agentbox AgentActivity, TV logcat 20:29:00–20:30:53), not the Forge TV page.
+- **Next:** D.m.p on Steve's OK (desktop main-process change: needs a Forge release/restart, not just mobile:build).
+
 ## Forge TV: accepts dictated text from River Hub (2026-10-26 19:20; uncommitted on master, mobile/dist rebuilt and live)
 
 - **Asked (Steve):** hold the Fire TV remote's mic button and talk; the words land in Forge's TV typing box. River Hub (`C:\Users\steve\Desktop\river-hub`, VoiceService) records the remote mic and transcribes with Groq; this is the page side.

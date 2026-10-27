@@ -1,5 +1,6 @@
 import { existsSync, statSync } from 'node:fs'
 import * as pty from '@lydell/node-pty'
+import { ENTER_GAP_MS, stripInvisible, submitHead } from './submit-split'
 
 /**
  * PtySessionManager — the only place in Forge that talks to node-pty.
@@ -89,6 +90,10 @@ interface Session {
   pendingResize?: { cols: number; rows: number }
   /** Fires the deferred resize so a pane is never stuck at spawn size. */
   pendingResizeTimer?: NodeJS.Timeout
+  /** Fires the Enter held back from a `text\r` write — see `write`. */
+  enterTimer?: NodeJS.Timeout
+  /** Writes that arrived while that Enter was waiting; they go after it, in order. */
+  afterEnter?: string[]
   disposed: boolean
 }
 
@@ -221,15 +226,74 @@ export class PtySessionManager {
     return { ok: true, id: spec.id, pid: proc.pid }
   }
 
+  /**
+   * Every pane's input goes through here, from every door (desk, phone, TV,
+   * pane_send, Foreman), so the two rules in ./submit-split.ts live here too:
+   * invisible characters out, and a write that ends in its Enter goes as the
+   * words now and the `\r` alone a beat later. Anything written in that beat
+   * waits behind the Enter, so the order on the PTY is the order of the calls.
+   */
   write(id: string, data: string): boolean {
     const s = this.sessions.get(id)
     if (!s || s.disposed) return false
-    try {
-      s.proc.write(data)
+    const clean = stripInvisible(data)
+    if (s.afterEnter) {
+      s.afterEnter.push(clean)
       return true
+    }
+    return this.writeNow(s, id, clean)
+  }
+
+  private writeNow(s: Session, id: string, data: string): boolean {
+    const head = submitHead(data)
+    try {
+      if (head === null) {
+        if (data) s.proc.write(data)
+        return true
+      }
+      s.proc.write(head)
     } catch (err) {
       console.error(`[pty] write to ${id} failed:`, describe(err))
       return false
+    }
+    s.afterEnter = []
+    s.enterTimer = setTimeout(() => this.writeEnter(s, id), ENTER_GAP_MS)
+    return true
+  }
+
+  private writeEnter(s: Session, id: string): void {
+    s.enterTimer = undefined
+    if (s.disposed) return
+    try {
+      s.proc.write('\r')
+    } catch (err) {
+      console.error(`[pty] write to ${id} failed:`, describe(err))
+      s.afterEnter = undefined
+      return
+    }
+    if (!s.afterEnter?.length) {
+      s.afterEnter = undefined
+      return
+    }
+    // Words written straight after the Enter would share its read, and Claude
+    // Code would take "\r<words>" as a paste. The same beat, then the queue.
+    s.enterTimer = setTimeout(() => this.writeQueued(s, id), ENTER_GAP_MS)
+  }
+
+  private writeQueued(s: Session, id: string): void {
+    const queued = s.afterEnter ?? []
+    s.enterTimer = undefined
+    s.afterEnter = undefined
+    if (s.disposed) return
+    for (let i = 0; i < queued.length; i++) {
+      // One of these may itself end in an Enter and start a new wait (writeNow
+      // sets afterEnter again; TS cannot see that and narrows it to undefined).
+      const waiting = s.afterEnter as string[] | undefined
+      if (waiting) {
+        waiting.push(...queued.slice(i))
+        return
+      }
+      this.writeNow(s, id, queued[i]!)
     }
   }
 
