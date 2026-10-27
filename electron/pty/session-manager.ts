@@ -1,5 +1,6 @@
 import { existsSync, statSync } from 'node:fs'
 import * as pty from '@lydell/node-pty'
+import { ENTER_GAP_MS, isUrgent, splitSubmit, stripInvisible } from './submit-split'
 
 /**
  * PtySessionManager — the only place in Forge that talks to node-pty.
@@ -89,6 +90,10 @@ interface Session {
   pendingResize?: { cols: number; rows: number }
   /** Fires the deferred resize so a pane is never stuck at spawn size. */
   pendingResizeTimer?: NodeJS.Timeout
+  /** Fires the Enter held back from a `text\r` write — see `write`. */
+  enterTimer?: NodeJS.Timeout
+  /** Writes that arrived while that Enter was waiting; they go after it, in order. */
+  afterEnter?: string[]
   disposed: boolean
 }
 
@@ -206,6 +211,7 @@ export class PtySessionManager {
 
     proc.onExit(({ exitCode, signal }) => {
       this.clearBootstrapTimers(session)
+      this.dropHeldEnter(session)
       session.disposed = true
       this.sessions.delete(spec.id)
       this.onExit(spec.id, exitCode ?? 0, signal)
@@ -221,15 +227,77 @@ export class PtySessionManager {
     return { ok: true, id: spec.id, pid: proc.pid }
   }
 
+  /**
+   * Every pane's input goes through here, from every door (desk, phone, TV,
+   * pane_send, Foreman), so the two rules in ./submit-split.ts live here too:
+   * invisible characters out, and a write that ends in its Enter goes as the
+   * words now and the `\r` alone a beat later. Anything written in that beat
+   * waits behind the Enter, so the order on the PTY is the order of the calls —
+   * except Ctrl+C and a lone Escape, which go at once: they are how somebody
+   * stops an agent, and must not wait for anything.
+   */
   write(id: string, data: string): boolean {
     const s = this.sessions.get(id)
     if (!s || s.disposed) return false
-    try {
-      s.proc.write(data)
+    const clean = stripInvisible(data)
+    if (s.afterEnter && !isUrgent(clean)) {
+      s.afterEnter.push(clean)
       return true
+    }
+    return this.writeNow(s, id, clean)
+  }
+
+  private writeNow(s: Session, id: string, data: string): boolean {
+    const split = splitSubmit(data)
+    try {
+      if (split === null) {
+        if (data) s.proc.write(data)
+        return true
+      }
+      s.proc.write(split[0])
     } catch (err) {
       console.error(`[pty] write to ${id} failed:`, describe(err))
       return false
+    }
+    s.afterEnter = []
+    const enter = split[1]
+    s.enterTimer = setTimeout(() => this.writeEnter(s, id, enter), ENTER_GAP_MS)
+    return true
+  }
+
+  private writeEnter(s: Session, id: string, enter: string): void {
+    s.enterTimer = undefined
+    if (s.disposed) return
+    try {
+      s.proc.write(enter)
+    } catch (err) {
+      console.error(`[pty] write to ${id} failed:`, describe(err))
+      s.afterEnter = undefined
+      return
+    }
+    if (!s.afterEnter?.length) {
+      s.afterEnter = undefined
+      return
+    }
+    // Words written straight after the Enter would share its read, and Claude
+    // Code would take "\r<words>" as a paste. The same beat, then the queue.
+    s.enterTimer = setTimeout(() => this.writeQueued(s, id), ENTER_GAP_MS)
+  }
+
+  private writeQueued(s: Session, id: string): void {
+    const queued = s.afterEnter ?? []
+    s.enterTimer = undefined
+    s.afterEnter = undefined
+    if (s.disposed) return
+    for (let i = 0; i < queued.length; i++) {
+      // One of these may itself end in an Enter and start a new wait (writeNow
+      // sets afterEnter again; TS cannot see that and narrows it to undefined).
+      const waiting = s.afterEnter as string[] | undefined
+      if (waiting) {
+        waiting.push(...queued.slice(i))
+        return
+      }
+      this.writeNow(s, id, queued[i]!)
     }
   }
 
@@ -264,6 +332,7 @@ export class PtySessionManager {
     const s = this.sessions.get(id)
     if (!s) return false
     this.clearBootstrapTimers(s)
+    this.dropHeldEnter(s)
     s.disposed = true
     this.sessions.delete(id)
     try {
@@ -348,6 +417,13 @@ export class PtySessionManager {
       console.error(`[pty] resize of ${session.info.id} failed:`, describe(err))
       return false
     }
+  }
+
+  /** A held Enter and what waits behind it, dropped: the pane is going. */
+  private dropHeldEnter(session: Session): void {
+    if (session.enterTimer) clearTimeout(session.enterTimer)
+    session.enterTimer = undefined
+    session.afterEnter = undefined
   }
 
   private clearBootstrapTimers(session: Session): void {

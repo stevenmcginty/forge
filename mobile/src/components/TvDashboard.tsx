@@ -10,6 +10,7 @@ import type { DesktopStats, MirrorViewer, ScreenStats } from '../lib/mirror'
 import { startPointer } from '../lib/pointer'
 import type { PointerHandle, PointerMode } from '../lib/pointer'
 import { appendVoiceText, registerVoiceTarget, tvBridge } from '../lib/tv-bridge'
+import { createAutoSend, isImeKey, readAutoSend, writeAutoSend } from '../lib/auto-send'
 import { formatBytes } from '../lib/manifest'
 import { CURRENT_VERSION_NAME, download as downloadUpdate, install as installUpdate, updateStore } from '../lib/update'
 import type { UpdateState } from '../lib/update'
@@ -1357,6 +1358,39 @@ function TvPaneView({
    */
   const { ctrl, alt, cycleCtrl, cycleAlt, sendChar, sendRaw } = useStickyKeys(onWrite)
   /**
+   * Dictation sends itself (lib/auto-send.ts): 3+ characters at once arm a
+   * 1.2 s quiet timer, a key or a small change disarms it, and the timer sends
+   * the line exactly as the Enter cap does. Refs, because the timer and the
+   * voice target outlive the render that made them.
+   */
+  const [autoSendOn, setAutoSendOn] = useState(readAutoSend)
+  const autoSendOnRef = useRef(autoSendOn)
+  autoSendOnRef.current = autoSendOn
+  const sendLineRef = useRef<() => void>(() => {})
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const autoSend = useRef(
+    createAutoSend({
+      send: () => {
+        if (autoSendOnRef.current && draftRef.current.trim()) sendLineRef.current()
+      }
+    })
+  ).current
+  useEffect(() => {
+    if (!typing) autoSend.cancel()
+  }, [typing, autoSend])
+  useEffect(() => () => autoSend.cancel(), [autoSend])
+  // Any press of a key — the D-pad, Back, a cap — disarms it, wherever focus is
+  // in the box. The IME's own key events are the dictation and do not.
+  useEffect(() => {
+    if (!typing) return undefined
+    const onKey = (event: KeyboardEvent): void => {
+      if (!isImeKey(event)) autoSend.cancel()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [typing, autoSend])
+  /**
    * The desktop's shape when this window opened, held for the hand-back.
    * Captured once — by the time the window closes, `session.cols` is whatever
    * this television last asked for, which is exactly the wrong thing to
@@ -1592,23 +1626,33 @@ function TvPaneView({
   // they are always taken: into the open box, or into the box opened for them,
   // as if OK had been pressed. Straight into the draft and not through
   // `onDraft`, whose one-key-at-a-time mode would send an armed Ctrl+<letter>
-  // instead of the sentence — and never sent: the Enter cap is Steve's.
+  // instead of the sentence. With Auto-send on, the words arm its timer.
   useEffect(
     () =>
       registerVoiceTarget((text) => {
         setDraft((current) => appendVoiceText(current, text))
         if (!typingRef.current) setTyping(true)
+        if (autoSendOnRef.current) autoSend.burst(text)
         return true
       }),
-    []
+    [autoSend]
   )
 
   // The whole line, with its Enter. An empty draft still sends '\r',
   // because answering a prompt with a bare Enter is a real need.
   const sendLine = (): void => {
+    autoSend.cancel()
     onWrite(`${draft}\r`)
     setDraft('')
     reveal.current()
+  }
+  sendLineRef.current = sendLine
+
+  const toggleAutoSend = (): void => {
+    const next = !autoSendOn
+    if (!next) autoSend.cancel()
+    writeAutoSend(next)
+    setAutoSendOn(next)
   }
 
   const onInputKey = (event: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -1643,9 +1687,11 @@ function TvPaneView({
    */
   const onDraft = (value: string): void => {
     if ((ctrl === 'off' && alt === 'off') || value.length !== draft.length + 1 || !value.startsWith(draft)) {
+      if (autoSendOn) autoSend.change(draft, value)
       setDraft(value)
       return
     }
+    autoSend.cancel()
     sendChar(value.slice(draft.length))
     setDraft(draft)
   }
@@ -1708,6 +1754,17 @@ function TvPaneView({
           <div className="tv-type-keys" ref={keysEl} onKeyDown={(e) => walkCaps(e, keysEl.current, inputEl.current)}>
             <button type="button" className="tv-type-key" tabIndex={-1} onClick={sendLine}>
               Enter
+            </button>
+            {/* Auto-send's switch, on the cap like Ctrl's state: dictated
+                words send themselves 1.2 s after they stop (lib/auto-send.ts). */}
+            <button
+              type="button"
+              className="tv-type-key"
+              tabIndex={-1}
+              aria-pressed={autoSendOn}
+              onClick={toggleAutoSend}
+            >
+              {autoSendOn ? 'Auto-send on' : 'Auto-send off'}
             </button>
             <button type="button" className="tv-type-key" tabIndex={-1} onClick={() => sendRaw(ESC)}>
               Esc
