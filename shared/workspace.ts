@@ -1,4 +1,4 @@
-import type { ChatBotId, ClaudePermissionMode, MosaicState, MosaicTile, TerminalTab, Workspace } from './types'
+import type { ChatBotId, ClaudePermissionMode, MosaicState, MosaicTile, PaneLaunchPin, TerminalTab, Workspace } from './types'
 import {
   BUILTIN_AGENT_PROFILES,
   RETIRED_BUILTIN_PROFILE_IDS,
@@ -230,9 +230,10 @@ export function makeTab(
   profileId: string,
   tabs: TerminalTab[],
   cursor: number,
-  permissionMode?: ClaudePermissionMode
+  permissionMode?: ClaudePermissionMode,
+  pin?: PaneLaunchPin
 ): { tab: TerminalTab; cursor: number } {
-  const leaf = makeLeaf(profileId, '', permissionMode)
+  const leaf = makeLeaf(profileId, '', permissionMode, pin)
   const name = nextTabName(tabs, cursor)
   return {
     tab: {

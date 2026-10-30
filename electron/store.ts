@@ -2,12 +2,16 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, unlinkS
 import { homedir, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
+  BRAIN_AGENT_EFFORT_DEFAULT,
+  BRAIN_AGENT_MODEL_DEFAULT,
   BUILTIN_AGENT_PROFILES,
   inferKind,
   isPermissionMode,
   migrateBuiltinCommand,
   permissionFamily,
-  RETIRED_BUILTIN_PROFILE_IDS
+  RETIRED_BUILTIN_PROFILE_IDS,
+  sanitiseBrainAgentEffort,
+  sanitiseBrainAgentModel
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
 import { BRAIN_CONTEXT_WARN_PCT, BRAIN_MODEL_DEFAULT, BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject, sanitiseBrainModel } from '@shared/brain'
@@ -330,6 +334,8 @@ function defaultSettings(): Settings {
     brainEnabled: false,
     brainEngine: 'claude',
     brainModel: BRAIN_MODEL_DEFAULT,
+    brainAgentModel: BRAIN_AGENT_MODEL_DEFAULT,
+    brainAgentEffort: BRAIN_AGENT_EFFORT_DEFAULT,
     brainIntroSeen: false,
     speechKeyReminderOff: false,
     brainVoice: BRAIN_VOICE_DEFAULT,
@@ -939,6 +945,8 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
     brainEnabled: s.brainEnabled === true,
     brainEngine: isBrainEngine(s.brainEngine) ? s.brainEngine : DEFAULT_SETTINGS.brainEngine,
     brainModel: sanitiseBrainModel(s.brainModel),
+    brainAgentModel: sanitiseBrainAgentModel(s.brainAgentModel),
+    brainAgentEffort: sanitiseBrainAgentEffort(s.brainAgentEffort),
     brainIntroSeen: s.brainIntroSeen === true,
     speechKeyReminderOff: s.speechKeyReminderOff === true,
     brainVoice: typeof s.brainVoice === 'string' && isEdgeVoice(s.brainVoice) ? s.brainVoice.trim() : BRAIN_VOICE_DEFAULT,

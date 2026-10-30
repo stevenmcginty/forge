@@ -1,4 +1,5 @@
-import type { AgentProfile, ClaudePermissionMode, ProfileKind } from './types'
+import type { AgentProfile, ClaudePermissionMode, PaneLaunchPin, ProfileKind } from './types'
+import type { SessionMode } from './session'
 
 /**
  * Built-in agent profiles. These are *seeded into* settings.json on first run
@@ -958,4 +959,64 @@ export function tabsToPermissionMode(
   const fromIndex = cycle.indexOf(from)
   if (fromIndex < 0) return null
   return (toIndex - fromIndex + cycle.length) % cycle.length
+}
+
+/* ------------------------------------------------- the model a pane starts on */
+
+/** The Claude Code models a pane can be pinned to: the picker's own list. */
+export const CLAUDE_AGENT_MODELS: readonly AgentModelSpec[] = MODEL_FAMILIES['claude'] ?? []
+
+/** What a Claude agent Forge Brain opens starts on until Steve picks otherwise. */
+export const BRAIN_AGENT_MODEL_DEFAULT = 'claude-opus-5-5[1m]'
+export const BRAIN_AGENT_EFFORT_DEFAULT: EffortLevel = 'xhigh'
+
+export function isClaudeAgentModel(value: unknown): value is string {
+  return CLAUDE_AGENT_MODELS.some((m) => m.id === value)
+}
+
+export function isEffortLevel(value: unknown): value is EffortLevel {
+  return EFFORT_LEVELS.some((l) => l.id === value)
+}
+
+export function sanitiseBrainAgentModel(value: unknown): string {
+  return isClaudeAgentModel(value) ? value : BRAIN_AGENT_MODEL_DEFAULT
+}
+
+export function sanitiseBrainAgentEffort(value: unknown): EffortLevel {
+  return isEffortLevel(value) ? value : BRAIN_AGENT_EFFORT_DEFAULT
+}
+
+/** Just the pin fields of `from`, absent when empty: a pane without them stays without them. */
+export function launchPinOf(from: unknown): PaneLaunchPin {
+  const { launchModel, launchEffort } = (from && typeof from === 'object' ? from : {}) as Record<string, unknown>
+  return {
+    ...(typeof launchModel === 'string' && launchModel ? { launchModel } : {}),
+    ...(typeof launchEffort === 'string' && launchEffort ? { launchEffort } : {})
+  }
+}
+
+const flagIn = (command: string, flags: string): boolean => new RegExp(`(?:^|\\s)(?:${flags})(?:\\s|=|$)`).test(command)
+
+/**
+ * The flags that start `command` on this model and effort, or '' when it should
+ * not get any: only Claude Code takes them, and a command that names its own
+ * model (GLM's) keeps it. Anything off the lists is dropped, because this text is
+ * typed into a shell. `[1m]` is single-quoted for PowerShell, as GLM's profile is.
+ */
+export function pinnedModelFlags(command: string, model: unknown, effort: unknown): string {
+  if (commandExe(command) !== 'claude' || flagIn(command, '--model')) return ''
+  const flags: string[] = []
+  if (isClaudeAgentModel(model)) flags.push(`--model '${model}'`)
+  if (isEffortLevel(effort) && !flagIn(command, '--effort')) flags.push(`--effort ${effort}`)
+  return flags.join(' ')
+}
+
+/**
+ * `command` with the pane's pin added. A resumed pane gets nothing: it keeps
+ * whatever model it was on, including one Steve picked in it by hand.
+ */
+export function pinLaunch(command: string, mode: SessionMode | null, pin: PaneLaunchPin | null | undefined): string {
+  if (!pin || mode === 'resume' || flagIn(command, '--resume|--continue|-r|-c')) return command
+  const flags = pinnedModelFlags(command, pin.launchModel, pin.launchEffort)
+  return flags ? `${command.trim()} ${flags}` : command
 }

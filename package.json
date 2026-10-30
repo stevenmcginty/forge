@@ -37,6 +37,7 @@
     "brain-confirm:check": "node scripts/brain-confirm-check.mjs",
     "telegram:check": "node scripts/telegram-check.mjs",
     "brain-adapters:check": "node scripts/brain-adapters-check.mjs",
+    "brain-agent-model:check": "node scripts/brain-agent-model-check.mjs",
     "voice-hotkey:check": "node scripts/voice-hotkey-check.mjs",
     "copilot-key:check": "node scripts/copilot-key-check.mjs",
     "realtime:check": "node scripts/realtime-check.mjs",

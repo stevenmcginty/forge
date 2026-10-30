@@ -1,3 +1,4 @@
+import type { PaneLaunchPin } from '@shared/types'
 import { BrowserLink } from '../browser-panes/link'
 
 /**
@@ -18,7 +19,8 @@ import { BrowserLink } from '../browser-panes/link'
 
 export interface LinkToolHost {
   listLinkTools(): unknown
-  callLinkTool(name: string, args: unknown): Promise<unknown>
+  /** `pin` comes from Forge Brain's host alone (`brainAgentCall` in shared/brain-tools.ts), never off the wire. */
+  callLinkTool(name: string, args: unknown, pin?: PaneLaunchPin): Promise<unknown>
 }
 
 export function createBrainLink(dir: string, host: () => LinkToolHost): BrowserLink {

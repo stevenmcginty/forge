@@ -26,6 +26,7 @@ import {
 import type { ChatUpdate } from '@shared/chat'
 import type { PaneLeaf, Workspace } from '@shared/types'
 import type { WebUsageFrame } from '@shared/web'
+import { brainAgentCall, withBrainAgentArgs } from '@shared/brain-tools'
 import { makeId } from '@shared/ids'
 import { newSessionId } from '@shared/session'
 import { stripAnsi } from '@shared/ansi'
@@ -401,16 +402,19 @@ const NOT_FOR_THE_BRAIN = new Set(['ask_brain', 'tell_brain'])
 const toolHost: LinkToolHost = {
   listLinkTools: () => {
     const tools = brainToolHost().listLinkTools()
-    return Array.isArray(tools) ? tools.filter((t: { name?: unknown }) => !NOT_FOR_THE_BRAIN.has(String(t?.name))) : tools
+    return Array.isArray(tools) ? tools.filter((t: { name?: unknown }) => !NOT_FOR_THE_BRAIN.has(String(t?.name))).map(withBrainAgentArgs) : tools
   },
   callLinkTool: async (name, args) => {
     if (NOT_FOR_THE_BRAIN.has(name)) {
       return { content: [{ type: 'text', text: `${name} is the voice agents' way to reach you; you are Forge Brain.` }], isError: true }
     }
+    // The only place a pane gets a pinned model: what the brain opens, nothing else.
+    const call = brainAgentCall(name, args, getSettings())
+    if ('refused' in call) return { content: [{ type: 'text', text: call.refused }], isError: true }
     if (opensPane(name, args)) openWindowUntil = Date.now() + OPEN_WINDOW_MS
     // It spoke for itself in a note's turn: Forge does not say its reply as well.
     if (name === 'say_to_voice_agent' && noteTurn) noteTurn.said = true
-    const result = (await brainToolHost().callLinkTool(name, args)) as CallToolResult
+    const result = (await brainToolHost().callLinkTool(name, call.args, call.pin)) as CallToolResult
     for (const block of result?.content ?? []) {
       if (block.type !== 'text') continue
       for (const m of block.text.matchAll(/pane id ([A-Za-z0-9_-]+)/g)) opened.add(m[1]!)

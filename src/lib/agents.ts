@@ -1,4 +1,4 @@
-import type { AgentProfile, ClaudePermissionMode, PaneLeaf, ProfileKind, TabSettings } from '@shared/types'
+import type { AgentProfile, ClaudePermissionMode, PaneLaunchPin, PaneLeaf, ProfileKind, TabSettings } from '@shared/types'
 import {
   ACCENT_PALETTE,
   BUILTIN_AGENT_PROFILES,
@@ -12,6 +12,7 @@ import {
   inferKind,
   isClaudeCommand,
   isPermissionMode,
+  launchPinOf,
   isShellProfile,
   paneDisplayTitle,
   permissionFamily,
@@ -156,6 +157,11 @@ export function permissionChip(
   const spec = permissionSpec(profile.command, effectivePermissionMode(profile, override))
   if (!spec || !spec.chip) return null
   return { label: spec.chip, danger: spec.danger === true }
+}
+
+/** The model and effort a leaf was opened on, for its terminal spec. Empty for almost every pane. */
+export function leafLaunchPin(leaf: PaneLaunchPin): PaneLaunchPin {
+  return launchPinOf(leaf)
 }
 
 /** The mode a leaf carries, if any — kept here so callers need not import types. */

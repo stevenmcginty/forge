@@ -1,4 +1,4 @@
-import type { ChatBotId, ChatLeaf, ClaudePermissionMode, LayoutNode, PaneLeaf, SplitDirection, TerminalTab } from '@shared/types'
+import type { ChatBotId, ChatLeaf, ClaudePermissionMode, LayoutNode, PaneLaunchPin, PaneLeaf, SplitDirection, TerminalTab } from '@shared/types'
 import { CHATBOTS, isChatBotId } from './chatbots'
 import { newSessionId } from '@shared/session'
 import { makeId } from './ids'
@@ -14,7 +14,7 @@ import { makeId } from './ids'
  * it as it is. Ask `isChatTab` / `chatLeafOf` for the chat itself.
  */
 
-export function makeLeaf(profileId: string, title = '', permissionMode?: ClaudePermissionMode): PaneLeaf {
+export function makeLeaf(profileId: string, title = '', permissionMode?: ClaudePermissionMode, pin?: PaneLaunchPin): PaneLeaf {
   // Every pane is born with a session id, whatever it is going to run. Minting
   // it here rather than at launch is the point: it is saved with the layout, so
   // the pane that comes back after a restart can ask for the same conversation.
@@ -23,6 +23,8 @@ export function makeLeaf(profileId: string, title = '', permissionMode?: ClaudeP
   // Only carried when the chooser actually overrode the profile's default, so a
   // saved layout does not freeze today's default into every pane forever.
   if (permissionMode) leaf.permissionMode = permissionMode
+  if (pin?.launchModel) leaf.launchModel = pin.launchModel
+  if (pin?.launchEffort) leaf.launchEffort = pin.launchEffort
   return leaf
 }
 

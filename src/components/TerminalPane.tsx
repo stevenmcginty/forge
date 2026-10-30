@@ -6,6 +6,7 @@ import {
   isClaudeCommand,
   isShellProfile,
   launchCommand,
+  leafLaunchPin,
   leafPermissionMode,
   paneDisplayTitle,
   permissionChip,
@@ -195,7 +196,8 @@ export const TerminalPane = memo(function TerminalPane({
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, leaf.title),
     sessionId: leaf.sessionId,
-    repoUrl: project.repoUrl
+    repoUrl: project.repoUrl,
+    ...leafLaunchPin(leaf)
   })
   specRef.current = {
     cwd: project.path,
@@ -206,7 +208,8 @@ export const TerminalPane = memo(function TerminalPane({
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, leaf.title),
     sessionId: leaf.sessionId,
-    repoUrl: project.repoUrl
+    repoUrl: project.repoUrl,
+    ...leafLaunchPin(leaf)
   }
 
   /* ------------------------------------------------------------- attach */

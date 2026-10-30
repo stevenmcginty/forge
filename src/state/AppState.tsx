@@ -22,6 +22,7 @@ import type {
   AgentProfile,
   AppInfo,
   ClaudePermissionMode,
+  PaneLaunchPin,
   LayoutNode,
   MosaicGrid,
   MosaicLayoutMode,
@@ -42,6 +43,8 @@ import type {
   WorkspaceViewMode
 } from '@shared/types'
 import {
+  BRAIN_AGENT_EFFORT_DEFAULT,
+  BRAIN_AGENT_MODEL_DEFAULT,
   BUILTIN_AGENT_PROFILES,
   TAB_NAME_POOL,
   isPermissionMode,
@@ -65,6 +68,7 @@ import {
   ACCENT_PALETTE,
   DEFAULT_PROFILE_ID,
   launchCommand,
+  leafLaunchPin,
   leafPermissionMode,
   paneDisplayTitle,
   resolveProfile,
@@ -317,6 +321,8 @@ const FALLBACK_SETTINGS: Settings = {
   brainEnabled: false,
   brainEngine: 'claude',
   brainModel: BRAIN_MODEL_DEFAULT,
+  brainAgentModel: BRAIN_AGENT_MODEL_DEFAULT,
+  brainAgentEffort: BRAIN_AGENT_EFFORT_DEFAULT,
   brainIntroSeen: false,
   speechKeyReminderOff: false,
   brainVoice: BRAIN_VOICE_DEFAULT,
@@ -458,7 +464,7 @@ type Action =
   | { type: 'setRailHeight'; id: RailSectionId; height: number }
   | { type: 'saveProfile'; profile: AgentProfile }
   | { type: 'deleteProfile'; id: string }
-  | { type: 'newTab'; profileId: string; permissionMode?: ClaudePermissionMode }
+  | { type: 'newTab'; profileId: string; permissionMode?: ClaudePermissionMode; pin?: PaneLaunchPin }
   /**
    * A tab of hired agent panes, in a named project, without moving the human.
    * See `hireTab` on Actions.
@@ -484,6 +490,7 @@ type Action =
       projectId?: string
       /** See PendingType.relay. */
       relay?: { from: string | null }
+      pin?: PaneLaunchPin
     }
   | { type: 'drainTypes'; paneIds: string[] }
   /** `projectId`: a tab in another project than the one on screen (Forge Brain's close_tab). */
@@ -505,6 +512,7 @@ type Action =
        */
       profileId: string | null
       permissionMode?: ClaudePermissionMode
+      pin?: PaneLaunchPin
     }
   | { type: 'closePane'; paneId: string }
   | { type: 'focusPane'; paneId: string }
@@ -590,7 +598,8 @@ function startUnshownPanes(st: AppState, projectId: string, paneIds: readonly st
         projectName: project.name,
         paneTitle: paneDisplayTitle(profile, leaf.title),
         sessionId: leaf.sessionId,
-        repoUrl: project.repoUrl
+        repoUrl: project.repoUrl,
+        ...leafLaunchPin(leaf)
       })
     }
   }
@@ -1032,7 +1041,7 @@ function reducer(state: AppState, action: Action): AppState {
         return { ...state, notice: `A project holds at most ${MAX_TABS_PER_PROJECT} tabs` }
       }
       return mapActiveWorkspace(state, (ws) => {
-        const made = makeTab(action.profileId, ws.tabs, ws.nameCursor ?? 0, action.permissionMode)
+        const made = makeTab(action.profileId, ws.tabs, ws.nameCursor ?? 0, action.permissionMode, action.pin)
         return { ...ws, tabs: [...ws.tabs, made.tab], activeTabId: made.tab.id, nameCursor: made.cursor }
       })
     }
@@ -1100,7 +1109,7 @@ function reducer(state: AppState, action: Action): AppState {
       if (workspaceOf(state, projectId).tabs.length >= MAX_TABS_PER_PROJECT) {
         return { ...state, notice: `A project holds at most ${MAX_TABS_PER_PROJECT} tabs` }
       }
-      const minted = makeLeaf(action.profileId, '')
+      const minted = makeLeaf(action.profileId, '', undefined, action.pin)
       const leaf = action.paneId ? { ...minted, id: action.paneId } : minted
       const target = workspaceOf(state, projectId)
       const pooled = action.pooled ? newTabName(target, action.name) : null
@@ -1240,7 +1249,7 @@ function reducer(state: AppState, action: Action): AppState {
           state.settings.agentProfiles,
           state.projects.find((p) => p.id === home.projectId)?.defaultProfileId ?? DEFAULT_PROFILE_ID
         )
-      const leaf = makeLeaf(profileId, '', action.permissionMode)
+      const leaf = makeLeaf(profileId, '', action.permissionMode, action.pin)
       return mapWorkspace(state, home.projectId, (ws) => ({
         ...ws,
         tabs: ws.tabs.map((t) =>
@@ -1564,7 +1573,7 @@ export interface AppActions {
   deleteProfile(id: string): void
   /** Duplicate a profile under a new id, ready to be edited. */
   duplicateProfile(id: string): void
-  newTab(profileId?: string, permissionMode?: ClaudePermissionMode): void
+  newTab(profileId?: string, permissionMode?: ClaudePermissionMode, pin?: PaneLaunchPin): void
   /**
    * Open a tab of `count` panes of one profile in `projectId`, side by side,
    * without switching project or tab. Foreman's hires go here. Refusals (limits,
@@ -1619,6 +1628,8 @@ export interface AppActions {
        * (`loadWorkspace`); `anchorPaneId` wins over it.
        */
       projectId?: string
+      /** The model and effort it starts on (Forge Brain's opens only). */
+      pin?: PaneLaunchPin
     }
   ): { paneId: string; name: string } | null
   /** `projectId`: a tab in a project other than the one on screen, which stays on screen. */
@@ -1638,7 +1649,8 @@ export interface AppActions {
     paneId: string,
     direction: SplitDirection,
     profileId?: string,
-    permissionMode?: ClaudePermissionMode
+    permissionMode?: ClaudePermissionMode,
+    pin?: PaneLaunchPin
   ): void
   closePane(paneId: string): void
   focusPane(paneId: string): void
@@ -2255,11 +2267,12 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           }
         })
       },
-      newTab: (profileId, permissionMode) =>
+      newTab: (profileId, permissionMode, pin) =>
         dispatch({
           type: 'newTab',
           profileId: profileId ?? defaultProfileFor(liveStateRef.current.activeProjectId),
-          ...(permissionMode ? { permissionMode } : {})
+          ...(permissionMode ? { permissionMode } : {}),
+          ...(pin ? { pin } : {})
         }),
       openToolPane: (title, command, submit) => {
         // A plain shell, never an agent: `winget upgrade …` typed at a Claude
@@ -2333,7 +2346,8 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           // are multi-sentence briefs; see PendingType.paste.
           submit: opts?.submit === true,
           paste: true,
-          relay: { from: opts?.relayFrom ?? opts?.anchorPaneId ?? null }
+          relay: { from: opts?.relayFrom ?? opts?.anchorPaneId ?? null },
+          ...(opts?.pin ? { pin: opts.pin } : {})
         })
         // A refusal still went through the reducer, which says why in the notice.
         return refused ? null : { paneId, name }
@@ -2346,13 +2360,14 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
       paintTab: (tabId, patch) => dispatch({ type: 'paintTab', tabId, patch }),
       setTabSettings: (tabId, patch) => dispatch({ type: 'setTabSettings', tabId, patch }),
       moveTab: (from, to) => dispatch({ type: 'moveTab', from, to }),
-      splitPane: (paneId, direction, profileId, permissionMode) =>
+      splitPane: (paneId, direction, profileId, permissionMode, pin) =>
         dispatch({
           type: 'splitPane',
           paneId,
           direction,
           profileId: profileId ?? null,
-          ...(permissionMode ? { permissionMode } : {})
+          ...(permissionMode ? { permissionMode } : {}),
+          ...(pin ? { pin } : {})
         }),
       closePane: (paneId) => dispatch({ type: 'closePane', paneId }),
       focusPane: (paneId) => dispatch({ type: 'focusPane', paneId }),

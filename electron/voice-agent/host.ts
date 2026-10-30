@@ -20,7 +20,8 @@ import type {
   VoiceAgentEvent,
   VoiceAgentStartRequest,
   VoiceAgentStatus,
-  VoiceAgentToolResult
+  VoiceAgentToolResult,
+  PaneLaunchPin
 } from '@shared/types'
 import { RestartBudget, MAX_RAPID_RESTARTS } from '../stt-protocol'
 import { whichCommand } from '../which'
@@ -690,7 +691,7 @@ export class VoiceAgentHost {
    * Run one Forge tool for a CLI brain, validated by the same zod shape the
    * Claude session's SDK checks. Answers in an MCP result; never rejects.
    */
-  async callLinkTool(name: string, args: unknown): Promise<CallToolResult> {
+  async callLinkTool(name: string, args: unknown, pin?: PaneLaunchPin): Promise<CallToolResult> {
     this.linkTools ??= this.forgeToolDefs()
     const def = this.linkTools.find((t) => t.name === name)
     if (!def) return { content: [{ type: 'text', text: `There is no Forge tool called ${name}.` }], isError: true }
@@ -699,7 +700,8 @@ export class VoiceAgentHost {
       return { content: [{ type: 'text', text: `${name} was given the wrong arguments: ${parsed.error.message.slice(0, 400)}` }], isError: true }
     }
     try {
-      return await def.handler(parsed.data as never, {})
+      // After the parse: the shape has no pin, so only the caller in main can add one.
+      return await def.handler((pin ? { ...parsed.data, ...pin } : parsed.data) as never, {})
     } catch (err) {
       return { content: [{ type: 'text', text: `${name} failed: ${errText(err)}` }], isError: true }
     }

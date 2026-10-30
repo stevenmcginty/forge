@@ -1,6 +1,6 @@
 import { Terminal, type ILink, type ILinkProvider, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import type { PtyDataEvent, PtyExitEvent, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
+import type { PaneLaunchPin, PtyDataEvent, PtyExitEvent, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
 import { findDevServerUrl } from '@shared/devserver'
 import { isTypedInput } from '@shared/typing'
@@ -52,7 +52,7 @@ export interface PaneRuntime {
   browser: boolean
 }
 
-export interface TerminalSpec {
+export interface TerminalSpec extends PaneLaunchPin {
   cwd: string
   bootstrapCommand: string
   fontSize: number
@@ -1730,7 +1730,9 @@ class TerminalHost {
       paneTitle: entry.spec.paneTitle,
       ...(entry.spec.sessionId ? { sessionId: entry.spec.sessionId } : {}),
       ...(entry.spec.repoUrl ? { repoUrl: entry.spec.repoUrl } : {}),
-      ...(entry.spec.remoteControl === false ? { remoteControl: false as const } : {})
+      ...(entry.spec.remoteControl === false ? { remoteControl: false as const } : {}),
+      ...(entry.spec.launchModel ? { launchModel: entry.spec.launchModel } : {}),
+      ...(entry.spec.launchEffort ? { launchEffort: entry.spec.launchEffort } : {})
     })
     if (result.ok) {
       this.setRuntime(entry, { status: 'live', pid: result.pid })

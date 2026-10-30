@@ -43,6 +43,19 @@ export type ProfileKind = 'shell' | 'agent'
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypass'
 
 /**
+ * The model and effort one pane starts on, whatever `/model` last saved as the
+ * default in ~/.claude/settings.json. Only Forge Brain's opens set them
+ * (electron/brain/host.ts); every other pane carries neither and launches as it
+ * always has. Session-only flags, added by the PTY host on a launch that is not
+ * a resume (`pinLaunch` in shared/agents.ts), so a by-hand `/model` in the pane
+ * survives a restart.
+ */
+export interface PaneLaunchPin {
+  launchModel?: string
+  launchEffort?: string
+}
+
+/**
  * An agent profile describes *what gets typed into a fresh shell*. Every pane
  * is a real pwsh session; a profile just decides whether we bootstrap it with
  * a command (`claude`, `kimi`, …) so that when the agent exits the prompt is
@@ -141,7 +154,7 @@ export interface Project {
 export type SplitDirection = 'row' | 'column'
 
 /** A terminal pane. `id` doubles as the PTY session id. */
-export interface PaneLeaf {
+export interface PaneLeaf extends PaneLaunchPin {
   type: 'leaf'
   id: string
   profileId: string
@@ -2006,6 +2019,13 @@ export interface Settings {
    * Pinned on the brain's command line, so it never follows his own default.
    */
   brainModel: string
+  /**
+   * The model and effort a Claude Code agent starts on when Forge Brain opens it
+   * and Steve named no other. One of `CLAUDE_AGENT_MODELS` and `EFFORT_LEVELS`
+   * (shared/agents.ts). Panes opened any other way do not read these.
+   */
+  brainAgentModel: string
+  brainAgentEffort: string
   /** The first-open pop-up that explains the brain has been seen. */
   brainIntroSeen: boolean
   /**
@@ -3300,7 +3320,7 @@ export interface AppInfo {
   channel: 'dev' | 'stable'
 }
 
-export interface CreateSessionRequest {
+export interface CreateSessionRequest extends PaneLaunchPin {
   id: string
   cwd: string
   cols: number

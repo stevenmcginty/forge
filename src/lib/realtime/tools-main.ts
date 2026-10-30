@@ -1,3 +1,4 @@
+import { launchPinOf } from '@shared/agents'
 import { isMainAgentTool, MAIN_AGENT_TOOL_SPECS } from '@shared/brain-tools'
 import type { VoiceAgentToolDeps } from '../agenttools'
 import { listTerminals } from '@shared/terminal-names'
@@ -85,7 +86,8 @@ export async function runMainAgentTool(
           agent: String(args['agent'] ?? ''),
           ...(typeof args['prompt'] === 'string' ? { prompt: args['prompt'] } : {}),
           ...(typeof args['name'] === 'string' ? { name: args['name'] } : {}),
-          ...(args['submit'] === true ? { submit: true } : {})
+          ...(args['submit'] === true ? { submit: true } : {}),
+          ...launchPinOf(args)
         })
         return { ok: outcome.ok, text: `${outcome.ok ? 'OK' : 'FAILED'}: ${outcome.summary}` }
       }

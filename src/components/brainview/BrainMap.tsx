@@ -3,7 +3,7 @@ import { BRAIN_ENGINE_NAME, BRAIN_PROJECT_NAME, isBrainProject, type BrainStatus
 import { collectLeaves } from '@shared/splitTree'
 import type { AgentProfile, Project, Workspace } from '@shared/types'
 import { paneNameInTab } from '@shared/workspace'
-import { launchCommand, leafPermissionMode, paneDisplayTitle, resolveProfile } from '@/lib/agents'
+import { launchCommand, leafLaunchPin, leafPermissionMode, paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { reducedMotion } from '@/lib/motion'
 import { ACTIVITY_WORD, type ActivityState, type PaneActivity } from '@/lib/paneActivity'
 import { shellMode } from '@/lib/shellSlots'
@@ -380,7 +380,8 @@ export function BrainMap({ closing, onClose }: { closing: boolean; onClose: () =
       projectName: project.name,
       paneTitle: paneDisplayTitle(agent.profile, agent.leaf.title),
       sessionId: agent.leaf.sessionId,
-      repoUrl: project.repoUrl
+      repoUrl: project.repoUrl,
+      ...leafLaunchPin(agent.leaf)
     }),
     [type.fontSize, type.fontFamily]
   )

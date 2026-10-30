@@ -2,7 +2,7 @@ import { clipboard, ipcMain, type BrowserWindow } from 'electron'
 import { resolve as resolvePath, sep } from 'node:path'
 import { IPC, MAX_SESSIONS } from '@shared/ipc'
 import type { CreateSessionRequest, CreateSessionResult, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
-import { commandExe, isGlmClaudeCommand, ZAI_ANTHROPIC_BASE_URL } from '@shared/agents'
+import { commandExe, isGlmClaudeCommand, pinLaunch, ZAI_ANTHROPIC_BASE_URL } from '@shared/agents'
 import { SHARE_DIR_ENV, SHARE_LINK_ENV, type ChatRelayActionResult } from '@shared/share'
 import { CHATBOTS } from '@shared/chatbots'
 import { chatLeafOf } from '@shared/splitTree'
@@ -903,9 +903,11 @@ export function createPaneSession(request: CreateSessionRequest): CreateSessionR
   // variadic too, and --mcp-config has to stay last.
   // Forge Brain's own tools go last of all, on its pane only: another path on
   // Claude's variadic `--mcp-config` (electron/brain/launch.ts).
+  // The pane's pinned model and effort go before all of those, and never on a
+  // resume. Checked against the lists here: the renderer's strings are not trusted.
   const bootstrapCommand = applyBrainMcp(
     String(req?.id ?? ''),
-    applyShareBridge(applyMcpBridge(applyForgeBrowserOnly(plan.command, getSettings().agentsForgeBrowserOnly !== false)))
+    applyShareBridge(applyMcpBridge(applyForgeBrowserOnly(pinLaunch(plan.command, plan.mode, req), getSettings().agentsForgeBrowserOnly !== false)))
   )
   const settings = getSettings()
 

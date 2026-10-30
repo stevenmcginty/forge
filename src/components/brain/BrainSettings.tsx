@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { CLAUDE_AGENT_MODELS, EFFORT_LEVELS, sanitiseBrainAgentEffort, sanitiseBrainAgentModel } from '@shared/agents'
 import { BRAIN_CONTEXT_WARN_PCT, BRAIN_ENGINE_NAME, BRAIN_MODELS, sanitiseBrainModel } from '@shared/brain'
 import { useKeymap } from '@/hooks/useHub'
 import { useApp, type SettingsSection } from '@/state/AppState'
@@ -153,6 +154,41 @@ export function BrainSettings(): ReactNode {
             </select>
           </Row>
         ) : null}
+      </Card>
+      <Card
+        title="Agents it opens"
+        hint="Applies only to Claude Code agents Forge Brain opens, unless you name another agent or model. Panes you open yourself, voice agents and pane agents do not change. A pane that resumes keeps the model it was on."
+      >
+        <Row label="Model" htmlFor="brain-agent-model">
+          <select
+            id="brain-agent-model"
+            className="select"
+            value={sanitiseBrainAgentModel(state.settings.brainAgentModel)}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => actions.patchSettings({ brainAgentModel: e.target.value })}
+          >
+            {CLAUDE_AGENT_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {`${m.label} — ${m.note}`}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label="Effort" htmlFor="brain-agent-effort">
+          <select
+            id="brain-agent-effort"
+            className="select"
+            value={sanitiseBrainAgentEffort(state.settings.brainAgentEffort)}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => actions.patchSettings({ brainAgentEffort: e.target.value })}
+          >
+            {EFFORT_LEVELS.map((l) => (
+              <option key={l.id} value={l.id}>
+                {`${l.label} — ${l.note}`}
+              </option>
+            ))}
+          </select>
+        </Row>
       </Card>
       <Card title="Voice" hint="Replies are spoken in this voice when Forge Brain is your voice agent.">
         <BrainVoicePicker />

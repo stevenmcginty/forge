@@ -22,7 +22,7 @@ import type {
 } from '@shared/types'
 import { paneNameInTab } from '@shared/workspace'
 import { isPaneDead, paneStatusLabel, usePaneRuntime } from '@/hooks/usePaneRuntime'
-import { launchCommand, leafPermissionMode, paneDisplayTitle, permissionChip, resolveProfile } from '@/lib/agents'
+import { launchCommand, leafLaunchPin, leafPermissionMode, paneDisplayTitle, permissionChip, resolveProfile } from '@/lib/agents'
 import {
   MOSAIC_GAP,
   MOSAIC_MIN_H,
@@ -1357,7 +1357,8 @@ export function PeekStage({
     projectName: project.name,
     paneTitle: paneDisplayTitle(profile, cell.leaf.title),
     sessionId: cell.leaf.sessionId,
-    repoUrl: project.repoUrl
+    repoUrl: project.repoUrl,
+    ...leafLaunchPin(cell.leaf)
   }
   const specRef = useRef<TerminalSpec>(spec)
   specRef.current = spec

@@ -1,3 +1,4 @@
+import { launchPinOf } from '@shared/agents'
 import { BRAIN_SETTINGS, brainSetting, type BrainSetting } from '@shared/brain-tools'
 import type { Settings, VoiceAgentToolRequest, VoiceAgentToolResult, Workspace } from '@shared/types'
 import type { LiveApp } from '../state/AppState'
@@ -450,7 +451,8 @@ async function openElsewhere(r: Reach, where: Where, args: Record<string, unknow
     profileId: profile.id,
     submit,
     projectId: where.id,
-    ...(name ? { name } : {})
+    ...(name ? { name } : {}),
+    pin: launchPinOf(args)
   })
   if (!opened) return `FAILED: Forge refused to open a ${profile.name} pane in ${where.name} — the session limit or that project's tab limit is reached.`
   const started = await startOffScreen(r, where.id, opened.paneId)
@@ -471,7 +473,7 @@ async function openElsewhere(r: Reach, where: Where, args: Record<string, unknow
  * when it never appeared (the pane then starts when its project is shown).
  */
 async function startOffScreen(r: Reach, projectId: string, paneId: string): Promise<boolean> {
-  const { launchCommand, leafPermissionMode, paneDisplayTitle, resolveProfile } = await import('./agents')
+  const { launchCommand, leafLaunchPin, leafPermissionMode, paneDisplayTitle, resolveProfile } = await import('./agents')
   for (let tries = 0; tries < 40; tries++) {
     const st = r.app.get()
     const project = st.projects.find((p) => p.id === projectId)
@@ -487,7 +489,8 @@ async function startOffScreen(r: Reach, projectId: string, paneId: string): Prom
         projectName: project.name,
         paneTitle: paneDisplayTitle(profile, leaf.title),
         sessionId: leaf.sessionId,
-        repoUrl: project.repoUrl
+        repoUrl: project.repoUrl,
+        ...leafLaunchPin(leaf)
       })
       return true
     }

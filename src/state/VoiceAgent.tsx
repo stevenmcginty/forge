@@ -1345,8 +1345,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
 
   const runnerRef = useRef<ActionRunner | null>(null)
   runnerRef.current = {
-    newTab: (profileId) => actions.newTab(profileId),
-    splitPane: (paneId, direction, profileId) => actions.splitPane(paneId, direction, profileId),
+    newTab: (profileId, pin) => actions.newTab(profileId, undefined, pin),
+    splitPane: (paneId, direction, profileId, pin) => actions.splitPane(paneId, direction, profileId, undefined, pin),
     closePane: (paneId) => actions.closePane(paneId),
     closeTab: (tabId) => actions.closeTab(tabId),
     selectProject: (projectId) => actions.selectProject(projectId),
@@ -1399,8 +1399,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     },
     // open_agent_pane: a new tab inside Forge, the prompt pasted once the
     // agent's banner has landed (AppState's pendingTypes readiness gate).
-    openAgentPane: ({ profileId, title, prompt, submit, name }) =>
-      actions.openAgentPane(title, prompt, { profileId, submit, ...(name ? { name } : {}) }),
+    openAgentPane: ({ profileId, title, prompt, submit, name, pin }) =>
+      actions.openAgentPane(title, prompt, { profileId, submit, ...(name ? { name } : {}), ...(pin ? { pin } : {}) }),
     recallMemory: () => agentMemory.recall(project?.id ?? null),
     forgetMemory: () => agentMemory.forget(project?.id ?? null),
 

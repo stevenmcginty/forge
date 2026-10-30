@@ -1,6 +1,7 @@
+import { launchPinOf } from '@shared/agents'
 import { MAX_TABS_PER_PROJECT } from '@shared/ipc'
 import { distance, listTerminals, resolveTerminal, type TerminalResolution } from '@shared/terminal-names'
-import type { AgentProfile, SplitDirection } from '@shared/types'
+import type { AgentProfile, PaneLaunchPin, SplitDirection } from '@shared/types'
 import { skillHandler } from './skillbus'
 
 /**
@@ -18,11 +19,14 @@ import { skillHandler } from './skillbus'
  */
 
 export type AppAction =
-  | { kind: 'open_tabs'; profileId: string; count: number; projectName?: string }
+  // launchModel / launchEffort: set by Forge Brain's host alone; see PaneLaunchPin.
+  | { kind: 'open_tabs'; profileId: string; count: number; projectName?: string; launchModel?: string; launchEffort?: string }
   | {
       kind: 'open_panes'
       profileId: string
       count: number
+      launchModel?: string
+      launchEffort?: string
       direction?: SplitDirection
       /**
        * Split beside this pane rather than the focused one. Foreman sets it to
@@ -103,7 +107,7 @@ export type AppAction =
    * `name` is the new terminal's name when the caller chose one ("Blue Car");
    * absent, it takes the next free tab name like a tab opened by hand.
    */
-  | { kind: 'open_agent_pane'; agent: string; prompt?: string; name?: string; submit?: boolean; anchorPaneId?: string }
+  | { kind: 'open_agent_pane'; agent: string; prompt?: string; name?: string; submit?: boolean; anchorPaneId?: string; launchModel?: string; launchEffort?: string }
 
 /** Image generation is the one thing here that cannot finish synchronously. */
 export const MAX_GENERATED_IMAGES = 4
@@ -186,8 +190,8 @@ export interface ActionContext {
 
 /** The UI actions the executor drives. Same ones the buttons call. */
 export interface ActionRunner {
-  newTab(profileId: string): void
-  splitPane(paneId: string, direction: SplitDirection, profileId: string): void
+  newTab(profileId: string, pin?: PaneLaunchPin): void
+  splitPane(paneId: string, direction: SplitDirection, profileId: string, pin?: PaneLaunchPin): void
   /**
    * Foreman's hires: a tab of their own beside the anchor pane's tab, in its
    * project. Optional because only Foreman's runner has it; without it an
@@ -292,6 +296,7 @@ export interface ActionRunner {
     submit: boolean
     name?: string
     anchorPaneId?: string
+    pin?: PaneLaunchPin
   }): { paneId: string; name: string } | string | null | void
   /** Create a folder and add it to the rail. Main process does the creating. */
   createProject?(request: { name: string; parentDir?: string }): Promise<ActionOutcome>
@@ -797,7 +802,7 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       const sessionRoom = Math.max(0, ctx.maxSessions - ctx.paneCount)
       const room = Math.min(tabRoom, sessionRoom)
       const done = Math.min(requested, room)
-      for (let i = 0; i < done; i++) run.newTab(profile.id)
+      for (let i = 0; i < done; i++) run.newTab(profile.id, launchPinOf(action))
 
       const ceiling =
         tabRoom <= sessionRoom
@@ -859,7 +864,7 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
       )
       const done = Math.min(requested, room)
       const direction: SplitDirection = action.direction ?? 'row'
-      for (let i = 0; i < done; i++) run.splitPane(target, direction, profile.id)
+      for (let i = 0; i < done; i++) run.splitPane(target, direction, profile.id, launchPinOf(action))
 
       if (done === 0) {
         return {
@@ -1245,7 +1250,8 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
           prompt,
           submit,
           ...(name ? { name } : {}),
-          ...(anchor ? { anchorPaneId: anchor } : {})
+          ...(anchor ? { anchorPaneId: anchor } : {}),
+          pin: launchPinOf(action)
         })
         if (opened === null) {
           return fail(`Forge refused to open a ${profile.name} pane — the session or tab limit is reached, or its project is not open`)
@@ -1262,7 +1268,7 @@ export function runAppAction(action: AppAction, ctx: ActionContext, run: ActionR
           ...(paneId ? { paneIds: [paneId] } : {})
         }
       }
-      run.newTab(profile.id)
+      run.newTab(profile.id, launchPinOf(action))
       return {
         ok: true,
         summary: `Opened a new ${profile.name} pane inside Forge${name ? ` (it could not be named “${name}” here — rename it with rename_tab)` : ''}${prompt ? ' (the prompt could not be typed here — send it with type_into_pane)' : ''}`,

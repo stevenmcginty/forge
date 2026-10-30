@@ -16,6 +16,16 @@
  * set; together they are what "the same tools on every brain" means.
  */
 
+import {
+  CLAUDE_AGENT_MODELS,
+  EFFORT_LEVELS,
+  isClaudeAgentModel,
+  isEffortLevel,
+  sanitiseBrainAgentEffort,
+  sanitiseBrainAgentModel
+} from './agents'
+import type { PaneLaunchPin } from './types'
+
 export const MAIN_AGENT_TOOL_NAMES = ['open_agent_pane', 'type_into_pane', 'help_prompt', 'read_pane', 'show_view', 'forge_command'] as const
 
 export type MainAgentToolName = (typeof MAIN_AGENT_TOOL_NAMES)[number]
@@ -173,6 +183,75 @@ export function withProjectArg(specs: readonly BrainToolSpec[]): BrainToolSpec[]
   )
 }
 
+/* ----------------------------------------- the model of agents it opens */
+
+const AGENT_MODEL_IDS = CLAUDE_AGENT_MODELS.map((m) => m.id)
+const AGENT_EFFORT_IDS = EFFORT_LEVELS.map((l) => l.id as string)
+
+/**
+ * Forge Brain's own arguments on open_agent_pane (`withBrainAgentArgs`). Not in
+ * the specs above: a voice agent is not offered them and its panes stay unpinned.
+ */
+export const BRAIN_AGENT_ARGS: Record<string, BrainToolProperty> = {
+  model: {
+    type: 'string',
+    enum: AGENT_MODEL_IDS,
+    description: 'Optional, Claude Code agents only. Omit it for Steve’s default; use it only when he names a model.'
+  },
+  effort: {
+    type: 'string',
+    enum: AGENT_EFFORT_IDS,
+    description: 'Optional, Claude Code agents only. Omit it for Steve’s default; use it only when he names an effort.'
+  }
+}
+
+/** One tools/list entry, with `BRAIN_AGENT_ARGS` on open_agent_pane. */
+export function withBrainAgentArgs<T extends { name?: unknown; inputSchema?: unknown }>(tool: T): T {
+  if (tool?.name !== 'open_agent_pane') return tool
+  const schema = (tool.inputSchema ?? {}) as { properties?: Record<string, unknown> }
+  return { ...tool, inputSchema: { ...schema, properties: { ...schema.properties, ...BRAIN_AGENT_ARGS } } } as T
+}
+
+const PIN_ACTION_KINDS: readonly unknown[] = ['open_agent_pane', 'open_tabs', 'open_panes']
+
+/**
+ * One tool call from Forge Brain, with the model and effort its new pane starts
+ * on: what it named, else Steve's settings. Anything else passes untouched.
+ *
+ * `pin` travels beside the arguments, not in them: the host's zod shape would
+ * strip it, and a field outside the shape cannot be sent by another brain.
+ * `run_app_action`'s action is a free record, so the pin rides in the action.
+ */
+export function brainAgentCall(
+  name: string,
+  args: unknown,
+  settings: { brainAgentModel: unknown; brainAgentEffort: unknown }
+): { args: unknown; pin?: PaneLaunchPin } | { refused: string } {
+  const pin = {
+    launchModel: sanitiseBrainAgentModel(settings.brainAgentModel),
+    launchEffort: sanitiseBrainAgentEffort(settings.brainAgentEffort) as string
+  }
+  const given = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
+  if (name === 'open_agent_pane') {
+    const model = String(given['model'] ?? '').trim()
+    const effort = String(given['effort'] ?? '').trim()
+    if (model && !isClaudeAgentModel(model)) {
+      return { refused: `"${model}" is not a model open_agent_pane can start, so nothing opened. Use one of ${AGENT_MODEL_IDS.join(', ')}, or omit model for Steve’s default.` }
+    }
+    if (effort && !isEffortLevel(effort)) {
+      return { refused: `"${effort}" is not an effort open_agent_pane can start on, so nothing opened. Use one of ${AGENT_EFFORT_IDS.join(', ')}, or omit effort for Steve’s default.` }
+    }
+    return { args, pin: { launchModel: model || pin.launchModel, launchEffort: effort || pin.launchEffort } }
+  }
+  if (name === 'run_app_action') {
+    const action = given['action'] as Record<string, unknown> | null | undefined
+    if (action && typeof action === 'object' && PIN_ACTION_KINDS.includes(action['kind'])) {
+      return { args: { ...given, action: { ...action, ...pin } } }
+    }
+  }
+  return { args }
+}
+
 /* -------------------------------------------------------------- settings */
 
 /**
@@ -207,7 +286,9 @@ export const BRAIN_SETTINGS: readonly BrainSetting[] = [
   { key: 'voiceReplyMode', label: 'voice agent replies as', kind: 'choice', choices: ['text', 'both', 'voice'] },
   { key: 'voiceEarcons', label: 'voice agent sounds', kind: 'boolean' },
   { key: 'voiceAutoRelay', label: 'auto-relay: the voice agent presses Enter when it sends a prompt to an agent', kind: 'boolean' },
-  { key: 'dictateAutoSend', label: 'dictation presses Enter after each phrase', kind: 'boolean' }
+  { key: 'dictateAutoSend', label: 'dictation presses Enter after each phrase', kind: 'boolean' },
+  { key: 'brainAgentModel', label: 'the model Claude agents you open start on', kind: 'choice', choices: AGENT_MODEL_IDS },
+  { key: 'brainAgentEffort', label: 'the effort Claude agents you open start on', kind: 'choice', choices: AGENT_EFFORT_IDS }
 ]
 
 export function brainSetting(key: string): BrainSetting | null {
