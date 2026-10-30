@@ -16,6 +16,7 @@ import {
   type AppAction
 } from './appactions'
 import { ACTION_SPECS, buildStateSection, type ManifestSnapshot } from './appmanifest'
+import { briefOutcomeOf, type BriefOutcome } from './briefDelivery'
 import { collectLeaves } from './splitTree'
 import { runHubTool } from './realtime/tools-hub'
 import { runMainAgentTool } from './realtime/tools-main'
@@ -439,6 +440,10 @@ function typeElsewhere(r: Reach, where: Where, pane: ActionPane, text: string, s
 }
 
 async function openElsewhere(r: Reach, where: Where, args: Record<string, unknown>): Promise<string> {
+  // The whole call has main's 15 s tool budget (electron/voice-agent/host.ts
+  // TOOL_TIMEOUT_MS); past it the Brain hears "Forge did not answer" and may
+  // open the pane again. So the wait for the brief below stops well short.
+  const t0 = Date.now()
   const said = str(args['agent'])
   const profiles = r.app.get().settings.agentProfiles
   const profile = profiles.find((p) => p.id === said.toLowerCase()) ?? (said ? matchProfile(profiles, said) : null)
@@ -456,6 +461,28 @@ async function openElsewhere(r: Reach, where: Where, args: Record<string, unknow
   })
   if (!opened) return `FAILED: Forge refused to open a ${profile.name} pane in ${where.name} — the session limit or that project's tab limit is reached.`
   const started = await startOffScreen(r, where.id, opened.paneId)
+  if (started && prompt) {
+    // Say what happened to the brief, not what should: wait for the drain to
+    // paste it (about 6 s after open today) or give up on it.
+    let outcome: BriefOutcome | null = null
+    for (;;) {
+      outcome = briefOutcomeOf(opened.paneId)
+      if (outcome) break
+      if (!r.app.get().pendingTypes.some((p) => p.paneId === opened.paneId)) break
+      if (Date.now() - t0 >= 12_000) {
+        return `STILL STARTING: ${opened.name} in ${where.name} (pane id ${opened.paneId}) has not taken its brief after 12 s; it is queued and goes in when the agent is up. Check with read_pane before sending anything.`
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    if (outcome === 'pasted' || outcome === 'typed') {
+      const head = `OK: opened ${opened.name} (${profile.name}) in ${where.name} (pane id ${opened.paneId}); its brief is`
+      return submit
+        ? `${head} in and sent. read_pane shows it, and you hear when it finishes.`
+        : `${head} typed, not sent — send it with type_into_pane.`
+    }
+    // Refused, dropped, or gone from the queue with nothing recorded.
+    return `FAILED: ${opened.name} opened in ${where.name} (pane id ${opened.paneId}) but its brief was NOT pasted — the pane died or showed no agent. Check with read_pane; if an agent is up, send the brief with type_into_pane.`
+  }
   return [
     `OK: opened ${opened.name} (${profile.name}) in ${where.name} (pane id ${opened.paneId}); Steve's screen stayed where it was.`,
     started

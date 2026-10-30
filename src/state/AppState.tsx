@@ -96,7 +96,7 @@ import { handleSignal, startMirror, stopMirror } from '@/lib/mirror'
 import { startWebMirror, stopWebMirror } from '@/lib/web-mirror'
 import { terminalHost } from '@/lib/terminals'
 import { relayComet } from '@/lib/relayComet'
-import { BriefDelivery, type BriefProbe } from '@/lib/briefDelivery'
+import { BriefDelivery, recordBriefOutcome, type BriefProbe } from '@/lib/briefDelivery'
 import { CloseConfirmHost } from '@/components/CloseConfirm'
 import { confirmProjectServer } from '@/lib/devicePreview'
 import { setLiveSettings } from '@/lib/livesettings'
@@ -1927,10 +1927,12 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         console.warn(`[brief] ${pending.paneId} ${step} status=${probed.status} bytes=${probed.outputBytes} quiet=${Math.round(probed.quietForMs)} exists=${probed.exists}`)
         if (step === 'drop') {
           delivery.markDone(pending)
+          recordBriefOutcome(pending.paneId, 'dropped')
           continue
         }
         if (step === 'refuse') {
           delivery.markDone(pending)
+          recordBriefOutcome(pending.paneId, 'refused')
           dispatch({
             type: 'notice',
             message: 'A new agent pane did not come up in 30 seconds, so its brief was not pasted — at a bare shell prompt every line would run'
@@ -1955,6 +1957,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
               delivery.markDone(pending)
               inFlight.delete(pending)
               terminalHost.paste(pending.paneId, pending.text)
+              recordBriefOutcome(pending.paneId, 'pasted')
               console.warn(`[brief] ${pending.paneId} pasted ${pending.text.length} chars${pending.submit ? ', Enter follows' : ''}`)
               if (pending.relay) relayComet(pending.paneId, pending.relay.from)
               // A pasted brief can be submitted too, and one caller asks for
@@ -1970,6 +1973,7 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           delivery.markDone(pending)
           inFlight.delete(pending)
           if (!terminalHost.type(pending.paneId, pending.text)) return
+          recordBriefOutcome(pending.paneId, 'typed')
           terminalHost.focus(pending.paneId)
           if (pending.relay) relayComet(pending.paneId, pending.relay.from)
           if (pending.submit) terminalHost.submit(pending.paneId)

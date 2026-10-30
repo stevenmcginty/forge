@@ -98,3 +98,35 @@ export class BriefDelivery<T extends object> {
     return paste ? 'refuse' : 'drop'
   }
 }
+
+/**
+ * How a pane's brief finished, for a caller who has to say so: the Brain's
+ * off-screen open waits on this instead of promising "it goes in once it is
+ * ready". The drain records it at the moment an entry finishes; entries leave
+ * the queue ~400 ms later and take nothing with them, so the answer is kept
+ * here, per pane id, for the last BRIEF_OUTCOMES_KEPT panes.
+ *
+ *   pasted   a brief went in whole
+ *   typed    a command was typed through the draft
+ *   refused  a brief whose agent never came up — not pasted
+ *   dropped  the pane closed, died or never started — nothing went in
+ */
+export type BriefOutcome = 'pasted' | 'typed' | 'refused' | 'dropped'
+
+const BRIEF_OUTCOMES_KEPT = 50
+const outcomes = new Map<string, BriefOutcome>()
+
+export function recordBriefOutcome(paneId: string, outcome: BriefOutcome): void {
+  outcomes.delete(paneId)
+  outcomes.set(paneId, outcome)
+  while (outcomes.size > BRIEF_OUTCOMES_KEPT) {
+    const oldest = outcomes.keys().next().value
+    if (oldest === undefined) break
+    outcomes.delete(oldest)
+  }
+}
+
+/** How the brief for `paneId` finished, or null while it is still queued (or was never queued). */
+export function briefOutcomeOf(paneId: string): BriefOutcome | null {
+  return outcomes.get(paneId) ?? null
+}
