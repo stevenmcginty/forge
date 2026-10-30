@@ -1884,6 +1884,16 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
     // Scheduled in *this* run and not typed yet. A re-run cancels these and
     // simply schedules them again — nothing of theirs has reached the pane.
     const inFlight = new Set<PendingType>()
+    // A beat between two writes to the same pane — focus-in before the paste,
+    // the paste before the Enter. A timer, never requestAnimationFrame: Forge
+    // runs headless for much of the day (Steve on the phone, this window under
+    // a maximised Chrome or minimised), and Chromium stops animation frames
+    // for an occluded window even with backgroundThrottling off. A brief whose
+    // last step waited on a frame was never pasted, and nobody was told
+    // (2026-10-30: every pane the Brain opened from Telegram came up empty).
+    const beat = (fn: () => void): void => {
+      window.setTimeout(fn, 40)
+    }
 
     const probe = (paneId: string): BriefProbe => {
       const runtime = terminalHost.runtime(paneId)
@@ -1908,8 +1918,13 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
         // quiet (terminalHost.readiness), and a pane that never does is
         // refused its brief rather than handed it: past the deadline it is
         // most likely a shell whose agent failed to start.
-        const step = delivery.step(pending, pending.paste === true, probe(pending.paneId), Date.now())
+        const probed = probe(pending.paneId)
+        const step = delivery.step(pending, pending.paste === true, probed, Date.now())
         if (step === 'skip' || step === 'wait') continue
+        // warn, not info: the main process keeps only warn/error renderer lines
+        // (electron/renderer-log.ts), and a brief that went nowhere must be
+        // findable in dev.log afterwards.
+        console.warn(`[brief] ${pending.paneId} ${step} status=${probed.status} bytes=${probed.outputBytes} quiet=${Math.round(probed.quietForMs)} exists=${probed.exists}`)
         if (step === 'drop') {
           delivery.markDone(pending)
           continue
@@ -1928,26 +1943,27 @@ export function AppStateProvider({ children }: { children: ReactNode }): ReactNo
           // A pasted brief goes down whole; a typed command goes through the
           // draft so "Take back typed" can rescue it. See PendingType.paste.
           if (pending.paste) {
-            // Focus, a frame, then the text — the DECSET 1004 race documented
+            // Focus, a beat, then the text — the DECSET 1004 race documented
             // on TerminalPane's file drop. An agent that has just been told
             // the terminal lost focus will drop the paste that follows it.
             terminalHost.focus(pending.paneId)
-            requestAnimationFrame(() => {
+            beat(() => {
               if (cancelled) return
               // Recorded the moment it goes in, never at scheduling time: a
-              // run cancelled before this frame has typed nothing, and the next
+              // run cancelled before this beat has typed nothing, and the next
               // run must still deliver it.
               delivery.markDone(pending)
               inFlight.delete(pending)
               terminalHost.paste(pending.paneId, pending.text)
+              console.warn(`[brief] ${pending.paneId} pasted ${pending.text.length} chars${pending.submit ? ', Enter follows' : ''}`)
               if (pending.relay) relayComet(pending.paneId, pending.relay.from)
               // A pasted brief can be submitted too, and one caller asks for
-              // it: a handoff on a tab with auto-send on. Another frame first
+              // it: a handoff on a tab with auto-send on. Another beat first
               // — the bracketed paste and its terminator have to be down the
               // pipe before the newline that submits them. Not gated on
               // `cancelled`: the brief is in, and a re-run must not leave it
               // typed but unsent.
-              if (pending.submit) requestAnimationFrame(() => terminalHost.submit(pending.paneId))
+              if (pending.submit) beat(() => terminalHost.submit(pending.paneId))
             })
             return
           }
