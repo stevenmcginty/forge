@@ -153,7 +153,12 @@ const LOOKUP_TTL_MS = 60_000
 
 /** The CLI is up and showing its own prompt. Tested against everything since the spawn. */
 const READY_RE: Record<BrainEngine, RegExp> = {
-  claude: /\? for shortcuts|Claude Code v?\d|Welcome to Claude/i,
+  // Claude Code 2.1.3xx no longer prints "? for shortcuts", and a resumed
+  // conversation's history can push the welcome banner out of the capped boot
+  // text, so the footer's mode line counts as ready too (2026-10-30: the brain
+  // sat in "starting" for 35 min after a Forge restart with a message queued).
+  claude:
+    /\? for shortcuts|Claude Code v?\d|Welcome to Claude|shift\+tab to cycle|bypass permissions on|auto mode on|accept edits on|plan mode on/i,
   codex: /OpenAI Codex|context left|send a message/i,
   local: /OpenAI Codex|context left|send a message/i,
   gemini: /Type your message|Tips for getting started|GEMINI\.md/i
