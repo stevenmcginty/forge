@@ -1,5 +1,14 @@
 # Handoff
 
+## Forge Brain: agents it opens start on a fixed model (2026-10-30; branch `brain-agent-model`, NOT merged, NOT pushed, Forge NOT restarted)
+
+- **Asked (Steve):** agents opened by the Brain (from Telegram) came up on Fable 5.1. They should open on Opus 5.5 xhigh, unless he names another agent or model.
+- **Cause (from transcripts):** the "Claude Code" profile is bare `claude`, so a new pane takes `model` from `~/.claude/settings.json`. `/model <id>`, which the Forge picker types, saves there. A Fable pick in a Chat pane on 2026-10-29 22:50 moved every new pane. It went back to Opus at 10:43 on 2026-10-30, so the default is only right until the next pick.
+- **Built:** `Settings.brainAgentModel` (default `claude-opus-5-5[1m]`) and `brainAgentEffort` (default `xhigh`). `electron/brain/host.ts` is the only place a pin is set. It travels on the leaf and `CreateSessionRequest`, and `pinLaunch` in `electron/pty-host.ts` adds the flags, never on a resume. Brain's `open_agent_pane` takes optional `model` and `effort`; ids off the list are refused. Settings -> Forge Brain has an "Agents it opens" card, and `set_setting` can change both.
+- **Decided:** hand-opened, voice-agent, Foreman and pane-agent panes are not pinned; they still follow the last `/model` pick. A hard pin there would make Claude Code's "saved as your default" message untrue.
+- **Checked:** typecheck 0, lint:hooks 0, `brain-agent-model:check` 29/0, brain-adapters 59/0, brain-confirm 22/0. Real CLI with the flags reported `claude-opus-5-5`. **NOT done:** no Brain has opened a pinned pane in a running Forge; the card has not been seen rendered; not tested whether `--resume` with no `--model` keeps a pane's earlier model on CLI 2.1.314.
+- **Next:** Steve's D.m.p merges and pushes. Main changed, so it goes live only after a Forge restart (strands the phone ~10 min when remote). Then have the Brain open an agent and check the pane's footer. Worktree `C:\Users\steve\Desktop\forge-worktrees\forge-brain-agent-model`; node_modules is a junction, `rmdir` it before removing the worktree.
+
 ## Telegram plugin for Forge Brain + Brain auto fresh start (2026-10-30; master 88dfcad, local only, NOT pushed; Forge NOT restarted)
 
 - **Asked (Steve):** talk to Forge Brain from his phone. Telegram chosen over a standalone app (official bot, free, no SIM, long polling so no public URL). Steve made the bot himself from his phone: `Forge3000bot`. He is remote today.
