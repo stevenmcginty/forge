@@ -1,5 +1,16 @@
 # Handoff
 
+## Telegram plugin for Forge Brain + Brain auto fresh start (2026-10-30; master 88dfcad, local only, NOT pushed; Forge NOT restarted)
+
+- **Asked (Steve):** talk to Forge Brain from his phone. Telegram chosen over a standalone app (official bot, free, no SIM, long polling so no public URL). Steve made the bot himself from his phone: `Forge3000bot`. He is remote today.
+- **Built (foreman -> apprentice + 3 builders, worktree `C:\Users\steve\Desktop\forge-worktrees\forge-telegram`, branch `telegram-plugin`, fast-forwarded to master; node_modules is a junction, `rmdir` it before removing the worktree):**
+  - `electron/telegram/{api,channel,split,ipc}.ts`: `getUpdates` long poll (30 s, `deleteWebhook` first, 409/429/backoff handled, 401/404 = token refused). Pairing: Settings arms a 6-digit code (10 min); the code pairs only from a private chat; 5 wrong codes drop it. Only the paired chat is heard, others dropped silently. Text -> `[Telegram] ` prefix -> `askBrain` (5 min wait) with a typing action every 4 s; replies split at 4000; `late` -> "Still working..."; Brain off -> plain refusal. Voice notes -> `transcribeAudio` -> `Heard: "..."` -> ask. Photos -> largest size saved under `%APPDATA%\Forge\telegram-inbox` and the path given to the Brain. Brain `says` lines forwarded to the chat when no ask is in flight (5 s dedupe). Confirms become Yes/No inline buttons -> `answerConfirm`; vanished ones are edited. `/status`, `/fresh`, `/help`. Token never appears in status or logs. Settings: `telegramEnabled`, `telegramBotToken` (secret), `telegramChatId`, `telegramChatName`; the three non-token ones are main-owned so the renderer's whole-object save cannot wipe a pairing. One knowledge line in `electron/brain/home.ts` about `[Telegram]` messages.
+  - Settings -> Telegram card (`src/components/settings/TelegramSection.tsx`, desktop only): three steps (token, Pair with the big code and a countdown, On + Send test). State by word and shape. Pair switches the bot on by itself.
+  - Brain auto fresh start: `shared/brain.ts` `brainAutoFreshDue` (pure) + wiring in `electron/brain/host.ts` (usage frames from `electron/usage-hub.ts`, `asksInFlight`, `idleSince`, 3-min gate, Claude engine only); `Settings.brainAutoFreshPct` default 60 (0 = never) edited in `BrainSettings.tsx`; `BrainStatus.contextPct` added; one spoken sentence after the swap.
+- **Checked:** typecheck 0, lint:hooks 0, `npm run telegram:check` 41/0 (fake API + fake Brain), brain-confirm 22/0, brain-adapters 59/0, voice-check 188. **NOT done:** nothing has touched the live Telegram API (no token yet); the Settings card has not been seen rendered; the auto fresh start wiring has no check script (only the pure rule was tested, in a scratch script that was deleted).
+- **Next:** (1) Forge restart: main + preload changed, so until then `window.forge.telegram` is missing (the card guards with `?.`) and the brain's auto fresh start is not live. Steve is remote: a restart strands the phone ~10 min, so it is his call. (2) Token into Settings -> Telegram (by RustDesk), or Steve pastes it to a pane and the Brain's `set_setting` puts it in. (3) Pair, Send test, first message from the phone. (4) Push on Steve's D.m.p (auto-releases). (5) Later: `/setjoingroups` Disable on BotFather; Forge Web has no Telegram settings on purpose.
+- **Undo:** `git revert 88dfcad 30a2087 d1a84f8 ab91c98 ca24c97`, then restart Forge.
+
 ## PTY sends: one Enter = one submit (2026-10-27; merged 1389dcf and pushed 21:18 on Steve's D.m.p, auto-releases)
 
 - **Asked:** TV dictation / pane_send text lands in Claude Code's box but does not submit.
@@ -7,7 +18,8 @@
 - **Built:** `electron/pty/submit-split.ts` + `SessionManager.write`: strip Cf (emoji ZWJ kept); a write ending in `\r` goes as words, then `\r` alone 80 ms later; writes in that beat queue behind it. Check: `npm run submit-split:check`.
 - **Not Forge:** Steve's 20:30 "Claude · Sending…" was Agent Box (com.steve.agentbox AgentActivity, TV logcat 20:29:00–20:30:53), not the Forge TV page.
 - **Auto-send (same branch, 2nd commit):** TV pane box (`TvPaneView`): 3+ chars added at once (dictation, or a `forge:voice-text` segment) arms 1.2 s; any non-IME key or a small change cancels; then `sendLine` as the Enter cap. Cap "Auto-send on/off" after Enter, default On, `localStorage forge.tv.autoSend`. Logic in `mobile/src/lib/auto-send.ts`, `npm run auto-send:check`. Mirror box ("Talk or type") not changed. Not tried on the stick.
-- **Shipped 21:18:** master 1389dcf pushed (Checks / Forge Web / Publish Forge runs started). `NODE_ENV=production npm run mobile:build` done; :8420 serves `index-BCpxOxT7.js` with `forge.tv.autoSend` (TV page live). Review fixes 37b324c: Ctrl+C / lone Esc skip the held Enter, kill/exit drop it, flag tags and script ZWNJ/ZWJ kept, `
+- **Shipped 21:18:** master 1389dcf pushed (Checks / Forge Web / Publish Forge runs started). `NODE_ENV=production npm run mobile:build` done; :8420 serves `index-BCpxOxT7.js` with `forge.tv.autoSend` (TV page live). Review fixes 37b324c: Ctrl+C / lone Esc skip the held Enter, kill/exit drop it, flag tags and script ZWNJ/ZWJ kept, `
+
 ` split.
 - **Next:** the PTY fix runs in the main process, so it is live only after a Forge restart. Then Steve reopens the Forge tile on the TV and dictates. Not yet tried on the stick.
 
