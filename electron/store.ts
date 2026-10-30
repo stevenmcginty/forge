@@ -334,6 +334,11 @@ function defaultSettings(): Settings {
     speechKeyReminderOff: false,
     brainVoice: BRAIN_VOICE_DEFAULT,
     brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
+    brainAutoFreshPct: 60,
+    telegramEnabled: false,
+    telegramBotToken: '',
+    telegramChatId: '',
+    telegramChatName: '',
     // Heuristic memory is free and predictable; letting a model rewrite the
     // project summary is neither, so it is opt-in.
     memoryLlmSummarize: false,
@@ -600,7 +605,9 @@ const SECRET_FIELDS = [
   // The RustDesk permanent password. Not pasted by anybody: Forge generates it
   // at setup and it is the only thing between a tailnet neighbour and this
   // desktop's screen, so it gets the same treatment as a refresh token.
-  'remoteYesPassword'
+  'remoteYesPassword',
+  // The Telegram bot token: whoever holds it can drive the bot.
+  'telegramBotToken'
 ] as const satisfies readonly (keyof Settings)[]
 
 /** The injected codec, or the headless pass-through. Never throws. */
@@ -939,6 +946,14 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       typeof s.brainContextWarnPct === 'number' && Number.isFinite(s.brainContextWarnPct)
         ? clamp(Math.round(s.brainContextWarnPct), 1, 100)
         : BRAIN_CONTEXT_WARN_PCT,
+    brainAutoFreshPct:
+      typeof s.brainAutoFreshPct === 'number' && Number.isFinite(s.brainAutoFreshPct)
+        ? clamp(Math.round(s.brainAutoFreshPct), 0, 95)
+        : 60,
+    telegramEnabled: s.telegramEnabled === true,
+    telegramBotToken: typeof s.telegramBotToken === 'string' ? s.telegramBotToken.trim() : '',
+    telegramChatId: typeof s.telegramChatId === 'string' ? s.telegramChatId.trim() : '',
+    telegramChatName: typeof s.telegramChatName === 'string' ? s.telegramChatName : '',
     memoryLlmSummarize: Boolean(s.memoryLlmSummarize),
     skillsLibraryDir:
       typeof s.skillsLibraryDir === 'string' && s.skillsLibraryDir.trim()

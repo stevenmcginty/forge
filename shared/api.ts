@@ -112,6 +112,7 @@ import type {
   BrainStatus
 } from './brain'
 import type { ChatUpdate } from './chat'
+import type { TelegramStatus, TelegramTestResult } from './telegram'
 import type {
   WebMirrorChunk,
   WebMirrorConfig,
@@ -541,6 +542,16 @@ export interface ForgeApi {
      * Optional on top of `brain?`, like `ask`.
      */
     openedPanes?(): Promise<string[]>
+  }
+
+  /** The Telegram bot (main process): pairing, on/off, test. Status is pushed on `onStatus`. */
+  telegram: {
+    status(): Promise<TelegramStatus>
+    setEnabled(enabled: boolean): Promise<TelegramStatus>
+    pair(): Promise<TelegramStatus>
+    unpair(): Promise<TelegramStatus>
+    test(): Promise<TelegramTestResult>
+    onStatus(cb: (status: TelegramStatus) => void): () => void
   }
 
   /**

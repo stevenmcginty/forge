@@ -1,5 +1,6 @@
 import { FOREMAN_IPC } from './foreman'
 import { BRAIN_IPC } from './brain'
+import { TELEGRAM_IPC } from './telegram'
 
 /** Every IPC channel name in one place, so main and preload cannot drift. */
 export const IPC = {
@@ -302,6 +303,12 @@ export const IPC = {
   brainSays: BRAIN_IPC.says,
   brainAsk: BRAIN_IPC.ask,
   brainFreshStart: BRAIN_IPC.freshStart,
+  telegramStatus: TELEGRAM_IPC.status,
+  telegramSetEnabled: TELEGRAM_IPC.setEnabled,
+  telegramPair: TELEGRAM_IPC.pair,
+  telegramUnpair: TELEGRAM_IPC.unpair,
+  telegramTest: TELEGRAM_IPC.test,
+  telegramState: TELEGRAM_IPC.state,
   /** R→M invoke. The pane ids the brain opened; [] when it is off. For the mini bar's announcer. */
   brainOpenedPanes: 'brain:openedPanes',
 

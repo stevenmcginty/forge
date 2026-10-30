@@ -320,6 +320,11 @@ const FALLBACK_SETTINGS: Settings = {
   speechKeyReminderOff: false,
   brainVoice: BRAIN_VOICE_DEFAULT,
   brainContextWarnPct: BRAIN_CONTEXT_WARN_PCT,
+  brainAutoFreshPct: 60,
+  telegramEnabled: false,
+  telegramBotToken: '',
+  telegramChatId: '',
+  telegramChatName: '',
   memoryLlmSummarize: false,
   // Filled in by the store on hydrate — main knows the real data root.
   skillsLibraryDir: '',

@@ -2027,6 +2027,19 @@ export interface Settings {
    * conversation). `BRAIN_CONTEXT_WARN_PCT` (shared/brain.ts) by default.
    */
   brainContextWarnPct: number
+  /**
+   * Forge Brain restarts itself with a handoff note when its context passes
+   * this percent. 0 = never. Clamped 0..95 on load.
+   */
+  brainAutoFreshPct: number
+  /** The Telegram bot is switched on (the bot lives in the main process). */
+  telegramEnabled: boolean
+  /** The Telegram bot token from @BotFather. Secret: encrypted at rest. */
+  telegramBotToken: string
+  /** The one Telegram chat allowed to talk to Forge Brain. '' = not paired. */
+  telegramChatId: string
+  /** The paired chat's first name or username, for display. */
+  telegramChatName: string
 
   /* -------------------------------------------------------- agent memory */
   /**

@@ -187,6 +187,15 @@ const api: ForgeApi = {
     openedPanes: () => ipcRenderer.invoke(IPC.brainOpenedPanes)
   },
 
+  telegram: {
+    status: () => ipcRenderer.invoke(IPC.telegramStatus),
+    setEnabled: (enabled) => ipcRenderer.invoke(IPC.telegramSetEnabled, enabled === true),
+    pair: () => ipcRenderer.invoke(IPC.telegramPair),
+    unpair: () => ipcRenderer.invoke(IPC.telegramUnpair),
+    test: () => ipcRenderer.invoke(IPC.telegramTest),
+    onStatus: (cb) => subscribe(IPC.telegramState, cb)
+  },
+
   memory: {
     read: (projectId) => ipcRenderer.invoke(IPC.memoryRead, projectId),
     append: (projectId, section, entry, at) => ipcRenderer.invoke(IPC.memoryAppend, projectId, section, entry, at),
