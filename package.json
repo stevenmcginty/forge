@@ -35,6 +35,7 @@
     "launch-guard:check": "node scripts/launch-guard-check.mjs",
     "agent-bar:check": "node scripts/agent-bar-check.mjs",
     "brain-confirm:check": "node scripts/brain-confirm-check.mjs",
+    "telegram:check": "node scripts/telegram-check.mjs",
     "brain-adapters:check": "node scripts/brain-adapters-check.mjs",
     "voice-hotkey:check": "node scripts/voice-hotkey-check.mjs",
     "copilot-key:check": "node scripts/copilot-key-check.mjs",

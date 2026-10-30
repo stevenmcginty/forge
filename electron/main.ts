@@ -81,6 +81,7 @@ import {
 import { disposeChatPanes, pruneChatViews, registerChatPanes, setChatWindow } from './chat-panes/ipc'
 import { disposeForeman, registerForemanHandlers, setForemanTarget } from './foreman/ipc'
 import { applyBrainModel, disposeBrainIpc, registerBrainHandlers, setBrainTarget } from './brain/ipc'
+import { applyTelegramSettings, disposeTelegram, registerTelegramHandlers, setTelegramTarget } from './telegram/ipc'
 import { applyCompanionSettings, disposeCompanion, registerCompanionHandlers } from './companion-host'
 import {
   applyMobileSettings,
@@ -525,6 +526,7 @@ function createWindow(): void {
     // feature must never be in.
     setForemanTarget(null)
     setBrainTarget(null)
+    setTelegramTarget(null)
     setReaderTarget(null)
     // Takes the overlay down with it. A topmost pill wired to a renderer that
     // no longer exists would be a dead button floating over every other app,
@@ -583,6 +585,7 @@ function createWindow(): void {
   setVoiceAgentTarget(mainWindow)
   setForemanTarget(mainWindow)
   setBrainTarget(mainWindow)
+  setTelegramTarget(mainWindow)
   setReaderTarget(mainWindow)
   setBrowserWindow(mainWindow)
   setChatWindow(mainWindow)
@@ -914,6 +917,13 @@ const MAIN_OWNED_SETTINGS = [
   // the pane. A stale renderer copy posted back must not turn it off.
   'brainEnabled',
   'brainEngine',
+  // The Telegram bot's switch and its paired chat change only through
+  // window.forge.telegram (electron/telegram/ipc.ts). A stale renderer copy
+  // posted back would unpair the chat the moment after it paired, or switch
+  // the bot off. The token stays renderer-owned: it is typed in a form.
+  'telegramEnabled',
+  'telegramChatId',
+  'telegramChatName',
   // Written by electron/minibar-window.ts when Steve drags the mini bar, which
   // happens while the main window is minimised; the renderer's whole-object
   // save would otherwise put its older copy back.
@@ -1117,6 +1127,14 @@ function registerAppHandlers(): void {
     // Forge Brain's model is on its command line, so a new one means a restart
     // (the same conversation, resumed). Nothing happens while the brain is off.
     if (before.brainModel !== next.brainModel) applyBrainModel()
+    // The Telegram bot starts, stops or restarts on a new token.
+    if (
+      before.telegramEnabled !== next.telegramEnabled ||
+      before.telegramBotToken !== next.telegramBotToken ||
+      before.telegramChatId !== next.telegramChatId
+    ) {
+      applyTelegramSettings()
+    }
     return next
   })
   ipcMain.handle(IPC.storeSetProjects, (_e, projects: Project[]) => {
@@ -1594,6 +1612,9 @@ void app
       // Forge Brain: handlers, and its pane only when settings say it is on —
       // off (the default) starts nothing. See electron/brain/host.ts.
       registerBrainHandlers()
+      // The Telegram bot: handlers, and the bot only when it is switched on
+      // with a token. See electron/telegram/channel.ts.
+      registerTelegramHandlers()
       // Off by default: this reads settings, sees `companionEnabled: false`, and
       // returns without touching the network or a credential.
       registerCompanionHandlers()
@@ -1772,6 +1793,7 @@ app.on('before-quit', () => {
   // Before the PTY host: the brain lets go of its link and timers; the PTY
   // host's own disposal then kills its pane with every other.
   safely('disposeBrain', disposeBrainIpc)
+  safely('disposeTelegram', disposeTelegram)
   safely('disposePtyHost', disposePtyHost)
   safely('disposeShotsWatcher', disposeShotsWatcher)
   safely('disposeHub', disposeHub)
