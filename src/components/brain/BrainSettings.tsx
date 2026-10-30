@@ -40,6 +40,9 @@ export function BrainSettings(): ReactNode {
   const engine = status?.engine ?? state.settings.brainEngine
   const context = useBrainContext()
   const warnAt = state.settings.brainContextWarnPct ?? BRAIN_CONTEXT_WARN_PCT
+  const autoAt = state.settings.brainAutoFreshPct ?? 0
+  const nowPct = status?.contextPct
+  const nowWords = typeof nowPct === 'number' ? `Now ${nowPct}% full.` : 'How full it is now is not known yet.'
   const [freshing, setFreshing] = useState(false)
 
   const freshStart = async (): Promise<void> => {
@@ -112,6 +115,20 @@ export function BrainSettings(): ReactNode {
           <button type="button" className="ghost-btn" disabled={!on || freshing || status?.state === 'error'} onClick={() => void freshStart()}>
             Fresh start
           </button>
+        </Row>
+        <Row
+          label="Fresh start by itself at"
+          hint={`How full, in percent, before the brain writes its handoff and starts again by itself, once it is idle. 0 = never. ${on ? nowWords : ''}`.trim()}
+        >
+          <Stepper
+            label="Fresh start by itself at"
+            value={autoAt}
+            display={autoAt > 0 ? `${autoAt}% full` : 'Never'}
+            min={0}
+            max={95}
+            step={5}
+            onChange={(next) => actions.patchSettings({ brainAutoFreshPct: next })}
+          />
         </Row>
       </Card>
       <Card

@@ -130,6 +130,12 @@ export interface BrainStatus {
   unavailable: Partial<Record<BrainEngine, string>>
   /** Tool calls waiting for Steve's yes, oldest first. */
   confirms: BrainConfirmRequest[]
+  /**
+   * Whole percent of the brain pane's context window in use, from its usage
+   * frame (electron/usage-hub.ts). Null (or absent, from an older desktop)
+   * while not known yet.
+   */
+  contextPct?: number | null
 }
 
 /** The answer to `send`. `queued` = the brain was busy; it is typed when it is free. */
@@ -144,6 +150,46 @@ export type BrainFreshStartResult = { ok: true; by: 'brain' | 'forge' } | { ok: 
 
 /** The context use, in percent, past which Forge says so once per conversation (`Settings.brainContextWarnPct`). */
 export const BRAIN_CONTEXT_WARN_PCT = 20
+
+/** How long Forge Brain must have sat idle before it may fresh-start by itself. */
+export const BRAIN_AUTO_FRESH_IDLE_MS = 10_000
+/** After one automatic fresh start, or a failed try, none again for this long. */
+export const BRAIN_AUTO_FRESH_GAP_MS = 180_000
+
+/** What `brainAutoFreshDue` weighs: main's picture of the brain at `now`. */
+export interface BrainAutoFreshInput {
+  /** `Settings.brainAutoFreshPct`: 0 = never. */
+  limitPct: number
+  /** Whole percent of the context window in use, or null when not known. */
+  contextPct: number | null
+  engine: BrainEngine
+  state: BrainState
+  /** Messages and notes waiting. */
+  queued: number
+  /** `askBrain` calls not answered yet. */
+  asksInFlight: number
+  /** A message is being typed in. */
+  sending: boolean
+  /** When the brain last went idle, epoch ms; 0 while it is not idle. */
+  idleSince: number
+  /** The last automatic fresh start, tried or done, epoch ms; 0 = never. */
+  lastTryAt: number
+  now: number
+}
+
+/**
+ * Whether Forge should fresh-start the brain by itself now: the context is at
+ * or past Steve's line, the brain has sat idle with nothing waiting and nobody
+ * waiting on an answer, and no automatic try in the last three minutes. Claude
+ * only: it is the one engine that reports a context.
+ */
+export function brainAutoFreshDue(i: BrainAutoFreshInput): boolean {
+  if (!(i.limitPct > 0) || i.contextPct === null || i.contextPct < i.limitPct) return false
+  if (i.engine !== 'claude' || i.state !== 'idle') return false
+  if (i.queued > 0 || i.asksInFlight > 0 || i.sending) return false
+  if (i.idleSince <= 0 || i.now - i.idleSince < BRAIN_AUTO_FRESH_IDLE_MS) return false
+  return i.lastTryAt <= 0 || i.now - i.lastTryAt >= BRAIN_AUTO_FRESH_GAP_MS
+}
 
 /** Forge Brain's own voice, until Steve picks another (`Settings.brainVoice`): Edge's calm British male. */
 export const BRAIN_VOICE_DEFAULT = 'en-GB-RyanNeural'

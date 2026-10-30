@@ -6,6 +6,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import {
   BRAIN_ASK_WAIT_MAX_MS,
   BRAIN_ASK_WAIT_MS,
+  BRAIN_AUTO_FRESH_GAP_MS,
   BRAIN_ENGINE_NAME,
   BRAIN_PROJECT_ID,
   BRAIN_PROJECT_NAME,
@@ -19,15 +20,18 @@ import {
   type BrainSendResult,
   type BrainState,
   type BrainStatus,
+  brainAutoFreshDue,
   sanitiseBrainModel
 } from '@shared/brain'
 import type { ChatUpdate } from '@shared/chat'
 import type { PaneLeaf, Workspace } from '@shared/types'
+import type { WebUsageFrame } from '@shared/web'
 import { makeId } from '@shared/ids'
 import { newSessionId } from '@shared/session'
 import { stripAnsi } from '@shared/ansi'
 import { onAttention, type AttentionEvent } from '../attention-bus'
 import { addPtySink, createPaneSession, getManager, killPane, liveSessions } from '../pty-host'
+import { ensureUsageHub, onUsageFrame } from '../usage-hub'
 import { getBrainProject, getDataDir, getProjects, getSettings, getWorkspace, setBrainProject, setWorkspace } from '../store'
 import { resolveBridgeScript } from '../bridge/mcp-config'
 import { tomlLiteralSafe } from '../bridge/cli-register'
@@ -271,6 +275,15 @@ let reconciling: Promise<void> = Promise.resolve()
 let transcriptSink: ((update: ChatUpdate) => void) | null = null
 let transcriptArmedFor: string | null = null
 let unavailableCache: { at: number; value: Partial<Record<BrainEngine, string>> } | null = null
+let unsubscribeUsage: (() => void) | null = null
+/** Whole percent of the brain pane's context window in use (its usage frame), or null when not known. */
+let contextPct: number | null = null
+/** `askBrain` calls not answered yet: nobody is left waiting through a fresh start. */
+let asksInFlight = 0
+/** When the brain last went idle; 0 while it is not idle. */
+let idleSince = 0
+/** The last automatic fresh start, tried or done (`maybeAutoFresh`). */
+let lastAutoFreshAt = 0
 
 /* ------------------------------------------------------------------ paths */
 
@@ -332,7 +345,8 @@ export function brainStatus(): BrainStatus {
     queued: queue.length,
     error: lastError,
     unavailable: unavailableEngines(),
-    confirms: [...confirms.values()].map((c) => c.request)
+    confirms: [...confirms.values()].map((c) => c.request),
+    contextPct
   }
 }
 
@@ -359,6 +373,8 @@ function emit(): void {
 }
 
 function setState(next: BrainState, error: string | null = null): void {
+  if (next !== 'idle') idleSince = 0
+  else if (state !== 'idle') idleSince = Date.now()
   state = next
   lastError = error
   emit()
@@ -542,6 +558,9 @@ async function start(engine: BrainEngine, fresh = false, resumed = false): Promi
     return
   }
   setBrainLaunch(launch)
+  // The context ring's numbers, for the automatic fresh start. A new pane starts unknown.
+  ensureUsageHub()
+  contextPct = null
   const now = Date.now()
   running = {
     engine,
@@ -767,6 +786,9 @@ function tick(): void {
   if (state !== 'idle' || lastError !== r.notice) setState('idle', r.notice)
   // Before the next message goes in: a note's reply ends where the next prompt starts.
   speakNoteReply(r)
+  // The usage readers start once web-host has registered, which can be after the brain's start.
+  if (contextPct === null && r.engine === 'claude') ensureUsageHub()
+  maybeAutoFresh()
   flush(r, now)
 }
 
@@ -992,10 +1014,15 @@ export function askBrain(raw: string, timeoutMs = BRAIN_ASK_WAIT_MS): Promise<Br
     const said: string[] = []
     let timer: ReturnType<typeof setTimeout> | null = null
     let poll: ReturnType<typeof setInterval> | null = null
+    let done = false
+    asksInFlight++
     const offSays = onBrainSays((event) => {
       if (start) said.push(event.text)
     })
     const finish = (result: BrainAskResult): void => {
+      if (done) return
+      done = true
+      asksInFlight--
       if (timer) clearTimeout(timer)
       if (poll) clearInterval(poll)
       offSays()
@@ -1208,6 +1235,50 @@ export async function freshStartBrain(): Promise<BrainFreshStartResult> {
   } finally {
     freshStarting = false
   }
+}
+
+/* ------------------------------------------------- automatic fresh start */
+
+/** The brain pane's usage frame: its context, in whole percent, the ring's number. */
+function onUsage(frame: WebUsageFrame): void {
+  const r = running
+  const raw = frame.context?.usedPct
+  if (!r || frame.sessionId !== r.paneId || typeof raw !== 'number' || !Number.isFinite(raw)) return
+  const pct = Math.max(0, Math.min(100, Math.round(raw)))
+  if (pct === contextPct) return
+  contextPct = pct
+  emit()
+  maybeAutoFresh()
+}
+
+/**
+ * Past `Settings.brainAutoFreshPct`, a fresh start by itself — only while the
+ * brain sits idle with nothing waiting (`brainAutoFreshDue`) — and one sentence
+ * saying so. A try that fails waits out the same three minutes as one that works.
+ */
+function maybeAutoFresh(): void {
+  const r = running
+  const now = Date.now()
+  if (!r || r.exited || freshStarting) return
+  const due = brainAutoFreshDue({
+    limitPct: getSettings().brainAutoFreshPct,
+    contextPct,
+    engine: r.engine,
+    state,
+    queued: queue.length,
+    asksInFlight,
+    sending: r.sending !== null,
+    idleSince,
+    lastTryAt: lastAutoFreshAt,
+    now
+  })
+  if (!due) return
+  lastAutoFreshAt = now
+  const pct = contextPct
+  void freshStartBrain().then((result) => {
+    if (result.ok) brainSays(`Fresh start. My memory was ${pct}% full, so I wrote a handoff note and began again.`, true)
+    else console.warn(`[brain] the automatic fresh start at ${pct}% failed; next try in ${BRAIN_AUTO_FRESH_GAP_MS / 60_000} minutes:`, result.error)
+  })
 }
 
 /* ------------------------------------------------------------ report-back */
@@ -1446,6 +1517,7 @@ export function stopBrainTranscript(): void {
 export function initBrain(): void {
   unsubscribeSink ??= addPtySink({ onData: onPaneData, onExit: onPaneExit, onSpawn: onPaneSpawn })
   unsubscribeAttention ??= onAttention(onPaneAttention)
+  unsubscribeUsage ??= onUsageFrame(onUsage)
   void applyBrainSettings()
 }
 
@@ -1465,6 +1537,9 @@ export function disposeBrain(): void {
   unsubscribeSink = null
   unsubscribeAttention?.()
   unsubscribeAttention = null
+  unsubscribeUsage?.()
+  unsubscribeUsage = null
+  contextPct = null
   link?.close()
   link = null
   linkReady = null
