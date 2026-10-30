@@ -139,6 +139,33 @@ if (made.ok) {
     log(gap >= ENTER_GAP_MS - 20, `the first Enter came ${gap} ms after its words (gap ${ENTER_GAP_MS} ms)`)
   } else log(false, 'saw the words and an Enter')
   /*
+   * A lone Enter keeps the beat clear ahead of it too. Words and a lone Enter
+   * written as two calls in the same tick (type_into_pane: type, then submit)
+   * must be two reads, the Enter a beat later — in one read they are a paste to
+   * Claude Code and the \r is not Enter. (A terminal report, ESC [ O, ahead of
+   * the \r loses it the same way against Claude Code 2.1.314; ConPTY eats that
+   * sequence before this child could see it, so words stand in for it here.)
+   */
+  out = ''
+  const ahead = 'these words go first and are long enough to be a paste on their own. '.repeat(2).trim()
+  manager.write('split', ahead)
+  manager.write('split', '\r')
+  await sleep(ENTER_GAP_MS * 2 + 500)
+  const reads2 = [...out.replace(/\r?\n/g, '\n').matchAll(/READ (\d+) (".*?(?<!\\)")/g)].map((m) => ({
+    at: Number(m[1]),
+    text: JSON.parse(m[2])
+  }))
+  const aheadRead = reads2.find((r) => r.text.includes('these words'))
+  const enter2 = reads2.find((r) => r.text === '\r')
+  log(
+    Boolean(aheadRead) && !aheadRead.text.includes('\r'),
+    `words written in the same tick as a lone Enter were read without it (${JSON.stringify(reads2.map((r) => r.text.slice(0, 12)))})`
+  )
+  log(
+    Boolean(enter2 && aheadRead) && enter2.at - aheadRead.at >= ENTER_GAP_MS - 20,
+    `and that Enter came a beat later (${enter2 && aheadRead ? enter2.at - aheadRead.at : '?'} ms, gap ${ENTER_GAP_MS} ms)`
+  )
+  /*
    * Ctrl+C and Escape inside the beat: they must not queue behind the held
    * Enter. Timed at node-pty's own write (a spy on the session's proc), which
    * is "reached the PTY"; the child's reads only confirm the order.
@@ -170,6 +197,13 @@ if (made.ok) {
     ),
     `the held Enter still went, after them (${JSON.stringify(wrote.map((w) => w.data))})`
   )
+  /* A lone Enter with nothing in the beat ahead of it goes at once. */
+  await sleep(ENTER_GAP_MS * 2)
+  const askedEnter = performance.now()
+  manager.write('split', '\r')
+  const hitEnter = wrote.find((w) => w.data === '\r' && w.at >= askedEnter)
+  const tookEnter = hitEnter ? hitEnter.at - askedEnter : Infinity
+  log(tookEnter < 10, `a lone Enter with a quiet beat ahead of it reached the PTY in ${tookEnter.toFixed(2)} ms (< 10)`)
   const session = manager.sessions.get('split')
   proc.write = realWrite
 

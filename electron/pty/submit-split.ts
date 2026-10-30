@@ -88,3 +88,15 @@ export function splitSubmit(data: string): [head: string, enter: string] | null 
 export function isUrgent(data: string): boolean {
   return data === '\x03' || data === '\x1b'
 }
+
+/**
+ * A write that is nothing but the Enter key. It must reach the PTY in a read
+ * of its own: Claude Code takes a read that starts with an escape sequence (a
+ * terminal's answer to a query, a focus report, a paste's end marker) and has
+ * the `\r` behind it as one key, and that key is not Enter. Seen live
+ * 2026-10-30: a brief sat in a Brain-opened pane's box and two Enters were
+ * lost; `ESC [ O` + `\r` in one read reproduced it against Claude Code 2.1.314.
+ */
+export function isLoneEnter(data: string): boolean {
+  return data === '\r' || data === '\r\n'
+}

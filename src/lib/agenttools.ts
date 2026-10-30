@@ -422,7 +422,7 @@ function listPanes(r: Reach, where: Where, panes: ActionPane[]): string {
 }
 
 /** Type into a pane of a project not on screen, without bringing it forward. */
-function typeElsewhere(r: Reach, where: Where, pane: ActionPane, text: string, submit: boolean): string {
+async function typeElsewhere(r: Reach, where: Where, pane: ActionPane, text: string, submit: boolean): Promise<string> {
   const status = r.term.runtime(pane.paneId).status
   if (status === 'idle') {
     return `FAILED: ${pane.name} in ${where.name} has not started yet — Forge starts a project's panes when it is on screen. Nothing was typed.`
@@ -434,9 +434,59 @@ function typeElsewhere(r: Reach, where: Where, pane: ActionPane, text: string, s
     if (/[\r\n]/.test(text)) r.term.paste(pane.paneId, text)
     else if (!r.term.type(pane.paneId, text)) return `FAILED: ${pane.name} in ${where.name} would not take the text.`
   }
-  if (submit) r.term.submit(pane.paneId)
-  if (!text) return `OK: pressed Enter in ${pane.name} (${where.name}).`
-  return `OK: typed into ${pane.name} (${where.name})${submit ? ' and pressed Enter' : ' (not sent)'}.`
+  if (!submit) return `OK: typed into ${pane.name} (${where.name}) (not sent).`
+  const did = text ? `typed into ${pane.name} (${where.name})` : `pressed Enter in ${pane.name} (${where.name})`
+  if (await submitAndWatch(r, pane.paneId)) return text ? `OK: ${did} and pressed Enter.` : `OK: ${did}.`
+  return `FAILED: ${did}, but the pane did not take the Enter: its screen did not change after two tries. Either its box was empty, or the Enter was lost. Check with read_pane before sending anything.`
+}
+
+/** How long a pane gets to react to an Enter before it counts as lost. */
+const SUBMIT_WATCH_MS = 1500
+const SUBMIT_WATCH_STEP_MS = 250
+/** How long the screen must hold still before the Enter goes, and the most it is waited for. */
+const SUBMIT_SETTLE_MS = 150
+const SUBMIT_SETTLE_MAX_MS = 1200
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Press Enter and watch the screen. A submit that landed changes the screen
+ * within a beat (the agent echoes the prompt and starts working); one that was
+ * lost leaves the words sitting in the box, and the Brain told Steve "sent"
+ * (2026-10-30, Kess in koraos: two lost Enters, Steve pressed it himself).
+ *
+ * The Enter waits for the screen to hold still first. Words typed a moment
+ * ago are still echoing back from the PTY, and an Enter written in the same
+ * tick as them shares their read — Claude Code takes that read as a paste and
+ * the `\r` is not Enter (seen live 13:02 the same day, "typed and pressed
+ * Enter" with the line still in the box). The still screen is also the
+ * `before` the watch compares against, so an echo cannot pass for a submit.
+ *
+ * One more press when nothing moved — an Enter at an empty box is a no-op for
+ * every agent and a blank line for a shell — then the truth.
+ */
+async function submitAndWatch(r: Reach, paneId: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = await settledScreen(r, paneId)
+    if (!r.term.submit(paneId)) return false
+    for (let waited = 0; waited < SUBMIT_WATCH_MS; waited += SUBMIT_WATCH_STEP_MS) {
+      await sleep(SUBMIT_WATCH_STEP_MS)
+      if (r.term.snapshotText(paneId, 8) !== before) return true
+    }
+  }
+  return false
+}
+
+/** The pane's last lines once they have not changed for SUBMIT_SETTLE_MS (or the wait runs out). */
+async function settledScreen(r: Reach, paneId: string): Promise<string | null> {
+  let last = r.term.snapshotText(paneId, 8)
+  for (let waited = 0; waited < SUBMIT_SETTLE_MAX_MS; waited += SUBMIT_SETTLE_MS) {
+    await sleep(SUBMIT_SETTLE_MS)
+    const now = r.term.snapshotText(paneId, 8)
+    if (now === last) return now
+    last = now
+  }
+  return last
 }
 
 async function openElsewhere(r: Reach, where: Where, args: Record<string, unknown>): Promise<string> {
@@ -703,7 +753,7 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
       const text = String(args['text'] ?? '')
       const submit = args['submit'] === true
       if (!text.trim() && !submit) return 'FAILED: there is nothing to type.'
-      return typeElsewhere(r, where, pane, text, submit)
+      return await typeElsewhere(r, where, pane, text, submit)
     }
     case 'run_app_action': {
       // send_prompt: the same Enter rules as on screen (appactions.ts), minus
@@ -712,7 +762,7 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
       if (!text) return 'FAILED: send_prompt needs the text to send.'
       const autoRelay = r.app.get().settings.voiceAutoRelay
       const submit = args['submit'] !== false && pane.agent && autoRelay
-      const typed = typeElsewhere(r, where, pane, text, submit)
+      const typed = await typeElsewhere(r, where, pane, text, submit)
       if (submit || typed.startsWith('FAILED')) return typed
       const why = args['submit'] === false ? 'you asked me not to send it' : !pane.agent ? 'it is a plain shell' : 'auto-relay is off in Settings'
       return `${typed} Not sent: ${why}.`

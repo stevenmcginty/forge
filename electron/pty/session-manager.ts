@@ -1,6 +1,6 @@
 import { existsSync, statSync } from 'node:fs'
 import * as pty from '@lydell/node-pty'
-import { ENTER_GAP_MS, isUrgent, splitSubmit, stripInvisible } from './submit-split'
+import { ENTER_GAP_MS, isLoneEnter, isUrgent, splitSubmit, stripInvisible } from './submit-split'
 
 /**
  * PtySessionManager — the only place in Forge that talks to node-pty.
@@ -94,6 +94,8 @@ interface Session {
   enterTimer?: NodeJS.Timeout
   /** Writes that arrived while that Enter was waiting; they go after it, in order. */
   afterEnter?: string[]
+  /** When bytes last went onto the PTY; a lone Enter keeps ENTER_GAP_MS clear of them. */
+  lastWriteAt?: number
   disposed: boolean
 }
 
@@ -249,19 +251,41 @@ export class PtySessionManager {
 
   private writeNow(s: Session, id: string, data: string): boolean {
     const split = splitSubmit(data)
+    const lone = split === null && isLoneEnter(data)
     try {
-      if (split === null) {
-        if (data) s.proc.write(data)
+      if (split === null && !lone) {
+        if (data) {
+          s.proc.write(data)
+          s.lastWriteAt = Date.now()
+        }
         return true
       }
-      s.proc.write(split[0])
+      if (split !== null) {
+        s.proc.write(split[0])
+        s.lastWriteAt = Date.now()
+      }
     } catch (err) {
       console.error(`[pty] write to ${id} failed:`, describe(err))
       return false
     }
+    // An Enter goes onto the PTY in a read of its own: a full beat after the
+    // last bytes (its own words, a paste, a terminal's answer to a query — see
+    // isLoneEnter) and with whatever follows held back for a beat. A lone Enter
+    // with nothing recent ahead of it goes at once, so typing feels no gap.
+    const enter = split === null ? data : split[1]
+    const wait = ENTER_GAP_MS - (Date.now() - (s.lastWriteAt ?? 0))
+    if (lone && wait <= 0) {
+      try {
+        s.proc.write(enter)
+        s.lastWriteAt = Date.now()
+      } catch (err) {
+        console.error(`[pty] write to ${id} failed:`, describe(err))
+        return false
+      }
+      return true
+    }
     s.afterEnter = []
-    const enter = split[1]
-    s.enterTimer = setTimeout(() => this.writeEnter(s, id, enter), ENTER_GAP_MS)
+    s.enterTimer = setTimeout(() => this.writeEnter(s, id, enter), Math.max(1, wait))
     return true
   }
 
@@ -270,6 +294,7 @@ export class PtySessionManager {
     if (s.disposed) return
     try {
       s.proc.write(enter)
+      s.lastWriteAt = Date.now()
     } catch (err) {
       console.error(`[pty] write to ${id} failed:`, describe(err))
       s.afterEnter = undefined
