@@ -1,0 +1,89 @@
+/* Telegram: the bot's state as a shape and a word, and the pairing code. */
+
+.stg__state,
+.stg__result {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+}
+
+.stg__state {
+  height: 24px;
+  padding: 0 var(--s-4);
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-hairline);
+  background: var(--bg-sunken);
+}
+
+/* The tint only repeats the word and the shape beside it. */
+.stg__state[data-state='ready'] {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-softer);
+}
+
+.stg__state[data-state='pairing'],
+.stg__state[data-state='checking'] {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.stg__state[data-state='error'] {
+  color: var(--danger);
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+}
+
+.stg__mark {
+  flex: none;
+}
+
+.stg__onoff {
+  min-width: 2.4em;
+  font-size: var(--t-sm);
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.stg__confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
+.stg__ask {
+  flex: 1;
+  font-size: var(--t-sm);
+  color: var(--text-primary);
+}
+
+.stg__code {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-hairline);
+  background: var(--bg-sunken);
+}
+
+.stg__digits {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  user-select: all;
+}
+
+.stg__left {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+}

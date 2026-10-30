@@ -54,6 +54,7 @@ export type IconName =
   | 'meter'
   | 'book'
   | 'pencil'
+  | 'telegram'
 
 const PATHS: Record<IconName, ReactNode> = {
   // A struck anvil: the mark.
@@ -355,6 +356,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M10.6 2.9l2.5 2.5-7.6 7.6-3.1.6.6-3.1z" />
       <path d="M9.2 4.3l2.5 2.5" />
+    </>
+  ),
+  // A paper plane: the Telegram bot.
+  telegram: (
+    <>
+      <path d="M13.8 2.4L2 7.2l4.4 1.6 1.6 4.6z" />
+      <path d="M6.4 8.8l7.4-6.4" />
     </>
   )
 }

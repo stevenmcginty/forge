@@ -15,6 +15,7 @@ import { ShortcutsSection } from './ShortcutsSection'
 import { ShotsSection } from './ShotsSection'
 import { MobileSection } from './MobileSection'
 import { WebSection } from './WebSection'
+import { TelegramSection } from './TelegramSection'
 import { TerminalSection } from './TerminalSection'
 import { UpdatesSection } from './UpdatesSection'
 import { VoiceSection } from './VoiceSection'
@@ -32,7 +33,7 @@ import './SettingsPage.css'
  */
 
 /**
- * Ten groups in the sidebar, in plain words, with Voice & Agent first. Each
+ * Eleven groups in the sidebar, in plain words, with Voice & Agent first. Each
  * group is one scrolling page of one or more parts, and every old section id
  * is a part — so `openSettings('models')` (the voice agent, the hub's "add a
  * key" links, onboarding) still lands on the right card, the Keys part of
@@ -68,6 +69,13 @@ const GROUPS: Group[] = [
     icon: 'sparkle',
     blurb: 'one agent for all of Forge',
     parts: [{ id: BRAIN_SETTINGS, label: 'Forge Brain', Body: BrainSettings }]
+  },
+  {
+    id: 'telegram',
+    label: 'Telegram',
+    icon: 'telegram',
+    blurb: 'talk to Forge Brain from your phone',
+    parts: [{ id: 'telegram', label: 'Telegram', Body: TelegramSection }]
   },
   {
     id: 'agents',

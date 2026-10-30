@@ -118,6 +118,7 @@ export type SettingsSection =
   | 'updates'
   | 'advanced'
   | 'brain'
+  | 'telegram'
 
 /**
  * What the main area is showing. Settings and Devices are *views*, not modals:
