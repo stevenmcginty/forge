@@ -261,8 +261,11 @@ export class TelegramChannel {
   /** Arm a fresh pairing code. Does nothing while paired, off, or without a token. */
   pair(): TelegramStatus {
     const s = this.deps.settings.get()
-    if (this.disposed || this.paired() || !s.telegramEnabled || !(s.telegramBotToken ?? '').trim()) {
-      return this.status()
+    if (this.disposed || this.paired() || !(s.telegramBotToken ?? '').trim()) return this.status()
+    // Pair switches the bot on by itself: a code is useless with no poller to hear it.
+    if (!s.telegramEnabled) {
+      this.deps.settings.set({ telegramEnabled: true })
+      this.apply()
     }
     this.clearCode()
     this.pairCode = String(randomInt(0, 1_000_000)).padStart(6, '0')
@@ -452,6 +455,8 @@ export class TelegramChannel {
     const attempt = command ? (command.name === 'start' ? command.arg : '') : /^\d+$/.test(text) ? text : ''
     // Not a code at all ("hi", the bare /start a new chat sends): ignored, not counted.
     if (!attempt) return
+    // Only a private chat can pair. A code sent in a group would let the whole group in.
+    if ((msg.chat.type ?? 'private') !== 'private') return
     const chatId = String(msg.chat.id)
     if (attempt === this.pairCode) {
       const name = msg.chat.first_name || msg.from?.first_name || msg.chat.username || msg.from?.username || ''

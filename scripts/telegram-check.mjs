@@ -386,6 +386,29 @@ await check('a wrong code is ignored without a reply; a right one pairs and writ
   t.ch.dispose()
 })
 
+await check('a right code sent from a group chat pairs nothing', async () => {
+  const t = await setup()
+  const code = t.ch.pair().pairCode
+  await t.send(STEVE, { text: code, chat: { id: STEVE, type: 'group', first_name: 'Steve' } })
+  assert.equal(t.settings.telegramChatId, '', 'a group chat must not pair')
+  assert.equal(t.api.sent.length, 0)
+  await t.send(STEVE, { text: code, chat: { id: STEVE, type: 'private', first_name: 'Steve' } })
+  assert.equal(t.settings.telegramChatId, String(STEVE), 'the same code from the private chat pairs')
+  t.ch.dispose()
+})
+
+await check('Pair while the bot is off switches it on and arms a code', async () => {
+  const t = await setup()
+  t.ch.setEnabled(false)
+  assert.equal(t.ch.status().state, 'off')
+  const s = t.ch.pair()
+  assert.equal(t.settings.telegramEnabled, true, 'Pair turned the bot on')
+  assert.match(s.pairCode ?? '', /^\d{6}$/, 'a code is armed')
+  await until(() => t.ch.status().state === 'pairing', 'the bot to come back up')
+  assert.equal(t.ch.status().pairCode, s.pairCode, 'the code survives the restart')
+  t.ch.dispose()
+})
+
 await check('/start CODE pairs', async () => {
   const t = await setup()
   const code = t.ch.pair().pairCode
