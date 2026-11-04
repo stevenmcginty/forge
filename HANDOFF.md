@@ -1,5 +1,12 @@
 # Handoff
 
+## Voice bar "garbled speech-to-text" was split turns; Edge TTS 403 fixed (2026-11-04 17:10; master 9d8c599 + 174be02, local, NOT pushed)
+
+- **Found (log + SDK session JSONL, not guessed):** Parakeet transcribed each piece correctly (only "jug" for "joke"). The bar cuts a phrase after `agentSilenceMs` (Steve: 800 ms), the mic stays open while Claude thinks (4-9 s on Opus), and a phrase arriving mid-turn REPLACED the turn in flight, so a sentence with a pause became two turns and Claude answered only the fragment. Mic = built-in Intel array, no Bluetooth. No capture code changed in the Claude Voice commit.
+- **Fixed, renderer (live by HMR at 17:08):** for the Claude brains, a spoken phrase within 20 s while the turn in flight has not started answering is joined onto it (`joinsTurnInFlight`, src/lib/brainConfirmVoice.ts) and sent as one turn with one chat card; once Claude speaks, talking over it still interrupts. Dev log line `[hub] event=turn-joined pieces=N`. brain-confirm:check 28/0.
+- **Fixed, main (needs a Forge restart):** Edge TTS 403 on every connection (why Forge Brain said "Voice unavailable"): ported edge-tts 7.3's v2 Sec-MS-GEC token, `2-` version, muid cookie, headers into electron/edge-tts.ts. Probed live: Ryan and Sonia return audio.
+- **Next:** Steve tests three sentences with pauses in Claude Voice; restart Forge for the Edge fix; D.m.p to push.
+
 ## New voice agent "Claude Voice": Claude Agent SDK brain + Kokoro voice on WebGPU (2026-11-04; branch `claude-kokoro`, worktree `C:\Users\steve\Desktop\forge-worktrees\forge-kokoro`, UNCOMMITTED, not merged)
 
 - **Asked (Steve):** a new voice agent beside the others, powered by Claude Code on his subscription (no API), Kokoro voice, seamless back-and-forth, full app power, on Forge desktop, Forge mobile browser and Forge browser.
