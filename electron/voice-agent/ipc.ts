@@ -9,7 +9,7 @@ import type {
   VoiceAgentToolResult
 } from '@shared/types'
 import { isCodexClaudeModel } from '@shared/agent-brain'
-import type { WebVoiceClaudeEvent } from '@shared/web'
+import type { WebVoiceClaudeAgent, WebVoiceClaudeEvent } from '@shared/web'
 import { getDataDir, getSettings } from '../store'
 import { isMainMinimised } from '../minibar-window'
 import { bridgeConfigPath, resolveBridgeScript } from '../bridge/mcp-config'
@@ -150,6 +150,8 @@ function ensureHost(): VoiceAgentHost {
  */
 
 let webHost: VoiceAgentHost | null = null
+/** Which agent the browser asked for: Claude Voice gets its own short persona (./persona.ts). */
+let webAgent: WebVoiceClaudeAgent = 'claude'
 /** The browser that owns `webHost` now. Replaced by the next `openWebVoiceAgent`. */
 let webSink: ((event: WebVoiceClaudeEvent) => void) | null = null
 
@@ -180,8 +182,9 @@ function ensureWebHost(): VoiceAgentHost {
     sendToolRequest: (request) => send(IPC.voiceAgentToolRequest, request),
     getModel: webClaudeModel,
     // Always this Claude session: `agentBrain` picks the desk's brain, and a
-    // CLI brain there must not answer a browser that asked for Claude.
-    getBrain: () => 'claude',
+    // CLI brain there must not answer a browser that asked for Claude. Claude
+    // Voice is the same session with its own persona (./host.ts `route`).
+    getBrain: () => webAgent,
     getBridgeServer: bridgeServer,
     captureScreen,
     getAssetsDir: () => join(getDataDir(), 'bridge-out'),
@@ -195,9 +198,13 @@ function ensureWebHost(): VoiceAgentHost {
  * so the first turn does not wait on the SDK starting. A browser that held it
  * before is told `closed`.
  */
-export function openWebVoiceAgent(onEvent: (event: WebVoiceClaudeEvent) => void): WebVoiceAgentLink {
+export function openWebVoiceAgent(
+  onEvent: (event: WebVoiceClaudeEvent) => void,
+  agent: WebVoiceClaudeAgent = 'claude'
+): WebVoiceAgentLink {
   const previous = webSink
   webSink = onEvent
+  webAgent = agent
   if (previous && previous !== onEvent) previous({ type: 'closed', reason: 'Claude is listening in another browser now.' })
   const brain = ensureWebHost()
   brain.stop()

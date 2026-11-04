@@ -63,6 +63,7 @@ import { disposeGlobalKeys, syncGlobalKeys } from './global-keys'
 import { disposeCopilotKey, syncCopilotKey } from './copilot-key'
 import { disposeShotCard, registerShotCardIpc } from './shot-card-window'
 import { registerVoiceHandlers } from './voice-bridge'
+import { disposeKokoro, registerKokoroScheme, warmKokoro } from './kokoro-tts'
 import {
   disposeVoiceAgent,
   registerVoiceAgentHandlers,
@@ -186,6 +187,9 @@ app.setPath('userData', DATA_ROOT)
 // settings.json, projects.json, layouts/ and shots/ at the top, browser guts
 // in chromium/.
 app.setPath('sessionData', join(DATA_ROOT, 'chromium'))
+// Claude Voice's speech engine page (electron/kokoro-tts.ts) needs a secure,
+// standard origin for WebGPU and module scripts. Before ready, and once.
+registerKokoroScheme()
 
 let mainWindow: BrowserWindow | null = null
 /** Watches that window's renderer for the three ways it can stop being Forge. */
@@ -412,6 +416,9 @@ function createWindow(): void {
     // Load Parakeet now, in the background, so the first Right Ctrl opens the
     // mic instead of waiting out a 3–6 s model load. Off via sttWarmStart.
     scheduleWarmStart()
+    // Claude Voice as the stored pick: Kokoro loads now too (a few seconds of
+    // GPU in the background; nothing at all for anyone on another agent).
+    if (getSettings().agentBrain === 'claude-voice') void warmKokoro(getSettings().kokoroVoice)
   })
 
   const emitWindowState = (): void => {
@@ -1056,6 +1063,9 @@ function registerAppHandlers(): void {
     const before = getSettings()
     const next = setSettings(rendererOwned(patch ?? {}))
     applyShotSettings(next)
+    // Claude Voice picked: load Kokoro on the GPU now, so its first reply is
+    // already in Kokoro's voice rather than Edge's.
+    if (next.agentBrain === 'claude-voice' && before.agentBrain !== 'claude-voice') void warmKokoro(next.kokoroVoice)
     // Turning the global talk keys (or the mini bar) off while minimised takes
     // the hook down at once; turning the bar off takes the bar down with it.
     if (before.miniBar && !next.miniBar) hideMiniBar()
@@ -1808,6 +1818,7 @@ app.on('before-quit', () => {
   // Ends the Agent SDK session and its subprocess. A voice brain outliving the
   // app would hold a `claude` process open with nobody to talk to.
   safely('disposeVoiceAgent', disposeVoiceAgent)
+  safely('disposeKokoro', disposeKokoro)
   // Every driven pane's session, for the same reason: a Foreman outliving the
   // app would hold a `claude` process open with a terminal to type into and
   // nobody watching it.

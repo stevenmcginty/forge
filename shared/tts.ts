@@ -170,3 +170,22 @@ export function isEdgeVoice(name: string): boolean {
   const v = (name ?? '').trim()
   return EDGE_VOICE_NAMES.has(v) || /^[a-z]{2,3}-[A-Za-z]{2,10}-[A-Za-z0-9]{2,40}Neural$/.test(v)
 }
+
+/* ------------------------------------------------------------------ Kokoro */
+
+/**
+ * Claude Voice's voice: Kokoro-82M, run on this machine's GPU by
+ * electron/kokoro-tts.ts. `bf_emma` is the best-graded British voice in
+ * Kokoro's own VOICES.md (B-); the other British ones grade C or worse.
+ */
+export const DEFAULT_KOKORO_VOICE = 'bf_emma'
+
+/**
+ * A kokoro-js voice id: a language-and-gender pair of letters, an underscore,
+ * a lower-case name (`bf_emma`, `am_michael`). The shape check keeps anything
+ * else out of the page script; kokoro-js refuses a well-formed unknown one,
+ * and main falls back to Edge for that sentence.
+ */
+export function isKokoroVoice(name: string): boolean {
+  return /^[a-z]{2}_[a-z]{2,20}$/.test((name ?? '').trim())
+}

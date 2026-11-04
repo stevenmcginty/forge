@@ -49,8 +49,9 @@ import { getMainWindow } from './main-window'
 import { WebAuth, googleJwksFetcher } from './web/auth'
 import { checkFolder, listFolder } from './web/fs-browse'
 import { saveInboxFile, saveInboxImage } from './web/inbox'
-import { saveSpeechKey, transcribeAudio } from './voice-bridge'
+import { noteKokoroFallback, saveSpeechKey, transcribeAudio } from './voice-bridge'
 import { speakEdge } from './edge-tts'
+import { cancelKokoro, pcm16Wav, speakKokoro, warmKokoro } from './kokoro-tts'
 import { openWebVoiceAgent } from './voice-agent/ipc'
 import { connectOpenAI, mintGeminiToken } from './realtime/tokens'
 import { filePasskeyStorage } from './web/passkey'
@@ -1616,8 +1617,10 @@ async function start(): Promise<void> {
     // ipc.ts). Each turn carries the app context when it changed since the
     // last — the desk's rule (src/state/VoiceAgent.tsx) — and the first one
     // says where Claude is being heard, since its persona is the desk's.
-    voiceClaudeOpen: (onEvent) => {
-      const link = openWebVoiceAgent(onEvent)
+    voiceClaudeOpen: (onEvent, agent) => {
+      // Claude Voice from a browser: Kokoro loads while the first turn is heard.
+      if (agent === 'claude-voice') void warmKokoro(getSettings().kokoroVoice)
+      const link = openWebVoiceAgent(onEvent, agent)
       let told = ''
       let first = true
       return {
@@ -1632,13 +1635,23 @@ async function start(): Promise<void> {
           link.say(block.length ? `[${block.join('\n\n')}]\n\n${text}` : text)
         },
         interrupt: async () => {
+          // Talked over: the sentences the page fetched ahead are not wanted.
+          cancelKokoro('web')
           await link.interrupt()
         },
         close: () => link.close()
       }
     },
-    // One sentence of a browser Claude's reply, in the desk's Edge voice.
-    voiceSpeak: async (text) => {
+    // One sentence of a browser Claude's reply, in the desk's Edge voice — or,
+    // for Claude Voice, Kokoro's (WAV, which every browser decodes), with Edge
+    // speaking the sentence whenever Kokoro cannot.
+    voiceSpeak: async (text, engine) => {
+      if (engine === 'kokoro') {
+        const kokoro = await speakKokoro(text, getSettings().kokoroVoice, { lane: 'web' })
+        if (kokoro.ok) return { ok: true, audio: pcm16Wav(Buffer.from(kokoro.audio, 'base64'), kokoro.sampleRate).toString('base64'), mime: 'audio/wav' }
+        if (kokoro.kind === 'cancelled') return { ok: false, error: kokoro.error }
+        noteKokoroFallback(kokoro.error)
+      }
       const result = await speakEdge({ text, voice: getSettings().voiceEdgeVoice })
       return result.ok
         ? { ok: true, audio: result.audio.toString('base64'), mime: result.mime }

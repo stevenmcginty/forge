@@ -234,6 +234,8 @@ export async function testBrain(target: BrainTestTarget, settings: Settings, fet
   const spec = agentBrainSpec(target.id)
   switch (target.id) {
     case 'claude':
+    case 'claude-voice':
+      // Claude Voice is the same Claude session; its Kokoro voice falls back to Edge by itself.
       return testClaudeCli(settings.voiceClaudeModel || 'opus')
     case 'gemini-live':
       return testGeminiKey(settings.geminiKey, null, fetchImpl)

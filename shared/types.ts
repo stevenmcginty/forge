@@ -960,6 +960,8 @@ export type AgentBrainId =
   | 'codex-cli'
   /** Forge Brain itself (shared/brain.ts): Parakeet hears, the brain pane answers, the TTS voice speaks. */
   | 'forge-brain'
+  /** Claude Voice: the Claude voice session (electron/voice-agent/host.ts), its own short persona, Kokoro speaks on the GPU. */
+  | 'claude-voice'
 
 /**
  * One row of the desktop voice menu, in display order.
@@ -1439,10 +1441,12 @@ export interface VoiceSpeakRequest {
    * Which neural engine to ask. Empty means Gemini, because every caller
    * predates the edge engine and that is what they meant.
    */
-  engine?: 'edge' | 'gemini'
+  engine?: 'edge' | 'gemini' | 'kokoro'
   /**
    * A voice name the chosen engine knows — `Sulafat` for Gemini,
-   * `en-GB-SoniaNeural` for edge. Empty means that engine's default.
+   * `en-GB-SoniaNeural` for edge, `bf_emma` for kokoro. Empty means that
+   * engine's default. `kokoro` is Claude Voice's (electron/kokoro-tts.ts): it
+   * answers with Edge, in `voiceEdgeVoice`, whenever Kokoro cannot.
    */
   voice?: string
   /** Gemini only. Empty means the model in settings, which defaults to 3.1 flash. */
@@ -1897,6 +1901,12 @@ export interface Settings {
    * shared/tts.ts — en-GB-SoniaNeural, a warm British female voice.
    */
   voiceEdgeVoice: string
+  /**
+   * The Kokoro voice Claude Voice speaks in (electron/kokoro-tts.ts) — a
+   * kokoro-js voice id such as `bf_emma`. `DEFAULT_KOKORO_VOICE` in
+   * shared/tts.ts until he picks one; no Settings UI yet.
+   */
+  kokoroVoice: string
   /**
    * A prebuilt Gemini voice name. Empty means `DEFAULT_TTS_VOICE` in
    * electron/gemini-tts.ts — Sulafat, the one Google documents as "Warm".

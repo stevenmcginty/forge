@@ -730,10 +730,10 @@ await check('an older desktop\'s "does not understand" becomes "update the deskt
   assert.equal(voiceFailureWords({ code: 'failed', message: 'Could not reach Gemini: offline' }), 'Could not reach Gemini: offline')
 })
 
-await check('the phone and deck pickers offer three: Forge Brain (the default), Gemini, ChatGPT; a remembered Claude becomes Forge Brain', async () => {
+await check('the phone and deck pickers offer four: Forge Brain (the default), Claude Voice, Gemini, ChatGPT; a remembered Claude becomes Forge Brain', async () => {
   const { WEB_VOICE_AGENTS, DEFAULT_WEB_VOICE_AGENT, readVoiceAgent, voiceAgentWord } = await import('../web/src/deck/voice-words.ts')
-  assert.deepEqual(WEB_VOICE_AGENTS, ['forge-brain', 'gemini-live', 'gpt-realtime'])
-  assert.deepEqual(WEB_VOICE_AGENTS.map(voiceAgentWord), ['Forge Brain', 'Gemini', 'ChatGPT'])
+  assert.deepEqual(WEB_VOICE_AGENTS, ['forge-brain', 'claude-voice', 'gemini-live', 'gpt-realtime'])
+  assert.deepEqual(WEB_VOICE_AGENTS.map(voiceAgentWord), ['Forge Brain', 'Claude Voice', 'Gemini', 'ChatGPT'])
   assert.equal(DEFAULT_WEB_VOICE_AGENT, 'forge-brain')
   for (const stored of [null, undefined, '', 'nope', 'claude', 'gpt-realtime-mini']) assert.equal(readVoiceAgent(stored), 'forge-brain', String(stored))
   for (const stored of WEB_VOICE_AGENTS) assert.equal(readVoiceAgent(stored), stored)

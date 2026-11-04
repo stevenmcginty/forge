@@ -32,7 +32,7 @@ import { closeDesktopWindow, focusDesktopWindow, listOpenWindows, sendKeysToWind
 import { click, frontWindow, key, noteLook, pngSize, readWindow, type } from '../desktop-hands'
 import { closeBrowser } from './chrome-control'
 import { defaultAssetsDir, listFiles, runCommand, saveAsset, writeTextFile } from './file-tools'
-import { VOICE_PERSONA } from './persona'
+import { CLAUDE_VOICE_PERSONA, VOICE_PERSONA } from './persona'
 import { brainHubTools } from '../hub-brain-tools'
 import { brainSpecAllowed, brainSpecTools } from '../brain-tools-mcp'
 import { refuseCommand } from './launch-guard'
@@ -241,6 +241,8 @@ export class VoiceAgentHost {
   /** The model and cwd the *live* session was started with. */
   private model = ''
   private cwd = ''
+  /** The system prompt the live session was started with: Claude Voice has its own. */
+  private persona = VOICE_PERSONA
   /** The cwd the next session should use, from the last start() request. */
   private wantedCwd = ''
 
@@ -262,12 +264,16 @@ export class VoiceAgentHost {
    * under the Claude brain (the old "GPT-5.6 Luna via Codex") is the codex-cli
    * adapter with that model, so it gets the Forge tools too.
    */
-  private route(): { kind: 'claude'; model: string } | { kind: 'cli'; brain: CliBrainId; model: string | null } {
+  private route():
+    | { kind: 'claude'; model: string; persona: string }
+    | { kind: 'cli'; brain: CliBrainId; model: string | null } {
     const brain = this.deps.getBrain?.() ?? 'claude'
     if (isCliBrain(brain)) return { kind: 'cli', brain, model: null }
     const model = this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
     if (CODEX_VOICE_MODELS.has(model) || isCodexClaudeModel(model)) return { kind: 'cli', brain: 'codex-cli', model }
-    return { kind: 'claude', model }
+    // Claude Voice: this same session and every tool, with its own short,
+    // conversational persona (./persona.ts CLAUDE_VOICE_PERSONA).
+    return { kind: 'claude', model, persona: brain === 'claude-voice' ? CLAUDE_VOICE_PERSONA : VOICE_PERSONA }
   }
 
   /* ------------------------------------------------------------- lifecycle */
@@ -356,7 +362,9 @@ export class VoiceAgentHost {
     }
 
     this.cli.interrupt()
-    if (this.session && route.model !== this.model) {
+    // A switch between Claude and Claude Voice changes the system prompt,
+    // which only a new session can take — at the same boundary as a model.
+    if (this.session && (route.model !== this.model || route.persona !== this.persona)) {
       this.teardown()
     }
 
@@ -485,7 +493,7 @@ export class VoiceAgentHost {
 
     let q: Query
     try {
-      q = query({ prompt: this.input(), options: this.options(model, cwd) })
+      q = query({ prompt: this.input(), options: this.options(model, cwd, route.persona) })
     } catch (err) {
       this.onDead(`The voice brain could not start: ${errText(err)}`)
       return
@@ -494,6 +502,7 @@ export class VoiceAgentHost {
     this.session = q
     this.model = model
     this.cwd = cwd
+    this.persona = route.persona
     this.lastError = null
 
     void this.consume(q)
@@ -1399,7 +1408,7 @@ export class VoiceAgentHost {
    *    the intended division of labour here. The allowlist says yes, the
    *    callback is the backstop that says no to everything else.
    */
-  private options(model: string, cwd: string): Options {
+  private options(model: string, cwd: string, persona: string = VOICE_PERSONA): Options {
     const servers: Record<string, McpServerConfig> = { forge: this.forgeServer() }
     // The same server every Claude pane gets, so the voice agent can generate
     // an image or ask Gemini without a second implementation of either.
@@ -1495,7 +1504,7 @@ export class VoiceAgentHost {
       // A plain string, not the claude_code preset: this is a voice butler and
       // the preset is thousands of tokens of coding-agent instruction that
       // would fight every rule in the persona.
-      systemPrompt: VOICE_PERSONA,
+      systemPrompt: persona,
       // No CLAUDE.md, no settings.json, no project instructions. The prompt
       // stays lean and — because nothing machine-specific leaks in — cacheable.
       settingSources: [],

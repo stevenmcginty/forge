@@ -438,12 +438,19 @@ export interface VoiceConfig {
   edgeVoices?: readonly string[]
   /** Never the local (SAPI) voice: when every neural try fails, say nothing (`engine: 'none'`). */
   neuralOnly?: boolean
+  /**
+   * Claude Voice: a Kokoro voice id (`bf_emma`), asked first. Main answers
+   * with Edge by itself while Kokoro loads or when it cannot run
+   * (electron/voice-bridge.ts), so this is a voice in front of the chain, not
+   * a replacement for it.
+   */
+  kokoroVoice?: string
 }
 
 export interface SpokenResult {
   /** Did any sound come out. */
   spoke: boolean
-  engine: VoiceEngine | 'none'
+  engine: VoiceEngine | 'kokoro' | 'none'
   /** Was it already in the cache — time to first audio was effectively zero. */
   cached: boolean
   /** Milliseconds from asking to the first sample. */
@@ -481,11 +488,23 @@ export function neuralChain(config: VoiceConfig): Array<'edge' | 'gemini'> {
  * them (the first voice twice — one retry — then the others), otherwise the
  * engine chain, each engine in its configured voice.
  */
-export function neuralTries(config: VoiceConfig): Array<{ engine: 'edge' | 'gemini'; voice: string }> {
+export function neuralTries(config: VoiceConfig): Array<{ engine: NeuralEngine; voice: string }> {
+  const kokoro = config.kokoroVoice?.trim() ? [{ engine: 'kokoro' as const, voice: config.kokoroVoice.trim() }] : []
   const voices = (config.edgeVoices ?? []).filter((v) => v.trim())
-  if (voices.length) return [voices[0]!, ...voices].map((voice) => ({ engine: 'edge' as const, voice }))
-  return neuralChain(config).map((engine) => ({ engine, voice: engine === 'edge' ? config.edgeVoice : config.geminiVoice }))
+  if (voices.length) return [...kokoro, ...[voices[0]!, ...voices].map((voice) => ({ engine: 'edge' as const, voice }))]
+  return [...kokoro, ...neuralChain(config).map((engine) => ({ engine, voice: engine === 'edge' ? config.edgeVoice : config.geminiVoice }))]
 }
+
+type NeuralEngine = 'edge' | 'gemini' | 'kokoro'
+
+/** The clip cache key for one neural try. */
+function tryCacheKey(body: string, engine: NeuralEngine, voice: string, config: VoiceConfig): string {
+  if (engine === 'kokoro') return ttsCacheKey(body, voice, 'kokoro')
+  return engine === 'edge' ? ttsCacheKey(body, voice || 'default', 'edge-neural') : ttsCacheKey(body, config.geminiVoice, config.ttsModel)
+}
+
+/** Sentences Claude Voice may have in synthesis ahead of the one playing. */
+const PREFETCH_MAX = 4
 
 let requestSeq = 0
 
@@ -510,6 +529,12 @@ class VoiceSpeaker {
   private active = false
   /** So the fallback notice is shown once per session, not once per sentence. */
   private warned = false
+  /**
+   * Claude Voice's sentences already asked for, ahead of the mouth
+   * (`prefetch`): the request id, and the clip-to-be by cache key. `speak`
+   * waits on one of these instead of asking again.
+   */
+  private readonly ahead = new Map<string, { requestId: string; done: Promise<void> }>()
 
   get speaking(): boolean {
     return this.active
@@ -564,10 +589,15 @@ class VoiceSpeaker {
     let lastFailureKind: string | null = null
     let lastFailureError = ''
     for (const { engine, voice } of neuralTries(config)) {
-      const key =
-        engine === 'edge'
-          ? ttsCacheKey(body, voice || 'default', 'edge-neural')
-          : ttsCacheKey(body, config.geminiVoice, config.ttsModel)
+      const key = tryCacheKey(body, engine, voice, config)
+      // Asked for ahead of time (Claude Voice): wait for that answer rather than asking twice.
+      const pending = this.ahead.get(key)
+      if (pending) {
+        await pending.done
+        if (generation !== this.generation) {
+          return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
+        }
+      }
       const hit = this.cache.get(key)
       if (hit) {
         const played = await this.playClip(hit, body, generation)
@@ -668,7 +698,52 @@ class VoiceSpeaker {
       this.inFlight = null
       void io().cancelSpeak(id)
     }
+    // The sentences fetched ahead were for the reply he just talked over.
+    for (const { requestId } of this.ahead.values()) void io().cancelSpeak(requestId)
+    this.ahead.clear()
     speaker.cancel()
+  }
+
+  /**
+   * Claude Voice: start making a sentence's audio now, while the one before it
+   * plays, so the gap between sentences is not a whole synthesis long. Only
+   * for a Kokoro config; the clip lands in the cache under the key `speak`
+   * looks for, and `speak` waits on it if it is still coming. Main's Kokoro
+   * queue is serial, so sentences are made in the order they were pushed.
+   */
+  prefetch(text: string, config: VoiceConfig): void {
+    const voice = config.kokoroVoice?.trim()
+    if (!voice) return
+    const body = stripFiller(speakable(text))
+    if (!body) return
+    const key = tryCacheKey(body, 'kokoro', voice, config)
+    if (this.cache.get(key) || this.ahead.has(key) || this.ahead.size >= PREFETCH_MAX) return
+    const requestId = `say_${++requestSeq}`
+    const generation = this.generation
+    const done = (async (): Promise<void> => {
+      try {
+        const result = await io().speak({ text: body, engine: 'kokoro', voice, requestId })
+        if (!result.ok || generation !== this.generation) return
+        if (result.format === 'mp3') {
+          // Kokoro could not, and main asked Edge for it.
+          const decoded = await io().decode(base64ToBytes(result.audio).buffer)
+          if (generation === this.generation) this.cache.set(key, { ...decoded, voice: result.voice, model: result.model })
+          return
+        }
+        this.cache.set(key, {
+          pcm: base64ToPcm(result.audio),
+          sampleRate: result.sampleRate,
+          channels: result.channels,
+          voice: result.voice,
+          model: result.model
+        })
+      } catch {
+        // `speak` asks again for itself.
+      } finally {
+        if (this.ahead.get(key)?.requestId === requestId) this.ahead.delete(key)
+      }
+    })()
+    this.ahead.set(key, { requestId, done })
   }
 
   /**

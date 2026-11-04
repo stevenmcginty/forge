@@ -23,6 +23,7 @@ import type {
 import { editImage, makeImage, makeVideo, type MediaResult } from './gemini-media'
 import { speak as speakGemini } from './gemini-tts'
 import { speakEdge } from './edge-tts'
+import { speakKokoro } from './kokoro-tts'
 import { adoptShotFiles } from './shots-watcher'
 import { getDataDir, getSettings, setSettings } from './store'
 
@@ -561,6 +562,16 @@ async function transcribeWithGemini(
   }
 }
 
+/** The last reason Kokoro handed a sentence to Edge — logged when it changes, not per sentence. */
+let kokoroFallbackSaid = ''
+
+export function noteKokoroFallback(reason: string): void {
+  const key = reason.replace(/\d+/g, '#')
+  if (key === kokoroFallbackSaid) return
+  kokoroFallbackSaid = key
+  console.warn(`[kokoro] Edge speaks instead: ${reason}`)
+}
+
 export function registerVoiceHandlers(): void {
   ipcMain.handle(IPC.voiceImportKey, (_e, which: KeySource): ImportedKeyResult =>
     importKey(which === 'openrouter' || which === 'groq' ? which : 'gemini')
@@ -641,13 +652,38 @@ export function registerVoiceHandlers(): void {
       speaking.set(id, controller)
     }
     try {
+      // Claude Voice's engine: Kokoro on this machine's GPU, PCM16 back. It is
+      // never the only voice — while it loads, or when it cannot run, the same
+      // sentence is spoken by Edge below, and the reason is logged once.
+      if (req?.engine === 'kokoro') {
+        const result = await speakKokoro(String(req?.text ?? ''), req?.voice || settings.kokoroVoice, {
+          signal: controller.signal,
+          lane: 'desk'
+        })
+        if (result.ok) {
+          return {
+            ok: true,
+            audio: result.audio,
+            format: 'pcm16',
+            mime: 'audio/L16;rate=24000',
+            sampleRate: result.sampleRate,
+            channels: 1,
+            model: 'kokoro-82m',
+            voice: result.voice,
+            ms: result.ms
+          }
+        }
+        if (result.kind === 'cancelled') return { ok: false, error: result.error, kind: 'cancelled' }
+        noteKokoroFallback(result.error)
+      }
       // The free engine takes a different road entirely: no key, one socket,
       // MP3 back. The renderer's chain decides which engine to ask; this
       // handler only answers for the one named.
-      if (req?.engine === 'edge') {
+      if (req?.engine === 'edge' || req?.engine === 'kokoro') {
         const result = await speakEdge({
           text: String(req?.text ?? ''),
-          voice: req?.voice || settings.voiceEdgeVoice,
+          // A Kokoro voice id means nothing to Edge: Kokoro's fallback is the agents' Edge voice.
+          voice: (req?.engine === 'edge' && req?.voice) || settings.voiceEdgeVoice,
           signal: controller.signal
         })
         if (!result.ok) return { ok: false, error: result.error, kind: result.kind }

@@ -34,7 +34,8 @@ const MAKER: Record<AgentBrainId, Maker> = {
   'gemini-flash': 'gemini',
   groq: 'groq',
   openrouter: 'openrouter',
-  'forge-brain': 'forge'
+  'forge-brain': 'forge',
+  'claude-voice': 'claude'
 }
 
 /**

@@ -89,6 +89,14 @@ export const AGENT_BRAINS: readonly AgentBrainSpec[] = [
     key: null,
     auth: 'the engine Forge Brain runs on',
     note: 'Talk straight to Forge Brain — Parakeet hears, the brain answers, your voice setting speaks'
+  },
+  {
+    id: 'claude-voice',
+    label: 'Claude Voice',
+    kind: 'session',
+    key: null,
+    auth: 'your claude login',
+    note: 'Free with your subscription — Parakeet hears, a hidden Claude session with every Forge tool thinks, Kokoro speaks on your GPU'
   }
 ]
 
@@ -100,14 +108,19 @@ export function isAgentBrainId(value: unknown): value is AgentBrainId {
 
 /**
  * The voice agents every picker offers — the bar's, Settings' Main agent card,
- * the phone's and the deck's — in this order. Forge Brain, Gemini Live and GPT
- * Realtime (the web calls them Forge Brain, Gemini and ChatGPT). The others
+ * the phone's and the deck's — in this order. Forge Brain, Claude Voice, Gemini
+ * Live and GPT Realtime (the web calls them Forge Brain, Claude Voice, Gemini
+ * and ChatGPT). The others
  * keep their adapters and their code in AGENT_BRAINS; one comes back by adding
  * its id here. A stored pick outside this list answers as Forge Brain
  * (`visibleAgentBrain`): Claude "doesn't quite work", and Forge Brain on its
  * own CLI replaces it.
+ *
+ * Claude Voice (2026-11-04) is that same Claude session with its own short
+ * conversational persona and a local voice — Kokoro on the GPU
+ * (electron/kokoro-tts.ts) — and sits second, after Forge Brain.
  */
-export const VISIBLE_AGENT_BRAINS: readonly AgentBrainId[] = ['forge-brain', 'gemini-live', 'gpt-realtime']
+export const VISIBLE_AGENT_BRAINS: readonly AgentBrainId[] = ['forge-brain', 'claude-voice', 'gemini-live', 'gpt-realtime']
 
 /** The same list as specs, in the same order. */
 export const VISIBLE_AGENT_BRAIN_SPECS: readonly AgentBrainSpec[] = VISIBLE_AGENT_BRAINS.map(
@@ -125,13 +138,13 @@ export function visibleAgentBrain(id: AgentBrainId): AgentBrainId {
   return isVisibleAgentBrain(id) ? id : DEFAULT_AGENT_BRAIN
 }
 
-/** The picker order when Settings has never stored one: the visible three, all shown. */
+/** The picker order when Settings has never stored one: every visible one, all shown. */
 export function defaultVoiceMenu(): VoiceMenuEntry[] {
   return VISIBLE_AGENT_BRAINS.map((id) => ({ id, shown: true }))
 }
 
 /**
- * A non-array (an old settings.json has no field) becomes the default three.
+ * A non-array (an old settings.json has no field) becomes the default list.
  * So does a menu saved before the visible list (it names a brain the pickers no
  * longer offer, e.g. Claude): its order and ticks were for other options.
  * Otherwise the array is kept: unknown ids and later duplicates drop, and any

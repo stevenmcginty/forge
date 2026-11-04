@@ -1,5 +1,14 @@
 # Handoff
 
+## New voice agent "Claude Voice": Claude Agent SDK brain + Kokoro voice on WebGPU (2026-11-04; branch `claude-kokoro`, worktree `C:\Users\steve\Desktop\forge-worktrees\forge-kokoro`, UNCOMMITTED, not merged)
+
+- **Asked (Steve):** a new voice agent beside the others, powered by Claude Code on his subscription (no API), Kokoro voice, seamless back-and-forth, full app power, on Forge desktop, Forge mobile browser and Forge browser.
+- **Decided:** brain = the existing warm `VoiceAgentHost` (electron/voice-agent/host.ts, one streaming-input SDK session, ~35 forge tools), with its own short spoken persona (`CLAUDE_VOICE_PERSONA`). Voice = kokoro-js 1.2.1 browser bundle (vendored in `assets/kokoro/`, Apache-2.0), fp16, `bf_emma` (setting `kokoroVoice`), in one hidden offscreen window (`electron/kokoro-tts.ts`, scheme `forge-kokoro://`, partition `persist:forge-kokoro`). Measured: Node CPU too slow (RTF 1.6-2.0), DirectML fails on a ConvTranspose node, WebGPU works (Intel iGPU, ~1 s first audio for a short sentence, ~2 s for 112 chars). The Cache API fails on the custom scheme, so main intercepts the model/wasm https fetches in that partition and keeps them in `<userData>\kokoro\cache` (~177 MB, first use downloads). Edge speaks until Kokoro is ready or if it fails. Hearing unchanged (desktop Parakeet; web = Groq/Gemini).
+- **Built:** new kind `claude-voice`, second in `VISIBLE_AGENT_BRAINS`; desktop loop speaks via Kokoro with 4-sentence prefetch; web `voice-claude` open carries `agent:'claude-voice'`, `speak` returns Kokoro WAV (Edge MP3 fallback), interrupt drops queued jobs. 26 files + `electron/kokoro-tts.ts` + `assets/kokoro/`.
+- **Checked:** typecheck 0, lint:hooks 0, voice:check 188, agent-bar:check 45/0, realtime:check 29, web:build ok, voice:brain 18/0 (plain persona). Hidden-window probe notes: scratch `claude-voice-kokoro-notes.md` (session scratchpad, may be gone).
+- **Not checked live:** the desktop loop with Claude Voice picked, phone WAV playback, the new persona on a real turn. A saved 3-item web voice menu shows Claude Voice under More.
+- **Next:** Steve's D.m.p (commit on branch, merge, push), then a Forge restart (main changed; strands the phone ~10 min), pick Claude Voice, talk.
+
 ## Brain "pressed Enter" and nothing was sent: an Enter must reach the PTY in a read of its own (2026-10-30 13:05; master, local, NOT pushed; renderer half live by HMR, main half needs a Forge restart)
 
 - **Asked (Steve, Telegram screenshot 12:30):** the Brain opened Kess in koraos (11:54, under the frame-wait code), the brief sat in its box, the Brain said "I pressed Enter to make sure it was sent" (12:29:29, `type_into_pane` text "" submit true, answered "OK: pressed Enter") and nothing was sent. Steve pressed Enter himself from the phone at 12:29:54 (Kess's transcript shows the first prompt then).

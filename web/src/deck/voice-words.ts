@@ -9,10 +9,12 @@ import type { WebVoiceProvider } from '@shared/web'
 export type WebVoicePhase = 'off' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'error'
 
 /**
- * Who Listen talks to: a voice agent (`WebVoiceProvider`), or Forge Brain
- * itself — heard the way Claude is, answered by the brain pane (./voiceAgent.ts).
+ * Who Listen talks to: a voice agent (`WebVoiceProvider`), Forge Brain
+ * itself — heard the way Claude is, answered by the brain pane — or Claude
+ * Voice: Claude's session with its own persona, spoken by Kokoro on the
+ * desktop's GPU (./voiceAgent.ts).
  */
-export type WebVoiceAgent = WebVoiceProvider | 'forge-brain'
+export type WebVoiceAgent = WebVoiceProvider | 'forge-brain' | 'claude-voice'
 
 /** What an older desktop is told to do: it answers the voice requests `unsupported`. */
 export const UPDATE_DESKTOP_WORDS = 'Update the desktop app to use voice here'
@@ -48,13 +50,20 @@ export function voiceFailureWords(failure: { code?: string; message?: string }, 
 }
 
 function isWebVoiceAgent(id: string): id is WebVoiceAgent {
-  return id === 'gemini-live' || id === 'gpt-realtime' || id === 'gpt-realtime-mini' || id === 'claude' || id === 'forge-brain'
+  return (
+    id === 'gemini-live' ||
+    id === 'gpt-realtime' ||
+    id === 'gpt-realtime-mini' ||
+    id === 'claude' ||
+    id === 'forge-brain' ||
+    id === 'claude-voice'
+  )
 }
 
 /**
  * The agents the Listen chip offers, in its menu's order: the desktop's visible
- * list (shared/agent-brain.ts VISIBLE_AGENT_BRAINS) — Forge Brain, Gemini,
- * ChatGPT. ChatGPT is GPT Realtime, the full model. Claude and ChatGPT mini keep
+ * list (shared/agent-brain.ts VISIBLE_AGENT_BRAINS) — Forge Brain, Claude
+ * Voice, Gemini, ChatGPT. ChatGPT is GPT Realtime, the full model. Claude and ChatGPT mini keep
  * their code here and come back when that list names them again.
  */
 export const WEB_VOICE_AGENTS: readonly WebVoiceAgent[] = VISIBLE_AGENT_BRAINS.filter(isWebVoiceAgent)
@@ -74,6 +83,8 @@ export function voiceAgentWord(agent: WebVoiceAgent): string {
       return 'Claude'
     case 'forge-brain':
       return 'Forge Brain'
+    case 'claude-voice':
+      return 'Claude Voice'
   }
 }
 

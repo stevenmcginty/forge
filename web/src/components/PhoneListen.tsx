@@ -318,7 +318,7 @@ export function ListenUnit({
         aria-haspopup="menu"
         aria-expanded={pickerOpen}
         title={`Voice agent: ${agent} — tap to pick Gemini, ChatGPT, Claude or Forge Brain`}
-        aria-label={`Voice agent: ${agent}. Pick Gemini, ChatGPT, Claude or Forge Brain`}
+        aria-label={`Voice agent: ${agent}. Pick Forge Brain, Claude Voice, Gemini or ChatGPT`}
         onClick={handleOpenPicker}
       >
         <span className="plisten__agent-tile" aria-hidden="true">
@@ -399,7 +399,7 @@ function AgentMark({ agent, size = 14, className }: { agent: WebVoiceAgent; size
     <svg className={className} data-agent={agent} width={size} height={size} viewBox="0 0 14 14" aria-hidden="true">
       {agent === 'gemini-live' ? (
         <path d="M7 .8C7.5 4.6 9.4 6.5 13.2 7 9.4 7.5 7.5 9.4 7 13.2 6.5 9.4 4.6 7.5.8 7 4.6 6.5 6.5 4.6 7 .8Z" fill="currentColor" />
-      ) : agent === 'claude' ? (
+      ) : agent === 'claude' || agent === 'claude-voice' ? (
         <path
           d="M7 1.2V4.6M7 9.4V12.8M1.2 7H4.6M9.4 7H12.8M2.9 2.9 5.3 5.3M8.7 8.7 11.1 11.1M11.1 2.9 8.7 5.3M5.3 8.7 2.9 11.1"
           fill="none"

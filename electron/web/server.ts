@@ -50,6 +50,7 @@ import {
   type WebSession,
   type WebShutdownReason,
   type WebUsageFrame,
+  type WebVoiceClaudeAgent,
   type WebVoiceClaudeEvent,
   type WebVoiceConnectRequest,
   type WebVoiceProvider,
@@ -637,9 +638,16 @@ export interface WebServerHost {
    * Opening again from anywhere hands the session over, and the one that had
    * it hears `closed`.
    */
-  voiceClaudeOpen?: (onEvent: (event: WebVoiceClaudeEvent) => void) => VoiceClaudeLink
-  /** One sentence as the desktop's Edge voice, base64 MP3. Never rejects. */
-  voiceSpeak?: (text: string) => Promise<{ ok: true; audio: string; mime: string } | { ok: false; error: string }>
+  voiceClaudeOpen?: (onEvent: (event: WebVoiceClaudeEvent) => void, agent?: WebVoiceClaudeAgent) => VoiceClaudeLink
+  /**
+   * One sentence as the desktop's Edge voice (base64 MP3), or — `kokoro`, for
+   * Claude Voice — Kokoro's (base64 WAV), which falls back to Edge by itself.
+   * Never rejects.
+   */
+  voiceSpeak?: (
+    text: string,
+    engine?: 'edge' | 'kokoro'
+  ) => Promise<{ ok: true; audio: string; mime: string } | { ok: false; error: string }>
 
   /**
    * Put a pasted image on this machine's clipboard so an agent that reads
@@ -851,6 +859,8 @@ export interface VoiceClaudeLink {
  */
 interface VoiceClaudeState {
   link: VoiceClaudeLink | null
+  /** Which agent the browser opened: Claude Voice speaks with Kokoro. */
+  agent: WebVoiceClaudeAgent
   queue: WebVoiceClaudeEvent[]
   waiter: ((events: WebVoiceClaudeEvent[]) => void) | null
   waitTimer: NodeJS.Timeout | null
@@ -3933,9 +3943,10 @@ export class WebServer {
     const op = request.op
     if (op === 'open') {
       this.closeVoiceClaude(client)
-      const state: VoiceClaudeState = { link: null, queue: [], waiter: null, waitTimer: null, turn: null, dead: false }
+      const agent: WebVoiceClaudeAgent = request.agent === 'claude-voice' ? 'claude-voice' : 'claude'
+      const state: VoiceClaudeState = { link: null, agent, queue: [], waiter: null, waitTimer: null, turn: null, dead: false }
       client.voiceClaude = state
-      state.link = voiceClaudeOpen((event) => this.pushVoiceClaude(client, state, event))
+      state.link = voiceClaudeOpen((event) => this.pushVoiceClaude(client, state, event), agent)
       answer({ kind: 'ok' })
       return
     }
@@ -4044,7 +4055,7 @@ export class WebServer {
           failed('bad-frame', 'There was nothing to speak.')
           return
         }
-        const res = await voiceSpeak(text)
+        const res = await voiceSpeak(text, state.agent === 'claude-voice' ? 'kokoro' : 'edge')
         if (!res.ok) {
           failed('failed', res.error)
           return

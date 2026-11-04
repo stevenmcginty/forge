@@ -50,6 +50,7 @@ import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { earconListening } from '@/lib/earcon'
 import { speakable, speaker } from '@/lib/speech'
 import { chooseEngine, pickVaried, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
+import { DEFAULT_KOKORO_VOICE } from '@shared/tts'
 import { buildActionPanes } from '@/lib/actionPanes'
 import { resolveProfile } from '@/lib/agents'
 import { buildManifest, type ManifestSnapshot } from '@/lib/appmanifest'
@@ -642,6 +643,9 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * have to be rebuilt (and the transcript subscription torn down) every time a
    * setting changes.
    */
+  // Claude Voice speaks in Kokoro (electron/kokoro-tts.ts), the rest of the
+  // chain behind it. Any other agent: exactly the chain it had.
+  const kokoroVoice = state.settings.agentBrain === 'claude-voice' ? state.settings.kokoroVoice || DEFAULT_KOKORO_VOICE : ''
   const voiceConfig = useMemo<VoiceConfig>(
     () => ({
       engine: state.settings.voiceEngine,
@@ -649,7 +653,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       edgeVoice: state.settings.voiceEdgeVoice,
       geminiVoice: state.settings.voiceTtsVoice,
       ttsModel: state.settings.voiceTtsModel,
-      localVoice: state.settings.voiceReplyVoice
+      localVoice: state.settings.voiceReplyVoice,
+      ...(kokoroVoice ? { kokoroVoice } : {})
     }),
     [
       state.settings.voiceEngine,
@@ -657,7 +662,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       state.settings.voiceEdgeVoice,
       state.settings.voiceTtsVoice,
       state.settings.voiceTtsModel,
-      state.settings.voiceReplyVoice
+      state.settings.voiceReplyVoice,
+      kokoroVoice
     ]
   )
   const voiceConfigRef = useRef(voiceConfig)
@@ -932,6 +938,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       if (!speaksAloudRef.current || !text.trim()) return
       if (!brain && !speaker.available && chooseEngine(voiceConfigRef.current) === 'local') return
       speakQueue.current.push({ key, text, brain, heard })
+      // Claude Voice: Kokoro starts on this sentence now, while the one before it plays.
+      if (!brain) voiceSpeaker.prefetch(text, voiceConfigRef.current)
       pump()
     },
     [pump]

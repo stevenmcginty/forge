@@ -82,6 +82,10 @@ const BRAIN_COPY: Record<string, { good: string; cost: string }> = {
   'forge-brain': {
     good: 'Talk straight to Forge Brain — it sees every project and runs the agents. Parakeet hears you, your voice setting reads its reply.',
     cost: 'Whatever Forge Brain runs on · turn it on from the brain in the top bar'
+  },
+  'claude-voice': {
+    good: 'A spoken conversation with Claude and every Forge tool — short answers, talk over it any time. Parakeet hears you, Kokoro speaks on your GPU (Edge while it loads).',
+    cost: 'Free with your Claude plan · the voice runs on this PC'
   }
 }
 
@@ -359,7 +363,7 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
         />
       ) : null}
 
-      {spec.id === 'claude' ? (
+      {spec.id === 'claude' || spec.id === 'claude-voice' ? (
         <Row label="Model" hint="Opus, Sonnet and Haiku use your Claude login. Takes effect on the next turn. For GPT, pick Codex as the main agent." htmlFor="mag-claude-model">
           <select
             id="mag-claude-model"

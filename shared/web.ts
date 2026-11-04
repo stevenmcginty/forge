@@ -1610,7 +1610,10 @@ export type WebRequest =
    *
    *   open       this socket owns the browser Claude session from now (one
    *              browser at a time: another browser's `open` closes this one
-   *              with a `closed` event). Answered `ok`.
+   *              with a `closed` event). Answered `ok`. `agent` 'claude-voice'
+   *              is Claude Voice: its own short persona, and `speak` answers
+   *              in Kokoro's voice (WAV) — Edge's when Kokoro cannot. A
+   *              desktop that predates it ignores the field: plain Claude.
    *   append     one slice of a turn's audio: raw PCM, 16-bit little-endian,
    *              16 kHz mono, base64, at most MAX_FILE_CHUNK_BYTES raw. `seq`
    *              from 0; a new `turnId` drops any turn not yet `done`.
@@ -1624,15 +1627,15 @@ export type WebRequest =
    *              changed). Answered `ok`; the reply arrives through `events`.
    *   events     held until there is something to say, or up to
    *              VOICE_CLAUDE_POLL_MS; answered `{ kind: 'voice-claude-events' }`.
-   *   speak      one sentence of the reply as the desktop's Edge voice, MP3;
-   *              answered `{ kind: 'voice-speech' }`.
+   *   speak      one sentence of the reply as the desktop's Edge voice, MP3
+   *              (Claude Voice: Kokoro, WAV); answered `{ kind: 'voice-speech' }`.
    *   interrupt  barge-in: stop the turn, keep the conversation. Answered `ok`.
    *   close      end the session. Answered `ok`, also when there was none.
    *
    * Every op but `open` and `close` on a socket that holds no session is
    * `failed`. The socket closing closes the session.
    */
-  | { kind: 'voice-claude'; op: 'open' }
+  | { kind: 'voice-claude'; op: 'open'; agent?: WebVoiceClaudeAgent }
   | { kind: 'voice-claude'; op: 'append'; turnId: string; seq: number; data: string }
   | { kind: 'voice-claude'; op: 'done'; turnId: string; chunks: number }
   | { kind: 'voice-claude'; op: 'cancel'; turnId: string }
@@ -2328,6 +2331,9 @@ export type WebResult =
  * ended under the browser (another browser took it, or the desktop let go).
  */
 export type WebVoiceClaudeEvent = VoiceAgentEvent | { type: 'closed'; reason: string }
+
+/** Which agent a browser's `voice-claude` session is: Claude, or Claude Voice (Kokoro speaks). */
+export type WebVoiceClaudeAgent = 'claude' | 'claude-voice'
 
 /**
  * How long a `voice-claude` `events` request is held open with nothing to

@@ -397,7 +397,11 @@ function VoiceAgentGlyph({ look, on }: { look: Look; on: boolean }): ReactNode {
 /** Whose agent it is, as the maker's own logo (shared/agent-logos.ts); Forge Brain has its own glyph. */
 function agentLogo(agent: WebVoiceAgent): AgentLogo | null {
   if (agent === 'forge-brain') return null
-  return agent === 'gemini-live' ? AGENT_LOGOS.gemini : agent === 'claude' ? AGENT_LOGOS.claude : AGENT_LOGOS.openai
+  return agent === 'gemini-live'
+    ? AGENT_LOGOS.gemini
+    : agent === 'claude' || agent === 'claude-voice'
+      ? AGENT_LOGOS.claude
+      : AGENT_LOGOS.openai
 }
 
 /** The maker's colour, as the two properties a plate reads (voicebar.css `.dk-mplate`). */

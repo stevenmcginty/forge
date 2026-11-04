@@ -115,6 +115,15 @@ extraResources:
     to: foreman-kit
     filter:
       - '**/*'
+  # Claude Voice's speech engine: the page electron/kokoro-tts.ts loads into a
+  # hidden window, and the vendored kokoro-js browser bundle it imports
+  # (Apache-2.0, LICENSE-kokoro-js.txt beside it). Served by path through the
+  # forge-kokoro:// scheme, so it lives out here rather than in the asar. The
+  # model is not shipped: it is fetched once into <userData>\kokoro\cache.
+  - from: assets/kokoro
+    to: kokoro
+    filter:
+      - '**/*'
 
 asar: true
 # node-pty's conpty.node / conpty.dll and its OpenConsole.exe are loaded by the

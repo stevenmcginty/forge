@@ -66,7 +66,7 @@ export function statusOf(spec: AgentBrainSpec, s: Settings, probe: Probe | undef
 
 /** The probe cache key: the inputs that change a brain's answer — its key, and Claude's model. */
 export function probeSig(spec: AgentBrainSpec, s: Settings): string {
-  return `${keyOf(s, spec.key)}|${spec.id === 'claude' ? s.voiceClaudeModel : ''}`
+  return `${keyOf(s, spec.key)}|${spec.id === 'claude' || spec.id === 'claude-voice' ? s.voiceClaudeModel : ''}`
 }
 
 /** A brain the picker will not switch to until it is fixed in Settings. */

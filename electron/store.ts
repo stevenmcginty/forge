@@ -15,7 +15,7 @@ import {
 } from '@shared/agents'
 import { DEFAULT_FOREMAN_BRIEF, FOREMAN_BRIEF_MAX } from '@shared/foreman'
 import { BRAIN_CONTEXT_WARN_PCT, BRAIN_MODEL_DEFAULT, BRAIN_VOICE_DEFAULT, isBrainEngine, isBrainProject, sanitiseBrainModel } from '@shared/brain'
-import { isEdgeVoice } from '@shared/tts'
+import { DEFAULT_KOKORO_VOICE, isEdgeVoice, isKokoroVoice } from '@shared/tts'
 import {
   DEFAULT_AGENT_BRAIN,
   defaultVoiceMenu,
@@ -291,6 +291,8 @@ function defaultSettings(): Settings {
     voiceEngine: 'edge',
     // Empty = DEFAULT_EDGE_VOICE in shared/tts.ts (en-GB-SoniaNeural).
     voiceEdgeVoice: '',
+    // Claude Voice's Kokoro voice (electron/kokoro-tts.ts).
+    kokoroVoice: DEFAULT_KOKORO_VOICE,
     // Empty = the built-ins in electron/gemini-tts.ts (Sulafat, 3.1 flash TTS).
     voiceTtsVoice: '',
     voiceTtsModel: '',
@@ -890,6 +892,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
           ? 'gemini'
           : DEFAULT_SETTINGS.voiceEngine,
     voiceEdgeVoice: typeof s.voiceEdgeVoice === 'string' ? s.voiceEdgeVoice.trim().slice(0, 60) : '',
+    kokoroVoice: typeof s.kokoroVoice === 'string' && isKokoroVoice(s.kokoroVoice) ? s.kokoroVoice.trim() : DEFAULT_KOKORO_VOICE,
     // Blank is meaningful for both: "whatever gemini-tts.ts defaults to".
     voiceTtsVoice: typeof s.voiceTtsVoice === 'string' ? s.voiceTtsVoice.trim().slice(0, 40) : '',
     voiceTtsModel: typeof s.voiceTtsModel === 'string' ? s.voiceTtsModel.trim().slice(0, 80) : '',

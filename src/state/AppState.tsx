@@ -61,6 +61,7 @@ import { EMPTY_WORKSPACE, makeTab, newTabName, nextTextColor, withPrunedMosaic }
 import { DEFAULT_FOREMAN_BRIEF } from '@shared/foreman'
 import { defaultVoiceMenu } from '@shared/agent-brain'
 import { BRAIN_CONTEXT_WARN_PCT, BRAIN_MODEL_DEFAULT, BRAIN_VOICE_DEFAULT } from '@shared/brain'
+import { DEFAULT_KOKORO_VOICE } from '@shared/tts'
 import { isSessionId, newSessionId } from '@shared/session'
 import { MOBILE_PORT } from '@shared/mobile'
 import { DEFAULT_RAIL_OPEN } from '@shared/rail'
@@ -293,6 +294,7 @@ const FALLBACK_SETTINGS: Settings = {
   // local voice on its own if the network is gone.
   voiceEngine: 'edge',
   voiceEdgeVoice: '',
+  kokoroVoice: DEFAULT_KOKORO_VOICE,
   voiceTtsVoice: '',
   voiceTtsModel: '',
   voiceEarcons: true,

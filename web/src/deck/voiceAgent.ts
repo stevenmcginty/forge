@@ -573,11 +573,21 @@ function forgeBrainAsk(): (body: WebRequest) => Promise<WebResult> {
   }
 }
 
+/**
+ * Listen on "Claude Voice": Claude's whole path (./claudeVoice.ts), opened as
+ * Claude Voice — the desktop gives the session Claude Voice's persona and
+ * answers each `speak` in Kokoro's voice (WAV, Edge's MP3 while Kokoro cannot).
+ * Every other request goes to the desktop as it is.
+ */
+function claudeVoiceAsk(): (body: WebRequest) => Promise<WebResult> {
+  return (body) => ask(body.kind === 'voice-claude' && body.op === 'open' ? { ...body, agent: 'claude-voice' } : body)
+}
+
 /** The session for the setup's provider, or null for one this page cannot run. */
 function makeSession(setup: WebVoiceSetup, events: RealtimeSessionEvents, agent: WebVoiceAgent): LiveSession | null {
   if (setup.provider === 'claude') {
     return new ClaudeVoiceSession({
-      ask: agent === 'forge-brain' ? forgeBrainAsk() : ask,
+      ask: agent === 'forge-brain' ? forgeBrainAsk() : agent === 'claude-voice' ? claudeVoiceAsk() : ask,
       events: {
         ...events,
         // Claude's tools run on the desktop, not through relayTool; any sign of
@@ -625,8 +635,9 @@ function fail(reason: string): void {
 async function open(carryover: string | null): Promise<void> {
   const mine = ++run
   const agent = state.agent
-  // Forge Brain is heard the way Claude is: Claude's setup, without Claude thinking.
-  const provider: WebVoiceProvider = agent === 'forge-brain' ? 'claude' : agent
+  // Forge Brain is heard the way Claude is: Claude's setup, without Claude
+  // thinking. Claude Voice is Claude's setup too, with its own persona and voice.
+  const provider: WebVoiceProvider = agent === 'forge-brain' || agent === 'claude-voice' ? 'claude' : agent
   set({ phase: 'connecting', error: null, ended: null })
   const res = await ask({ kind: 'voice-setup', provider, ...(carryover ? { carryover } : {}) })
   if (mine !== run) return
@@ -644,7 +655,14 @@ async function open(carryover: string | null): Promise<void> {
     return
   }
   setup = res.setup
-  label = agent === 'forge-brain' ? 'Forge Brain' : provider === 'claude' ? 'Claude' : providerSpec(provider).label
+  label =
+    agent === 'forge-brain'
+      ? 'Forge Brain'
+      : agent === 'claude-voice'
+        ? 'Claude Voice'
+        : provider === 'claude'
+          ? 'Claude'
+          : providerSpec(provider).label
   const live: LiveSession | null = makeSession(res.setup, {
     onState: (st, detail) => {
       if (session !== live) return
