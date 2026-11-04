@@ -1,5 +1,13 @@
 # Handoff
 
+## Claude Live: new conductor voice agent, architecture C, building (2026-11-04 ~18:00; branch `claude-live`, worktree `C:\Users\steve\Desktop\forge-worktrees\forge-live`, not merged)
+
+- **Asked (Steve):** a real back-and-forth with a Claude agent that speaks human-like, choreographs work, spins up agents, has full control of Forge (computer use, screen, projects) and shows the work; "think outside the box"; must work very well on his phone too. He said "pick the best one and start building", then: voice brain on Opus by default with a selector ("I'm not going to use it all day").
+- **Decided:** architecture C (`docs/live-agent-plan.md` on the branch): a quick Claude voice brain on the Messages API (Anthropic API credit; `liveVoiceModel` Opus 5.5 default at effort low, Sonnet/Haiku selectable) + a deep Conductor (Agent SDK, Opus 5.5, subscription) + a job ledger in main that the UI and spoken news read; full-duplex ears (OpenAI semantic-VAD transcription, Parakeet fallback), Kokoro clause speech with spoken acks. UI = Design B (`docs/live-agent-design/B.png`): right Conductor rail, big captions over the bar, crew cards, needs-you flyout, "Forge is showing you" ring. Research/audit notes were in the session scratchpad (agent-capability-audit.md, voice-agent-sota.md).
+- **Crew (gaffer foreman):** L0 foundation (shared/live.ts contract, electron/live ledger + IPC, kind `claude-live`, settings, Anthropic key) → L1 main brains, L2 renderer voice shell, L3 UI (designer) → L4 desktop integration, L5 phone/browser.
+- **Live already (master e3d264a, renderer by HMR; main needs a restart):** Claude Voice on Sonnet 5.5 low effort, spoken ack, first-clause speech, capped tool text.
+- **Steve must:** paste an Anthropic API key in Settings when L0 lands; restart Forge after the merge.
+
 ## Voice bar "garbled speech-to-text" was split turns; Edge TTS 403 fixed (2026-11-04 17:10; master 9d8c599 + 174be02, local, NOT pushed)
 
 - **Found (log + SDK session JSONL, not guessed):** Parakeet transcribed each piece correctly (only "jug" for "joke"). The bar cuts a phrase after `agentSilenceMs` (Steve: 800 ms), the mic stays open while Claude thinks (4-9 s on Opus), and a phrase arriving mid-turn REPLACED the turn in flight, so a sentence with a pause became two turns and Claude answered only the fragment. Mic = built-in Intel array, no Bluetooth. No capture code changed in the Claude Voice commit.
