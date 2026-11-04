@@ -1,5 +1,15 @@
 # Handoff
 
+## Claude Live / Claude Voice speech: OpenAI Cedar by default, fluent chunking (2026-11-04 20:20; master 9411e40 + 9861a11, local, NOT pushed; renderer live by HMR, main needs a restart)
+
+- **Asked (Steve):** Claude Live sounds robotic, slow, choppy; first "use the Forge Brain voice (Ryan)", then "any voice, pick on quick, fluent, human alone".
+- **Found (dev log, not guessed):** Kokoro bf_emma really was speaking. Brain first text 1.3-3 s (Opus, subscription), Kokoro first audio +0.9-3 s, replies cut into 4-8-word clauses each spoken as its own utterance, clips chained on `onended`, and `speak()` threw away in-flight prefetches (double synthesis, gaps). The old log label `engine=kokoro` came from the loop variable, so it could not prove Kokoro spoke.
+- **Built:** setting `claudeVoiceSound` ('openai' default | 'brain' | 'kokoro') + `openaiTtsVoice` ('cedar' default | 'marin'), Settings "Voice" row in words. `electron/openai-tts.ts` = gpt-4o-mini-tts, pcm, instructions for pace/tone, no `speed` (undocumented), streamed to the renderer, acks on disk, Ryan on no key / 401 / network error. Fluent chunking for cloud voices (first sentence, merged sentences to 220 chars; Kokoro unchanged), 40 ms edge trim, clips scheduled on the AudioContext clock, prefetch only dropped by cancel. Phone speaks the same voice as WAV. Logged engine is now the real one.
+- **Checked:** typecheck 0, lint:hooks 0, voice:check 201, live-voice:check 26, live:check 27/0, agent-bar 46/0, web:check good. Fakes only: no real OpenAI request, no audio heard.
+- **Cost / risk:** $0.60/1M text in + $12/1M audio out (~1-2p per spoken minute, estimate). OpenAI shuts gpt-4o-mini-tts down 2027-01-06; successor gpt-realtime-2.1-mini is not on /v1/audio/speech (Realtime API job).
+- **Gaps:** phone chunking (`web/src/deck/live-words.ts`) still Kokoro-style; VoiceAgent prefetches up to 4 and merges only within one delta.
+- **Next:** restart Forge (until then old main maps 'openai' to Ryan), Steve talks to Claude Live; read `[tts] openai ... first-byte=` lines in `%APPDATA%\Forge\dev.log`. D.m.p to push.
+
 ## Claude Live: new conductor voice agent, architecture C (2026-11-04 ~19:30; built on `claude-live` 1bd4b6c, merged to master 166ea95, local, NOT pushed, NOT checked live)
 
 - **Asked (Steve):** a real back-and-forth with a Claude agent that speaks human-like, choreographs work, spins up agents, has full control of Forge (computer use, screen, projects) and shows the work; "think outside the box"; must work very well on his phone too. He said "pick the best one and start building", then: voice brain on Opus by default with a selector ("I'm not going to use it all day").
