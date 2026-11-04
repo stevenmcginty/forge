@@ -664,18 +664,28 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * have to be rebuilt (and the transcript subscription torn down) every time a
    * setting changes.
    */
-  // Claude Voice speaks in Kokoro (electron/kokoro-tts.ts), the rest of the
-  // chain behind it. Any other agent: exactly the chain it had.
-  const kokoroVoice = state.settings.agentBrain === 'claude-voice' ? state.settings.kokoroVoice || DEFAULT_KOKORO_VOICE : ''
+  // Claude Voice speaks in Forge Brain's voice (`claudeVoiceSound: 'brain'`,
+  // the default: Edge, `brainVoice` and its fallbacks, never SAPI) or in Kokoro
+  // (electron/kokoro-tts.ts) with the rest of the chain behind it. Any other
+  // agent: exactly the chain it had.
+  const claudeVoice = state.settings.agentBrain === 'claude-voice'
+  const claudeVoiceRef = useRef(claudeVoice)
+  claudeVoiceRef.current = claudeVoice
+  const brainVoiceName = state.settings.brainVoice || BRAIN_VOICE_DEFAULT
+  const claudeInBrainVoice = claudeVoice && state.settings.claudeVoiceSound !== 'kokoro'
+  const kokoroVoice = claudeVoice && !claudeInBrainVoice ? state.settings.kokoroVoice || DEFAULT_KOKORO_VOICE : ''
   const voiceConfig = useMemo<VoiceConfig>(
     () => ({
-      engine: state.settings.voiceEngine,
+      engine: claudeInBrainVoice ? 'edge' : state.settings.voiceEngine,
       hasKey: state.settings.geminiKey.trim().length > 0,
-      edgeVoice: state.settings.voiceEdgeVoice,
+      edgeVoice: claudeInBrainVoice ? brainVoiceName : state.settings.voiceEdgeVoice,
       geminiVoice: state.settings.voiceTtsVoice,
       ttsModel: state.settings.voiceTtsModel,
       localVoice: state.settings.voiceReplyVoice,
-      ...(kokoroVoice ? { kokoroVoice } : {})
+      ...(kokoroVoice ? { kokoroVoice } : {}),
+      ...(claudeInBrainVoice
+        ? { edgeVoices: [brainVoiceName, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== brainVoiceName)], neuralOnly: true }
+        : {})
     }),
     [
       state.settings.voiceEngine,
@@ -684,16 +694,19 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       state.settings.voiceTtsVoice,
       state.settings.voiceTtsModel,
       state.settings.voiceReplyVoice,
-      kokoroVoice
+      kokoroVoice,
+      claudeInBrainVoice,
+      brainVoiceName
     ]
   )
   const voiceConfigRef = useRef(voiceConfig)
   voiceConfigRef.current = voiceConfig
+  /** The voice Claude Voice's acks and prefetch are made in — a new one is primed afresh. */
+  const claudeLead = claudeVoice ? (kokoroVoice ? `kokoro:${kokoroVoice}` : `edge:${brainVoiceName}`) : ''
   /**
    * Forge Brain's voice: Edge only, its own voice (`brainVoice`), one retry,
    * then the other British neural voices — and never SAPI (`neuralOnly`).
    */
-  const brainVoiceName = state.settings.brainVoice || BRAIN_VOICE_DEFAULT
   const brainVoiceRef = useRef<VoiceConfig>(voiceConfig)
   brainVoiceRef.current = {
     ...voiceConfig,
@@ -1794,9 +1807,9 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           if (run.silent || run.aborted) return
           run.replied = true
           run.buffer += event.text
-          // Claude Voice: the reply's first chunk may stop at a clause, so Kokoro starts sooner.
+          // Claude Voice: the reply's first chunk may stop at a clause, so its voice starts sooner.
           const { chunks, rest } = takeSpeechChunks(run.buffer, SPEAK_CHUNK_MAX, {
-            firstClause: run.chunk === 0 && Boolean(voiceConfigRef.current.kokoroVoice)
+            firstClause: run.chunk === 0 && claudeVoiceRef.current
           })
           run.buffer = rest
           for (const chunk of chunks) {
@@ -1815,7 +1828,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           if (event.phase === 'start' && armedRef.current && !speakingRef.current) setPhase('thinking')
           // Claude Voice: the clause said before a tool ("Checking now.") is spoken now,
           // not held until the text after the tool arrives and glued to it.
-          if (event.phase === 'start' && !run.silent && !run.aborted && run.buffer.trim() && voiceConfigRef.current.kokoroVoice) {
+          if (event.phase === 'start' && !run.silent && !run.aborted && run.buffer.trim() && claudeVoiceRef.current) {
             openMouth()
             pushSpeech(`${run.id}:s${run.chunk++}`, run.buffer.trim())
             run.buffer = ''
@@ -1979,9 +1992,10 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           /* a turn without context is still a turn */
         }
         // Claude Voice, said aloud here: no reply text by ACK_AFTER_MS, and a
-        // Kokoro clip made at warm-up says "Sure." through the same mouth — so
-        // barge-in and the echo guard cover it. No clip held, no ack.
-        if (opts.ack && !run.silent && voiceConfigRef.current.kokoroVoice) {
+        // clip made at warm-up (Kokoro, or Forge Brain's voice) says "Sure."
+        // through the same mouth — so barge-in and the echo guard cover it. No
+        // clip held, no ack.
+        if (opts.ack && !run.silent && claudeVoiceRef.current) {
           const sentAt = Date.now()
           ackTimer = window.setTimeout(() => {
             if (run.replied || run.aborted || claudeRun.current !== run) return
@@ -2008,7 +2022,7 @@ ${said}` : said)
         closeMouth()
         await speakRun.current
         // Quiet now: a good moment to finish making the acknowledgement clips, if Kokoro was still loading before.
-        if (voiceConfigRef.current.kokoroVoice) void voiceSpeaker.primeAcks(voiceConfigRef.current)
+        if (claudeVoiceRef.current) void voiceSpeaker.primeAcks(voiceConfigRef.current)
       }
 
       if (run.error) throw new Error(run.error)
@@ -2017,12 +2031,13 @@ ${said}` : said)
     [openMouth, closeMouth, pushSpeech, buildContextNow]
   )
 
-  // Claude Voice: make the acknowledgement clips once Kokoro is warm. Main
+  // Claude Voice: make the acknowledgement clips in its voice. In Forge
+  // Brain's voice the first try makes them. In Kokoro, once it is warm: main
   // warms it with the app; until it is ready main answers in Edge, which
   // `primeAcks` turns down, so it tries again a little later — only while
   // nothing is being said, because Kokoro makes one clip at a time.
   useEffect(() => {
-    if (!kokoroVoice) return undefined
+    if (!claudeLead) return undefined
     let stopped = false
     let tries = 0
     let timer: number | undefined
@@ -2041,7 +2056,7 @@ ${said}` : said)
       stopped = true
       window.clearTimeout(timer)
     }
-  }, [kokoroVoice])
+  }, [claudeLead])
 
   /**
    * "Type this into Everest: echo hi" (B11): his words, raw, into that pane —

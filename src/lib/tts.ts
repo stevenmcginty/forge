@@ -537,6 +537,28 @@ function tryCacheKey(body: string, engine: NeuralEngine, voice: string, config: 
   return engine === 'edge' ? ttsCacheKey(body, voice || 'default', 'edge-neural') : ttsCacheKey(body, config.geminiVoice, config.ttsModel)
 }
 
+/**
+ * The voice a Claude voice config leads with, for `prefetch` and the acks:
+ * Kokoro when `kokoroVoice` is set, otherwise the first of `edgeVoices` (Forge
+ * Brain's voice). Null when the config has neither — not a Claude voice.
+ */
+export function leadVoice(config: VoiceConfig): { engine: 'kokoro' | 'edge'; voice: string } | null {
+  const kokoro = config.kokoroVoice?.trim()
+  if (kokoro) return { engine: 'kokoro', voice: kokoro }
+  const edge = (config.edgeVoices ?? []).map((v) => v.trim()).find(Boolean)
+  return edge ? { engine: 'edge', voice: edge } : null
+}
+
+/**
+ * The engine that really made a clip, from its model id — not the one asked:
+ * main answers a Kokoro request with Edge (`edge-neural`) while Kokoro loads.
+ */
+export function clipEngine(model: string, asked: NeuralEngine): NeuralEngine {
+  if (model === 'edge-neural') return 'edge'
+  if (/^kokoro/i.test(model)) return 'kokoro'
+  return asked
+}
+
 /** Sentences Claude Voice may have in synthesis ahead of the one playing. */
 const PREFETCH_MAX = 4
 
@@ -663,7 +685,8 @@ class VoiceSpeaker {
       const hit = this.cache.get(key) ?? this.acks.get(key)
       if (hit) {
         const played = await this.playClip(hit, body, generation)
-        return { spoke: played, engine, cached: true, latencyMs: Date.now() - started }
+        // The engine that made the clip: a Kokoro ask may hold an Edge clip.
+        return { spoke: played, engine: clipEngine(hit.model, engine), cached: true, latencyMs: Date.now() - started }
       }
 
       const requestId = `say_${++requestSeq}`
@@ -716,7 +739,7 @@ class VoiceSpeaker {
         }
         this.cache.set(key, clip)
         const played = await this.playClip(clip, body, generation)
-        return { spoke: played, engine, cached: false, latencyMs: Date.now() - started }
+        return { spoke: played, engine: clipEngine(clip.model, engine), cached: false, latencyMs: Date.now() - started }
       }
 
       // A cancellation is not a failure and must not drag him onto SAPI.
@@ -769,25 +792,27 @@ class VoiceSpeaker {
   /**
    * Claude Voice: start making a sentence's audio now, while the one before it
    * plays, so the gap between sentences is not a whole synthesis long. Only
-   * for a Kokoro config; the clip lands in the cache under the key `speak`
-   * looks for, and `speak` waits on it if it is still coming. Main's Kokoro
-   * queue is serial, so sentences are made in the order they were pushed.
+   * for a Claude voice config, in its lead voice (`leadVoice`: Kokoro, or
+   * Forge Brain's Edge voice); the clip lands in the cache under the key
+   * `speak` looks for, and `speak` waits on it if it is still coming. Main's
+   * Kokoro queue is serial, so sentences are made in the order they were pushed.
    */
   prefetch(text: string, config: VoiceConfig): void {
-    const voice = config.kokoroVoice?.trim()
-    if (!voice) return
+    const lead = leadVoice(config)
+    if (!lead) return
+    const { engine, voice } = lead
     const body = stripFiller(speakable(text))
     if (!body) return
-    const key = tryCacheKey(body, 'kokoro', voice, config)
+    const key = tryCacheKey(body, engine, voice, config)
     if (this.cache.get(key) || this.acks.has(key) || this.ahead.has(key) || this.ahead.size >= PREFETCH_MAX) return
     const requestId = `say_${++requestSeq}`
     const generation = this.generation
     const done = (async (): Promise<void> => {
       try {
-        const result = await io().speak({ text: body, engine: 'kokoro', voice, requestId })
+        const result = await io().speak({ text: body, engine, voice, requestId })
         if (!result.ok || generation !== this.generation) return
         if (result.format === 'mp3') {
-          // Kokoro could not, and main asked Edge for it.
+          // Edge's answer — the lead voice, or standing in while Kokoro could not.
           const decoded = await io().decode(base64ToBytes(result.audio).buffer)
           if (generation === this.generation) this.cache.set(key, { ...decoded, voice: result.voice, model: result.model })
           return
@@ -823,24 +848,33 @@ class VoiceSpeaker {
   }
 
   /**
-   * Claude Voice: make each `ACK_LINES` clip in Kokoro, one at a time, and keep
-   * it. Stops at the first answer that is not Kokoro's — Edge speaking while
-   * Kokoro loads — because an acknowledgement in another voice is worse than
-   * none; a later call carries on. Resolves true once every line is held.
+   * Claude Voice: make each `ACK_LINES` clip in the config's lead voice
+   * (`leadVoice`), one at a time, and keep it. With a Kokoro lead it stops at
+   * the first answer that is not Kokoro's — Edge (MP3) speaking while Kokoro
+   * loads — because an acknowledgement in another voice is worse than none; a
+   * later call carries on. With an Edge lead (Forge Brain's voice) the MP3 is
+   * the voice itself, decoded once here. Resolves true once every line is held.
    * Main's Kokoro queue is serial, so call it while nothing is being said.
    */
   primeAcks(config: VoiceConfig): Promise<boolean> {
-    const voice = config.kokoroVoice?.trim()
-    if (!voice) return Promise.resolve(false)
+    const lead = leadVoice(config)
+    if (!lead) return Promise.resolve(false)
+    const { engine, voice } = lead
     if (this.priming) return this.priming
     const run = (async (): Promise<boolean> => {
       try {
         for (const line of ACK_LINES) {
           const body = stripFiller(speakable(line))
-          const key = tryCacheKey(body, 'kokoro', voice, config)
+          const key = tryCacheKey(body, engine, voice, config)
           if (!body || this.acks.has(key)) continue
-          const result = await io().speak({ text: body, engine: 'kokoro', voice, requestId: `ack_${++requestSeq}` })
-          if (!result.ok || result.format === 'mp3') return false
+          const result = await io().speak({ text: body, engine, voice, requestId: `ack_${++requestSeq}` })
+          if (!result.ok) return false
+          if (result.format === 'mp3') {
+            if (engine === 'kokoro') return false
+            const decoded = await io().decode(base64ToBytes(result.audio).buffer)
+            this.acks.set(key, { ...decoded, voice: result.voice, model: result.model })
+            continue
+          }
           this.acks.set(key, {
             pcm: base64ToPcm(result.audio),
             sampleRate: result.sampleRate,
@@ -861,11 +895,11 @@ class VoiceSpeaker {
     return run
   }
 
-  /** The `ACK_LINES` whose Kokoro clip is held for `config`'s voice — the ones that would play at once. */
+  /** The `ACK_LINES` whose clip is held in `config`'s lead voice — the ones that would play at once. */
   readyAcks(config: VoiceConfig): string[] {
-    const voice = config.kokoroVoice?.trim()
-    if (!voice) return []
-    return ACK_LINES.filter((line) => this.acks.has(tryCacheKey(stripFiller(speakable(line)), 'kokoro', voice, config)))
+    const lead = leadVoice(config)
+    if (!lead) return []
+    return ACK_LINES.filter((line) => this.acks.has(tryCacheKey(stripFiller(speakable(line)), lead.engine, lead.voice, config)))
   }
 
   /** Forget every cached clip — for a voice or model change in Settings. */

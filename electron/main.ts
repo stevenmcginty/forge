@@ -418,9 +418,10 @@ function createWindow(): void {
     // Load Parakeet now, in the background, so the first Right Ctrl opens the
     // mic instead of waiting out a 3–6 s model load. Off via sttWarmStart.
     scheduleWarmStart()
-    // Claude Voice as the stored pick: Kokoro loads now too (a few seconds of
-    // GPU in the background; nothing at all for anyone on another agent).
-    if (getSettings().agentBrain === 'claude-voice') void warmKokoro(getSettings().kokoroVoice)
+    // Claude Voice in Kokoro as the stored pick: Kokoro loads now too (a few
+    // seconds of GPU in the background; nothing at all for anyone on another
+    // agent, or on Forge Brain's voice).
+    if (getSettings().agentBrain === 'claude-voice' && getSettings().claudeVoiceSound === 'kokoro') void warmKokoro(getSettings().kokoroVoice)
   })
 
   const emitWindowState = (): void => {
@@ -1067,9 +1068,13 @@ function registerAppHandlers(): void {
     const before = getSettings()
     const next = setSettings(rendererOwned(patch ?? {}))
     applyShotSettings(next)
-    // Claude Voice picked: load Kokoro on the GPU now, so its first reply is
-    // already in Kokoro's voice rather than Edge's.
-    if (next.agentBrain === 'claude-voice' && before.agentBrain !== 'claude-voice') void warmKokoro(next.kokoroVoice)
+    // Claude Voice picked in Kokoro, or Kokoro picked while a Claude voice
+    // brain is: load Kokoro on the GPU now, so its first reply is already in
+    // Kokoro's voice rather than Edge's. Forge Brain's voice needs no warm-up.
+    const claudeVoiceBrain = next.agentBrain === 'claude-voice' || next.agentBrain === 'claude-live'
+    const pickedClaudeVoice = next.agentBrain === 'claude-voice' && before.agentBrain !== 'claude-voice'
+    const pickedKokoro = claudeVoiceBrain && before.claudeVoiceSound !== 'kokoro'
+    if (next.claudeVoiceSound === 'kokoro' && (pickedClaudeVoice || pickedKokoro)) void warmKokoro(next.kokoroVoice)
     // Turning the global talk keys (or the mini bar) off while minimised takes
     // the hook down at once; turning the bar off takes the bar down with it.
     if (before.miniBar && !next.miniBar) hideMiniBar()

@@ -1,4 +1,4 @@
-import { SPEAK_CHUNK_MAX, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
+import { leadVoice, SPEAK_CHUNK_MAX, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 
 /**
  * Claude Live's mouth: one queue in front of src/lib/tts.ts `voiceSpeaker`.
@@ -170,7 +170,8 @@ export class LiveMouth {
 
   private prefetchAhead(): void {
     const config = this.config()
-    if (!config.kokoroVoice) return
+    // A Claude voice (Kokoro, or Forge Brain's Edge voice) — the only kind `prefetch` makes ahead.
+    if (!leadVoice(config)) return
     for (const item of this.queue.slice(0, PREFETCH_AHEAD)) voiceSpeaker.prefetch(item.text, config)
   }
 

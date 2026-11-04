@@ -25,6 +25,7 @@ import {
   type WebVoiceToolAnswer
 } from '@shared/web'
 import { commandExe } from '@shared/agents'
+import { BRAIN_VOICE_DEFAULT, BRAIN_VOICE_FALLBACKS } from '@shared/brain'
 import { providerSpec } from '@shared/realtime'
 import { isSessionId } from '@shared/session'
 import { collectLeaves } from '@shared/splitTree'
@@ -811,7 +812,7 @@ let webLiveSeq = 0
  * reply in flight and nothing else: the Conductor's jobs run on.
  */
 function openWebLive(onEvent: (event: WebVoiceClaudeEvent) => void): VoiceClaudeLink {
-  void warmKokoro(getSettings().kokoroVoice)
+  if (getSettings().claudeVoiceSound === 'kokoro') void warmKokoro(getSettings().kokoroVoice)
   void ensureLiveStarted().catch((err) => console.error('[live] web start failed:', err))
   const lane = ++webLiveSeq
   const mine = new Set<string>()
@@ -1737,8 +1738,8 @@ async function start(): Promise<void> {
     voiceClaudeOpen: (onEvent, agent) => {
       // Claude Live is a lane onto the desk's own Live voice brain, not a session here.
       if (agent === 'claude-live') return openWebLive(onEvent)
-      // Claude Voice from a browser: Kokoro loads while the first turn is heard.
-      if (agent === 'claude-voice') void warmKokoro(getSettings().kokoroVoice)
+      // Claude Voice from a browser, in Kokoro: Kokoro loads while the first turn is heard.
+      if (agent === 'claude-voice' && getSettings().claudeVoiceSound === 'kokoro') void warmKokoro(getSettings().kokoroVoice)
       const link = openWebVoiceAgent(onEvent, agent)
       let told = ''
       let first = true
@@ -1762,9 +1763,23 @@ async function start(): Promise<void> {
       }
     },
     // One sentence of a browser Claude's reply, in the desk's Edge voice — or,
-    // for Claude Voice, Kokoro's (WAV, which every browser decodes), with Edge
-    // speaking the sentence whenever Kokoro cannot.
+    // for Claude Voice and Claude Live (`engine` 'kokoro'), their own voice:
+    // Forge Brain's Edge voice by default (`claudeVoiceSound: 'brain'`, the
+    // brain's order: `brainVoice` twice, then its fallbacks), or Kokoro's (WAV,
+    // which every browser decodes) with Edge speaking the sentence whenever
+    // Kokoro cannot.
     voiceSpeak: async (text, engine) => {
+      if (engine === 'kokoro' && getSettings().claudeVoiceSound !== 'kokoro') {
+        const brainVoice = getSettings().brainVoice || BRAIN_VOICE_DEFAULT
+        let error = 'No neural voice answered.'
+        for (const voice of [brainVoice, brainVoice, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== brainVoice)]) {
+          const result = await speakEdge({ text, voice })
+          if (result.ok) return { ok: true, audio: result.audio.toString('base64'), mime: result.mime }
+          error = result.error
+          if (result.kind === 'cancelled' || result.kind === 'bad-input') break
+        }
+        return { ok: false, error }
+      }
       if (engine === 'kokoro') {
         const kokoro = await speakKokoro(text, getSettings().kokoroVoice, { lane: 'web' })
         if (kokoro.ok) return { ok: true, audio: pcm16Wav(Buffer.from(kokoro.audio, 'base64'), kokoro.sampleRate).toString('base64'), mime: 'audio/wav' }

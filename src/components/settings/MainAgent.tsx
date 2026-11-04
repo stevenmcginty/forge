@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { LiveConductorModel, LiveEars, LiveVoiceModel, Settings } from '@shared/types'
+import type { ClaudeVoiceSound, LiveConductorModel, LiveEars, LiveVoiceModel, Settings } from '@shared/types'
 import {
   AGENT_BRAINS,
   isForgeBrainAgent,
@@ -10,7 +10,9 @@ import {
   type AgentBrainKind,
   type AgentBrainSpec
 } from '@shared/agent-brain'
+import { BRAIN_VOICE_DEFAULT } from '@shared/brain'
 import { GEMINI_VOICES, OPENAI_VOICES, providerSpec, resolveVoice } from '@shared/realtime'
+import { EDGE_VOICES } from '@shared/tts'
 import { useBrainProbes } from '@/hooks/useBrainStatus'
 import { statusOf, forgeBrainStatus, type BrainStatus as Status, type Probe } from '@/lib/brainStatus'
 import { resolveAgentBrain } from '@/lib/realtime/provider'
@@ -137,6 +139,25 @@ const LIVE_EARS_CHOICES: Array<{ id: LiveEars; name: string; word: string }> = [
   { id: 'openai', name: 'OpenAI', word: 'talk over it' },
   { id: 'parakeet', name: 'Parakeet', word: 'on this PC, free' }
 ]
+
+/**
+ * Claude Voice's and Claude Live's voice (`claudeVoiceSound`): Forge Brain's
+ * Edge voice — named from `brainVoice`, so it says Ryan until another is
+ * picked — or Kokoro. Words and a tick, never colour alone.
+ */
+function ClaudeVoiceSoundRow({ settings, onPick }: { settings: Settings; onPick: (id: ClaudeVoiceSound) => void }): ReactNode {
+  const brainVoice = settings.brainVoice || BRAIN_VOICE_DEFAULT
+  const brainName = EDGE_VOICES.find((v) => v.name === brainVoice)?.label.split(' — ')[0] ?? 'Ryan'
+  const choices: Array<{ id: ClaudeVoiceSound; name: string; word: string }> = [
+    { id: 'brain', name: `Forge Brain voice (${brainName})`, word: 'clearer, the default' },
+    { id: 'kokoro', name: 'Kokoro (Emma)', word: 'on this PC' }
+  ]
+  return (
+    <Row label="Voice" hint="The voice it speaks in. Forge Brain's voice is set on the Forge Brain page. Takes effect on the next reply.">
+      <LiveSeg label="Claude voice" choices={choices} value={settings.claudeVoiceSound === 'kokoro' ? 'kokoro' : 'brain'} onPick={onPick} />
+    </Row>
+  )
+}
 
 /** One row of Claude Live's three-way picks: a name and one word under it, and a tick on the pick. */
 function LiveSeg<T extends string>({
@@ -470,6 +491,10 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
         </Row>
       ) : null}
 
+      {spec.id === 'claude-voice' ? (
+        <ClaudeVoiceSoundRow settings={s} onPick={(id) => actions.patchSettings({ claudeVoiceSound: id })} />
+      ) : null}
+
       {spec.id === 'claude-live' ? (
         <>
           <Row
@@ -487,6 +512,7 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
               onPick={(id) => actions.patchSettings({ liveVoiceModel: id })}
             />
           </Row>
+          <ClaudeVoiceSoundRow settings={s} onPick={(id) => actions.patchSettings({ claudeVoiceSound: id })} />
           <Row label="Worker model" hint="The Claude that does the jobs in the background, on your Claude login. Takes effect on the next job.">
             <LiveSeg
               label="Claude Live worker model"

@@ -3663,6 +3663,80 @@ await test('Claude Voice: ack clips are made in Kokoro only, held, and played fr
   voiceSpeaker.clearCache()
 })
 
+await test("Claude Voice in Forge Brain's voice: Edge leads, and acks, prefetch and the logged engine follow it", async () => {
+  const { neuralTries, leadVoice } = await import('../src/lib/tts.ts')
+  const VOICES = ['en-GB-RyanNeural', 'en-GB-ThomasNeural', 'en-GB-SoniaNeural']
+  const RYAN = { engine: 'edge', hasKey: false, edgeVoice: VOICES[0], geminiVoice: '', ttsModel: '', localVoice: '', edgeVoices: VOICES, neuralOnly: true }
+  const KOKORO = { engine: 'edge', hasKey: false, edgeVoice: '', geminiVoice: '', ttsModel: '', localVoice: '', kokoroVoice: 'bf_emma' }
+  // The lead voice: Kokoro when it is set, else the first Edge voice; neither = not a Claude voice.
+  assert.deepEqual(leadVoice(RYAN), { engine: 'edge', voice: 'en-GB-RyanNeural' })
+  assert.deepEqual(leadVoice(KOKORO), { engine: 'kokoro', voice: 'bf_emma' })
+  assert.equal(leadVoice({ ...KOKORO, kokoroVoice: '' }), null)
+  // Ryan twice (one retry), then the fallbacks; no Kokoro try at all.
+  assert.deepEqual(neuralTries(RYAN).map((t) => `${t.engine}:${t.voice}`), [
+    'edge:en-GB-RyanNeural',
+    'edge:en-GB-RyanNeural',
+    'edge:en-GB-ThomasNeural',
+    'edge:en-GB-SoniaNeural'
+  ])
+  const decode = async () => ({ pcm: new Int16Array(2400), sampleRate: 24_000, channels: 1 })
+  const EDGE_MP3 = (req) => ({ ok: true, audio: 'AAAA', format: 'mp3', mime: 'audio/mpeg', sampleRate: 0, channels: 1, model: 'edge-neural', voice: req.voice || 'en-GB-SoniaNeural', ms: 5 })
+
+  // An Edge lead takes the MP3: every ack line is made once, in Ryan, decoded and held.
+  fake = fakeTts(EDGE_MP3)
+  setTtsBackend({ ...fake.backend, decode })
+  voiceSpeaker.clearCache()
+  assert.equal(await voiceSpeaker.primeAcks(RYAN), true)
+  assert.deepEqual(fake.calls.speak.map((r) => [r.text, r.engine, r.voice]), ACK_LINES.map((l) => [l, 'edge', 'en-GB-RyanNeural']))
+  assert.deepEqual(voiceSpeaker.readyAcks(RYAN), [...ACK_LINES])
+  assert.deepEqual(voiceSpeaker.readyAcks(KOKORO), [], 'Ryan clips are not Kokoro acks')
+  // Played from memory under the key `speak` looks up, and logged as Edge.
+  const asked = fake.calls.speak.length
+  const ack = await voiceSpeaker.speak('Sure.', RYAN)
+  assert.equal(ack.spoke, true)
+  assert.equal(ack.cached, true)
+  assert.equal(ack.engine, 'edge')
+  assert.equal(fake.calls.speak.length, asked)
+
+  // A Kokoro lead still turns the same MP3 down: that is Edge standing in while Kokoro loads.
+  voiceSpeaker.clearCache()
+  fake = fakeTts(EDGE_MP3)
+  setTtsBackend({ ...fake.backend, decode })
+  assert.equal(await voiceSpeaker.primeAcks(KOKORO), false)
+  assert.deepEqual(voiceSpeaker.readyAcks(KOKORO), [])
+
+  // Prefetch in Ryan: one Edge request ahead, and `speak` plays that clip without asking again.
+  voiceSpeaker.clearCache()
+  fake = fakeTts(EDGE_MP3)
+  setTtsBackend({ ...fake.backend, decode })
+  voiceSpeaker.prefetch('The build passed on the first try.', RYAN)
+  assert.deepEqual(fake.calls.speak.map((r) => `${r.engine}:${r.voice}`), ['edge:en-GB-RyanNeural'])
+  // Made while the sentence before it plays, as in a reply.
+  await new Promise((r) => setTimeout(r, 10))
+  const said = await voiceSpeaker.speak('The build passed on the first try.', RYAN)
+  assert.equal(said.spoke, true)
+  assert.equal(said.cached, true)
+  assert.equal(said.engine, 'edge')
+  assert.equal(fake.calls.speak.length, 1, 'the prefetched clip is the one played')
+
+  // The logged engine is the one that made the clip: a Kokoro ask that main answered in Edge is Edge.
+  voiceSpeaker.clearCache()
+  fake = fakeTts(EDGE_MP3)
+  setTtsBackend({ ...fake.backend, decode })
+  const stoodIn = await voiceSpeaker.speak('Zeb has finished the build.', KOKORO)
+  assert.equal(fake.calls.speak[0].engine, 'kokoro', 'Kokoro was asked')
+  assert.equal(stoodIn.engine, 'edge', 'but Edge made it')
+  const again = await voiceSpeaker.speak('Zeb has finished the build.', KOKORO)
+  assert.equal(again.cached, true)
+  assert.equal(again.engine, 'edge', 'the cached hit says Edge too')
+  // Kokoro's own PCM is logged as Kokoro.
+  voiceSpeaker.clearCache()
+  fake = fakeTts(() => ({ ok: true, audio: fakePcm(0.2).toString('base64'), format: 'pcm16', mime: 'audio/L16;rate=24000', sampleRate: 24_000, channels: 1, model: 'kokoro-82m', voice: 'bf_emma', ms: 5 }))
+  setTtsBackend(fake.backend)
+  assert.equal((await voiceSpeaker.speak('Zeb has finished the build.', KOKORO)).engine, 'kokoro')
+  voiceSpeaker.clearCache()
+})
+
 /* ------------------------------------------------------------------- live */
 
 /**

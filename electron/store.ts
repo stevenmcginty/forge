@@ -302,6 +302,8 @@ function defaultSettings(): Settings {
     voiceEdgeVoice: '',
     // Claude Voice's Kokoro voice (electron/kokoro-tts.ts).
     kokoroVoice: DEFAULT_KOKORO_VOICE,
+    // Claude Voice and Claude Live speak in Forge Brain's voice unless Kokoro is picked.
+    claudeVoiceSound: 'brain',
     // Claude Voice's own model: Sonnet, for a reply that starts in a second or two.
     claudeVoiceModel: 'claude-sonnet-5-5',
     // Claude Live (shared/live.ts): Opus talks, Opus conducts, OpenAI hears.
@@ -908,6 +910,7 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
           : DEFAULT_SETTINGS.voiceEngine,
     voiceEdgeVoice: typeof s.voiceEdgeVoice === 'string' ? s.voiceEdgeVoice.trim().slice(0, 60) : '',
     kokoroVoice: typeof s.kokoroVoice === 'string' && isKokoroVoice(s.kokoroVoice) ? s.kokoroVoice.trim() : DEFAULT_KOKORO_VOICE,
+    claudeVoiceSound: s.claudeVoiceSound === 'kokoro' ? 'kokoro' : 'brain',
     claudeVoiceModel:
       typeof s.claudeVoiceModel === 'string' && s.claudeVoiceModel.trim() && !isCodexClaudeModel(s.claudeVoiceModel)
         ? s.claudeVoiceModel.trim().slice(0, 80)

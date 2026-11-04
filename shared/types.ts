@@ -971,6 +971,8 @@ export type LiveVoiceModel = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-h
 export type LiveConductorModel = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-fable-5-1'
 /** Who hears Steve for Claude Live: OpenAI realtime transcription, or local Parakeet. */
 export type LiveEars = 'openai' | 'parakeet'
+/** The voice Claude Voice and Claude Live speak in: Forge Brain's Edge voice, or Kokoro. */
+export type ClaudeVoiceSound = 'brain' | 'kokoro'
 
 /**
  * One row of the desktop voice menu, in display order.
@@ -1919,6 +1921,13 @@ export interface Settings {
    * shared/tts.ts until he picks one; no Settings UI yet.
    */
   kokoroVoice: string
+  /**
+   * Which voice Claude Voice and Claude Live speak in: `brain` = Forge Brain's
+   * own Edge neural voice (`brainVoice`, Ryan by default, with its fallbacks)
+   * — the default, because Steve finds it clearer; `kokoro` = Kokoro in
+   * `kokoroVoice` (electron/kokoro-tts.ts). Settings → Main agent.
+   */
+  claudeVoiceSound: ClaudeVoiceSound
   /**
    * Which Claude model Claude Voice runs (agentBrain `claude-voice`) — its own
    * setting, so the hidden `claude` brain keeps `voiceClaudeModel`. A model id

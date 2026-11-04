@@ -295,6 +295,7 @@ const FALLBACK_SETTINGS: Settings = {
   voiceEngine: 'edge',
   voiceEdgeVoice: '',
   kokoroVoice: DEFAULT_KOKORO_VOICE,
+  claudeVoiceSound: 'brain',
   claudeVoiceModel: 'claude-sonnet-5-5',
   // Mirrors electron/store.ts: Claude Live (shared/live.ts).
   liveVoiceModel: 'claude-opus-5-5',

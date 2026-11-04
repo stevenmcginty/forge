@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { LiveEvent, LiveJob, LiveStatus } from '@shared/live'
-import type { LiveEars, Settings, VoiceEngine } from '@shared/types'
+import { BRAIN_VOICE_DEFAULT, BRAIN_VOICE_FALLBACKS } from '@shared/brain'
+import type { ClaudeVoiceSound, LiveEars, Settings, VoiceEngine } from '@shared/types'
 import { DEFAULT_KOKORO_VOICE } from '@shared/tts'
 import { liveCardFor, liveCardWho, livePushLine, type LiveCardAnswer } from '@shared/live-card'
 import type { LivePhase, LiveShowing, LiveTurn, LiveView } from '@/components/live/types'
@@ -43,7 +44,7 @@ import { shallowEqual, useAppSelector } from '@/state/AppState'
  *   ears    always-open mic, semantic end of turn (src/lib/live/ears-*.ts)
  *   brains  in main, over `window.forge.live` (shared/live.ts): a finished
  *           turn goes up with `ask`, the reply comes back as `say` pieces
- *   mouth   Kokoro, clause-streamed, with a spoken ack when nothing has been
+ *   mouth   Forge Brain's voice or Kokoro (`claudeVoiceSound`), clause-streamed, with a spoken ack when nothing has been
  *           heard 600 ms after he stopped (src/lib/live/mouth.ts)
  *
  * Barge-in stops only the speech: duck at once, stop 150 ms later, and
@@ -95,6 +96,8 @@ interface LiveSettings {
   voiceTtsModel: string
   voiceReplyVoice: string
   kokoroVoice: string
+  claudeVoiceSound: ClaudeVoiceSound
+  brainVoice: string
 }
 
 function selectLiveSettings(state: { settings: Settings }): LiveSettings {
@@ -109,12 +112,30 @@ function selectLiveSettings(state: { settings: Settings }): LiveSettings {
     voiceTtsVoice: s.voiceTtsVoice,
     voiceTtsModel: s.voiceTtsModel,
     voiceReplyVoice: s.voiceReplyVoice,
-    kokoroVoice: s.kokoroVoice || DEFAULT_KOKORO_VOICE
+    kokoroVoice: s.kokoroVoice || DEFAULT_KOKORO_VOICE,
+    claudeVoiceSound: s.claudeVoiceSound === 'kokoro' ? 'kokoro' : 'brain',
+    brainVoice: s.brainVoice || BRAIN_VOICE_DEFAULT
   }
 }
 
-/** Kokoro first, the rest of the configured chain behind it — the same shape VoiceAgent gives Claude Voice. */
+/**
+ * The same shape VoiceAgent gives Claude Voice: Forge Brain's voice
+ * (`claudeVoiceSound: 'brain'`, Edge only, `brainVoice` then its fallbacks,
+ * never SAPI), or Kokoro first with the rest of the configured chain behind it.
+ */
 function voiceConfigOf(s: LiveSettings): VoiceConfig {
+  if (s.claudeVoiceSound !== 'kokoro') {
+    return {
+      engine: 'edge',
+      hasKey: s.hasGeminiKey,
+      edgeVoice: s.brainVoice,
+      geminiVoice: s.voiceTtsVoice,
+      ttsModel: s.voiceTtsModel,
+      localVoice: s.voiceReplyVoice,
+      edgeVoices: [s.brainVoice, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== s.brainVoice)],
+      neuralOnly: true
+    }
+  }
   return {
     engine: s.voiceEngine,
     hasKey: s.hasGeminiKey,
@@ -175,7 +196,7 @@ interface Clock extends TurnClock {
 const TICK_MS = 250
 /** A "speech started" with no turn after this long was a noise: stop showing "hearing". */
 const HEARING_STALE_MS = 15_000
-/** Between tries to make the ack clips while Kokoro warms. */
+/** Between tries to make the ack clips while Kokoro warms (Forge Brain's voice makes them on the first). */
 const PRIME_RETRY_MS = 5_000
 /** Turn ids remembered as cancelled, so a late `say` for one is dropped. */
 const CANCELLED_KEPT = 50
@@ -625,7 +646,7 @@ class LiveRuntime {
     if (!mouth.active && !busy && !this.hearing && now - this.primedAt >= PRIME_RETRY_MS) this.primeAcks()
   }
 
-  /** Make the ack clips in Kokoro while nothing is being said (main's Kokoro queue is serial). */
+  /** Make the ack clips in Live's voice while nothing is being said (main's Kokoro queue is serial). */
   private primeAcks(): void {
     const config = this.config()
     if (voiceSpeaker.readyAcks(config).length >= ACK_LINES.length) return
