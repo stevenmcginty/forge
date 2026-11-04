@@ -1,3 +1,4 @@
+import { OPENAI_TTS_MODEL } from '@shared/tts'
 import type { VoiceEngine, VoiceSpeakRequest, VoiceSpeakResult } from '@shared/types'
 import { speakable, speaker } from './speech'
 
@@ -56,13 +57,39 @@ export interface Playing {
    * See src/lib/bargein.ts.
    */
   duck(level: number): void
+  /** On the backend's clock (`TtsBackend.now`, seconds): when the sound starts. Absent = unknown. */
+  startsAt?: number
+  /** When the sound ends, on the same clock — known for a clip, and for a stream once it has ended. */
+  endsAt?: number
+}
+
+/** A sound fed piece by piece (streamed speech): `push` in order, then `end`. */
+export interface StreamPlaying extends Playing {
+  push(pcm: Int16Array): void
+  /** No more pieces: `endsAt` is known from here, and `done` resolves when the last one has played. */
+  end(): void
 }
 
 export interface TtsBackend {
   speak(req: VoiceSpeakRequest): Promise<VoiceSpeakResult>
   cancelSpeak(requestId: string): Promise<boolean>
-  /** Play raw PCM. Returns as soon as playback has *started*. */
-  play(pcm: Int16Array, sampleRate: number, channels: number): Playing
+  /**
+   * Play raw PCM. Returns as soon as playback has *started* — or, with
+   * `startAt` (on the `now` clock, seconds), as soon as it is scheduled to
+   * start then: how a Claude voice's next clip joins the one playing with no
+   * gap (`seamless`).
+   */
+  play(pcm: Int16Array, sampleRate: number, channels: number, startAt?: number): Playing
+  /** The audio clock, seconds. Absent: clips are not scheduled ahead, each waits for the last to end. */
+  now?(): number
+  /**
+   * `speak` with the audio handed to `onChunk` as it arrives (OpenAI only).
+   * Absent on a stale preload, which has no chunk channel: the whole clip is
+   * played instead.
+   */
+  speakStream?(req: VoiceSpeakRequest, onChunk: (pcm: Int16Array) => void): Promise<VoiceSpeakResult>
+  /** A player fed piece by piece, for `speakStream`. */
+  playStream?(sampleRate: number, channels: number, startAt?: number): StreamPlaying
   /**
    * Decode a compressed clip (the edge engine returns MP3) to the same raw PCM
    * shape everything downstream — the cache, `play`, ducking — already speaks.
@@ -122,8 +149,7 @@ export function base64ToPcm(b64: string): Int16Array {
   return new Int16Array(bytes.buffer, 0, bytes.byteLength >> 1)
 }
 
-function webAudioPlay(pcm: Int16Array, sampleRate: number, channels: number): Playing {
-  const ctx = context()
+function audioBuffer(ctx: AudioContext, pcm: Int16Array, sampleRate: number, channels: number): AudioBuffer {
   const frames = Math.floor(pcm.length / channels)
   const buffer = ctx.createBuffer(channels, Math.max(1, frames), sampleRate)
   if (channels === 1) {
@@ -136,6 +162,12 @@ function webAudioPlay(pcm: Int16Array, sampleRate: number, channels: number): Pl
       buffer.copyToChannel(plane, c)
     }
   }
+  return buffer
+}
+
+function webAudioPlay(pcm: Int16Array, sampleRate: number, channels: number, startAt?: number): Playing {
+  const ctx = context()
+  const buffer = audioBuffer(ctx, pcm, sampleRate, channels)
   const source = ctx.createBufferSource()
   source.buffer = buffer
   // A gain stage between the clip and the speakers, purely so barge-in has
@@ -164,9 +196,13 @@ function webAudioPlay(pcm: Int16Array, sampleRate: number, channels: number): Pl
     resolve()
   }
   source.onended = finish
-  source.start()
+  // On the clock when asked (the clip before it ends then), else now.
+  const startsAt = startAt !== undefined && startAt > ctx.currentTime ? startAt : ctx.currentTime
+  source.start(startsAt > ctx.currentTime ? startsAt : 0)
   return {
     done,
+    startsAt,
+    endsAt: startsAt + buffer.duration,
     stop: () => {
       try {
         source.stop()
@@ -187,6 +223,102 @@ function webAudioPlay(pcm: Int16Array, sampleRate: number, channels: number): Pl
         /* context went away mid-utterance */
       }
     }
+  }
+}
+
+/**
+ * Streamed speech: each piece is its own AudioBufferSource, started on the
+ * clock exactly where the last one ends, all through one gain stage so
+ * ducking rides the whole sentence. A piece that arrives late (the network
+ * slower than speech) starts at once: a short gap, never an overlap.
+ */
+function webAudioStream(sampleRate: number, channels: number, startAt?: number): StreamPlaying {
+  const ctx = context()
+  const gain = ctx.createGain()
+  gain.gain.value = 1
+  gain.connect(ctx.destination)
+  const sources = new Set<AudioBufferSourceNode>()
+  let cursor = startAt !== undefined && startAt > ctx.currentTime ? startAt : ctx.currentTime
+  let ended = false
+  let settled = false
+  let resolve: () => void = () => {}
+  const done = new Promise<void>((r) => {
+    resolve = r
+  })
+  const finish = (): void => {
+    if (settled) return
+    settled = true
+    try {
+      gain.disconnect()
+    } catch {
+      /* already gone */
+    }
+    resolve()
+  }
+  const playing: StreamPlaying = {
+    done,
+    startsAt: cursor,
+    push: (pcm: Int16Array) => {
+      if (settled || ended || pcm.length < channels) return
+      const buffer = audioBuffer(ctx, pcm, sampleRate, channels)
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(gain)
+      const at = Math.max(cursor, ctx.currentTime)
+      source.start(at)
+      cursor = at + buffer.duration
+      sources.add(source)
+      source.onended = () => {
+        sources.delete(source)
+        try {
+          source.disconnect()
+        } catch {
+          /* already gone */
+        }
+        if (ended && !sources.size) finish()
+      }
+    },
+    end: () => {
+      if (ended) return
+      ended = true
+      playing.endsAt = cursor
+      if (!sources.size) finish()
+    },
+    stop: () => {
+      ended = true
+      for (const source of sources) {
+        try {
+          source.stop()
+        } catch {
+          /* never started, or already stopped */
+        }
+      }
+      sources.clear()
+      finish()
+    },
+    duck: (level: number) => {
+      if (settled) return
+      try {
+        gain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)), ctx.currentTime, 0.015)
+      } catch {
+        /* context went away mid-utterance */
+      }
+    }
+  }
+  return playing
+}
+
+/** `voice:speak` with its streamed pieces (`IPC.voiceSpeakChunk`) handed to `onChunk` as they arrive. */
+async function ipcSpeakStream(req: VoiceSpeakRequest, onChunk: (pcm: Int16Array) => void): Promise<VoiceSpeakResult> {
+  const id = req.requestId ?? ''
+  // The pieces and the answer share one IPC pipe, in order: every piece lands before the answer.
+  const off = window.forge.voice.onSpeakChunk?.((chunk) => {
+    if (chunk?.requestId === id && typeof chunk.pcm === 'string') onChunk(base64ToPcm(chunk.pcm))
+  })
+  try {
+    return await window.forge.voice.speak({ ...req, stream: true })
+  } finally {
+    off?.()
   }
 }
 
@@ -217,6 +349,10 @@ function rendererBackend(): TtsBackend {
     speak: (req) => window.forge.voice.speak(req),
     cancelSpeak: (id) => window.forge.voice.cancelSpeak(id),
     play: webAudioPlay,
+    now: () => context().currentTime,
+    // A preload from before the chunk channel (Forge not restarted yet) has
+    // no `onSpeakChunk`: no streaming, the whole clip plays instead.
+    ...(typeof window.forge.voice.onSpeakChunk === 'function' ? { speakStream: ipcSpeakStream, playStream: webAudioStream } : {}),
     decode: webAudioDecode
   }
 }
@@ -388,14 +524,25 @@ const CLAUSE_END = /(?:[,;:]|\s[—–-])(?=\s)/g
 /** A first chunk cut at a clause has at least this many words, so it sounds like a phrase, not a stammer. */
 export const FIRST_CLAUSE_MIN_WORDS = 4
 
-/** Where the first clause of ≥ `FIRST_CLAUSE_MIN_WORDS` words ends, before `limit` (-1 = anywhere). -1 when there is none. */
-function clauseCut(text: string, limit: number): number {
+/**
+ * The cloud voices (OpenAI, Forge Brain's Edge voice): a first sentence that
+ * runs past this many words with no end yet is let out at a clause…
+ */
+export const FLUENT_FIRST_MAX_WORDS = 14
+/** …but only at a clause after at least this many words: a phrase, never a four-word stammer. */
+export const FLUENT_FIRST_CLAUSE_WORDS = 8
+
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter((w) => /\w/.test(w)).length
+}
+
+/** Where the first clause of ≥ `minWords` words ends, before `limit` (-1 = anywhere). -1 when there is none. */
+function clauseCut(text: string, limit: number, minWords: number = FIRST_CLAUSE_MIN_WORDS): number {
   CLAUSE_END.lastIndex = 0
   for (let m = CLAUSE_END.exec(text); m; m = CLAUSE_END.exec(text)) {
     const end = m.index + m[0].length
     if (limit >= 0 && end >= limit) return -1
-    const words = text.slice(0, end).split(/\s+/).filter((w) => /\w/.test(w)).length
-    if (words >= FIRST_CLAUSE_MIN_WORDS) return end
+    if (wordCount(text.slice(0, end)) >= minWords) return end
   }
   return -1
 }
@@ -417,11 +564,19 @@ function clauseCut(text: string, limit: number): number {
  * chunk may end at a clause — "Sure, I'll check the Forge project," — once it
  * has `FIRST_CLAUSE_MIN_WORDS` words, so Kokoro starts on it before the full
  * stop is written. Every later chunk is still a sentence.
+ *
+ * `fluent` (Claude Voice and Claude Live in a cloud voice — OpenAI or Forge
+ * Brain's Edge voice, `speaksFluently`): every chunk is a falling end and a
+ * pause, so there are fewer and longer ones. `'first'` (the reply's first
+ * chunk is in this buffer): it is the whole first sentence — only one that
+ * runs past `FLUENT_FIRST_MAX_WORDS` with no end yet is cut, at a clause after
+ * `FLUENT_FIRST_CLAUSE_WORDS` words. After it, and for all of `'rest'`, the
+ * whole sentences at hand are merged up to `max`.
  */
 export function takeSpeechChunks(
   buffer: string,
   max: number = SPEAK_CHUNK_MAX,
-  opts: { firstClause?: boolean } = {}
+  opts: { firstClause?: boolean; fluent?: 'first' | 'rest' } = {}
 ): {
   chunks: string[]
   rest: string
@@ -436,6 +591,10 @@ export function takeSpeechChunks(
       const clause = clauseCut(rest, cut)
       if (clause > 0 && clause <= max) cut = clause
     }
+    if (opts.fluent === 'first' && chunks.length === 0 && cut < 0 && wordCount(rest) > FLUENT_FIRST_MAX_WORDS) {
+      const clause = clauseCut(rest, -1, FLUENT_FIRST_CLAUSE_WORDS)
+      if (clause > 0 && clause <= max) cut = clause
+    }
     // No sentence end yet — but an over-long run still has to be let out.
     if (cut < 0) {
       if (rest.length <= max) break
@@ -448,7 +607,96 @@ export function takeSpeechChunks(
     if (head) chunks.push(head)
   }
 
-  return { chunks, rest }
+  if (!opts.fluent) return { chunks, rest }
+  // The reply's first chunk stays on its own, so its voice starts soonest; the rest merge.
+  const keep = opts.fluent === 'first' ? 1 : 0
+  const merged = chunks.slice(0, keep)
+  for (const chunk of chunks.slice(keep)) {
+    const last = merged.length > keep ? merged[merged.length - 1]! : null
+    if (last !== null && last.length + 1 + chunk.length <= max) merged[merged.length - 1] = `${last} ${chunk}`
+    else merged.push(chunk)
+  }
+  return { chunks: merged, rest }
+}
+
+/**
+ * Cut a clip's silence at both ends down to `keepMs` (Claude voices,
+ * `seamless`): the pause between two sentences is then the voice's own, not
+ * the engine's lead-in plus its tail. Anything quieter than `SILENCE_LEVEL`
+ * counts as silence; a clip with nothing louder is left as it is.
+ */
+export const SILENCE_LEVEL = 160
+export const CLIP_EDGE_MS = 40
+
+export function trimSilence(pcm: Int16Array, sampleRate: number, channels: number, keepMs: number = CLIP_EDGE_MS): Int16Array {
+  const frames = Math.floor(pcm.length / Math.max(1, channels))
+  const loud = (frame: number): boolean => {
+    for (let c = 0; c < channels; c++) if (Math.abs(pcm[frame * channels + c]!) > SILENCE_LEVEL) return true
+    return false
+  }
+  let first = 0
+  while (first < frames && !loud(first)) first++
+  if (first >= frames) return pcm
+  let last = frames - 1
+  while (last > first && !loud(last)) last--
+  const keep = Math.round((keepMs / 1000) * sampleRate)
+  const from = Math.max(0, first - keep)
+  const to = Math.min(frames, last + 1 + keep)
+  if (from === 0 && to === frames) return pcm
+  return pcm.slice(from * channels, to * channels)
+}
+
+/**
+ * `trimSilence` for a clip that arrives in pieces (streamed speech): drops
+ * the lead-in until the voice starts (keeping `keepMs` before it), and holds
+ * the newest `holdMs` back so the tail's silence can be cut at the end.
+ * `feed` returns what can be played now; `finish` the rest, trimmed.
+ */
+export class StreamTrimmer {
+  private readonly channels: number
+  private readonly keep: number
+  private readonly hold: number
+  private started = false
+  /** Samples not handed out yet: the lead-in so far, or the held tail. */
+  private pending: Int16Array = new Int16Array(0)
+
+  constructor(sampleRate: number, channels: number, keepMs: number = CLIP_EDGE_MS, holdMs = 300) {
+    this.channels = Math.max(1, channels)
+    this.keep = Math.round((keepMs / 1000) * sampleRate) * this.channels
+    this.hold = Math.round((holdMs / 1000) * sampleRate) * this.channels
+  }
+
+  feed(pcm: Int16Array): Int16Array {
+    const all = new Int16Array(this.pending.length + pcm.length)
+    all.set(this.pending, 0)
+    all.set(pcm, this.pending.length)
+    let from = 0
+    if (!this.started) {
+      let at = 0
+      while (at < all.length && Math.abs(all[at]!) <= SILENCE_LEVEL) at++
+      if (at >= all.length) {
+        // Still silence: keep only the last `keep` of it, the pad before the voice.
+        this.pending = all.slice(Math.max(0, all.length - this.keep))
+        return new Int16Array(0)
+      }
+      this.started = true
+      from = Math.max(0, at - (at % this.channels) - this.keep)
+    }
+    const cut = Math.max(from, all.length - this.hold)
+    const out = all.slice(from, cut - ((cut - from) % this.channels))
+    this.pending = all.slice(from + out.length)
+    return out
+  }
+
+  finish(): Int16Array {
+    const rest = this.pending
+    this.pending = new Int16Array(0)
+    if (!this.started) return new Int16Array(0)
+    let last = rest.length - 1
+    while (last >= 0 && Math.abs(rest[last]!) <= SILENCE_LEVEL) last--
+    const end = Math.min(rest.length, last + 1 + this.keep)
+    return rest.slice(0, end - (end % this.channels))
+  }
 }
 
 /* ---------------------------------------------------------------- the chain */
@@ -479,12 +727,41 @@ export interface VoiceConfig {
    * a replacement for it.
    */
   kokoroVoice?: string
+  /**
+   * Claude Voice / Claude Live: an OpenAI voice (`cedar`, `marin`), asked
+   * first, with `edgeVoices` (Forge Brain's voice) behind it. Main answers a
+   * failure when OpenAI cannot (no key, a refused key, the network), and the
+   * chain moves on to Ryan. Set only when there is an OpenAI key.
+   */
+  openaiVoice?: string
+  /**
+   * Claude Voice / Claude Live: each clip's silence is cut to ~40 ms at both
+   * ends (`trimSilence`), and with `speak`'s `follow` the next clip starts on
+   * the audio clock where this one ends — no `onended` gap between sentences.
+   */
+  seamless?: boolean
+}
+
+/** `speak`'s options for a queue of sentences (Claude Voice's and Claude Live's mouths). */
+export interface SayOptions {
+  /**
+   * Part of a run of sentences: what is playing is not stopped — this clip is
+   * scheduled to start where it ends — and `speak` resolves just before this
+   * clip's own end (`HANDOFF_S`), so the caller's next sentence can be
+   * scheduled behind it in turn. `cancel` still stops all of them at once.
+   * Without a clock on the backend it simply waits for the last one.
+   */
+  follow?: boolean
+  /** Called when this clip's first sample actually plays (later than `speak` was called, when it was scheduled). */
+  onStart?: () => void
+  /** An ack line: main may keep it on disk (OpenAI), so a restart does not pay for it again. */
+  keep?: boolean
 }
 
 export interface SpokenResult {
   /** Did any sound come out. */
   spoke: boolean
-  engine: VoiceEngine | 'kokoro' | 'none'
+  engine: VoiceEngine | 'kokoro' | 'openai' | 'none'
   /** Was it already in the cache — time to first audio was effectively zero. */
   cached: boolean
   /** Milliseconds from asking to the first sample. */
@@ -523,26 +800,32 @@ export function neuralChain(config: VoiceConfig): Array<'edge' | 'gemini'> {
  * engine chain, each engine in its configured voice.
  */
 export function neuralTries(config: VoiceConfig): Array<{ engine: NeuralEngine; voice: string }> {
+  const openai = config.openaiVoice?.trim() ? [{ engine: 'openai' as const, voice: config.openaiVoice.trim() }] : []
   const kokoro = config.kokoroVoice?.trim() ? [{ engine: 'kokoro' as const, voice: config.kokoroVoice.trim() }] : []
+  const first = [...openai, ...kokoro]
   const voices = (config.edgeVoices ?? []).filter((v) => v.trim())
-  if (voices.length) return [...kokoro, ...[voices[0]!, ...voices].map((voice) => ({ engine: 'edge' as const, voice }))]
-  return [...kokoro, ...neuralChain(config).map((engine) => ({ engine, voice: engine === 'edge' ? config.edgeVoice : config.geminiVoice }))]
+  if (voices.length) return [...first, ...[voices[0]!, ...voices].map((voice) => ({ engine: 'edge' as const, voice }))]
+  return [...first, ...neuralChain(config).map((engine) => ({ engine, voice: engine === 'edge' ? config.edgeVoice : config.geminiVoice }))]
 }
 
-type NeuralEngine = 'edge' | 'gemini' | 'kokoro'
+type NeuralEngine = 'edge' | 'gemini' | 'kokoro' | 'openai'
 
 /** The clip cache key for one neural try. */
 function tryCacheKey(body: string, engine: NeuralEngine, voice: string, config: VoiceConfig): string {
+  if (engine === 'openai') return ttsCacheKey(body, voice, OPENAI_TTS_MODEL)
   if (engine === 'kokoro') return ttsCacheKey(body, voice, 'kokoro')
   return engine === 'edge' ? ttsCacheKey(body, voice || 'default', 'edge-neural') : ttsCacheKey(body, config.geminiVoice, config.ttsModel)
 }
 
 /**
  * The voice a Claude voice config leads with, for `prefetch` and the acks:
- * Kokoro when `kokoroVoice` is set, otherwise the first of `edgeVoices` (Forge
- * Brain's voice). Null when the config has neither — not a Claude voice.
+ * OpenAI when `openaiVoice` is set, Kokoro when `kokoroVoice` is, otherwise
+ * the first of `edgeVoices` (Forge Brain's voice). Null when the config has
+ * none of them — not a Claude voice.
  */
-export function leadVoice(config: VoiceConfig): { engine: 'kokoro' | 'edge'; voice: string } | null {
+export function leadVoice(config: VoiceConfig): { engine: 'openai' | 'kokoro' | 'edge'; voice: string } | null {
+  const openai = config.openaiVoice?.trim()
+  if (openai) return { engine: 'openai', voice: openai }
   const kokoro = config.kokoroVoice?.trim()
   if (kokoro) return { engine: 'kokoro', voice: kokoro }
   const edge = (config.edgeVoices ?? []).map((v) => v.trim()).find(Boolean)
@@ -556,11 +839,56 @@ export function leadVoice(config: VoiceConfig): { engine: 'kokoro' | 'edge'; voi
 export function clipEngine(model: string, asked: NeuralEngine): NeuralEngine {
   if (model === 'edge-neural') return 'edge'
   if (/^kokoro/i.test(model)) return 'kokoro'
+  if (model === OPENAI_TTS_MODEL) return 'openai'
   return asked
+}
+
+/**
+ * Does this config speak in a cloud voice (OpenAI, or Forge Brain's Edge
+ * voice) as a Claude voice — so its replies are cut by whole sentences
+ * (`takeSpeechChunks` `fluent`)? Kokoro keeps its four-word first clause.
+ */
+export function speaksFluently(config: VoiceConfig): boolean {
+  return !!config.seamless && !config.kokoroVoice?.trim() && leadVoice(config) !== null
+}
+
+/**
+ * What `prefetch` asks for, in order: the lead voice, and behind an OpenAI
+ * lead the first Edge voice too, so a sentence OpenAI could not make is
+ * already being made in Ryan rather than asked for when its turn comes.
+ */
+function aheadTries(config: VoiceConfig): Array<{ engine: 'openai' | 'kokoro' | 'edge'; voice: string }> {
+  const lead = leadVoice(config)
+  if (!lead) return []
+  const edge = (config.edgeVoices ?? []).map((v) => v.trim()).find(Boolean)
+  return lead.engine === 'openai' && edge ? [lead, { engine: 'edge', voice: edge }] : [lead]
+}
+
+/**
+ * Is this answer really from the engine asked? A main process from before
+ * the OpenAI engine (Forge not restarted) answers an `openai` ask with
+ * Gemini's default voice — that is a wrong voice, so it counts as a failure
+ * and the chain moves on to Forge Brain's.
+ */
+function answeredBy(engine: NeuralEngine, result: VoiceSpeakResult): boolean {
+  return engine !== 'openai' || !result.ok || result.model === OPENAI_TTS_MODEL
 }
 
 /** Sentences Claude Voice may have in synthesis ahead of the one playing. */
 const PREFETCH_MAX = 4
+
+/**
+ * A `follow` clip's `speak` resolves this long before the clip ends, so the
+ * next sentence — usually already made (`prefetch`) — is scheduled on the
+ * clock behind it before it runs out.
+ */
+export const HANDOFF_S = 0.25
+
+/** OpenAI's PCM: 24 kHz mono (electron/openai-tts.ts). */
+const OPENAI_PCM_RATE = 24_000
+
+/** What an `openai` answer from a main process that predates the engine counts as (`answeredBy`). */
+const STALE_MAIN = { kind: 'stale-main', error: 'The desktop needs a Forge restart for the OpenAI voice' }
 
 /**
  * Claude Voice's instant acknowledgements: made in Kokoro once it is warm
@@ -598,11 +926,28 @@ class VoiceSpeaker {
   private readonly spoken = new Set<string>()
   private readonly listeners = new Set<(speaking: boolean) => void>()
 
-  private playing: Playing | null = null
-  /** The main-process request id currently in flight, if any. */
-  private inFlight: string | null = null
-  /** Bumped by `cancel()`, so a reply that lands after barge-in is discarded. */
+  /**
+   * Every sound out or scheduled: one, normally; with `follow`, the clip
+   * playing and the one scheduled to start where it ends. `cancel` and
+   * `duck` reach all of them.
+   */
+  private readonly playing = new Set<Playing>()
+  /** The last clip of a run, and its words: the next `follow` clip starts where it ends. */
+  private tail: { handle: Playing; text: string } | null = null
+  /** The main-process request ids in flight. */
+  private readonly inFlight = new Set<string>()
+  /**
+   * Bumped by every `speak` and by `cancel()`, so a reply that lands after a
+   * newer one — or after barge-in — is discarded.
+   */
   private generation = 0
+  /**
+   * Bumped by `cancel()` only. A prefetched clip is kept against this, never
+   * `generation`: `speak` reaching its sentence must not throw away the clip
+   * being made for it (it did, and every prefetched sentence was made twice,
+   * with a gap the length of the second synthesis).
+   */
+  private epoch = 0
   private active = false
   /** So the fallback notice is shown once per session, not once per sentence. */
   private warned = false
@@ -613,12 +958,20 @@ class VoiceSpeaker {
    */
   private readonly ahead = new Map<string, { requestId: string; done: Promise<void> }>()
   /**
+   * Prefetches that failed with another voice behind them (OpenAI, with Ryan
+   * already being asked), by cache key: `speak` skips that try instead of
+   * asking it a second time.
+   */
+  private readonly missed = new Map<string, { kind: string; error: string }>()
+  /**
    * Claude Voice's acknowledgement clips (`ACK_LINES`), by cache key. Kept out
    * of the LRU so a long reply cannot push them out; `speak` plays from here.
    */
   private readonly acks = new Map<string, CachedClip>()
   /** The `primeAcks` run in flight, so two callers share one. */
   private priming: Promise<boolean> | null = null
+  /** `quiet` callers, told when the last sound ends. */
+  private quietWaiters: Array<() => void> = []
 
   get speaking(): boolean {
     return this.active
@@ -636,6 +989,12 @@ class VoiceSpeaker {
     }
   }
 
+  /** Resolves once nothing is playing or scheduled: the true end of a `follow` run. */
+  quiet(): Promise<void> {
+    if (!this.playing.size) return Promise.resolve()
+    return new Promise((resolve) => this.quietWaiters.push(resolve))
+  }
+
   /**
    * Say something once, keyed by turn id.
    *
@@ -644,26 +1003,33 @@ class VoiceSpeaker {
    * re-renders for any number of reasons and anything that speaks from a render
    * path can speak twice.
    */
-  async speakOnce(key: string, text: string, config: VoiceConfig, onNotice?: (msg: string) => void): Promise<SpokenResult> {
+  async speakOnce(
+    key: string,
+    text: string,
+    config: VoiceConfig,
+    onNotice?: (msg: string) => void,
+    opts: SayOptions = {}
+  ): Promise<SpokenResult> {
     if (this.spoken.has(key)) return { spoke: false, engine: 'none', cached: false, latencyMs: 0 }
     this.spoken.add(key)
     if (this.spoken.size > 400) {
       const oldest = this.spoken.values().next().value
       if (oldest !== undefined) this.spoken.delete(oldest)
     }
-    return this.speak(text, config, onNotice)
+    return this.speak(text, config, onNotice, opts)
   }
 
   /**
    * Say something. The settings page's sample button uses this directly; every
    * conversational turn goes through `speakOnce`.
    */
-  async speak(text: string, config: VoiceConfig, onNotice?: (msg: string) => void): Promise<SpokenResult> {
+  async speak(text: string, config: VoiceConfig, onNotice?: (msg: string) => void, opts: SayOptions = {}): Promise<SpokenResult> {
     const body = stripFiller(speakable(text))
     if (!body) return { spoke: false, engine: 'none', cached: false, latencyMs: 0 }
 
-    // Whatever was talking stops first: the queue is never a queue.
-    this.stopSound()
+    // Whatever was talking stops first: the queue is never a queue — except
+    // the next sentence of a run (`follow`), which goes on behind it.
+    if (!opts.follow) this.stopSound()
     const generation = ++this.generation
     const started = Date.now()
 
@@ -682,18 +1048,36 @@ class VoiceSpeaker {
           return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
         }
       }
+      // Asked ahead and refused: the next voice is already on it.
+      const miss = this.missed.get(key)
+      if (miss) {
+        this.missed.delete(key)
+        lastFailureKind = miss.kind
+        lastFailureError = miss.error
+        continue
+      }
       const hit = this.cache.get(key) ?? this.acks.get(key)
       if (hit) {
-        const played = await this.playClip(hit, body, generation)
+        const played = await this.playClip(hit, body, generation, opts)
         // The engine that made the clip: a Kokoro ask may hold an Edge clip.
         return { spoke: played, engine: clipEngine(hit.model, engine), cached: true, latencyMs: Date.now() - started }
       }
 
       const requestId = `say_${++requestSeq}`
-      this.inFlight = requestId
+      const backend = io()
+      // OpenAI streams: the first piece plays while the rest is still being made.
+      if (engine === 'openai' && backend.speakStream && backend.playStream) {
+        const streamed = await this.speakStreamed(body, key, voice, config, generation, opts, requestId, started)
+        if ('spoke' in streamed) return streamed
+        lastFailureKind = streamed.kind
+        lastFailureError = streamed.error
+        continue
+      }
+
+      this.inFlight.add(requestId)
       let result: VoiceSpeakResult
       try {
-        result = await io().speak({
+        result = await backend.speak({
           text: body,
           engine,
           voice,
@@ -703,7 +1087,7 @@ class VoiceSpeaker {
       } catch (err) {
         result = { ok: false, error: err instanceof Error ? err.message : String(err), kind: 'network' }
       } finally {
-        if (this.inFlight === requestId) this.inFlight = null
+        this.inFlight.delete(requestId)
       }
 
       // Barge-in while the request was out: he is talking, so nothing is said.
@@ -711,34 +1095,29 @@ class VoiceSpeaker {
         return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
       }
 
+      if (!answeredBy(engine, result)) {
+        lastFailureKind = STALE_MAIN.kind
+        lastFailureError = STALE_MAIN.error
+        continue
+      }
+
       if (result.ok) {
         let clip: CachedClip
-        if (result.format === 'mp3') {
-          try {
-            const decoded = await io().decode(base64ToBytes(result.audio).buffer)
-            clip = { ...decoded, voice: result.voice, model: result.model }
-          } catch {
-            // A clip that will not decode is this engine failing, not the end
-            // of the chain.
-            lastFailureKind = 'no-audio'
-            lastFailureError = 'The audio clip could not be decoded'
-            continue
-          }
-          // Decoding awaited too — he may have started talking during it.
-          if (generation !== this.generation) {
-            return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
-          }
-        } else {
-          clip = {
-            pcm: base64ToPcm(result.audio),
-            sampleRate: result.sampleRate,
-            channels: result.channels,
-            voice: result.voice,
-            model: result.model
-          }
+        try {
+          clip = await this.clipOf(result, config)
+        } catch {
+          // A clip that will not decode is this engine failing, not the end
+          // of the chain.
+          lastFailureKind = 'no-audio'
+          lastFailureError = 'The audio clip could not be decoded'
+          continue
+        }
+        // Decoding awaited too — he may have started talking during it.
+        if (generation !== this.generation) {
+          return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
         }
         this.cache.set(key, clip)
-        const played = await this.playClip(clip, body, generation)
+        const played = await this.playClip(clip, body, generation, opts)
         return { spoke: played, engine: clipEngine(clip.model, engine), cached: false, latencyMs: Date.now() - started }
       }
 
@@ -771,66 +1150,71 @@ class VoiceSpeaker {
   /**
    * Shut up now.
    *
-   * Three things, and all three are needed: stop the sound that is playing,
-   * abort the request that has not come back yet, and bump the generation so a
-   * reply already in the air is thrown away rather than played a beat later.
+   * Three things, and all three are needed: stop every sound playing or
+   * scheduled, abort the requests that have not come back yet, and bump the
+   * generation so a reply already in the air is thrown away rather than
+   * played a beat later.
    */
   cancel(): void {
     this.generation++
+    this.epoch++
     this.stopSound()
-    const id = this.inFlight
-    if (id) {
-      this.inFlight = null
-      void io().cancelSpeak(id)
-    }
+    for (const id of this.inFlight) void io().cancelSpeak(id)
+    this.inFlight.clear()
     // The sentences fetched ahead were for the reply he just talked over.
     for (const { requestId } of this.ahead.values()) void io().cancelSpeak(requestId)
     this.ahead.clear()
+    this.missed.clear()
     speaker.cancel()
   }
 
   /**
    * Claude Voice: start making a sentence's audio now, while the one before it
    * plays, so the gap between sentences is not a whole synthesis long. Only
-   * for a Claude voice config, in its lead voice (`leadVoice`: Kokoro, or
-   * Forge Brain's Edge voice); the clip lands in the cache under the key
-   * `speak` looks for, and `speak` waits on it if it is still coming. Main's
+   * for a Claude voice config, in its lead voice (`leadVoice`: OpenAI, Kokoro,
+   * or Forge Brain's Edge voice — and behind OpenAI, Ryan if OpenAI cannot);
+   * the clip lands in the cache under the key `speak` looks for, and `speak`
+   * waits on it if it is still coming. Only `cancel` throws it away. Main's
    * Kokoro queue is serial, so sentences are made in the order they were pushed.
    */
   prefetch(text: string, config: VoiceConfig): void {
-    const lead = leadVoice(config)
-    if (!lead) return
-    const { engine, voice } = lead
+    const tries = aheadTries(config)
+    if (!tries.length) return
     const body = stripFiller(speakable(text))
     if (!body) return
-    const key = tryCacheKey(body, engine, voice, config)
-    if (this.cache.get(key) || this.acks.has(key) || this.ahead.has(key) || this.ahead.size >= PREFETCH_MAX) return
-    const requestId = `say_${++requestSeq}`
-    const generation = this.generation
-    const done = (async (): Promise<void> => {
-      try {
-        const result = await io().speak({ text: body, engine, voice, requestId })
-        if (!result.ok || generation !== this.generation) return
-        if (result.format === 'mp3') {
-          // Edge's answer — the lead voice, or standing in while Kokoro could not.
-          const decoded = await io().decode(base64ToBytes(result.audio).buffer)
-          if (generation === this.generation) this.cache.set(key, { ...decoded, voice: result.voice, model: result.model })
-          return
+    const epoch = this.epoch
+    const ask = (i: number): void => {
+      const { engine, voice } = tries[i]!
+      const key = tryCacheKey(body, engine, voice, config)
+      if (this.cache.get(key) || this.acks.has(key) || this.ahead.has(key)) return
+      // The fallback for a sentence already counted is not a new one.
+      if (i === 0 && this.ahead.size >= PREFETCH_MAX) return
+      const requestId = `say_${++requestSeq}`
+      const done = (async (): Promise<void> => {
+        try {
+          const result = await io().speak({ text: body, engine, voice, requestId })
+          if (epoch !== this.epoch) return
+          if (!result.ok || !answeredBy(engine, result)) {
+            if (!result.ok && result.kind === 'cancelled') return
+            // The lead could not: the next voice starts on it now, and
+            // `speak` skips this try rather than asking it again.
+            if (i + 1 < tries.length) {
+              this.miss(key, result.ok ? STALE_MAIN : { kind: result.kind, error: result.error })
+              ask(i + 1)
+            }
+            return
+          }
+          const clip = await this.clipOf(result, config)
+          if (epoch === this.epoch) this.cache.set(key, clip)
+        } catch {
+          // `speak` asks again for itself.
+        } finally {
+          if (this.ahead.get(key)?.requestId === requestId) this.ahead.delete(key)
         }
-        this.cache.set(key, {
-          pcm: base64ToPcm(result.audio),
-          sampleRate: result.sampleRate,
-          channels: result.channels,
-          voice: result.voice,
-          model: result.model
-        })
-      } catch {
-        // `speak` asks again for itself.
-      } finally {
-        if (this.ahead.get(key)?.requestId === requestId) this.ahead.delete(key)
-      }
-    })()
-    this.ahead.set(key, { requestId, done })
+      })()
+      this.ahead.set(key, { requestId, done })
+    }
+    ask(0)
   }
 
   /**
@@ -844,7 +1228,7 @@ class VoiceSpeaker {
    * voice nicety and interrupting works on both, which is the right way round.
    */
   duck(level: number): void {
-    this.playing?.duck(level)
+    for (const handle of this.playing) handle.duck(level)
   }
 
   /**
@@ -853,8 +1237,10 @@ class VoiceSpeaker {
    * the first answer that is not Kokoro's — Edge (MP3) speaking while Kokoro
    * loads — because an acknowledgement in another voice is worse than none; a
    * later call carries on. With an Edge lead (Forge Brain's voice) the MP3 is
-   * the voice itself, decoded once here. Resolves true once every line is held.
-   * Main's Kokoro queue is serial, so call it while nothing is being said.
+   * the voice itself, decoded once here. With an OpenAI lead main keeps each
+   * clip on disk (`keep`), so a restart does not pay for them again. Resolves
+   * true once every line is held. Main's Kokoro queue is serial, so call it
+   * while nothing is being said.
    */
   primeAcks(config: VoiceConfig): Promise<boolean> {
     const lead = leadVoice(config)
@@ -867,21 +1253,16 @@ class VoiceSpeaker {
           const body = stripFiller(speakable(line))
           const key = tryCacheKey(body, engine, voice, config)
           if (!body || this.acks.has(key)) continue
-          const result = await io().speak({ text: body, engine, voice, requestId: `ack_${++requestSeq}` })
-          if (!result.ok) return false
-          if (result.format === 'mp3') {
-            if (engine === 'kokoro') return false
-            const decoded = await io().decode(base64ToBytes(result.audio).buffer)
-            this.acks.set(key, { ...decoded, voice: result.voice, model: result.model })
-            continue
-          }
-          this.acks.set(key, {
-            pcm: base64ToPcm(result.audio),
-            sampleRate: result.sampleRate,
-            channels: result.channels,
-            voice: result.voice,
-            model: result.model
+          const result = await io().speak({
+            text: body,
+            engine,
+            voice,
+            requestId: `ack_${++requestSeq}`,
+            ...(engine === 'openai' ? { keep: true } : {})
           })
+          if (!result.ok || !answeredBy(engine, result)) return false
+          if (result.format === 'mp3' && engine === 'kokoro') return false
+          this.acks.set(key, await this.clipOf(result, config))
         }
         return true
       } catch {
@@ -906,6 +1287,158 @@ class VoiceSpeaker {
   clearCache(): void {
     this.cache.clear()
     this.acks.clear()
+    this.missed.clear()
+  }
+
+  /** A clip from a good answer: MP3 decoded, PCM as it is, and for a Claude voice (`seamless`) its silence trimmed. */
+  private async clipOf(result: Extract<VoiceSpeakResult, { ok: true }>, config: VoiceConfig): Promise<CachedClip> {
+    const clip: CachedClip =
+      result.format === 'mp3'
+        ? { ...(await io().decode(base64ToBytes(result.audio).buffer)), voice: result.voice, model: result.model }
+        : {
+            pcm: base64ToPcm(result.audio),
+            sampleRate: result.sampleRate,
+            channels: result.channels,
+            voice: result.voice,
+            model: result.model
+          }
+    return config.seamless ? { ...clip, pcm: trimSilence(clip.pcm, clip.sampleRate, clip.channels) } : clip
+  }
+
+  private miss(key: string, why: { kind: string; error: string }): void {
+    this.missed.set(key, why)
+    while (this.missed.size > PREFETCH_MAX * 4) {
+      const oldest = this.missed.keys().next().value
+      if (oldest === undefined) break
+      this.missed.delete(oldest)
+    }
+  }
+
+  /**
+   * One OpenAI sentence, played as it arrives: the first piece starts the
+   * sound (behind the clip before it, for `follow`), the rest are appended on
+   * the clock, and the whole clip lands in the cache when the answer does.
+   * A failure stops whatever of it played and hands the sentence on to the
+   * next voice, whole.
+   */
+  private async speakStreamed(
+    body: string,
+    key: string,
+    voice: string,
+    config: VoiceConfig,
+    generation: number,
+    opts: SayOptions,
+    requestId: string,
+    started: number
+  ): Promise<SpokenResult | { kind: string; error: string }> {
+    const backend = io()
+    const trimmer = config.seamless ? new StreamTrimmer(OPENAI_PCM_RATE, 1) : null
+    // A holder, not a `let`: the player is made inside the chunk callback.
+    const out: { player: StreamPlaying | null } = { player: null }
+    const onChunk = (pcm: Int16Array): void => {
+      if (generation !== this.generation) return
+      const ready = trimmer ? trimmer.feed(pcm) : pcm
+      if (!ready.length) return
+      if (!out.player) {
+        const { startAt, joinText } = this.followFrom(opts)
+        const player = backend.playStream!(OPENAI_PCM_RATE, 1, startAt)
+        this.adopt(player, joinText ? `${joinText} ${body}` : body, body, opts)
+        out.player = player
+      }
+      out.player.push(ready)
+    }
+    this.inFlight.add(requestId)
+    let result: VoiceSpeakResult
+    try {
+      result = await backend.speakStream!({ text: body, engine: 'openai', voice, requestId, ...(opts.keep ? { keep: true } : {}) }, onChunk)
+    } catch (err) {
+      result = { ok: false, error: err instanceof Error ? err.message : String(err), kind: 'network' }
+    } finally {
+      this.inFlight.delete(requestId)
+    }
+    const player = out.player
+    if (generation !== this.generation) {
+      player?.stop()
+      return { spoke: false, engine: 'openai', cached: false, latencyMs: Date.now() - started }
+    }
+    if (!result.ok || !answeredBy('openai', result)) {
+      player?.stop()
+      if (!result.ok && result.kind === 'cancelled') return { spoke: false, engine: 'openai', cached: false, latencyMs: Date.now() - started }
+      return result.ok ? STALE_MAIN : { kind: result.kind, error: result.error }
+    }
+    const clip = await this.clipOf(result, config)
+    this.cache.set(key, clip)
+    // No piece came (a main that does not stream): the whole clip, as before.
+    if (!player) {
+      const played = await this.playClip(clip, body, generation, opts)
+      return { spoke: played, engine: 'openai', cached: false, latencyMs: Date.now() - started }
+    }
+    const tail = trimmer?.finish()
+    if (tail?.length) player.push(tail)
+    player.end()
+    await this.until(player, opts)
+    return { spoke: true, engine: 'openai', cached: false, latencyMs: Date.now() - started }
+  }
+
+  /**
+   * Where a `follow` clip starts: on the clock where the run's last clip ends,
+   * while that one is still playing; and that clip's words, so the echo
+   * guard hears both.
+   */
+  private followFrom(opts: SayOptions): { startAt?: number; joinText: string } {
+    const tail = opts.follow ? this.tail : null
+    if (!tail || !this.playing.has(tail.handle)) return { joinText: '' }
+    const end = tail.handle.endsAt
+    return end !== undefined && io().now ? { startAt: end, joinText: tail.text } : { joinText: tail.text }
+  }
+
+  /**
+   * A sound has started (or is scheduled): it joins `playing`, the echo
+   * guard is told what is coming out of the speakers, and when the last
+   * sound ends the guard's echo window starts and `speaking` goes false.
+   */
+  private adopt(handle: Playing, echo: string, text: string, opts: SayOptions): void {
+    this.announce(true)
+    speaker.rememberSpoken(echo)
+    this.playing.add(handle)
+    this.tail = { handle, text }
+    if (opts.onStart) {
+      const epoch = this.epoch
+      const now = io().now?.()
+      const wait = handle.startsAt !== undefined && now !== undefined ? handle.startsAt - now : 0
+      const fire = (): void => {
+        if (epoch === this.epoch && this.playing.has(handle)) opts.onStart?.()
+      }
+      if (wait > 0.005) setTimeout(fire, wait * 1000)
+      else fire()
+    }
+    void handle.done.then(() => {
+      this.playing.delete(handle)
+      if (this.tail?.handle === handle) this.tail = null
+      if (this.playing.size) return
+      speaker.finishedSpeaking()
+      this.announce(false)
+      for (const wake of this.quietWaiters.splice(0)) wake()
+    })
+  }
+
+  /**
+   * Until `handle` ends — or, for a `follow` clip on a clock, until
+   * `HANDOFF_S` before it ends, so the next sentence is scheduled behind it.
+   */
+  private async until(handle: Playing, opts: SayOptions): Promise<void> {
+    const now = io().now?.()
+    if (!opts.follow || handle.endsAt === undefined || now === undefined) return handle.done
+    const wait = (handle.endsAt - HANDOFF_S - now) * 1000
+    if (wait <= 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      handle.done,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, wait)
+      })
+    ])
+    clearTimeout(timer)
   }
 
   /**
@@ -917,26 +1450,28 @@ class VoiceSpeaker {
    * lives in speech.ts and would otherwise never hear about a neural clip.
    * Without this pair, the default engine would talk to itself.
    */
-  private async playClip(clip: CachedClip, text: string, generation: number): Promise<boolean> {
+  private async playClip(clip: CachedClip, text: string, generation: number, opts: SayOptions = {}): Promise<boolean> {
     if (generation !== this.generation) return false
-    this.announce(true)
+    const backend = io()
+    // No clock to schedule on: a `follow` clip waits for the one before it to end.
+    const before = opts.follow ? this.tail : null
+    if (before && this.playing.has(before.handle) && (before.handle.endsAt === undefined || !backend.now)) {
+      await before.handle.done
+      if (generation !== this.generation) return false
+    }
+    const { startAt, joinText } = this.followFrom(opts)
     let handle: Playing
     try {
-      speaker.rememberSpoken(text)
-      handle = io().play(clip.pcm, clip.sampleRate, clip.channels)
+      handle = backend.play(clip.pcm, clip.sampleRate, clip.channels, startAt)
     } catch {
-      speaker.finishedSpeaking()
-      this.announce(false)
+      if (!this.playing.size) {
+        speaker.finishedSpeaking()
+        this.announce(false)
+      }
       return false
     }
-    this.playing = handle
-    try {
-      await handle.done
-    } finally {
-      if (this.playing === handle) this.playing = null
-      speaker.finishedSpeaking()
-      this.announce(false)
-    }
+    this.adopt(handle, joinText ? `${joinText} ${text}` : text, text, opts)
+    await this.until(handle, opts)
     return true
   }
 
@@ -951,10 +1486,12 @@ class VoiceSpeaker {
   }
 
   private stopSound(): void {
-    const handle = this.playing
-    this.playing = null
-    handle?.stop()
+    const handles = [...this.playing]
+    this.playing.clear()
+    this.tail = null
+    for (const handle of handles) handle.stop()
     if (this.active) this.announce(false)
+    for (const wake of this.quietWaiters.splice(0)) wake()
   }
 
   private announce(next: boolean): void {

@@ -56,7 +56,7 @@ import { bargeIn } from '@/lib/bargein'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { earconListening } from '@/lib/earcon'
 import { speakable, speaker } from '@/lib/speech'
-import { chooseEngine, nextAck, pickVaried, SPEAK_CHUNK_MAX, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
+import { chooseEngine, nextAck, pickVaried, SPEAK_CHUNK_MAX, speaksFluently, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { DEFAULT_KOKORO_VOICE } from '@shared/tts'
 import { buildActionPanes } from '@/lib/actionPanes'
 import { resolveProfile } from '@/lib/agents'
@@ -664,16 +664,24 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * have to be rebuilt (and the transcript subscription torn down) every time a
    * setting changes.
    */
-  // Claude Voice speaks in Forge Brain's voice (`claudeVoiceSound: 'brain'`,
-  // the default: Edge, `brainVoice` and its fallbacks, never SAPI) or in Kokoro
-  // (electron/kokoro-tts.ts) with the rest of the chain behind it. Any other
-  // agent: exactly the chain it had.
+  // Claude Voice speaks in OpenAI's voice (`claudeVoiceSound: 'openai'`, the
+  // default, when there is an OpenAI key: Cedar or Marin) with Forge Brain's
+  // voice behind it; in Forge Brain's voice (`'brain'`: Edge, `brainVoice` and
+  // its fallbacks, never SAPI); or in Kokoro (electron/kokoro-tts.ts) with the
+  // rest of the chain behind it. All three `seamless`. Any other agent:
+  // exactly the chain it had.
   const claudeVoice = state.settings.agentBrain === 'claude-voice'
   const claudeVoiceRef = useRef(claudeVoice)
   claudeVoiceRef.current = claudeVoice
   const brainVoiceName = state.settings.brainVoice || BRAIN_VOICE_DEFAULT
   const claudeInBrainVoice = claudeVoice && state.settings.claudeVoiceSound !== 'kokoro'
   const kokoroVoice = claudeVoice && !claudeInBrainVoice ? state.settings.kokoroVoice || DEFAULT_KOKORO_VOICE : ''
+  const openaiVoice =
+    claudeInBrainVoice && state.settings.claudeVoiceSound === 'openai' && (state.settings.openaiKey ?? '').trim()
+      ? state.settings.openaiTtsVoice === 'marin'
+        ? 'marin'
+        : 'cedar'
+      : ''
   const voiceConfig = useMemo<VoiceConfig>(
     () => ({
       engine: claudeInBrainVoice ? 'edge' : state.settings.voiceEngine,
@@ -683,9 +691,11 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       ttsModel: state.settings.voiceTtsModel,
       localVoice: state.settings.voiceReplyVoice,
       ...(kokoroVoice ? { kokoroVoice } : {}),
+      ...(openaiVoice ? { openaiVoice } : {}),
       ...(claudeInBrainVoice
         ? { edgeVoices: [brainVoiceName, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== brainVoiceName)], neuralOnly: true }
-        : {})
+        : {}),
+      ...(claudeVoice ? { seamless: true } : {})
     }),
     [
       state.settings.voiceEngine,
@@ -695,6 +705,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       state.settings.voiceTtsModel,
       state.settings.voiceReplyVoice,
       kokoroVoice,
+      openaiVoice,
+      claudeVoice,
       claudeInBrainVoice,
       brainVoiceName
     ]
@@ -702,14 +714,22 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const voiceConfigRef = useRef(voiceConfig)
   voiceConfigRef.current = voiceConfig
   /** The voice Claude Voice's acks and prefetch are made in — a new one is primed afresh. */
-  const claudeLead = claudeVoice ? (kokoroVoice ? `kokoro:${kokoroVoice}` : `edge:${brainVoiceName}`) : ''
+  const claudeLead = claudeVoice
+    ? openaiVoice
+      ? `openai:${openaiVoice}`
+      : kokoroVoice
+        ? `kokoro:${kokoroVoice}`
+        : `edge:${brainVoiceName}`
+    : ''
   /**
    * Forge Brain's voice: Edge only, its own voice (`brainVoice`), one retry,
    * then the other British neural voices — and never SAPI (`neuralOnly`).
+   * Never Claude Voice's OpenAI voice or its clip shaping: those are dropped.
    */
   const brainVoiceRef = useRef<VoiceConfig>(voiceConfig)
+  const { openaiVoice: _claudeOpenai, seamless: _claudeSeamless, ...brainBase } = voiceConfig
   brainVoiceRef.current = {
-    ...voiceConfig,
+    ...brainBase,
     engine: 'edge',
     edgeVoice: brainVoiceName,
     edgeVoices: [brainVoiceName, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== brainVoiceName)],
@@ -923,14 +943,16 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         // surface showing the same conversation — cannot make it say the same
         // thing twice.
         // Dev evidence (B11): each spoken chunk's start and end, in dev.log.
+        // Claude Voice: each sentence starts on the audio clock where the last
+        // ends (`follow`). Anything else waits for that run to play out first,
+        // or its `speak` would cut the run's last words off.
+        const config = next.brain ? brainVoiceRef.current : voiceConfigRef.current
+        const follow = !next.brain && !!config.seamless
+        if (!follow) await voiceSpeaker.quiet()
+        if (interrupted) break
         const saidAt = Date.now()
         if (import.meta.env.DEV) console.info(`[hub] event=tts-start key=${next.key} chars=${next.text.length}`)
-        const said = await voiceSpeaker.speakOnce(
-          next.key,
-          next.text,
-          next.brain ? brainVoiceRef.current : voiceConfigRef.current,
-          (msg) => noticeRef.current(msg)
-        )
+        const said = await voiceSpeaker.speakOnce(next.key, next.text, config, (msg) => noticeRef.current(msg), follow ? { follow } : {})
         // The brain's voice never falls back to the robot: silence, said in words.
         if (next.brain && said.engine === 'none' && said.fellBackBecause) {
           setTurns((prev) => [...prev, { id: `${next.key}:unvoiced`, said: 'Voice unavailable', at: Date.now(), kind: 'note', tone: 'warn' }])
@@ -941,6 +963,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         // Talked over is not heard: a line cut short does not count as said.
         next.heard?.(said.spoke && !interrupted)
       }
+      // A `follow` run hands its last sentence back just before it ends: let it play out.
+      if (!interrupted) await voiceSpeaker.quiet()
     } finally {
       bargeIn.disarm()
       speakQueue.current = []
@@ -1807,10 +1831,16 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           if (run.silent || run.aborted) return
           run.replied = true
           run.buffer += event.text
-          // Claude Voice: the reply's first chunk may stop at a clause, so its voice starts sooner.
-          const { chunks, rest } = takeSpeechChunks(run.buffer, SPEAK_CHUNK_MAX, {
-            firstClause: run.chunk === 0 && claudeVoiceRef.current
-          })
+          // Claude Voice: in Kokoro the reply's first chunk may stop at a clause, so its voice
+          // starts sooner; in a cloud voice it is the first sentence, and the rest merge.
+          const first = run.chunk === 0
+          const { chunks, rest } = takeSpeechChunks(
+            run.buffer,
+            SPEAK_CHUNK_MAX,
+            claudeVoiceRef.current && speaksFluently(voiceConfigRef.current)
+              ? { fluent: first ? 'first' : 'rest' }
+              : { firstClause: first && claudeVoiceRef.current }
+          )
           run.buffer = rest
           for (const chunk of chunks) {
             openMouth()

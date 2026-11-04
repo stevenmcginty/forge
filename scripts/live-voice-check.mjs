@@ -257,6 +257,40 @@ await check('mouth: an ack goes ahead of the reply; dropTurn silences only that 
   tts.setTtsBackend(null)
 })
 
+await check('mouth in a cloud voice: whole sentences, merged while they wait, in order, quiet at the end', async () => {
+  const log = []
+  const base = fakeBackend(log)
+  // OpenAI answers as OpenAI: a `kokoro` model on an openai ask would be a stale main, and Ryan would say it.
+  tts.setTtsBackend({ ...base, speak: async (req) => ({ ...(await base.speak(req)), model: 'gpt-4o-mini-tts' }) })
+  const CEDAR = { ...KOKORO, kokoroVoice: undefined, openaiVoice: 'cedar', edgeVoices: ['en-GB-RyanNeural'], neuralOnly: true, seamless: true }
+  const started = []
+  const busy = []
+  const mouth = new LiveMouth(() => CEDAR, {
+    onBusy: (b) => busy.push(b),
+    onStart: (item) => started.push(`${item.kind}:${item.text}`),
+    onEnd: () => {},
+    onNotice: () => {}
+  })
+  // Kokoro would start on "Okay, so I will check this,"; a cloud voice waits for the sentence.
+  mouth.pushReply('t1', 'Okay, so I will check this, then the ')
+  mouth.pushReply('t1', 'koraos project. Two jobs are running. One is done. ')
+  mouth.pushReply('t1', 'Three is next. Four too. Five')
+  mouth.endReply('t1')
+  await idle(mouth)
+  assert.equal(started[0], 'reply:Okay, so I will check this, then the koraos project.')
+  const tidy = (s) => s.replace(/\s+/g, ' ').trim()
+  assert.equal(
+    tidy(started.map((s) => s.slice('reply:'.length)).join(' ')),
+    'Okay, so I will check this, then the koraos project. Two jobs are running. One is done. Three is next. Four too. Five',
+    'every word, once, in order'
+  )
+  assert.ok(started.length < 7, `sentences merged (${started.length} utterances for 6 sentences)`)
+  assert.ok(log.every((l) => l.startsWith('synth:openai:')), `all in Cedar: ${JSON.stringify(log)}`)
+  assert.deepEqual(busy, [true, false])
+  mouth.dispose()
+  tts.setTtsBackend(null)
+})
+
 /* ----------------------------------------------------------------- ears */
 
 await check('Parakeet pause: the Agent silence window, clamped to 0.5–2 s', () => {

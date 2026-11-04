@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -24,6 +24,7 @@ import { editImage, makeImage, makeVideo, type MediaResult } from './gemini-medi
 import { speak as speakGemini } from './gemini-tts'
 import { speakEdge } from './edge-tts'
 import { speakKokoro } from './kokoro-tts'
+import { noteOpenAiFallback, speakOpenAi } from './openai-tts'
 import { adoptShotFiles } from './shots-watcher'
 import { getDataDir, getSettings, setSettings } from './store'
 
@@ -641,7 +642,7 @@ export function registerVoiceHandlers(): void {
     return out
   })
 
-  ipcMain.handle(IPC.voiceSpeak, async (_e, req: VoiceSpeakRequest): Promise<VoiceSpeakResult> => {
+  ipcMain.handle(IPC.voiceSpeak, async (e, req: VoiceSpeakRequest): Promise<VoiceSpeakResult> => {
     const settings = getSettings()
     const id = typeof req?.requestId === 'string' ? req.requestId : ''
     const controller = new AbortController()
@@ -652,6 +653,44 @@ export function registerVoiceHandlers(): void {
       speaking.set(id, controller)
     }
     try {
+      // Claude Voice's and Claude Live's default voice: OpenAI, PCM16 back like
+      // Kokoro — streamed to the asking window as it arrives when asked
+      // (`stream`), and whole in the answer either way, for the renderer's
+      // cache. On any failure it answers a failure, logged once per reason, and
+      // the renderer's chain says the sentence in Forge Brain's voice.
+      if (req?.engine === 'openai') {
+        const sender = e.sender
+        const result = await speakOpenAi({
+          key: settings.openaiKey,
+          text: String(req?.text ?? ''),
+          voice: req?.voice || settings.openaiTtsVoice,
+          signal: controller.signal,
+          lane: 'desk',
+          ...(req?.keep ? { cacheDir: join(app.getPath('userData'), 'openai-tts') } : {}),
+          ...(req?.stream && id
+            ? {
+                onChunk: (pcm: Buffer) => {
+                  if (!sender.isDestroyed()) sender.send(IPC.voiceSpeakChunk, { requestId: id, pcm: pcm.toString('base64') })
+                }
+              }
+            : {})
+        })
+        if (result.ok) {
+          return {
+            ok: true,
+            audio: result.audio.toString('base64'),
+            format: 'pcm16',
+            mime: 'audio/L16;rate=24000',
+            sampleRate: result.sampleRate,
+            channels: 1,
+            model: result.model,
+            voice: result.voice,
+            ms: result.ms
+          }
+        }
+        if (result.kind !== 'cancelled') noteOpenAiFallback(result.error)
+        return { ok: false, error: result.error, kind: result.kind }
+      }
       // Claude Voice's engine: Kokoro on this machine's GPU, PCM16 back. It is
       // never the only voice — while it loads, or when it cannot run, the same
       // sentence is spoken by Edge below, and the reason is logged once.

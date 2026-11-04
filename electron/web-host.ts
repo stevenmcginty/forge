@@ -54,6 +54,7 @@ import { saveInboxFile, saveInboxImage } from './web/inbox'
 import { noteKokoroFallback, saveSpeechKey, transcribeAudio } from './voice-bridge'
 import { speakEdge } from './edge-tts'
 import { cancelKokoro, pcm16Wav, speakKokoro, warmKokoro } from './kokoro-tts'
+import { cancelOpenAiTts, noteOpenAiFallback, speakOpenAi } from './openai-tts'
 import { openWebVoiceAgent } from './voice-agent/ipc'
 import { connectOpenAI, connectOpenAITranscription, mintGeminiToken } from './realtime/tokens'
 import { liveLedgerForPhone, type LiveLedgerSnapshot } from '@shared/live'
@@ -1757,6 +1758,7 @@ async function start(): Promise<void> {
         interrupt: async () => {
           // Talked over: the sentences the page fetched ahead are not wanted.
           cancelKokoro('web')
+          cancelOpenAiTts('web')
           await link.interrupt()
         },
         close: () => link.close()
@@ -1764,12 +1766,20 @@ async function start(): Promise<void> {
     },
     // One sentence of a browser Claude's reply, in the desk's Edge voice — or,
     // for Claude Voice and Claude Live (`engine` 'kokoro'), their own voice:
-    // Forge Brain's Edge voice by default (`claudeVoiceSound: 'brain'`, the
-    // brain's order: `brainVoice` twice, then its fallbacks), or Kokoro's (WAV,
-    // which every browser decodes) with Edge speaking the sentence whenever
-    // Kokoro cannot.
+    // OpenAI's (`claudeVoiceSound: 'openai'`, the default; WAV) with Forge
+    // Brain's voice speaking whenever OpenAI cannot; Forge Brain's Edge voice
+    // (`'brain'`, the brain's order: `brainVoice` twice, then its fallbacks);
+    // or Kokoro's (WAV, which every browser decodes) with Edge speaking the
+    // sentence whenever Kokoro cannot.
     voiceSpeak: async (text, engine) => {
-      if (engine === 'kokoro' && getSettings().claudeVoiceSound !== 'kokoro') {
+      const sound = getSettings().claudeVoiceSound
+      if (engine === 'kokoro' && sound === 'openai') {
+        const spoken = await speakOpenAi({ key: getSettings().openaiKey, text, voice: getSettings().openaiTtsVoice, lane: 'web' })
+        if (spoken.ok) return { ok: true, audio: pcm16Wav(spoken.audio, spoken.sampleRate).toString('base64'), mime: 'audio/wav' }
+        if (spoken.kind === 'cancelled') return { ok: false, error: spoken.error }
+        noteOpenAiFallback(spoken.error)
+      }
+      if (engine === 'kokoro' && sound !== 'kokoro') {
         const brainVoice = getSettings().brainVoice || BRAIN_VOICE_DEFAULT
         let error = 'No neural voice answered.'
         for (const voice of [brainVoice, brainVoice, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== brainVoice)]) {

@@ -971,8 +971,13 @@ export type LiveVoiceModel = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-h
 export type LiveConductorModel = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-fable-5-1'
 /** Who hears Steve for Claude Live: OpenAI realtime transcription, or local Parakeet. */
 export type LiveEars = 'openai' | 'parakeet'
-/** The voice Claude Voice and Claude Live speak in: Forge Brain's Edge voice, or Kokoro. */
-export type ClaudeVoiceSound = 'brain' | 'kokoro'
+/**
+ * The voice Claude Voice and Claude Live speak in: OpenAI's gpt-4o-mini-tts
+ * (`openaiTtsVoice`, electron/openai-tts.ts), Forge Brain's Edge voice, or Kokoro.
+ */
+export type ClaudeVoiceSound = 'openai' | 'brain' | 'kokoro'
+/** OpenAI's two best TTS voices (developers.openai.com text-to-speech guide): Cedar is a man, Marin a woman. */
+export type OpenAiTtsVoice = 'cedar' | 'marin'
 
 /**
  * One row of the desktop voice menu, in display order.
@@ -1452,12 +1457,14 @@ export interface VoiceSpeakRequest {
    * Which neural engine to ask. Empty means Gemini, because every caller
    * predates the edge engine and that is what they meant.
    */
-  engine?: 'edge' | 'gemini' | 'kokoro'
+  engine?: 'edge' | 'gemini' | 'kokoro' | 'openai'
   /**
    * A voice name the chosen engine knows — `Sulafat` for Gemini,
-   * `en-GB-SoniaNeural` for edge, `bf_emma` for kokoro. Empty means that
-   * engine's default. `kokoro` is Claude Voice's (electron/kokoro-tts.ts): it
-   * answers with Edge, in `voiceEdgeVoice`, whenever Kokoro cannot.
+   * `en-GB-SoniaNeural` for edge, `bf_emma` for kokoro, `cedar` for openai.
+   * Empty means that engine's default. `kokoro` is Claude Voice's
+   * (electron/kokoro-tts.ts): it answers with Edge, in `voiceEdgeVoice`,
+   * whenever Kokoro cannot. `openai` (electron/openai-tts.ts) answers with a
+   * failure instead, and the renderer's chain says it in Forge Brain's voice.
    */
   voice?: string
   /** Gemini only. Empty means the model in settings, which defaults to 3.1 flash. */
@@ -1467,6 +1474,20 @@ export interface VoiceSpeakRequest {
    * request mid-flight. Anything falsy simply cannot be cancelled.
    */
   requestId?: string
+  /**
+   * openai only: send the PCM to the asking window as it arrives
+   * (`IPC.voiceSpeakChunk`, keyed by `requestId`) as well as whole in the
+   * answer, so playback can start on the first chunk.
+   */
+  stream?: boolean
+  /** openai only: an ack line — main keeps the clip on disk, so a restart does not pay for it again. */
+  keep?: boolean
+}
+
+/** One piece of a streamed `voice:speak` answer (`VoiceSpeakRequest.stream`): base64 PCM16, whole samples. */
+export interface VoiceSpeakChunk {
+  requestId: string
+  pcm: string
 }
 
 export type VoiceSpeakResult =
@@ -1924,10 +1945,15 @@ export interface Settings {
   /**
    * Which voice Claude Voice and Claude Live speak in: `brain` = Forge Brain's
    * own Edge neural voice (`brainVoice`, Ryan by default, with its fallbacks)
-   * — the default, because Steve finds it clearer; `kokoro` = Kokoro in
-   * `kokoroVoice` (electron/kokoro-tts.ts). Settings → Main agent.
+   * — `kokoro` = Kokoro in `kokoroVoice` (electron/kokoro-tts.ts); `openai`
+   * = OpenAI's gpt-4o-mini-tts in `openaiTtsVoice` (electron/openai-tts.ts),
+   * the default since 2026-11-04 (Steve found the others robotic), with
+   * Forge Brain's voice speaking whenever OpenAI cannot (no key, bad key,
+   * network). Settings → Main agent.
    */
   claudeVoiceSound: ClaudeVoiceSound
+  /** The OpenAI voice for `claudeVoiceSound: 'openai'`: Cedar (a man, the default) or Marin (a woman). */
+  openaiTtsVoice: OpenAiTtsVoice
   /**
    * Which Claude model Claude Voice runs (agentBrain `claude-voice`) — its own
    * setting, so the hidden `claude` brain keeps `voiceClaudeModel`. A model id

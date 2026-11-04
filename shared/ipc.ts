@@ -215,6 +215,12 @@ export const IPC = {
    * nobody will ever hear.
    */
   voiceSpeakCancel: 'voice:speak-cancel',
+  /**
+   * main → renderer: a piece of a streamed `voice:speak` answer
+   * (`VoiceSpeakRequest.stream`, OpenAI only), so playback starts on the
+   * first chunk instead of the whole clip.
+   */
+  voiceSpeakChunk: 'voice:speak-chunk',
 
   /* ------------------------------------------------------- claude voice brain
    *

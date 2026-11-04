@@ -146,6 +146,7 @@ const api: ForgeApi = {
     makeVideo: (req) => ipcRenderer.invoke(IPC.voiceMakeVideo, req),
     speak: (req) => ipcRenderer.invoke(IPC.voiceSpeak, req),
     cancelSpeak: (requestId) => ipcRenderer.invoke(IPC.voiceSpeakCancel, requestId),
+    onSpeakChunk: (cb) => subscribe(IPC.voiceSpeakChunk, cb),
     saveSpeechKey: (key) => ipcRenderer.invoke(IPC.voiceSaveSpeechKey, key),
     onSpeechKeySaved: (cb) => subscribe(IPC.voiceSpeechKeySaved, () => cb()),
     onListenToggle: (cb) => subscribe(IPC.voiceListenToggle, () => cb())

@@ -140,21 +140,42 @@ const LIVE_EARS_CHOICES: Array<{ id: LiveEars; name: string; word: string }> = [
   { id: 'parakeet', name: 'Parakeet', word: 'on this PC, free' }
 ]
 
+/** A pick in the Voice row: the sound, and for OpenAI which of its voices. */
+type ClaudeVoicePick = 'openai-cedar' | 'openai-marin' | 'brain' | 'kokoro'
+
+/** The settings a Voice-row pick writes. */
+function claudeVoicePatch(id: ClaudeVoicePick): Partial<Settings> {
+  if (id === 'openai-cedar') return { claudeVoiceSound: 'openai', openaiTtsVoice: 'cedar' }
+  if (id === 'openai-marin') return { claudeVoiceSound: 'openai', openaiTtsVoice: 'marin' }
+  return { claudeVoiceSound: id satisfies ClaudeVoiceSound }
+}
+
 /**
- * Claude Voice's and Claude Live's voice (`claudeVoiceSound`): Forge Brain's
- * Edge voice — named from `brainVoice`, so it says Ryan until another is
- * picked — or Kokoro. Words and a tick, never colour alone.
+ * Claude Voice's and Claude Live's voice (`claudeVoiceSound`, and
+ * `openaiTtsVoice` for OpenAI): OpenAI's Cedar or Marin, Forge Brain's Edge
+ * voice — named from `brainVoice`, so it says Ryan until another is picked —
+ * or Kokoro. Words and a tick, never colour alone.
  */
-function ClaudeVoiceSoundRow({ settings, onPick }: { settings: Settings; onPick: (id: ClaudeVoiceSound) => void }): ReactNode {
+function ClaudeVoiceSoundRow({ settings, onPick }: { settings: Settings; onPick: (patch: Partial<Settings>) => void }): ReactNode {
   const brainVoice = settings.brainVoice || BRAIN_VOICE_DEFAULT
   const brainName = EDGE_VOICES.find((v) => v.name === brainVoice)?.label.split(' — ')[0] ?? 'Ryan'
-  const choices: Array<{ id: ClaudeVoiceSound; name: string; word: string }> = [
-    { id: 'brain', name: `Forge Brain voice (${brainName})`, word: 'clearer, the default' },
+  const hasOpenAi = (settings.openaiKey ?? '').trim().length > 0
+  const openAiWord = hasOpenAi ? 'most human' : 'needs an OpenAI key'
+  const choices: Array<{ id: ClaudeVoicePick; name: string; word: string }> = [
+    { id: 'openai-cedar', name: 'OpenAI Cedar (man)', word: openAiWord },
+    { id: 'openai-marin', name: 'OpenAI Marin (woman)', word: openAiWord },
+    { id: 'brain', name: `Forge Brain voice (${brainName})`, word: 'free' },
     { id: 'kokoro', name: 'Kokoro (Emma)', word: 'on this PC' }
   ]
+  const sound = settings.claudeVoiceSound
+  const value: ClaudeVoicePick =
+    sound === 'brain' || sound === 'kokoro' ? sound : settings.openaiTtsVoice === 'marin' ? 'openai-marin' : 'openai-cedar'
+  const hint = hasOpenAi
+    ? `The voice it speaks in. When OpenAI cannot answer, Forge Brain's voice (${brainName}) speaks instead. Takes effect on the next reply.`
+    : `The voice it speaks in. OpenAI's voices need an OpenAI key in Models & APIs; until then Forge Brain's voice (${brainName}) speaks. Takes effect on the next reply.`
   return (
-    <Row label="Voice" hint="The voice it speaks in. Forge Brain's voice is set on the Forge Brain page. Takes effect on the next reply.">
-      <LiveSeg label="Claude voice" choices={choices} value={settings.claudeVoiceSound === 'kokoro' ? 'kokoro' : 'brain'} onPick={onPick} />
+    <Row label="Voice" hint={hint}>
+      <LiveSeg label="Claude voice" choices={choices} value={value} onPick={(id) => onPick(claudeVoicePatch(id))} />
     </Row>
   )
 }
@@ -492,7 +513,7 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
       ) : null}
 
       {spec.id === 'claude-voice' ? (
-        <ClaudeVoiceSoundRow settings={s} onPick={(id) => actions.patchSettings({ claudeVoiceSound: id })} />
+        <ClaudeVoiceSoundRow settings={s} onPick={(patch) => actions.patchSettings(patch)} />
       ) : null}
 
       {spec.id === 'claude-live' ? (
@@ -512,7 +533,7 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
               onPick={(id) => actions.patchSettings({ liveVoiceModel: id })}
             />
           </Row>
-          <ClaudeVoiceSoundRow settings={s} onPick={(id) => actions.patchSettings({ claudeVoiceSound: id })} />
+          <ClaudeVoiceSoundRow settings={s} onPick={(patch) => actions.patchSettings(patch)} />
           <Row label="Worker model" hint="The Claude that does the jobs in the background, on your Claude login. Takes effect on the next job.">
             <LiveSeg
               label="Claude Live worker model"

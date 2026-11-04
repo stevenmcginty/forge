@@ -83,6 +83,7 @@ import type {
   VoiceAgentStatus,
   VoiceAgentToolRequest,
   VoiceAgentToolResult,
+  VoiceSpeakChunk,
   VoiceSpeakRequest,
   VoiceSpeakResult,
   WindowStateEvent,
@@ -404,6 +405,12 @@ export interface ForgeApi {
     speak(req: VoiceSpeakRequest): Promise<VoiceSpeakResult>
     /** Abort an in-flight `speak`. Unknown ids are a no-op, never an error. */
     cancelSpeak(requestId: string): Promise<boolean>
+    /**
+     * The pieces of streamed `speak` answers (`stream: true`), as they arrive.
+     * Optional because a stale preload bundle has none: callers use `?.` and
+     * play the whole clip instead.
+     */
+    onSpeakChunk?(cb: (chunk: VoiceSpeakChunk) => void): () => void
     /**
      * Check a pasted Groq key with Groq, then save it as the speech-to-text
      * key. Optional because a stale preload bundle has none: callers use `?.`.

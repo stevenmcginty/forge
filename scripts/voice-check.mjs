@@ -3737,6 +3737,398 @@ await test("Claude Voice in Forge Brain's voice: Edge leads, and acks, prefetch 
   voiceSpeaker.clearCache()
 })
 
+/* ------------------------------------------------ OpenAI voice and fluency */
+
+console.log('\nClaude voices — OpenAI, fluency, gaps')
+
+const openaiTts = await import('../electron/openai-tts.ts')
+const {
+  speaksFluently,
+  trimSilence,
+  StreamTrimmer,
+  FLUENT_FIRST_MAX_WORDS,
+  FLUENT_FIRST_CLAUSE_WORDS,
+  HANDOFF_S
+} = await import('../src/lib/tts.ts')
+
+const RYAN_VOICES = ['en-GB-RyanNeural', 'en-GB-ThomasNeural', 'en-GB-SoniaNeural']
+const CEDAR = {
+  engine: 'edge',
+  hasKey: false,
+  edgeVoice: RYAN_VOICES[0],
+  geminiVoice: '',
+  ttsModel: '',
+  localVoice: '',
+  openaiVoice: 'cedar',
+  edgeVoices: RYAN_VOICES,
+  neuralOnly: true,
+  seamless: true
+}
+const OPENAI_PCM = (req) => ({
+  ok: true,
+  audio: fakePcm(0.2).toString('base64'),
+  format: 'pcm16',
+  mime: 'audio/L16;rate=24000',
+  sampleRate: 24_000,
+  channels: 1,
+  model: 'gpt-4o-mini-tts',
+  voice: req.voice,
+  ms: 5
+})
+const EDGE_MP3_REPLY = (req) => ({ ok: true, audio: 'AAAA', format: 'mp3', mime: 'audio/mpeg', sampleRate: 0, channels: 1, model: 'edge-neural', voice: req.voice, ms: 5 })
+const decodeTo = async () => ({ pcm: new Int16Array(2400).fill(4000), sampleRate: 24_000, channels: 1 })
+
+/** A fetch that records each request and answers `reply(call)`: `{ status, pcm?, json? }`. No network. */
+function openaiFetch(reply) {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) })
+    const r = reply(calls.length)
+    if (r.throws) throw new Error(r.throws)
+    const bytes = r.pcm ?? Buffer.alloc(0)
+    return {
+      ok: r.status >= 200 && r.status < 300,
+      status: r.status,
+      json: async () => r.json ?? {},
+      // Two pieces, the first an odd length, so a sample is split across them.
+      body: new ReadableStream({
+        start(c) {
+          if (bytes.length) {
+            c.enqueue(new Uint8Array(bytes.subarray(0, 4801)))
+            c.enqueue(new Uint8Array(bytes.subarray(4801)))
+          }
+          c.close()
+        }
+      })
+    }
+  }
+  return { calls, fetchImpl }
+}
+
+await test('cloud voices: the first chunk is the first sentence, never a four-word clause', () => {
+  const fluentFirst = { fluent: 'first' }
+  assert.equal(FLUENT_FIRST_MAX_WORDS, 14)
+  assert.equal(FLUENT_FIRST_CLAUSE_WORDS, 8)
+  // Kokoro's rule would cut here ("On it, opening the Forge project,"); a cloud voice waits for the sentence.
+  assert.deepEqual(takeSpeechChunks('On it, opening the Forge project, then I will read Zeb', SPEAK_CHUNK_MAX, fluentFirst).chunks, [])
+  assert.deepEqual(
+    takeSpeechChunks('On it, opening the Forge project, then I will read Zeb. ', SPEAK_CHUNK_MAX, fluentFirst).chunks,
+    ['On it, opening the Forge project, then I will read Zeb.']
+  )
+  // A short first sentence is its own chunk; the rest that has arrived merges.
+  const a = takeSpeechChunks('Sure. I checked the build. It passed. Now the tests', SPEAK_CHUNK_MAX, fluentFirst)
+  assert.deepEqual(a.chunks, ['Sure.', 'I checked the build. It passed.'])
+  assert.equal(a.rest, ' Now the tests')
+  // Past fourteen words with no end: cut at a clause after eight words, not before.
+  const long = 'So the build on the forge project went fine, but two of the tests were flaky again'
+  assert.deepEqual(takeSpeechChunks(long, SPEAK_CHUNK_MAX, fluentFirst).chunks, ['So the build on the forge project went fine,'])
+  assert.deepEqual(takeSpeechChunks('Yes, so, well, the build went fine and the tests too and more of them', SPEAK_CHUNK_MAX, fluentFirst).chunks, [], 'no clause after eight words yet')
+  // Later chunks: whole sentences merged up to the cap, never past it.
+  const later = takeSpeechChunks('One thing. Two things. Three things. ', SPEAK_CHUNK_MAX, { fluent: 'rest' })
+  assert.deepEqual(later.chunks, ['One thing. Two things. Three things.'])
+  const capped = takeSpeechChunks(`${'a'.repeat(120)}. ${'b'.repeat(120)}. `, SPEAK_CHUNK_MAX, { fluent: 'rest' })
+  assert.equal(capped.chunks.length, 2, 'two sentences that would pass the cap stay two')
+  // Which configs are fluent: the cloud voices as Claude voices; never Kokoro, never a plain config.
+  assert.equal(speaksFluently(CEDAR), true)
+  assert.equal(speaksFluently({ ...CEDAR, openaiVoice: undefined }), true, "Forge Brain's voice is a cloud voice too")
+  assert.equal(speaksFluently({ ...CEDAR, kokoroVoice: 'bf_emma' }), false, 'Kokoro keeps its first clause')
+  assert.equal(speaksFluently({ ...CEDAR, seamless: false }), false)
+})
+
+await test('openai request: gpt-4o-mini-tts, the voice, pcm, instructions, no speed; streamed whole samples', async () => {
+  openaiTts.resetOpenAiTts()
+  const { calls, fetchImpl } = openaiFetch(() => ({ status: 200, pcm: fakePcm(0.2) }))
+  const chunks = []
+  const logged = []
+  const info = console.info
+  console.info = (line) => logged.push(String(line))
+  let r
+  try {
+    r = await openaiTts.speakOpenAi({ key: 'sk-test', text: 'Zeb has finished the build.', voice: 'cedar', fetchImpl, onChunk: (b) => chunks.push(b) })
+  } finally {
+    console.info = info
+  }
+  assert.equal(logged.length, 1)
+  assert.ok(/^\[tts\] openai voice=cedar chars=27 first-byte=\d+ms total=\d+ms$/.test(logged[0]), logged[0])
+  assert.equal(r.ok, true)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, 'https://api.openai.com/v1/audio/speech')
+  assert.equal(calls[0].headers.Authorization, 'Bearer sk-test')
+  const body = calls[0].body
+  assert.equal(body.model, 'gpt-4o-mini-tts')
+  assert.equal(body.voice, 'cedar')
+  assert.equal(body.response_format, 'pcm')
+  assert.equal(body.input, 'Zeb has finished the build.')
+  assert.ok(/relaxed, friendly man/.test(body.instructions) && /never an announcer/.test(body.instructions), body.instructions)
+  assert.equal('speed' in body, false, 'speed is not documented for this model, so it is never sent')
+  assert.deepEqual(Object.keys(body).sort(), ['input', 'instructions', 'model', 'response_format', 'voice'])
+  // Marin is a woman, in the same words.
+  assert.ok(/friendly woman/.test(openaiTts.openAiTtsBody('x', 'marin').instructions))
+  assert.equal(openaiTts.openAiTtsVoice('nonsense'), 'cedar')
+  // The PCM arrives in pieces of whole samples, and the answer is all of it.
+  assert.ok(chunks.length >= 2 && chunks.every((c) => c.length % 2 === 0), 'whole samples only')
+  assert.equal(Buffer.concat(chunks).length, r.audio.length)
+  assert.equal(r.audio.length, fakePcm(0.2).length)
+  assert.equal(r.sampleRate, 24_000)
+  assert.equal(r.model, 'gpt-4o-mini-tts')
+})
+
+await test('openai failures are answers: no key costs nothing, a 401 is remembered per key, the network is a failure', async () => {
+  openaiTts.resetOpenAiTts()
+  const quiet = console.warn
+  console.warn = () => {}
+  try {
+    const none = openaiFetch(() => ({ status: 200, pcm: fakePcm(0.1) }))
+    const noKey = await openaiTts.speakOpenAi({ key: '  ', text: 'Hello there.', fetchImpl: none.fetchImpl })
+    assert.equal(noKey.ok, false)
+    assert.equal(noKey.kind, 'no-key')
+    assert.equal(none.calls.length, 0, 'no key: nothing reached the wire')
+
+    const bad = openaiFetch(() => ({ status: 401, json: { error: { message: 'Incorrect API key provided' } } }))
+    const refused = await openaiTts.speakOpenAi({ key: 'sk-bad', text: 'Hello there.', fetchImpl: bad.fetchImpl })
+    assert.equal(refused.kind, 'auth')
+    assert.ok(/401/.test(refused.error))
+    const again = await openaiTts.speakOpenAi({ key: 'sk-bad', text: 'And again.', fetchImpl: bad.fetchImpl })
+    assert.equal(again.kind, 'auth')
+    assert.equal(bad.calls.length, 1, 'a refused key is not asked again')
+    const fresh = await openaiTts.speakOpenAi({ key: 'sk-new', text: 'And again.', fetchImpl: bad.fetchImpl })
+    assert.equal(fresh.kind, 'auth')
+    assert.equal(bad.calls.length, 2, 'a new key is')
+
+    const down = openaiFetch(() => ({ throws: 'getaddrinfo ENOTFOUND api.openai.com' }))
+    const offline = await openaiTts.speakOpenAi({ key: 'sk-ok', text: 'Hello there.', fetchImpl: down.fetchImpl })
+    assert.equal(offline.kind, 'network')
+
+    const controller = new AbortController()
+    controller.abort()
+    const cancelled = await openaiTts.speakOpenAi({ key: 'sk-ok', text: 'Hello there.', fetchImpl: down.fetchImpl, signal: controller.signal })
+    assert.equal(cancelled.kind, 'cancelled')
+  } finally {
+    console.warn = quiet
+    openaiTts.resetOpenAiTts()
+  }
+})
+
+await test("openai fails (no key, 401): the sentence is said in Forge Brain's voice (Ryan), never silence, never SAPI", async () => {
+  for (const failure of [
+    { ok: false, kind: 'no-key', error: 'No OpenAI key is set' },
+    { ok: false, kind: 'auth', error: 'OpenAI refused the key (401)' }
+  ]) {
+    voiceSpeaker.clearCache()
+    fake = fakeTts((req) => (req.engine === 'openai' ? failure : EDGE_MP3_REPLY(req)))
+    setTtsBackend({ ...fake.backend, decode: decodeTo })
+    const said = await voiceSpeaker.speak('Zeb has finished the build.', CEDAR)
+    assert.equal(said.spoke, true, failure.kind)
+    assert.equal(said.engine, 'edge', `${failure.kind}: Ryan spoke`)
+    assert.deepEqual(fake.calls.speak.map((r) => `${r.engine}:${r.voice}`), ['openai:cedar', 'edge:en-GB-RyanNeural'])
+  }
+  // A main from before the OpenAI engine answers in Gemini's voice: that is not Cedar, so Ryan says it.
+  voiceSpeaker.clearCache()
+  fake = fakeTts((req) => (req.engine === 'openai' ? { ...OPENAI_PCM(req), model: 'gemini-3.1-flash-tts-preview', voice: 'Sulafat' } : EDGE_MP3_REPLY(req)))
+  setTtsBackend({ ...fake.backend, decode: decodeTo })
+  assert.equal((await voiceSpeaker.speak('Zeb has finished the build.', CEDAR)).engine, 'edge')
+  voiceSpeaker.clearCache()
+})
+
+await test('openai: the logged engine is openai, and the acks are made once in Cedar, asked to be kept on disk', async () => {
+  voiceSpeaker.clearCache()
+  fake = fakeTts(OPENAI_PCM)
+  setTtsBackend(fake.backend)
+  const said = await voiceSpeaker.speak('Zeb has finished the build.', CEDAR)
+  assert.equal(said.engine, 'openai')
+  assert.equal(fake.calls.speak[0].engine, 'openai')
+  assert.equal(fake.calls.speak[0].voice, 'cedar')
+  // The acks: made once in Cedar, asked to be kept (main writes them under userData), then played from memory.
+  fake = fakeTts(OPENAI_PCM)
+  setTtsBackend(fake.backend)
+  assert.equal(await voiceSpeaker.primeAcks(CEDAR), true)
+  assert.deepEqual(fake.calls.speak.map((r) => [r.text, r.engine, r.voice, r.keep]), ACK_LINES.map((l) => [l, 'openai', 'cedar', true]))
+  assert.deepEqual(voiceSpeaker.readyAcks(CEDAR), [...ACK_LINES])
+  const ack = await voiceSpeaker.speak('Okay.', CEDAR)
+  assert.equal(ack.cached, true)
+  assert.equal(ack.engine, 'openai')
+  assert.equal(fake.calls.speak.length, ACK_LINES.length)
+  voiceSpeaker.clearCache()
+})
+
+await test('a clip still being prefetched when its sentence comes up is played, never asked for a second time', async () => {
+  for (const config of [CEDAR, { engine: 'edge', hasKey: false, edgeVoice: '', geminiVoice: '', ttsModel: '', localVoice: '', kokoroVoice: 'bf_emma' }]) {
+    voiceSpeaker.clearCache()
+    fake = fakeTts((req) => (req.engine === 'kokoro' ? { ...OPENAI_PCM(req), model: 'kokoro-82m' } : OPENAI_PCM(req)))
+    fake.hold = true
+    setTtsBackend(fake.backend)
+    voiceSpeaker.prefetch('The tests passed on the second run.', config)
+    assert.equal(fake.calls.speak.length, 1)
+    // The mouth reaches the sentence while its prefetch is still in flight…
+    const saying = voiceSpeaker.speak('The tests passed on the second run.', config)
+    await new Promise((r) => setTimeout(r, 5))
+    fake.hold = false
+    fake.finish()
+    const said = await saying
+    // …and plays that very clip.
+    assert.equal(said.spoke, true, config.kokoroVoice ? 'kokoro' : 'openai')
+    assert.equal(said.cached, true)
+    assert.equal(fake.calls.speak.length, 1, 'one synthesis, not two')
+    assert.equal(fake.calls.play.filter((p) => typeof p === 'object').length, 1)
+  }
+  // An OpenAI prefetch that fails hands the sentence to Ryan at once; `speak` does not ask OpenAI again.
+  voiceSpeaker.clearCache()
+  fake = fakeTts((req) => (req.engine === 'openai' ? { ok: false, kind: 'network', error: 'down' } : EDGE_MP3_REPLY(req)))
+  setTtsBackend({ ...fake.backend, decode: decodeTo })
+  voiceSpeaker.prefetch('The tests passed on the second run.', CEDAR)
+  await new Promise((r) => setTimeout(r, 10))
+  const fellBack = await voiceSpeaker.speak('The tests passed on the second run.', CEDAR)
+  assert.equal(fellBack.engine, 'edge')
+  assert.equal(fellBack.cached, true)
+  assert.deepEqual(fake.calls.speak.map((r) => r.engine), ['openai', 'edge'])
+  // Only `cancel` throws a prefetch away.
+  voiceSpeaker.clearCache()
+  fake = fakeTts(OPENAI_PCM)
+  fake.hold = true
+  setTtsBackend(fake.backend)
+  voiceSpeaker.prefetch('Talked over before it came back.', CEDAR)
+  voiceSpeaker.cancel()
+  assert.equal(fake.calls.cancel.length, 1, 'barge-in aborts the prefetch request')
+  fake.hold = false
+  fake.finish()
+  voiceSpeaker.clearCache()
+})
+
+await test('seamless: clip silence trimmed to ~40 ms, streamed or whole', () => {
+  const rate = 24_000
+  // 0.3 s of silence, 0.2 s of voice, then 0.3 s of silence.
+  const voice = new Int16Array(Math.round(rate * 0.2)).fill(5000)
+  const pcm = new Int16Array(Math.round(rate * 0.8))
+  pcm.set(voice, Math.round(rate * 0.3))
+  const trimmed = trimSilence(pcm, rate, 1)
+  assert.equal(trimmed.length, voice.length + 2 * Math.round(rate * 0.04))
+  assert.equal(trimSilence(new Int16Array(100), rate, 1).length, 100, 'all silence: left as it is')
+  // The same clip in pieces: what is handed out plus the end is the trimmed clip.
+  const t = new StreamTrimmer(rate, 1)
+  const out = []
+  for (let i = 0; i < pcm.length; i += 1000) out.push(t.feed(pcm.subarray(i, i + 1000)))
+  out.push(t.finish())
+  const total = out.reduce((n, c) => n + c.length, 0)
+  assert.equal(total, trimmed.length)
+  assert.ok(out.slice(0, -1).some((c) => c.length > 0), 'audio is handed out before the end')
+})
+
+/** A backend with an audio clock, scheduling like Web Audio, recording each start time. */
+function clockTts(reply) {
+  const base = fakeTts(reply)
+  let clock = 100
+  const starts = []
+  const handles = []
+  base.backend.now = () => clock
+  base.backend.play = (pcm, rate, channels, startAt) => {
+    const startsAt = startAt !== undefined && startAt > clock ? startAt : clock
+    const endsAt = startsAt + pcm.length / channels / rate
+    let end
+    const done = new Promise((r) => (end = r))
+    const h = { startsAt, endsAt, stopped: false, done, stop: () => ((h.stopped = true), end()), duck: () => {} }
+    starts.push(startsAt)
+    handles.push(h)
+    return h
+  }
+  return {
+    ...base,
+    starts,
+    handles,
+    /** Move the clock on; whatever has ended by then ends. */
+    advance: (s) => {
+      clock += s
+      for (const h of handles) if (h.endsAt <= clock) h.stop()
+    }
+  }
+}
+
+await test('seamless follow: the next clip starts on the clock where this one ends; cancel stops both at once', async () => {
+  voiceSpeaker.clearCache()
+  const c = clockTts(OPENAI_PCM)
+  fake = c
+  setTtsBackend(c.backend)
+  const started = []
+  const first = await voiceSpeaker.speak('The build passed.', CEDAR, undefined, { follow: true, onStart: () => started.push('one') })
+  // Handed back before its end (the 0.2 s clip, trimmed, minus HANDOFF_S): the clip itself still plays.
+  assert.equal(first.spoke, true)
+  assert.equal(voiceSpeaker.speaking, true)
+  const second = voiceSpeaker.speak('Two tests were flaky.', CEDAR, undefined, { follow: true, onStart: () => started.push('two') })
+  await new Promise((r) => setTimeout(r, 5))
+  assert.equal(c.starts.length, 2)
+  assert.ok(Math.abs(c.starts[1] - c.handles[0].endsAt) < 1e-9, 'scheduled exactly at the first clip end, not on onended')
+  assert.ok(HANDOFF_S > 0)
+  // Barge-in: both the playing and the scheduled clip stop.
+  voiceSpeaker.cancel()
+  assert.equal(c.handles[0].stopped, true)
+  assert.equal(c.handles[1].stopped, true)
+  await second
+  assert.equal(voiceSpeaker.speaking, false)
+  assert.deepEqual(started, ['one'], 'a scheduled clip that never played never says it started')
+  // Without `follow` (any other caller), a new sentence still stops the one playing.
+  voiceSpeaker.clearCache()
+  const d = clockTts(OPENAI_PCM)
+  setTtsBackend(d.backend)
+  void voiceSpeaker.speak('The build passed.', CEDAR)
+  await new Promise((r) => setTimeout(r, 5))
+  void voiceSpeaker.speak('Two tests were flaky.', CEDAR)
+  await new Promise((r) => setTimeout(r, 5))
+  assert.equal(d.handles[0].stopped, true)
+  voiceSpeaker.cancel()
+  voiceSpeaker.clearCache()
+})
+
+await test('openai streaming: the first piece plays before the answer lands; the whole clip is cached', async () => {
+  voiceSpeaker.clearCache()
+  const pushed = []
+  let ended = false
+  let answered = false
+  const base = fakeTts(OPENAI_PCM)
+  fake = base
+  setTtsBackend({
+    ...base.backend,
+    now: () => 0,
+    speakStream: async (req, onChunk) => {
+      base.calls.speak.push(req)
+      const bytes = fakePcm(0.4)
+      const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length / 2)
+      onChunk(pcm.subarray(0, 4800))
+      onChunk(pcm.subarray(4800))
+      answered = true
+      return OPENAI_PCM(req)
+    },
+    playStream: () => {
+      let end
+      const done = new Promise((r) => (end = r))
+      const h = {
+        done,
+        startsAt: 0,
+        push: (p) => pushed.push({ samples: p.length, beforeAnswer: !answered }),
+        end: () => {
+          ended = true
+          h.endsAt = 0.4
+          end()
+        },
+        stop: () => end(),
+        duck: () => {}
+      }
+      return h
+    }
+  })
+  const said = await voiceSpeaker.speak('Zeb has finished the build and the tests.', CEDAR)
+  assert.equal(said.spoke, true)
+  assert.equal(said.engine, 'openai')
+  assert.ok(pushed.length >= 1 && pushed[0].beforeAnswer, 'audio went out before the answer')
+  assert.equal(ended, true)
+  assert.equal(base.calls.speak.length, 1)
+  assert.equal(base.calls.play.length, 0, 'not played a second time as a whole clip')
+  // The whole clip is in the cache for a repeat.
+  const again = await voiceSpeaker.speak('Zeb has finished the build and the tests.', CEDAR)
+  assert.equal(again.cached, true)
+  assert.equal(base.calls.speak.length, 1)
+  voiceSpeaker.clearCache()
+  setTtsBackend(null)
+})
+
 /* ------------------------------------------------------------------- live */
 
 /**

@@ -189,3 +189,10 @@ export const DEFAULT_KOKORO_VOICE = 'bf_emma'
 export function isKokoroVoice(name: string): boolean {
   return /^[a-z]{2}_[a-z]{2,20}$/.test((name ?? '').trim())
 }
+
+/**
+ * Claude Voice's and Claude Live's default voice: OpenAI's TTS model
+ * (electron/openai-tts.ts). OpenAI shuts it down on 2027-01-06. The renderer's
+ * clip cache and logged engine key on this id (src/lib/tts.ts `clipEngine`).
+ */
+export const OPENAI_TTS_MODEL = 'gpt-4o-mini-tts'

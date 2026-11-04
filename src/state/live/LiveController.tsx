@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { LiveEvent, LiveJob, LiveStatus } from '@shared/live'
 import { BRAIN_VOICE_DEFAULT, BRAIN_VOICE_FALLBACKS } from '@shared/brain'
-import type { ClaudeVoiceSound, LiveEars, Settings, VoiceEngine } from '@shared/types'
+import type { ClaudeVoiceSound, LiveEars, OpenAiTtsVoice, Settings, VoiceEngine } from '@shared/types'
 import { DEFAULT_KOKORO_VOICE } from '@shared/tts'
 import { liveCardFor, liveCardWho, livePushLine, type LiveCardAnswer } from '@shared/live-card'
 import type { LivePhase, LiveShowing, LiveTurn, LiveView } from '@/components/live/types'
@@ -97,6 +97,7 @@ interface LiveSettings {
   voiceReplyVoice: string
   kokoroVoice: string
   claudeVoiceSound: ClaudeVoiceSound
+  openaiTtsVoice: OpenAiTtsVoice
   brainVoice: string
 }
 
@@ -113,15 +114,19 @@ function selectLiveSettings(state: { settings: Settings }): LiveSettings {
     voiceTtsModel: s.voiceTtsModel,
     voiceReplyVoice: s.voiceReplyVoice,
     kokoroVoice: s.kokoroVoice || DEFAULT_KOKORO_VOICE,
-    claudeVoiceSound: s.claudeVoiceSound === 'kokoro' ? 'kokoro' : 'brain',
+    claudeVoiceSound: s.claudeVoiceSound === 'kokoro' || s.claudeVoiceSound === 'brain' ? s.claudeVoiceSound : 'openai',
+    openaiTtsVoice: s.openaiTtsVoice === 'marin' ? 'marin' : 'cedar',
     brainVoice: s.brainVoice || BRAIN_VOICE_DEFAULT
   }
 }
 
 /**
- * The same shape VoiceAgent gives Claude Voice: Forge Brain's voice
- * (`claudeVoiceSound: 'brain'`, Edge only, `brainVoice` then its fallbacks,
- * never SAPI), or Kokoro first with the rest of the configured chain behind it.
+ * The same shape VoiceAgent gives Claude Voice: OpenAI's voice
+ * (`claudeVoiceSound: 'openai'`, the default, when there is an OpenAI key)
+ * with Forge Brain's voice behind it; Forge Brain's voice (`'brain'`, Edge
+ * only, `brainVoice` then its fallbacks, never SAPI); or Kokoro first with the
+ * rest of the configured chain behind it. All `seamless`: trimmed clips, each
+ * starting on the clock where the last ends.
  */
 function voiceConfigOf(s: LiveSettings): VoiceConfig {
   if (s.claudeVoiceSound !== 'kokoro') {
@@ -132,8 +137,10 @@ function voiceConfigOf(s: LiveSettings): VoiceConfig {
       geminiVoice: s.voiceTtsVoice,
       ttsModel: s.voiceTtsModel,
       localVoice: s.voiceReplyVoice,
+      ...(s.claudeVoiceSound === 'openai' && s.hasOpenAIKey ? { openaiVoice: s.openaiTtsVoice } : {}),
       edgeVoices: [s.brainVoice, ...BRAIN_VOICE_FALLBACKS.filter((v) => v !== s.brainVoice)],
-      neuralOnly: true
+      neuralOnly: true,
+      seamless: true
     }
   }
   return {
@@ -143,7 +150,8 @@ function voiceConfigOf(s: LiveSettings): VoiceConfig {
     geminiVoice: s.voiceTtsVoice,
     ttsModel: s.voiceTtsModel,
     localVoice: s.voiceReplyVoice,
-    kokoroVoice: s.kokoroVoice
+    kokoroVoice: s.kokoroVoice,
+    seamless: true
   }
 }
 
