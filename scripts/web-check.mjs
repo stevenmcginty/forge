@@ -374,7 +374,11 @@ registerHooks({
           'export const screen = { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 0, height: 0 } }) }',
           'export const desktopCapturer = { getSources: async () => [] }',
           'export class WebContentsView { constructor() { this.webContents = { isDestroyed: () => false, close: () => {} } } setBounds() {} setVisible() {} setBackgroundColor() {} }',
-          'export const session = { fromPartition: () => ({ setPermissionRequestHandler: () => {}, setPermissionCheckHandler: () => {}, on: () => {} }) }'
+          'export const session = { fromPartition: () => ({ setPermissionRequestHandler: () => {}, setPermissionCheckHandler: () => {}, on: () => {} }) }',
+          // electron/kokoro-tts.ts (reached through web-host.ts) names these two.
+          // Nothing in this run warms Kokoro, so neither is ever called.
+          'export const net = { fetch: async () => { throw new Error("no network in web:check") } }',
+          'export const protocol = { registerSchemesAsPrivileged: () => {}, handle: () => {} }'
         ].join('\n')
       }
     }
