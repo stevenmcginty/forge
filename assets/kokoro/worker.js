@@ -3,7 +3,11 @@
 // with executeJavaScript, one job at a time.
 //
 // Kokoro-82M (kokoro-js 1.2.1, Apache-2.0, see LICENSE-kokoro-js.txt) runs on
-// the GPU through WebGPU, fp16. Measured on Steve's Arc 140V: load 5-8 s, the
+// the GPU through WebGPU, fp32. NOT fp16: on Steve's Intel GPU (xe-2lpg) fp16
+// comes out distorted (3x the sample-to-sample roughness of fp32 and of the CPU
+// q8 reference, clipped peaks; heard as a growl), while fp32 matches the CPU
+// reference and is about as fast (~1.2 s vs ~1.0 s for a short line), measured
+// 2026-11-04. Measured on Steve's Arc 140V: load 5-8 s, the
 // first generate after load ~5 s (shader compile), then ~1 s to the audio of a
 // short sentence. warm() pays both once so a reply never does.
 //
@@ -33,7 +37,7 @@ async function load(voice) {
       const info = adapter.info || {}
       state.adapter = [info.vendor, info.architecture, info.description].filter(Boolean).join(' ')
       let t = performance.now()
-      const model = await KokoroTTS.from_pretrained(MODEL, { dtype: 'fp16', device: 'webgpu' })
+      const model = await KokoroTTS.from_pretrained(MODEL, { dtype: 'fp32', device: 'webgpu' })
       state.loadMs = Math.round(performance.now() - t)
       t = performance.now()
       // The GPU compiles its kernels per input size, so a first sentence of a

@@ -11,7 +11,7 @@ import { DEFAULT_KOKORO_VOICE, isKokoroVoice } from '@shared/tts'
  * Measured on Steve's laptop (Core Ultra 5 226V, Arc 140V, 2026-11-04):
  * onnxruntime-node on the CPU is slower than real time (RTF 1.6-2.0) and its
  * DirectML provider fails on a ConvTranspose node, so neither is used. WebGPU
- * in Chromium is the road that works: fp16, model load ~2 s from disk, then
+ * in Chromium is the road that works: fp32 (fp16 is distorted on this GPU), model load ~2 s from disk, then
  * ~1 s for the audio of a short sentence (RTF ~0.3). So the engine is a page:
  *
  *   one hidden window   offscreen (never on any screen, no taskbar entry, and
