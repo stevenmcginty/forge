@@ -36,7 +36,14 @@ import {
   type BrainSaysEvent
 } from '@shared/brain'
 import { brainSnapshot } from '@/components/brain/brainStore'
-import { confirmQuestion, gatherWait, joinPhrases, parseConfirmAnswer, voiceConfirmTarget } from '@/lib/brainConfirmVoice'
+import {
+  confirmQuestion,
+  gatherWait,
+  joinPhrases,
+  joinsTurnInFlight,
+  parseConfirmAnswer,
+  voiceConfirmTarget
+} from '@/lib/brainConfirmVoice'
 import { getHubRuntime } from '@/lib/hubRuntime'
 import { buildAppContext, ContextTracker, projectBranch, type PaneStateWord } from '@/lib/realtime/context'
 import { endedNote, parseVoiceDictation, stopPhraseOf, type ConversationEnd, type VoiceDictation } from '@/lib/realtime/conversation'
@@ -749,6 +756,13 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
    * barge-in handler has to be able to stop it — see `runMouth`.
    */
   const claudeRun = useRef<ClaudeRun | null>(null)
+  /**
+   * The newest Claude turn `runPhrase` sent, until it ends: the phrases it was
+   * asked, so one he paused in the middle of can join it (`joinsTurnInFlight`).
+   */
+  const claudeAsk = useRef<{ id: string; parts: string[]; at: number; voiced: boolean } | null>(null)
+  /** Counts `runClaudeTurn` calls, so one overtaken while it waited stands down. */
+  const claudeTicket = useRef(0)
 
   /* --------------------------------------------------------------- the mouth
    *
@@ -1863,6 +1877,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       // one is unwound and settled with whatever it had managed to say, not
       // failed. It was superseded, which is not the same as broken, and the
       // difference is audible: a failure says so out loud.
+      const ticket = ++claudeTicket.current
       const previous = claudeRun.current
       if (previous) {
         previous.aborted = true
@@ -1880,6 +1895,10 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         // turn resolves instead of hanging on a result that is not coming.
         if (previous.error === undefined) previous.finish()
       }
+      // A newer turn arrived while this one waited for the unwind: it is the
+      // one he meant, and it carries the same interrupt. Stand down unsent —
+      // two waiters both installing would leave one running unseen.
+      if (ticket !== claudeTicket.current) return ''
 
       let settle: (() => void) | null = null
       const done = new Promise<void>((resolve) => {
@@ -2321,12 +2340,42 @@ ${said}` : said)
         return reply
       }
 
+      // 2, the join — the Claude brains keep the mic open while they think, so
+      // a sentence he paused in arrives as a second phrase with the first still
+      // in flight. Until Claude has started answering, it is the rest of that
+      // sentence: both go as one turn (the fragment is still interrupted, in
+      // `runClaudeTurn`), and its card takes the fragment's place. Once Claude
+      // is answering, this is a barge-in and replaces it, as before.
+      const inFlight = usingClaudeRef.current && !usingForgeBrainRef.current ? claudeAsk.current : null
+      const live = claudeRun.current
+      const joins =
+        inFlight !== null &&
+        joinsTurnInFlight(
+          {
+            voiced: inFlight.voiced,
+            sinceSent: Date.now() - inFlight.at,
+            // Not installed yet (an older turn is still unwinding): nothing said.
+            answering: live?.id === inFlight.id && (live.said.length > 0 || live.chunk > 0)
+          },
+          spokenHere
+        )
+      const parts = joins && inFlight ? [...inFlight.parts, said] : [said]
+      const asked = joins ? joinPhrases(parts) : said
+      if (joins && import.meta.env.DEV) {
+        console.info(`[hub] event=turn-joined pieces=${parts.length} chars=${asked.length}`)
+      }
+
       // 2 — everything else is a conversation with the brain.
       thinkingSince.current = Date.now()
       if (armedRef.current) setPhase('thinking')
       // A fresh turn starts its tool count at zero, whatever the last one showed.
       resetToolActivity()
-      setTurns((prev) => [...prev, { id, said, at: Date.now(), kind: 'brain', phase: 'thinking', draft: '' }])
+      const card: Turn = { id, said: asked, at: Date.now(), kind: 'brain', phase: 'thinking', draft: '' }
+      setTurns((prev) =>
+        joins && inFlight && prev.some((t) => t.id === inFlight.id)
+          ? prev.map((t) => (t.id === inFlight.id ? card : t))
+          : [...prev, card]
+      )
 
       // Forge Brain's context line, if one came in since the last turn.
       const brainNote = brainNoteRef.current
@@ -2346,7 +2395,7 @@ ${said}` : said)
       }
       const heard = brainNote ? `[Forge Brain told you, for context: ${brainNote}]
 
-${said}` : said
+${asked}` : asked
 
       /** What a failed turn looks like, whichever brain failed. */
       const failed = async (err: unknown): Promise<string> => {
@@ -2376,6 +2425,7 @@ ${said}` : said
       // against announcing an action they never sent, and a real tool call is
       // not that kind of claim.
       if (usingClaudeRef.current) {
+        claudeAsk.current = { id, parts, at: Date.now(), voiced: spokenHere }
         try {
           const text = await runClaudeTurn(id, heard, {
             silent: opts?.silent,
@@ -2396,7 +2446,7 @@ ${said}` : said
           )
           void agentMemory.record({
             projectId: ctx?.activeProjectId ?? null,
-            utterance: said,
+            utterance: asked,
             at: Date.now(),
             reply
           })
@@ -2406,6 +2456,8 @@ ${said}` : said
           return text
         } catch (err) {
           return failed(err)
+        } finally {
+          if (claudeAsk.current?.id === id) claudeAsk.current = null
         }
       }
 

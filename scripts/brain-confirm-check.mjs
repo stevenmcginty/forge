@@ -5,6 +5,7 @@
  *    "Yeah." allows, "yes but wait" is not an answer and goes to the brain.
  *  - A half-sentence is held for what follows; a whole sentence is not.
  *  - Held phrases reach the brain as one message, in the order said.
+ *  - A spoken phrase joins the Claude turn in flight until it starts answering.
  *  - The wiring: the gate is answered in runPhrase, by code, and no voice
  *    tool can reach it.
  *
@@ -199,6 +200,37 @@ check('never held past the limit, even in a room that never goes quiet', () => {
   assert.equal(V.gatherWait(clock({ sinceLast: V.GATHER_MAX_MS - 100, sinceVoice: 0 })), 100)
 })
 
+console.log('\nthe join: a Claude turn he paused in')
+
+const flight = (over) => ({ voiced: true, sinceSent: 3000, answering: false, ...over })
+
+check('a spoken phrase joins a spoken turn that has not started answering', () => {
+  assert.equal(V.joinsTurnInFlight(flight(), true), true)
+  assert.equal(V.joinsTurnInFlight(flight({ sinceSent: 0 }), true), true)
+  assert.equal(V.joinsTurnInFlight(flight({ sinceSent: V.JOIN_IN_FLIGHT_MS - 1 }), true), true)
+})
+
+check('a turn already answering is barged in on, not joined', () => {
+  assert.equal(V.joinsTurnInFlight(flight({ answering: true }), true), false)
+})
+
+check('typed words and the phone never join, and are never joined onto', () => {
+  assert.equal(V.joinsTurnInFlight(flight(), false), false)
+  assert.equal(V.joinsTurnInFlight(flight({ voiced: false }), true), false)
+})
+
+check('nothing in flight, or sent too long ago: a new turn', () => {
+  assert.equal(V.joinsTurnInFlight(null, true), false)
+  assert.equal(V.joinsTurnInFlight(flight({ sinceSent: V.JOIN_IN_FLIGHT_MS }), true), false)
+  assert.equal(V.joinsTurnInFlight(flight({ sinceSent: -1 }), true), false)
+})
+
+check('three pieces chain into one sentence', () => {
+  const parts = ["It's a virtual world that.", 'has uh agents', 'that talk.']
+  assert.equal(V.joinPhrases(parts.slice(0, 2)), "It's a virtual world that has uh agents")
+  assert.equal(V.joinPhrases(parts), "It's a virtual world that has uh agents that talk.")
+})
+
 console.log('\nwiring')
 
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
@@ -231,6 +263,15 @@ check('no model can answer the gate: no voice tool reaches the confirm', () => {
   for (const [name, source] of tools) {
     assert.ok(!/brain\??\.confirm|brain-confirm|brainConfirm/.test(source), name)
   }
+})
+
+check('runPhrase joins a paused-in Claude turn in place of its card, after the commands', () => {
+  const agent = read('src/state/VoiceAgent.tsx')
+  const grammar = agent.indexOf('parseUtterance(said, ctx)')
+  const join = agent.indexOf('joinsTurnInFlight(')
+  assert.ok(join > grammar, 'the join is decided after the command grammar')
+  assert.ok(agent.includes('prev.map((t) => (t.id === inFlight.id ? card : t))'), 'the card replaces the fragment')
+  assert.ok(agent.includes('if (ticket !== claudeTicket.current) return'), 'an overtaken turn stands down unsent')
 })
 
 check('Forge Web sends the answer on the wire that already exists', () => {

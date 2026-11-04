@@ -16,6 +16,12 @@
  *               turn for the brain, which answered "that got cut off". A phrase
  *               that does not read as a whole sentence is held for a moment and
  *               joined with what follows.
+ *
+ *   the join    The Claude brains are not held — the mic stays open while they
+ *               think — so the same pause reached them as a second turn that
+ *               cancelled the first, and Claude answered only the fragment. A
+ *               phrase that lands before the turn in flight has said anything
+ *               joins it instead (`joinsTurnInFlight`).
  */
 
 /* ------------------------------------------------------------------ the gate */
@@ -148,4 +154,29 @@ export function gatherWait(clock: GatherClock): number {
   const quiet = GATHER_HOLD_MS - clock.sinceLast
   const landing = clock.sinceVoice === null ? 0 : clock.pauseMs + GATHER_LAND_MS - clock.sinceVoice
   return Math.max(0, Math.min(left, Math.max(quiet, landing)))
+}
+
+/* ------------------------------------------------------------------ the join */
+
+/** How long after a Claude turn was sent a spoken phrase may still join it. */
+export const JOIN_IN_FLIGHT_MS = 20_000
+
+export interface TurnInFlight {
+  /** It was said aloud at this machine — not typed, not the phone. */
+  voiced: boolean
+  /** Milliseconds since it was sent. */
+  sinceSent: number
+  /** It has started answering: a sentence pushed to the mouth, or a block of text. */
+  answering: boolean
+}
+
+/**
+ * Is this phrase the rest of the sentence in flight, rather than a new turn
+ * that replaces it? Only spoken words, onto a spoken turn sent under
+ * `JOIN_IN_FLIGHT_MS` ago that has not started answering. Once Claude is
+ * answering, talking over it is a real barge-in and replaces it, as before.
+ */
+export function joinsTurnInFlight(turn: TurnInFlight | null, voiced: boolean): boolean {
+  if (!turn || !voiced || !turn.voiced || turn.answering) return false
+  return turn.sinceSent >= 0 && turn.sinceSent < JOIN_IN_FLIGHT_MS
 }
