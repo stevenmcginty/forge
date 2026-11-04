@@ -10,6 +10,7 @@ import { DictationProvider } from './state/Dictation'
 import { ForemanProvider } from './state/Foreman'
 import { VoiceAgentProvider } from './state/VoiceAgent'
 import { VoiceHubControllerProvider } from './state/VoiceHubController'
+import { LiveControllerProvider } from './state/live/LiveController'
 import { registerBrowser } from './components/browser/registerBrowser'
 import { ReaderOpener } from './components/reader/ReaderOpener'
 import { registerReader } from './components/reader/registerReader'
@@ -29,6 +30,8 @@ registerWindowCommands()
  */
 const MiniBarRoot = lazy(() => import('./minibar/MiniBarRoot').then((m) => ({ default: m.MiniBarRoot })))
 const ShotCardApp = lazy(() => import('./minibar/ShotCardApp').then((m) => ({ default: m.ShotCardApp })))
+/** Claude Live's desktop card (electron/live-card-window.ts), the same kind of view. */
+const LiveCardApp = lazy(() => import('./minibar/LiveCardApp').then((m) => ({ default: m.LiveCardApp })))
 
 const host = document.getElementById('root')
 if (!host) throw new Error('#root missing from index.html')
@@ -175,6 +178,12 @@ if (window.forge.minibar?.isMiniBar?.()) {
       <ShotCardApp />
     </Suspense>
   )
+} else if (window.forge.liveCard?.isLiveCard?.()) {
+  root.render(
+    <Suspense fallback={null}>
+      <LiveCardApp />
+    </Suspense>
+  )
 } else if (window.forge.overlay.isOverlay()) {
   root.render(<OverlayApp />)
 } else {
@@ -197,6 +206,10 @@ if (window.forge.minibar?.isMiniBar?.()) {
         <AppStateProvider>
           <DictationProvider>
             <VoiceAgentProvider>
+              {/* Claude Live's voice shell (src/state/live/), once, above the
+                  hub that drives it: one mic, one mouth, one ledger feed. It
+                  does not go through the VoiceAgent. */}
+              <LiveControllerProvider>
               {/* The voice hub's engine sits directly inside the agent it
                   falls back to: one realtime session at most, and it drives
                   the one VoiceAgent rather than being a second one. */}
@@ -216,6 +229,7 @@ if (window.forge.minibar?.isMiniBar?.()) {
                 </HandoffProvider>
               </ForemanProvider>
               </VoiceHubControllerProvider>
+              </LiveControllerProvider>
             </VoiceAgentProvider>
           </DictationProvider>
         </AppStateProvider>

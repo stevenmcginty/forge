@@ -25,6 +25,7 @@ import {
 import { dictateToPane } from '@/lib/realtime/dictate'
 import { errorReasonOf, type ErrorSource } from '@/lib/realtime/errors'
 import { dictationHoldsMic, micState } from '@/lib/realtime/micstate'
+import { liveHubPhase, liveMicState } from '@/lib/live/hub'
 import { currentVoiceAgentToolDeps } from '@/lib/agenttools'
 import { buildStateSection } from '@/lib/appmanifest'
 import {
@@ -53,6 +54,7 @@ import { desktopToolsOn, realtimeResultLabel, realtimeToolLabel, realtimeToolsFo
 import { startBrainFeed, useBrain } from '@/components/brain/brainStore'
 import { useApp } from './AppState'
 import { useDictation } from './Dictation'
+import { useLiveControls } from './live/LiveController'
 import { useVoiceAgent, type AgentPhase } from './VoiceAgent'
 
 /**
@@ -67,6 +69,11 @@ import { useVoiceAgent, type AgentPhase } from './VoiceAgent'
  *  - **Claude** (the default, and the fallback when the chosen provider has
  *    no key): the existing VoiceAgent — Parakeet in, the Claude Agent SDK
  *    brain, Edge TTS out — driven through its own context, untouched.
+ *  - **Claude Live** (`claude-live`): its own shell, src/state/live/
+ *    LiveController.tsx — ears, the two Claudes in main, Kokoro out. Listen
+ *    drives it; the VoiceAgent is never armed for it. Listen off closes the
+ *    ears and the mouth only: the crew's jobs keep running. It draws its own
+ *    captions (src/components/live/), so the bar's caption rail stays empty.
  *
  * The UI reads one API either way: `useVoiceHubController()`. The shape is
  * written up for the designers in the B1 API note; the short version is
@@ -182,6 +189,9 @@ export interface VoiceHubController {
 }
 
 const MAX_CAPTIONS = 40
+/** Stable empties for Claude Live, which draws its own (a fresh [] each render would re-render the bar). */
+const NO_CAPTIONS: HubCaption[] = []
+const NO_ACTIONS: HubAction[] = []
 const MAX_ACTIONS = 20
 const NOTICE_MS = 6000
 
@@ -230,6 +240,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   const { state, actions: app } = useApp()
   const agent = useVoiceAgent()
   const dictation = useDictation()
+  const live = useLiveControls()
   const s = state.settings
 
   // The ONE setting. A settings.json from before it existed migrates the way
@@ -287,6 +298,11 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   agentRef.current = agent
   const liveProviderRef = useRef(liveProvider)
   liveProviderRef.current = liveProvider
+  const liveRef = useRef(live)
+  liveRef.current = live
+  const livePicked = pickedBrain.brain === 'claude-live'
+  const livePickedRef = useRef(livePicked)
+  livePickedRef.current = livePicked
 
   // Forge Brain talking to the voice agent (`say_to_voice_agent`). A live
   // realtime session says it in its own voice — one voice, not two over each
@@ -595,6 +611,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   // A Parakeet conversation still open when the brain setting moves to a live
   // one is still the conversation the switch shows, until it ends (B11).
   const usingRealtime = realtimeLive || (resolved.provider !== 'claude' && !agent.armed)
+  // Claude Live, picked or still open: the same rule — a Parakeet conversation
+  // or a live session still open is what the switch shows until it ends.
+  const usingLive = !realtimeLive && !agent.armed && (livePicked || live.phase !== 'off')
   const pendingSubmitRef = useRef<string | null>(null)
 
   // The composer's submit reads its own draft, so set it and submit on the
@@ -660,6 +679,11 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     // A new conversation: the last one's "ended because" is history now.
     setRtEnded(null)
     if (import.meta.env.DEV) console.info(`[hub] event=open brain=${pick.brain}`)
+    if (pick.brain === 'claude-live') {
+      // Its own shell, never the VoiceAgent: one mic, one brain.
+      void liveRef.current.start()
+      return
+    }
     if (!pick.realtime) {
       // A Parakeet brain: arm AND capture now. Arming alone, with the wake
       // word on, only monitors for "hey Jarvis" — the Listening-but-deaf bug.
@@ -685,6 +709,13 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
         stopRealtime()
         return
       }
+      // Claude Live: the ears and the mouth close; its jobs keep running.
+      if (liveRef.current.phase !== 'off') {
+        setRtEnded(endedNote(end))
+        if (import.meta.env.DEV) console.info(`[hub] event=ended why=${end.kind} brain=claude-live`)
+        void liveRef.current.stop()
+        return
+      }
       // A realtime start that failed leaves no session to stop, only its error.
       // Clear it, or "back to dictation" is a dead click and the dock stays live.
       setRtPhase('off')
@@ -703,7 +734,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
 
   const stop = useCallback((): void => endConversation({ kind: 'press' }), [endConversation])
 
-  const phase: HubPhase = usingRealtime ? rtPhase : fromAgentPhase(agent.phase, agent.armed)
+  const phase: HubPhase = usingLive ? liveHubPhase(live) : usingRealtime ? rtPhase : fromAgentPhase(agent.phase, agent.armed)
 
   const toggle = useCallback((): void => {
     if (phase === 'off' || phase === 'error') start()
@@ -712,6 +743,12 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
 
   const setMuted = useCallback(
     (on: boolean): void => {
+      // Claude Live has no mic track to mute either: muting is Listen off, and on again.
+      if (livePickedRef.current && !sessionRef.current && !agentRef.current.armed) {
+        if (on) void liveRef.current.stop()
+        else void liveRef.current.start()
+        return
+      }
       setMutedState(on)
       mutedRef.current = on
       if (sessionRef.current) {
@@ -733,6 +770,10 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       sessionRef.current.interrupt()
       return
     }
+    if (liveRef.current.phase !== 'off') {
+      liveRef.current.interrupt()
+      return
+    }
     if (agentRef.current.phase === 'speaking') agentRef.current.toggleAgent()
   }, [])
 
@@ -748,6 +789,15 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
         }
         if (opts?.via !== 'voice') typedRtRef.current = body
         sessionRef.current.sendText(body)
+        return
+      }
+      if (livePickedRef.current && !agentRef.current.armed) {
+        // Claude Live: typed (or a phrase from elsewhere) goes up as a typed
+        // turn. Off, Listen opens first, as a realtime brain does, so the
+        // reply is heard and seen.
+        const l = liveRef.current
+        if (l.phase === 'off') void l.start().then(() => liveRef.current.sendTyped(body))
+        else void l.sendTyped(body)
         return
       }
       if (resolved.provider !== 'claude') {
@@ -806,6 +856,23 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     dictatingRef.current = dictatingNow
     sessionRef.current?.setMuted(mutedRef.current || dictatingNow)
   }, [dictatingNow, liveProvider])
+  // Claude Live on OpenAI ears: the same rule, so a pane's dictation is not a
+  // turn. On Parakeet ears the sidecar is Live's own, so there is nothing to hold.
+  const liveEars = live.ears
+  const liveSetHeld = live.setHeld
+  useEffect(() => {
+    liveSetHeld(dictatingNow && liveEars === 'openai')
+  }, [dictatingNow, liveEars, liveSetHeld])
+
+  /* ------------------------- Claude Live and the brain setting (V6)
+   * Moved off Claude Live while it listens: the ears and the mouth close and
+   * say why; the jobs keep running. */
+  const liveOpen = live.phase !== 'off'
+  useEffect(() => {
+    if (livePicked || !liveOpen) return
+    setRtEnded(endedNote({ kind: 'switched' }))
+    void liveRef.current.stop()
+  }, [livePicked, liveOpen])
 
   /* ------------------------------ the brain setting moved mid-session (V6)
    * The bar names the new brain at once; the old live session must not keep
@@ -862,16 +929,19 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
 
   const setHandsFree = useCallback(
     (on: boolean): void => {
-      // Realtime is always hands-free; the Claude path's hands-free is the wake word.
-      if (usingRealtime) return
+      // Realtime and Claude Live are always hands-free; the Claude path's hands-free is the wake word.
+      if (usingRealtime || usingLive) return
       app.patchSettings({ voiceWakeWord: on })
     },
-    [app, usingRealtime]
+    [app, usingRealtime, usingLive]
   )
 
   const readLevels = useCallback((): { mic: number; out: number } => {
     const session = sessionRef.current
     if (session) return session.levels()
+    // Claude Live has no meters here: speaking is a steady half, as on the Claude path.
+    const l = liveRef.current
+    if (l.phase !== 'off') return { mic: 0, out: l.phase === 'speaking' ? 0.5 : 0 }
     const a = agentRef.current
     // The Claude path has a mic meter but no output meter: speaking is a steady half.
     return { mic: Math.min(1, a.levelRef.current ?? 0), out: a.phase === 'speaking' ? 0.5 : 0 }
@@ -886,7 +956,8 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
    * thought about or spoken is not quiet — and restarts on everything that is
    * not quiet: his phrase landing, a caption of his, a reply starting or ending.
    * "Listening again" is the first listen after a reply, until he speaks. */
-  const open = usingRealtime ? realtimeLive && rtPhase !== 'off' && rtPhase !== 'error' : agent.armed
+  // Claude Live is never "open" to this clock: no idle close (src/lib/live/hub.ts).
+  const open = usingLive ? false : usingRealtime ? realtimeLive && rtPhase !== 'off' && rtPhase !== 'error' : agent.armed
   const busy = phase === 'thinking' || phase === 'speaking'
   const idleMs = normaliseIdleTimeout(s.agentIdleTimeoutMs)
   // A ref, written in the same commit the clock effect below reads it in: the
@@ -954,7 +1025,10 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
   /* ------------------------------------------- honest mic state (B7) */
   let errorSource: ErrorSource = 'brain'
   let errorText: string | null = null
-  if (usingRealtime) {
+  if (usingLive) {
+    errorSource = 'claude'
+    errorText = live.phase === 'off' ? (live.startError ?? null) : null
+  } else if (usingRealtime) {
     errorSource = providerSpec(provider).vendor === 'gemini' ? 'gemini' : 'openai'
     errorText = rtError && rtPhase === 'error' ? rtError : null
   } else {
@@ -978,7 +1052,7 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     errorText = sttErr ?? turnError
   }
   const errorReason = errorReasonOf(errorSource, errorText)
-  const { capturing, starting, listenNote } = micState({
+  const mic = micState({
     realtime: usingRealtime,
     phase: usingRealtime ? rtPhase : agent.phase,
     muted,
@@ -988,11 +1062,12 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
     again: open && again,
     ended: open ? null : usingRealtime ? rtEnded : (agent.ended ?? null)
   })
+  const { capturing, starting, listenNote } = usingLive ? liveMicState(live, rtEnded) : mic
   const brainLabel = agentBrainSpec(pickedBrain.brain).label
 
   // Dev evidence: one line per state change. Main copies `[hub]` lines into
   // dev.log (electron/renderer-log.ts), so a live "it did nothing" leaves a trail.
-  const traceLine = `[hub] phase=${phase} capturing=${capturing} starting=${starting} brain=${pickedBrain.brain} requested=${requestedBrain}${liveProvider ? ` live=${liveProvider}` : ''} armed=${agent.armed} errorReason=${errorReason ?? '-'} listenNote=${listenNote}`
+  const traceLine = `[hub] phase=${phase} capturing=${capturing} starting=${starting} brain=${pickedBrain.brain} requested=${requestedBrain}${liveProvider ? ` live=${liveProvider}` : ''}${usingLive ? ` claudeLive=${live.phase}` : ''} armed=${agent.armed} errorReason=${errorReason ?? '-'} listenNote=${listenNote}`
   useEffect(() => {
     if (import.meta.env.DEV) console.info(traceLine)
   }, [traceLine])
@@ -1003,19 +1078,20 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       provider,
       requestedProvider: isRealtimeBrainId(requestedBrain) ? requestedBrain : 'claude',
       fallbackReason: liveProvider ? null : resolved.fallbackReason,
-      realtime: usingRealtime,
+      realtime: usingRealtime && !usingLive,
       availability,
-      error: usingRealtime ? rtError : agent.sttError,
-      muted,
-      captions: usingRealtime ? captions : claudeCaptions,
-      actions: usingRealtime ? rtActions : claudeActions,
-      sessionStartedAt: usingRealtime ? sessionStartedAt : null,
+      error: usingLive ? (live.phase === 'off' ? (live.startError ?? null) : null) : usingRealtime ? rtError : agent.sttError,
+      muted: usingLive ? false : muted,
+      // Claude Live draws its own captions and crew (src/components/live/).
+      captions: usingLive ? NO_CAPTIONS : usingRealtime ? captions : claudeCaptions,
+      actions: usingLive ? NO_ACTIONS : usingRealtime ? rtActions : claudeActions,
+      sessionStartedAt: usingLive ? null : usingRealtime ? sessionStartedAt : null,
       sessionLimitMs: liveProvider && liveProvider !== 'gemini-live' ? OPENAI_SESSION_LIMIT_MS : null,
       notice,
-      handsFree: usingRealtime ? true : s.voiceWakeWord,
+      handsFree: usingRealtime || usingLive ? true : s.voiceWakeWord,
       setHandsFree,
       discussionMode,
-      discussionAvailable: usingRealtime,
+      discussionAvailable: usingRealtime && !usingLive,
       setDiscussionMode,
       go,
       readLevels,
@@ -1052,6 +1128,9 @@ export function VoiceHubControllerProvider({ children }: { children: ReactNode }
       liveProvider,
       resolved.fallbackReason,
       usingRealtime,
+      usingLive,
+      live.phase,
+      live.startError,
       availability,
       rtError,
       agent.sttError,

@@ -730,13 +730,59 @@ await check('an older desktop\'s "does not understand" becomes "update the deskt
   assert.equal(voiceFailureWords({ code: 'failed', message: 'Could not reach Gemini: offline' }), 'Could not reach Gemini: offline')
 })
 
-await check('the phone and deck pickers offer four: Forge Brain (the default), Claude Voice, Gemini, ChatGPT; a remembered Claude becomes Forge Brain', async () => {
-  const { WEB_VOICE_AGENTS, DEFAULT_WEB_VOICE_AGENT, readVoiceAgent, voiceAgentWord } = await import('../web/src/deck/voice-words.ts')
-  assert.deepEqual(WEB_VOICE_AGENTS, ['forge-brain', 'claude-voice', 'gemini-live', 'gpt-realtime'])
-  assert.deepEqual(WEB_VOICE_AGENTS.map(voiceAgentWord), ['Forge Brain', 'Claude Voice', 'Gemini', 'ChatGPT'])
+await check('the phone and deck pickers offer five: Forge Brain (the default), Claude Live, Claude Voice, Gemini, ChatGPT; a remembered Claude becomes Forge Brain', async () => {
+  const { WEB_VOICE_AGENTS, DEFAULT_WEB_VOICE_AGENT, readVoiceAgent, voiceAgentWord, isClaudeVoiceAgent } = await import('../web/src/deck/voice-words.ts')
+  assert.deepEqual(WEB_VOICE_AGENTS, ['forge-brain', 'claude-live', 'claude-voice', 'gemini-live', 'gpt-realtime'])
+  assert.deepEqual(WEB_VOICE_AGENTS.map(voiceAgentWord), ['Forge Brain', 'Claude Live', 'Claude Voice', 'Gemini', 'ChatGPT'])
+  assert.deepEqual(WEB_VOICE_AGENTS.filter(isClaudeVoiceAgent), ['claude-live', 'claude-voice'], "the Claude agents wear Claude's mark")
   assert.equal(DEFAULT_WEB_VOICE_AGENT, 'forge-brain')
   for (const stored of [null, undefined, '', 'nope', 'claude', 'gpt-realtime-mini']) assert.equal(readVoiceAgent(stored), 'forge-brain', String(stored))
   for (const stored of WEB_VOICE_AGENTS) assert.equal(readVoiceAgent(stored), stored)
+})
+
+await check('Claude Live on the phone: the first clause is spoken first, then whole sentences; nothing dropped or said twice', async () => {
+  const { takeClauses } = await import('../web/src/deck/live-words.ts')
+  const first = takeClauses('Sure, I will check the forge project for you', true)
+  assert.deepEqual(first.chunks, [], 'a clause under four words waits')
+  const cut = takeClauses('Sure, I will check the forge project, then tell you. More soon ', true)
+  assert.deepEqual(cut.chunks, ['Sure, I will check the forge project,', 'then tell you.'])
+  assert.equal(cut.rest, ' More soon ')
+  const later = takeClauses('It is running, and Zeb is on it. Next', false)
+  assert.deepEqual(later.chunks, ['It is running, and Zeb is on it.'], 'after the first chunk only sentences are cut')
+  assert.equal(later.rest, ' Next')
+  const long = 'word '.repeat(80)
+  const forced = takeClauses(long, false)
+  assert.equal(forced.chunks.join(' ').split(/\s+/).length + forced.rest.trim().split(/\s+/).filter(Boolean).length, 80, 'an over-long run is let out, word for word')
+})
+
+await check('Claude Live cards: needs-you first, then done or failed of the last half hour; a dismissed card stays away until its job moves', async () => {
+  const { liveCardsOf, LIVE_CARD_DONE_MS, LIVE_ACK_LINES } = await import('../web/src/deck/live-words.ts')
+  const { liveLedgerForPhone, LIVE_PHONE_JOBS_MAX, LIVE_PHONE_KEEP_DONE_MS } = await import('../shared/live.ts')
+  const now = 10_000_000
+  const job = (id, state, updatedAt) => ({ id, title: id, owner: 'conductor', state, steps: [{ at: 1, text: 'a' }, { at: 2, text: 'b' }], createdAt: 0, updatedAt })
+  const jobs = [
+    job('old-done', 'done', now - LIVE_CARD_DONE_MS - 1),
+    job('done', 'done', now - 5),
+    job('ask-1', 'needs-you', now - 50),
+    job('run', 'running', now - 1),
+    job('ask-2', 'needs-you', now - 10),
+    job('fail', 'failed', now - 20),
+    job('stop', 'stopped', now - 2)
+  ]
+  assert.deepEqual(liveCardsOf(jobs, now).map((j) => j.id), ['ask-2', 'ask-1', 'done', 'fail'])
+  assert.deepEqual(liveCardsOf(jobs, now, new Set([`ask-2:${now - 10}`])).map((j) => j.id), ['ask-1', 'done', 'fail'])
+  assert.deepEqual(liveCardsOf([job('ask-2', 'needs-you', now)], now, new Set([`ask-2:${now - 10}`])).map((j) => j.id), ['ask-2'], 'it moved: back')
+  assert.deepEqual([...LIVE_ACK_LINES], ['Okay.', 'Sure.', 'One sec.', 'Let me check.'], "the desk's acks (src/lib/tts.ts ACK_LINES)")
+
+  const many = Array.from({ length: 30 }, (_, i) => job(`j${i}`, i % 2 ? 'running' : 'done', now - i))
+  many.push(job('stale', 'done', now - LIVE_PHONE_KEEP_DONE_MS - 1))
+  const trimmed = liveLedgerForPhone({ jobs: many, seq: 4 }, now)
+  assert.equal(trimmed.jobs.length, LIVE_PHONE_JOBS_MAX)
+  assert.equal(trimmed.seq, 4)
+  assert.deepEqual(trimmed.jobs.map((j) => j.id).slice(0, 3), ['j0', 'j1', 'j2'], 'newest first')
+  assert.ok(trimmed.jobs.every((j) => j.steps.length === 1 && j.steps[0].text === 'b'), 'the newest step only')
+  assert.ok(!liveLedgerForPhone({ jobs: many, seq: 4 }, now).jobs.some((j) => j.id === 'stale'), 'a long-finished job is not carried')
+  assert.equal(many[0].steps.length, 2, 'the ledger itself is not touched')
 })
 
 await check('a browser that navigates itself is told where to go; the desktop is never asked to move', async () => {

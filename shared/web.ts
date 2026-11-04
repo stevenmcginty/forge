@@ -133,6 +133,7 @@ import type { MirrorButton, MirrorInputAction, MirrorKey, RemoteYesInfo } from '
 import type { ChatClientFrame, ChatServerFrame } from './chat-mirror'
 import type { BrowserClientFrame, BrowserServerFrame } from './browser-mirror'
 import type { BoardClientFrame, BoardServerFrame } from './board-mirror'
+import type { LiveEvent, LiveJobAction, LiveLatencySample } from './live'
 
 /* --------------------------------------------------------- protocol identity */
 
@@ -1632,6 +1633,27 @@ export type WebRequest =
    *   interrupt  barge-in: stop the turn, keep the conversation. Answered `ok`.
    *   close      end the session. Answered `ok`, also when there was none.
    *
+   * `agent` 'claude-live' is Claude Live (shared/live.ts): no session of its
+   * own — the desktop's one Live voice brain answers, the same conversation
+   * the desk has, and its jobs keep running whatever the browser does. On
+   * it, `say` carries the browser's `turnId` (the reply's `say` pieces name
+   * it), events are `{ type: 'live' }` (the say pieces and turn ends of this
+   * browser's own turns only, and all news, ledger and status — a ledger
+   * trimmed to what a phone draws), `speak` is Kokoro's, `interrupt` cancels
+   * the browser's turn in flight, and three more ops exist:
+   *
+   *   ears       the browser's WebRTC SDP offer for an OpenAI realtime
+   *              transcription session (semantic VAD); main mints the secret
+   *              with the stored key (electron/realtime/tokens.ts's
+   *              `connectOpenAITranscription`) and answers `{ kind:
+   *              'voice-connect' }` with OpenAI's SDP answer. `failed` when
+   *              there is no OpenAI key, or Settings picked other ears: the
+   *              browser then hears the way Claude does (`append`/`done`).
+   *   job        one tap on a job card: `stop` or `show` (shared/live.ts
+   *              `LiveJobAction`). Answered `ok`, or `failed` with the reason.
+   *   latency    one turn's latency sample, logged on the desktop as
+   *              `[live] web latency …`. Answered `ok`.
+   *
    * Every op but `open` and `close` on a socket that holds no session is
    * `failed`. The socket closing closes the session.
    */
@@ -1639,11 +1661,14 @@ export type WebRequest =
   | { kind: 'voice-claude'; op: 'append'; turnId: string; seq: number; data: string }
   | { kind: 'voice-claude'; op: 'done'; turnId: string; chunks: number }
   | { kind: 'voice-claude'; op: 'cancel'; turnId: string }
-  | { kind: 'voice-claude'; op: 'say'; text: string }
+  | { kind: 'voice-claude'; op: 'say'; text: string; turnId?: string }
   | { kind: 'voice-claude'; op: 'events' }
   | { kind: 'voice-claude'; op: 'speak'; text: string }
   | { kind: 'voice-claude'; op: 'interrupt' }
   | { kind: 'voice-claude'; op: 'close' }
+  | { kind: 'voice-claude'; op: 'ears'; sdp: string }
+  | { kind: 'voice-claude'; op: 'job'; jobId: string; action: LiveJobAction }
+  | { kind: 'voice-claude'; op: 'latency'; sample: LiveLatencySample }
   /**
    * Begin enrolling this browser's passkey. Only on a socket that opened with
    * the PIN (or a passkey) on a desktop that still has that same PIN set; any
@@ -2330,10 +2355,13 @@ export type WebResult =
  * events (shared/types.ts `VoiceAgentEvent`), plus `closed` when the session
  * ended under the browser (another browser took it, or the desktop let go).
  */
-export type WebVoiceClaudeEvent = VoiceAgentEvent | { type: 'closed'; reason: string }
+export type WebVoiceClaudeEvent = VoiceAgentEvent | { type: 'closed'; reason: string } | { type: 'live'; event: LiveEvent }
 
-/** Which agent a browser's `voice-claude` session is: Claude, or Claude Voice (Kokoro speaks). */
-export type WebVoiceClaudeAgent = 'claude' | 'claude-voice'
+/**
+ * Which agent a browser's `voice-claude` session is: Claude, Claude Voice
+ * (Kokoro speaks), or Claude Live (the desktop's Live voice brain; Kokoro speaks).
+ */
+export type WebVoiceClaudeAgent = 'claude' | 'claude-voice' | 'claude-live'
 
 /**
  * How long a `voice-claude` `events` request is held open with nothing to

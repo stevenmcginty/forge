@@ -89,6 +89,22 @@ export function ModelsSection(): ReactNode {
         />
       </Card>
 
+      <Card title="Anthropic">
+        <KeyField
+          label="API key"
+          value={s.anthropicKey}
+          onCommit={(key) => actions.patchSettings({ anthropicKey: key.trim() })}
+          placeholder="sk-ant-…"
+          note={
+            <>
+              For Claude Live&apos;s voice, which answers faster on the API. An API platform key with billing — your
+              Claude plan does not cover it. Without one, Claude Live talks on your Claude login instead. Sent only to{' '}
+              <span className="mono">api.anthropic.com</span>.
+            </>
+          }
+        />
+      </Card>
+
       <Card title="Groq">
         <KeyField
           label="API key"

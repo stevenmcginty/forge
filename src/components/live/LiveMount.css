@@ -1,0 +1,20 @@
+/*
+ * Claude Live on the desktop shell (LiveMount.tsx). The mount is no box of
+ * its own; it carries the bar's measured place down to the surface, whose
+ * defaults (live.css) are only a guess at it. The bar itself never moves.
+ */
+
+.live-mount {
+  display: contents;
+}
+
+.live-mount > .live-surface {
+  --live-bar-clear: var(--live-measured-clear, calc(var(--dock-clear, 88px) + 24px));
+  --live-bar-w: var(--live-measured-w, clamp(600px, 72vw, 1240px));
+  --live-bar-left: var(--live-measured-left, max(16px, calc((100vw - var(--live-bar-w)) / 2)));
+}
+
+/* While the rail is up, the panes keep clear of it: the stage gives up its right edge. */
+.deck[data-live-rail='on'] .deck__stage {
+  padding-right: var(--live-rail-reserve, 436px);
+}

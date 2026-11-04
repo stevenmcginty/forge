@@ -62,6 +62,7 @@ import { setMainWindow } from './main-window'
 import { disposeGlobalKeys, syncGlobalKeys } from './global-keys'
 import { disposeCopilotKey, syncCopilotKey } from './copilot-key'
 import { disposeShotCard, registerShotCardIpc } from './shot-card-window'
+import { disposeLiveCard, registerLiveCardIpc, watchMainForLiveCard } from './live-card-window'
 import { registerVoiceHandlers } from './voice-bridge'
 import { disposeKokoro, registerKokoroScheme, warmKokoro } from './kokoro-tts'
 import {
@@ -70,6 +71,7 @@ import {
   setVoiceAgentTarget
 } from './voice-agent/ipc'
 import { registerRealtimeHandlers } from './realtime/ipc'
+import { disposeLive, initLive } from './live'
 import { disposeHub, keymapOverride, postToBoard, registerHubHandlers } from './hub-ipc'
 import { browserKeyCombo } from '@shared/browser'
 import { guardArtifactFrames, installArtifactScheme } from './artifact-scheme'
@@ -602,6 +604,8 @@ function createWindow(): void {
   // And the mini bar's: the host publishes its state and runs its calls.
   setMiniBarHost(mainWindow)
   setMainWindow(mainWindow)
+  // Claude Live's desktop card goes when Forge comes back to the front.
+  watchMainForLiveCard(mainWindow)
 
   const devUrl = process.env['ELECTRON_RENDERER_URL']
   if (isDev && devUrl) {
@@ -1615,6 +1619,10 @@ void app
       // Handlers only, again: no key is read and nothing is minted until the
       // voice hub starts a realtime session. See electron/realtime/.
       registerRealtimeHandlers()
+      // Claude Live: its job ledger loads and its handlers register; neither
+      // brain starts and no key is read until the renderer asks. See
+      // electron/live/index.ts.
+      initLive()
       // Same posture: handlers only. Foreman opens no session and touches no
       // `claude` login until a pane is actually toggled on — see
       // electron/foreman/host.ts.
@@ -1728,6 +1736,8 @@ void app
       // made on the first minimise and the first shot while minimised.
       registerMiniBarIpc({ openMainWindow })
       registerShotCardIpc()
+      // Claude Live's desktop card (needs you / done while Forge is away).
+      registerLiveCardIpc()
     } catch (err) {
       reportStartupFailure('Part of Forge failed to start, so some of it will not work', err)
     }
@@ -1818,6 +1828,7 @@ app.on('before-quit', () => {
   // Ends the Agent SDK session and its subprocess. A voice brain outliving the
   // app would hold a `claude` process open with nobody to talk to.
   safely('disposeVoiceAgent', disposeVoiceAgent)
+  safely('disposeLive', disposeLive)
   safely('disposeKokoro', disposeKokoro)
   // Every driven pane's session, for the same reason: a Foreman outliving the
   // app would hold a `claude` process open with a terminal to type into and
@@ -1849,4 +1860,5 @@ app.on('before-quit', () => {
   safely('disposeGlobalKeys', disposeGlobalKeys)
   safely('disposeCopilotKey', disposeCopilotKey)
   safely('disposeShotCard', disposeShotCard)
+  safely('disposeLiveCard', disposeLiveCard)
 })

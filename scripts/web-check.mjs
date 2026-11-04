@@ -1989,6 +1989,98 @@ log(
   'and the same verb for a pane this desktop does not have is refused at the boundary, against the real session list'
 )
 
+/* ================================================================ phase 11a1
+ *
+ * Claude Live, from a browser, against the real host.
+ *
+ * `voice-claude` with agent `claude-live` is a lane onto the desktop's one
+ * Live voice brain (electron/live/index.ts), not a session of its own. No
+ * brain runs here (initLive is never called), which is the shape to drive:
+ * the lane opens, says how Live is, refuses the phone's ears without an
+ * OpenAI key, refuses a job it does not have, logs a latency line, ends a
+ * turn it cannot answer with a turn-end for that turn — and keeps another
+ * lane's reply out while news and a phone-sized ledger come through.
+ */
+
+console.log('\nClaude Live from a browser')
+
+const live = await import('../electron/live/index.ts')
+let liveRid = 0
+const liveAsk = async (body) => {
+  const rid = `r-live-${++liveRid}`
+  sendFrame(held, { type: 'request', rid, body: { kind: 'voice-claude', ...body } })
+  await waitFor(() => resultOf(held, rid), 5000, `the Claude Live ${body.op}`)
+  return resultOf(held, rid).body
+}
+const liveEvents = async () => {
+  const res = await liveAsk({ op: 'events' })
+  return res.kind === 'voice-claude-events' ? res.events.filter((e) => e.type === 'live').map((e) => e.event) : []
+}
+
+log((await liveAsk({ op: 'open', agent: 'claude-live' })).kind === 'ok', 'a browser opens Claude Live')
+const opening = await liveEvents()
+log(
+  opening.some((e) => e.type === 'status' && typeof e.status.ready === 'boolean'),
+  'and is told at once how Live is, before anything has been said'
+)
+const ears = await liveAsk({ op: 'ears', sdp: 'v=0\r\n' })
+log(
+  ears.kind === 'failed' && /OpenAI key|local ears/.test(ears.message),
+  `the phone's ears are refused in words with no OpenAI key (${ears.message}), so the page hears the way Claude does`
+)
+const job = await liveAsk({ op: 'job', jobId: 'never-was', action: 'stop' })
+log(job.kind === 'failed' && /No such job/.test(job.message), 'a Stop for a job the ledger never had is refused in words')
+const badJob = await liveAsk({ op: 'job', jobId: 'x', action: 'delete' })
+log(badJob.kind === 'failed' && badJob.code === 'bad-frame', 'and an action that is not stop or show is not a job action')
+
+const said = []
+const realLog = console.log
+console.log = (...args) => {
+  said.push(args.join(' '))
+}
+const latency = await liveAsk({ op: 'latency', sample: { turnId: 'p-1', eosToSendMs: 310, sendToFirstTextMs: 900, eosToAudioMs: 1650, ack: true } })
+console.log = realLog
+log(
+  latency.kind === 'ok' && said.some((l) => /^\[live\] web latency turn=p-1 eos→send=310ms send→text=900ms .*eos→audio=1650ms ack=true/.test(l)),
+  `a turn's latency reaches the desktop's log as "[live] web latency …" (${said.find((l) => l.includes('web latency')) ?? 'nothing logged'})`
+)
+const badSample = await liveAsk({ op: 'latency', sample: { turnId: 'p-1', eosToSendMs: -4 } })
+log(badSample.kind === 'failed' && badSample.code === 'bad-frame', 'and a sample with a negative time is not one')
+
+log((await liveAsk({ op: 'say', text: 'what is Zeb doing', turnId: 'p-2' })).kind === 'ok', 'a turn is said under the browser’s own id')
+const ended = await liveEvents()
+log(
+  ended.some((e) => e.type === 'turn-end' && e.turnId === 'p-2' && e.ok === false && /not running/.test(e.error ?? '')),
+  'with no brain behind it the turn still ends — once, for that id, in words'
+)
+
+live.emitLive({ type: 'say', turnId: 'desk-1', text: 'the desk is talking', final: false })
+live.emitLive({ type: 'news', id: 'n-1', jobId: 'j-1', text: 'Zeb is done.', urgency: 'done' })
+const steps = Array.from({ length: 50 }, (_, i) => ({ at: i, text: `step ${i}` }))
+const now = Date.now()
+const jobs = Array.from({ length: 40 }, (_, i) => ({
+  id: `j-${i}`,
+  title: `job ${i}`,
+  owner: 'conductor',
+  state: i < 30 ? 'running' : 'done',
+  steps,
+  createdAt: now - 1000,
+  updatedAt: now - i
+}))
+live.emitLive({ type: 'ledger', snapshot: { jobs, seq: 7 } })
+await sleep(700)
+const mixed = await liveEvents()
+log(
+  !mixed.some((e) => e.type === 'say') && mixed.some((e) => e.type === 'news' && e.id === 'n-1'),
+  "another lane's reply stays out of this browser, and the news comes through"
+)
+const ledgerOut = mixed.find((e) => e.type === 'ledger')
+log(
+  ledgerOut?.snapshot.jobs.length === 12 && ledgerOut.snapshot.jobs.every((j) => j.steps.length === 1) && ledgerOut.snapshot.seq === 7,
+  `the ledger reaches the phone trimmed to what it draws: ${ledgerOut?.snapshot.jobs.length ?? 0} jobs, one step each`
+)
+log((await liveAsk({ op: 'close' })).kind === 'ok', 'and Listen off closes the lane')
+
 /* ================================================================ phase 11a2
  *
  * Handoff, from a browser, against the real host.

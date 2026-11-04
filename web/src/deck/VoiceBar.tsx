@@ -6,6 +6,7 @@ import { Icon } from '@/components/Icon'
 import { badgeColor, isShellProfile } from '@/lib/agents'
 import { usePresence } from '@/lib/motion'
 import { BrainGlyphMark } from '../components/BrainGlyph'
+import { LiveCards } from '../components/LiveCards'
 import { Rail } from '../components/Rail'
 import { withAgentSends } from '../lib/pane-sent'
 import { useActiveProject, useForge, useWorkspace } from '../state'
@@ -43,6 +44,7 @@ import {
 } from './voiceAgent'
 import {
   actionStatusWord,
+  isClaudeVoiceAgent,
   voiceAgentWord,
   voiceHint,
   voicePhaseWord,
@@ -318,6 +320,8 @@ function VoiceAgent({ place }: { place: BarPlace }): ReactNode {
           })}
         </div>
       </DeckSheet>
+      {/* Claude Live's job cards, over the deck beside the bar, while its menu is shut. */}
+      {!open && voice.agent === 'claude-live' ? <LiveCards face="deck" place={place} /> : null}
     </span>
   )
 }
@@ -399,7 +403,7 @@ function agentLogo(agent: WebVoiceAgent): AgentLogo | null {
   if (agent === 'forge-brain') return null
   return agent === 'gemini-live'
     ? AGENT_LOGOS.gemini
-    : agent === 'claude' || agent === 'claude-voice'
+    : isClaudeVoiceAgent(agent)
       ? AGENT_LOGOS.claude
       : AGENT_LOGOS.openai
 }

@@ -97,6 +97,16 @@ export const AGENT_BRAINS: readonly AgentBrainSpec[] = [
     key: null,
     auth: 'your claude login',
     note: 'Free with your subscription — Parakeet hears, a hidden Claude session with every Forge tool thinks, Kokoro speaks on your GPU'
+  },
+  {
+    // Claude Live (shared/live.ts, electron/live/): no key required — with an
+    // Anthropic key the voice brain uses the API, without one the claude login.
+    id: 'claude-live',
+    label: 'Claude Live',
+    kind: 'session',
+    key: null,
+    auth: 'your Anthropic key or your claude login',
+    note: 'Talks fast, works in the background'
   }
 ]
 
@@ -118,9 +128,14 @@ export function isAgentBrainId(value: unknown): value is AgentBrainId {
  *
  * Claude Voice (2026-11-04) is that same Claude session with its own short
  * conversational persona and a local voice — Kokoro on the GPU
- * (electron/kokoro-tts.ts) — and sits second, after Forge Brain.
+ * (electron/kokoro-tts.ts).
+ *
+ * Claude Live (2026-11-04, shared/live.ts) sits second, right after Forge
+ * Brain: a quick voice brain talks while a Conductor works in the background.
+ * Desktop only for now — the web pickers (web/src/deck/voice-words.ts) do not
+ * offer it yet.
  */
-export const VISIBLE_AGENT_BRAINS: readonly AgentBrainId[] = ['forge-brain', 'claude-voice', 'gemini-live', 'gpt-realtime']
+export const VISIBLE_AGENT_BRAINS: readonly AgentBrainId[] = ['forge-brain', 'claude-live', 'claude-voice', 'gemini-live', 'gpt-realtime']
 
 /** The same list as specs, in the same order. */
 export const VISIBLE_AGENT_BRAIN_SPECS: readonly AgentBrainSpec[] = VISIBLE_AGENT_BRAINS.map(

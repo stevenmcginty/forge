@@ -14,6 +14,7 @@ import { UpdateBanner } from '@/components/UpdateBanner'
 import { WebProjectRemoveBridge } from '@/components/WebProjectRemoveBridge'
 import { WebVoiceBridge } from '@/components/WebVoiceBridge'
 import { HubLayer } from '@/components/hub/HubLayer'
+import { LiveMount } from '@/components/live/LiveMount'
 import { Backdrop } from '@/components/shell/Backdrop'
 import { ChatRelayBar } from '@/components/shell/ChatRelayBar'
 import { DeckToast } from '@/components/shell/DeckToast'
@@ -218,6 +219,8 @@ export function App(): ReactNode {
         mounted. The engine itself is headless, in the providers at the root.
       */}
       <HubLayer />
+      {/* Claude Live's rail, captions and show ring, while it is the picked brain. */}
+      <LiveMount />
       <Onboarding />
       <AccountPrompt />
       {/* Phone dictation needs a speech-to-text key here; waits behind the three above. */}

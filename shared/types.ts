@@ -962,6 +962,15 @@ export type AgentBrainId =
   | 'forge-brain'
   /** Claude Voice: the Claude voice session (electron/voice-agent/host.ts), its own short persona, Kokoro speaks on the GPU. */
   | 'claude-voice'
+  /** Claude Live: a quick Claude voice brain in front, a Claude Conductor doing the work, one job ledger (shared/live.ts). */
+  | 'claude-live'
+
+/** Claude Live's voice brain model (shared/live.ts LIVE_VOICE_MODELS). */
+export type LiveVoiceModel = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-haiku-5-5'
+/** Claude Live's Conductor model (shared/live.ts LIVE_CONDUCTOR_MODELS). */
+export type LiveConductorModel = 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-fable-5-1'
+/** Who hears Steve for Claude Live: OpenAI realtime transcription, or local Parakeet. */
+export type LiveEars = 'openai' | 'parakeet'
 
 /**
  * One row of the desktop voice menu, in display order.
@@ -1771,8 +1780,11 @@ export interface Settings {
   voiceBargeIn: boolean
   voiceBrain: VoiceBrainId
   /**
-   * Anthropic key for the (unbuilt) ClaudeBrain. Stored here and used nowhere:
-   * no code in Forge sends it anywhere.
+   * Anthropic API key, for Claude Live's voice brain (electron/live/): with
+   * one it answers over the Messages API, without one it falls back to the
+   * `claude` subscription login. A secret at rest (electron/store.ts
+   * SECRET_FIELDS); main only, sent only to api.anthropic.com. Set in
+   * Settings → Models & APIs.
    */
   anthropicKey: string
   /**
@@ -1917,6 +1929,16 @@ export interface Settings {
    * in Settings → Main agent.
    */
   claudeVoiceModel: string
+  /**
+   * Claude Live (agentBrain `claude-live`, shared/live.ts): the voice brain's
+   * model — Opus by default; Sonnet and Haiku answer sooner. Set in
+   * Settings → Main agent.
+   */
+  liveVoiceModel: LiveVoiceModel
+  /** Claude Live's Conductor model, on the `claude` subscription. Opus by default. */
+  liveConductorModel: LiveConductorModel
+  /** Claude Live's ears: OpenAI realtime transcription (the default) or local Parakeet. */
+  liveEars: LiveEars
   /**
    * A prebuilt Gemini voice name. Empty means `DEFAULT_TTS_VOICE` in
    * electron/gemini-tts.ts — Sulafat, the one Google documents as "Warm".

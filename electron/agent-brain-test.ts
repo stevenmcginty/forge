@@ -238,6 +238,9 @@ export async function testBrain(target: BrainTestTarget, settings: Settings, fet
     case 'claude-voice':
       // Claude Voice is the same Claude session on its own model; its Kokoro voice falls back to Edge by itself.
       return testClaudeCli(settings.claudeVoiceModel || 'claude-sonnet-5-5')
+    case 'claude-live':
+      // The Conductor runs on the claude login; the voice brain falls back to it without an Anthropic key.
+      return testClaudeCli(settings.liveConductorModel || 'claude-opus-5-5')
     case 'gemini-live':
       return testGeminiKey(settings.geminiKey, null, fetchImpl)
     case 'gemini-flash':

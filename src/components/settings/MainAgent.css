@@ -536,3 +536,16 @@
 .va-choice .seg__btn:disabled {
   cursor: default;
 }
+
+/* Claude Live's voice model: the name, and one word under it. The pick also gets a tick. */
+.mag__liveseg .seg__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.mag__liveseg-word {
+  font-size: var(--t-xs);
+  opacity: 0.8;
+}

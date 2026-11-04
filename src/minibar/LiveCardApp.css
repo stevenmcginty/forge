@@ -1,0 +1,132 @@
+/*
+ * Claude Live's desktop card (electron/live-card-window.ts): transparent
+ * window, the card at its top right with room for the shadow. Every state has
+ * a word and a mark (◆ Needs you, ✓ Done), and the needs-you card also wears a
+ * thicker edge, so nothing is told by colour alone.
+ */
+
+:root[data-livecard-view],
+:root[data-livecard-view] body,
+:root[data-livecard-view] #root {
+  background: transparent;
+  overflow: hidden;
+}
+
+.lcard {
+  position: fixed;
+  top: 4px;
+  right: 6px;
+  width: calc(100% - 12px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 12px 12px;
+  border-radius: 14px;
+  background: var(--sheet-bg, var(--bg-panel));
+  border: 1px solid var(--glass-line-strong, rgba(232, 234, 237, 0.19));
+  box-shadow:
+    var(--glass-shadow, 0 12px 32px rgba(0, 0, 0, 0.5)),
+    inset 0 1px 0 var(--glass-hi, rgba(255, 255, 255, 0.07));
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  animation: lcard-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.lcard[data-urgency='needs-you'] {
+  border: 2px solid color-mix(in srgb, var(--warn, #ffb347) 60%, transparent);
+}
+
+@keyframes lcard-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lcard {
+    animation: none;
+  }
+}
+
+.lcard__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-xs, 10.5px);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.lcard__mark {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.lcard[data-urgency='needs-you'] .lcard__mark,
+.lcard[data-urgency='needs-you'] .lcard__state {
+  color: var(--warn, #ffb347);
+  font-weight: 600;
+}
+
+.lcard__from {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.lcard__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lcard__text {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lcard__acts {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.lcard__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--glass-line-strong, rgba(232, 234, 237, 0.19));
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.lcard__btn[data-choice='push'] {
+  background: var(--warn, #ffb347);
+  border-color: transparent;
+  color: #1a1208;
+  font-weight: 600;
+}
+
+.lcard__btn[data-choice='later'] {
+  margin-left: auto;
+}
+
+.lcard__btn:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 1px;
+}

@@ -66,7 +66,14 @@ export function statusOf(spec: AgentBrainSpec, s: Settings, probe: Probe | undef
 
 /** The probe cache key: the inputs that change a brain's answer — its key, and Claude's model. */
 export function probeSig(spec: AgentBrainSpec, s: Settings): string {
-  const model = spec.id === 'claude' ? s.voiceClaudeModel : spec.id === 'claude-voice' ? s.claudeVoiceModel : ''
+  const model =
+    spec.id === 'claude'
+      ? s.voiceClaudeModel
+      : spec.id === 'claude-voice'
+        ? s.claudeVoiceModel
+        : spec.id === 'claude-live'
+          ? s.liveConductorModel
+          : ''
   return `${keyOf(s, spec.key)}|${model}`
 }
 
@@ -99,8 +106,11 @@ export function barBrainLabel(chosen: AgentBrainId, resolved: { brain: AgentBrai
  *    the new brain.
  *  - A Parakeet conversation to a realtime brain: the conversation carries on
  *    until it ends (B11); the next press opens the live session.
+ *  - Claude Live, either way: it is its own shell like a realtime session —
+ *    switching off it closes its ears, switching to it waits for the
+ *    conversation on screen to end.
  */
 export function brainSwitchWaits(opts: { listening: boolean; liveRealtime: boolean; current: AgentBrainId; target: AgentBrainId }): boolean {
   if (!opts.listening || opts.target === opts.current) return false
-  return opts.liveRealtime || isRealtimeBrain(opts.target)
+  return opts.liveRealtime || isRealtimeBrain(opts.target) || opts.current === 'claude-live' || opts.target === 'claude-live'
 }

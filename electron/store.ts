@@ -26,6 +26,14 @@ import {
   normaliseVoiceMenu,
   visibleAgentBrain
 } from '@shared/agent-brain'
+import {
+  DEFAULT_LIVE_CONDUCTOR_MODEL,
+  DEFAULT_LIVE_EARS,
+  DEFAULT_LIVE_VOICE_MODEL,
+  isLiveConductorModel,
+  isLiveEars,
+  isLiveVoiceModel
+} from '@shared/live'
 import { isValidSkillName } from '@shared/skills'
 import { sanitiseCustomTools } from '@shared/tools'
 import { ACCEPT_WINDOW_MS, MOBILE_PORT, normaliseNgrokDomain } from '@shared/mobile'
@@ -296,6 +304,10 @@ function defaultSettings(): Settings {
     kokoroVoice: DEFAULT_KOKORO_VOICE,
     // Claude Voice's own model: Sonnet, for a reply that starts in a second or two.
     claudeVoiceModel: 'claude-sonnet-5-5',
+    // Claude Live (shared/live.ts): Opus talks, Opus conducts, OpenAI hears.
+    liveVoiceModel: DEFAULT_LIVE_VOICE_MODEL,
+    liveConductorModel: DEFAULT_LIVE_CONDUCTOR_MODEL,
+    liveEars: DEFAULT_LIVE_EARS,
     // Empty = the built-ins in electron/gemini-tts.ts (Sulafat, 3.1 flash TTS).
     voiceTtsVoice: '',
     voiceTtsModel: '',
@@ -326,7 +338,7 @@ function defaultSettings(): Settings {
     // The ONE Agent brain (shared/agent-brain.ts). Forge Brain: no key; off
     // until turned on, and picking it while off shows how.
     agentBrain: DEFAULT_AGENT_BRAIN,
-    // Picker list: Forge Brain, Gemini Live, GPT Realtime (VISIBLE_AGENT_BRAINS).
+    // Picker list: every VISIBLE_AGENT_BRAINS entry, all shown.
     voiceMenu: defaultVoiceMenu(),
     // Hands-free Agent mode: 0.8 s of silence sends the phrase.
     agentSilenceMs: 800,
@@ -900,6 +912,9 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
       typeof s.claudeVoiceModel === 'string' && s.claudeVoiceModel.trim() && !isCodexClaudeModel(s.claudeVoiceModel)
         ? s.claudeVoiceModel.trim().slice(0, 80)
         : DEFAULT_SETTINGS.claudeVoiceModel,
+    liveVoiceModel: isLiveVoiceModel(s.liveVoiceModel) ? s.liveVoiceModel : DEFAULT_SETTINGS.liveVoiceModel,
+    liveConductorModel: isLiveConductorModel(s.liveConductorModel) ? s.liveConductorModel : DEFAULT_SETTINGS.liveConductorModel,
+    liveEars: isLiveEars(s.liveEars) ? s.liveEars : DEFAULT_SETTINGS.liveEars,
     // Blank is meaningful for both: "whatever gemini-tts.ts defaults to".
     voiceTtsVoice: typeof s.voiceTtsVoice === 'string' ? s.voiceTtsVoice.trim().slice(0, 40) : '',
     voiceTtsModel: typeof s.voiceTtsModel === 'string' ? s.voiceTtsModel.trim().slice(0, 80) : '',

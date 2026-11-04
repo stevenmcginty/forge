@@ -165,6 +165,71 @@ export async function connectOpenAI(
   return { ok: true, sdp: answer.sdp, expiresAt: secret.expiresAt }
 }
 
+/* ------------------------------------------------- OpenAI transcription only */
+
+/**
+ * Claude Live's ears (src/lib/live/ears-openai.ts): a transcription session,
+ * not a conversation — OpenAI only listens; Claude answers. Not whisper-1
+ * (OPENAI_TRANSCRIBE_MODEL, the captions above): whisper-1 sends the whole
+ * phrase at the end, and Live captions him while he talks, so this one streams
+ * deltas. `gpt-live-transcribe` streams too, but it takes no VAD, and the
+ * point here is the server's semantic end of turn.
+ */
+export const LIVE_TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe'
+
+export type LiveTranscribeEagerness = 'auto' | 'low' | 'medium' | 'high'
+
+export interface OpenAITranscribeConnectRequest {
+  /** The renderer's (or phone's) SDP offer. */
+  sdp: string
+  /** Semantic VAD eagerness; `auto` (= medium) when absent. */
+  eagerness?: LiveTranscribeEagerness
+  /** ISO-639-1. English when absent: Steve speaks British English. */
+  language?: string
+}
+
+/**
+ * The `session` object of a transcription client-secret request, per
+ * POST /v1/realtime/client_secrets (session.type `transcription`). No
+ * create/interrupt_response: those are conversation-mode only. No format:
+ * over WebRTC the audio is the call's own Opus track.
+ */
+export function buildOpenAITranscriptionSession(req: Omit<OpenAITranscribeConnectRequest, 'sdp'> = {}): Record<string, unknown> {
+  const eagerness: LiveTranscribeEagerness =
+    req.eagerness === 'low' || req.eagerness === 'medium' || req.eagerness === 'high' ? req.eagerness : 'auto'
+  const language = typeof req.language === 'string' && /^[a-z]{2}$/.test(req.language) ? req.language : 'en'
+  return {
+    type: 'transcription',
+    audio: {
+      input: {
+        noise_reduction: { type: 'near_field' },
+        transcription: { model: LIVE_TRANSCRIBE_MODEL, language },
+        turn_detection: { type: 'semantic_vad', eagerness }
+      }
+    }
+  }
+}
+
+/**
+ * The whole transcription handshake: mint a transcription client secret with
+ * the stored key, post the SDP offer with it, hand back the answer. The same
+ * result shape as `connectOpenAI`, so callers treat both alike. For the
+ * desktop IPC handler and Forge Web's host (the phone's ears).
+ */
+export async function connectOpenAITranscription(
+  key: string,
+  req: OpenAITranscribeConnectRequest,
+  fetchImpl: FetchLike = fetch
+): Promise<RealtimeOpenAIConnectResult> {
+  if (!req || typeof req.sdp !== 'string' || !req.sdp.trim()) return { ok: false, error: 'No SDP offer to send' }
+  const { sdp, ...rest } = req
+  const secret = await mintOpenAIClientSecret(key, buildOpenAITranscriptionSession(rest), fetchImpl)
+  if (!secret.ok) return secret
+  const answer = await exchangeOpenAISdp(secret.value, sdp, fetchImpl)
+  if (!answer.ok) return answer
+  return { ok: true, sdp: answer.sdp, expiresAt: secret.expiresAt }
+}
+
 /* ------------------------------------------------------------------ Gemini */
 
 /** Thirty minutes to use it, one to open the session — Google's own defaults. */

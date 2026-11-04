@@ -21,6 +21,7 @@ import {
   type WebRememberedPhone,
   type WebVoiceAskEvent,
   type WebVoiceAskReply,
+  type WebVoiceClaudeEvent,
   type WebVoiceToolAnswer
 } from '@shared/web'
 import { commandExe } from '@shared/agents'
@@ -53,11 +54,22 @@ import { noteKokoroFallback, saveSpeechKey, transcribeAudio } from './voice-brid
 import { speakEdge } from './edge-tts'
 import { cancelKokoro, pcm16Wav, speakKokoro, warmKokoro } from './kokoro-tts'
 import { openWebVoiceAgent } from './voice-agent/ipc'
-import { connectOpenAI, mintGeminiToken } from './realtime/tokens'
+import { connectOpenAI, connectOpenAITranscription, mintGeminiToken } from './realtime/tokens'
+import { liveLedgerForPhone, type LiveLedgerSnapshot } from '@shared/live'
+import {
+  ensureLiveStarted,
+  getLiveLedger,
+  liveAsk,
+  liveCancel,
+  liveJobAction,
+  liveStatus,
+  logWebLatency,
+  onLiveEvent
+} from './live/index'
 import { filePasskeyStorage } from './web/passkey'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
-import { WebServer, type WebServerHost } from './web/server'
+import { WebServer, type VoiceClaudeLink, type WebServerHost } from './web/server'
 import { disposeChatMirrors, findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
 import { disposeBrowserMirrors, sharedBrowserMirrorHost } from './browser-panes/web-mirror'
 import { sharedBoardMirrorHost } from './board-web'
@@ -774,6 +786,111 @@ const VOICE_ASK_MS = 8000
  */
 const WEB_CLAUDE_NOTE =
   "You are being heard and spoken through Forge Web in the user's browser, away from the desktop. Your tools still run on the desktop."
+
+/**
+ * Said to Claude Live with a browser's first turn, and the short tag with
+ * every one after: the voice brain is the desk's one conversation, so where
+ * each turn was heard is news to it.
+ */
+const WEB_LIVE_NOTE =
+  "Steve is talking to you through Forge Web (his phone or another browser), away from the desk: he hears you, but he cannot see the desktop's screen. Jobs and tools still run on the desktop."
+const WEB_LIVE_TAG = 'Heard through Forge Web, away from the desk.'
+
+/** Ledger changes to a browser, at most this often: a busy Conductor moves it many times a second. */
+const WEB_LIVE_LEDGER_GAP_MS = 400
+
+let webLiveSeq = 0
+
+/**
+ * Claude Live for a browser (`voice-claude` with agent `claude-live`): a lane
+ * onto the desktop's one Live voice brain (electron/live/index.ts), not a
+ * session of its own. The browser's turns go in under its own ids, and their
+ * replies come back here and only here (`liveAsk`'s `web` lane keeps them off
+ * the desk); news, status and a phone-sized ledger come to every browser
+ * that has Live open. Closing — Listen off, the socket gone — cancels the
+ * reply in flight and nothing else: the Conductor's jobs run on.
+ */
+function openWebLive(onEvent: (event: WebVoiceClaudeEvent) => void): VoiceClaudeLink {
+  void warmKokoro(getSettings().kokoroVoice)
+  void ensureLiveStarted().catch((err) => console.error('[live] web start failed:', err))
+  const lane = ++webLiveSeq
+  const mine = new Set<string>()
+  let current: string | null = null
+  let first = true
+  let closed = false
+  let ledgerTimer: NodeJS.Timeout | null = null
+  let ledgerNext: LiveLedgerSnapshot | null = null
+  const sendLedger = (snapshot: LiveLedgerSnapshot): void => {
+    onEvent({ type: 'live', event: { type: 'ledger', snapshot: liveLedgerForPhone(snapshot) } })
+  }
+  const off = onLiveEvent((event) => {
+    if (closed) return
+    switch (event.type) {
+      case 'say':
+        if (!mine.has(event.turnId)) return
+        break
+      case 'turn-end':
+        if (!mine.delete(event.turnId)) return
+        if (current === event.turnId) current = null
+        break
+      case 'ledger':
+        ledgerNext = event.snapshot
+        ledgerTimer ??= setTimeout(() => {
+          ledgerTimer = null
+          const next = ledgerNext
+          ledgerNext = null
+          if (next && !closed) sendLedger(next)
+        }, WEB_LIVE_LEDGER_GAP_MS)
+        return
+      case 'show':
+        // Moving the desk is the desk's business; the phone has its own Open.
+        return
+      default:
+        break
+    }
+    onEvent({ type: 'live', event })
+  })
+  // The opening picture: how Live is, and its jobs as they are now.
+  onEvent({ type: 'live', event: { type: 'status', status: liveStatus() } })
+  const ledger = getLiveLedger()
+  if (ledger) sendLedger(ledger.snapshot())
+  return {
+    say: async (text, turnId) => {
+      const id = turnId || `web${lane}-${Date.now().toString(36)}`
+      mine.add(id)
+      current = id
+      const said = `[${first ? WEB_LIVE_NOTE : WEB_LIVE_TAG}]\n\n${text}`
+      first = false
+      // Not awaited: the reply arrives as events, and `interrupt` must not wait for the whole turn.
+      void liveAsk(id, said, { typed: false }, 'web')
+    },
+    interrupt: async () => {
+      // Talked over: the clauses the page fetched ahead are not wanted.
+      cancelKokoro('web')
+      if (current) await liveCancel(current)
+    },
+    close: () => {
+      if (closed) return
+      closed = true
+      off()
+      if (ledgerTimer) clearTimeout(ledgerTimer)
+      ledgerTimer = null
+      cancelKokoro('web')
+      if (current) void liveCancel(current)
+      current = null
+    },
+    ears: async (sdp) => {
+      const settings = getSettings()
+      if (settings.liveEars === 'parakeet') return { ok: false, error: 'Settings picked the local ears for Claude Live.' }
+      if (!settings.openaiKey?.trim()) return { ok: false, error: 'No OpenAI key is set — add one in Settings → Models & APIs' }
+      const res = await connectOpenAITranscription(settings.openaiKey, { sdp })
+      if (!res.ok) console.warn('[live] web ears failed:', res.error)
+      return res
+    },
+    job: (jobId, action) => liveJobAction(jobId, action),
+    latency: (sample) => logWebLatency(sample)
+  }
+}
 
 /**
  * A tool can be slow — a pane that has to mount, a browser step — but a
@@ -1618,6 +1735,8 @@ async function start(): Promise<void> {
     // last — the desk's rule (src/state/VoiceAgent.tsx) — and the first one
     // says where Claude is being heard, since its persona is the desk's.
     voiceClaudeOpen: (onEvent, agent) => {
+      // Claude Live is a lane onto the desk's own Live voice brain, not a session here.
+      if (agent === 'claude-live') return openWebLive(onEvent)
       // Claude Voice from a browser: Kokoro loads while the first turn is heard.
       if (agent === 'claude-voice') void warmKokoro(getSettings().kokoroVoice)
       const link = openWebVoiceAgent(onEvent, agent)
