@@ -14,7 +14,7 @@ import type { BrowserAgentReply } from '@shared/browser'
 import { captureScreen } from '../voice-agent/ipc'
 import { desktopLinkOp, ensureDesktopHands, screenLook } from '../desktop-hands-ipc'
 import { noteLook, pngSize } from '../desktop-hands'
-import { connectOpenAI, mintGeminiToken } from './tokens'
+import { connectOpenAI, connectOpenAITranscription, mintGeminiToken } from './tokens'
 
 /**
  * The Electron half of the realtime voice brains — kept as thin as the voice
@@ -32,6 +32,13 @@ export function registerRealtimeHandlers(): void {
     IPC.realtimeOpenAIConnect,
     async (_e, req: RealtimeOpenAIConnectRequest): Promise<RealtimeOpenAIConnectResult> =>
       connectOpenAI(getSettings().openaiKey, req)
+  )
+  // Claude Live's ears: transcription only. Only the offer crosses from the
+  // renderer; the session (model, VAD, language) is main's.
+  ipcMain.handle(
+    IPC.realtimeOpenAITranscribeConnect,
+    async (_e, req: { sdp?: unknown }): Promise<RealtimeOpenAIConnectResult> =>
+      connectOpenAITranscription(getSettings().openaiKey, { sdp: typeof req?.sdp === 'string' ? req.sdp : '' })
   )
   ipcMain.handle(
     IPC.realtimeGeminiToken,

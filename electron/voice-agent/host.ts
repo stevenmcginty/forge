@@ -6,6 +6,7 @@ import {
   query,
   tool,
   type AgentDefinition,
+  type EffortLevel,
   type McpServerConfig,
   type Options,
   type PermissionResult,
@@ -219,6 +220,37 @@ export interface VoiceAgentDeps {
    * Absent (Forge Web's host, the smoke test) = never minimised.
    */
   isForgeMinimised?(): boolean
+  /**
+   * A session that is not the voice agent at all: Claude Live's Conductor
+   * (electron/live/conductor.ts). Same Forge tools and guards, its own
+   * persona and model, plus whatever it adds. Absent = the voice agent, as
+   * before.
+   */
+  profile?: VoiceAgentProfile
+}
+
+/**
+ * What a non-voice session changes about the host (`VoiceAgentDeps.profile`).
+ * Everything else — the Forge tools, the confirm gate, the permission
+ * posture, the restart budget — is the voice agent's, unchanged.
+ */
+export interface VoiceAgentProfile {
+  /** The system prompt. Static, like the voice personas. */
+  persona: string
+  /** The model, read at every session start. Empty = `DEFAULT_VOICE_CLAUDE_MODEL`. */
+  model(): string
+  effort?: EffortLevel
+  /** Agentic turns per user message. Absent = `MAX_TURNS`. */
+  maxTurns?: number
+  /** More tools on the `forge` server, allowed like the rest. */
+  extraTools?: ForgeToolDef[]
+  /** Forge tools (short names) this session must not have, e.g. say_to_voice_agent. */
+  deny?: readonly string[]
+  /** Trim big text results to Claude Voice's budget (`capVoiceToolText`), to keep a long session lean. */
+  capResults?: boolean
+  hooks?: Options['hooks']
+  /** The `claude` binary to run. Absent = `claudeExecutablePath()`, as the voice agent does. */
+  executable?: () => string | undefined
 }
 
 /* --------------------------------------------------------------- utilities */
@@ -329,6 +361,9 @@ export class VoiceAgentHost {
   private route():
     | { kind: 'claude'; model: string; persona: string }
     | { kind: 'cli'; brain: CliBrainId; model: string | null } {
+    // A profiled session (Claude Live's Conductor) is always this Claude session.
+    const profile = this.deps.profile
+    if (profile) return { kind: 'claude', model: profile.model().trim() || DEFAULT_VOICE_CLAUDE_MODEL, persona: profile.persona }
     const brain = this.deps.getBrain?.() ?? 'claude'
     if (isCliBrain(brain)) return { kind: 'cli', brain, model: null }
     // Claude Voice: this same session and every tool, with its own short,
@@ -749,8 +784,8 @@ export class VoiceAgentHost {
    * `run_app_action`'s description carries the action vocabulary that used to
    * be a section of that prompt.
    */
-  private forgeServer(voice = false): McpServerConfig {
-    const defs = this.forgeToolDefs()
+  private forgeServer(voice = false, extra: ForgeToolDef[] = [], deny: readonly string[] = []): McpServerConfig {
+    const defs = [...this.forgeToolDefs().filter((d) => !deny.includes(d.name)), ...extra]
     return createSdkMcpServer({
       name: 'forge',
       version: '1.0.0',
@@ -1496,7 +1531,13 @@ export class VoiceAgentHost {
    */
   private options(model: string, cwd: string, persona: string = VOICE_PERSONA): Options {
     const voice = persona === CLAUDE_VOICE_PERSONA
-    const servers: Record<string, McpServerConfig> = { forge: this.forgeServer(voice) }
+    // Claude Live's Conductor: the same session with its own prompt and extras.
+    const profile = this.deps.profile && this.deps.profile.persona === persona ? this.deps.profile : null
+    const extra = profile?.extraTools ?? []
+    const deny = profile?.deny ?? []
+    const servers: Record<string, McpServerConfig> = {
+      forge: this.forgeServer(voice || profile?.capResults === true, extra, deny)
+    }
     // The same server every Claude pane gets, so the voice agent can generate
     // an image or ask Gemini without a second implementation of either.
     const bridge = this.deps.getBridgeServer?.() ?? null
@@ -1547,6 +1588,10 @@ export class VoiceAgentHost {
       'mcp__forge__set_setting',
       'mcp__forge__list_subagents',
       'mcp__forge__say_to_voice_agent',
+      // Defined in forgeToolDefs but never allowed, so every call was denied.
+      'mcp__forge__ask_brain',
+      'mcp__forge__tell_brain',
+      ...extra.map((def) => `mcp__forge__${def.name}`),
       ...brainSpecAllowed(),
       ...BRAIN_BROWSER_ALLOWED,
       ...(bridge
@@ -1559,6 +1604,7 @@ export class VoiceAgentHost {
           ]
         : [])
     ])
+    for (const name of deny) allowed.delete(`mcp__forge__${name}`)
 
     /**
      * The one subagent, and the reason Task is allowed at all.
@@ -1595,7 +1641,7 @@ export class VoiceAgentHost {
       // No CLAUDE.md, no settings.json, no project instructions. The prompt
       // stays lean and — because nothing machine-specific leaks in — cacheable.
       settingSources: [],
-      maxTurns: MAX_TURNS,
+      maxTurns: profile?.maxTurns ?? MAX_TURNS,
       includePartialMessages: true,
       mcpServers: servers,
       tools: ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'Agent'],
@@ -1614,22 +1660,11 @@ export class VoiceAgentHost {
     // Claude Voice answers out loud, so the first word matters more than the
     // depth: low effort keeps thinking short, whichever model he picked.
     if (voice) options.effort = 'low'
+    if (profile?.effort) options.effort = profile.effort
+    if (profile?.hooks) options.hooks = profile.hooks
 
-    // Normally unnecessary — the SDK ships its own CLI and resolves it fine on
-    // Windows. This is the fallback for a machine where that lookup fails, and
-    // it points at the same `claude` on PATH that every Forge pane runs.
-    if (process.env['FORGE_VOICE_CLAUDE_PATH']) {
-      options.pathToClaudeCodeExecutable = process.env['FORGE_VOICE_CLAUDE_PATH']
-    } else if (process.env['FORGE_VOICE_CLAUDE_FROM_PATH'] === '1') {
-      const exe = whichCommand('claude')
-      if (exe) options.pathToClaudeCodeExecutable = exe
-    }
-    else {
-      // An installed Forge's SDK lookup lands inside app.asar, which cannot be
-      // executed; this is the same binary in app.asar.unpacked.
-      const exe = claudeSdkExecutable()
-      if (exe) options.pathToClaudeCodeExecutable = exe
-    }
+    const exe = (profile?.executable ?? claudeExecutablePath)()
+    if (exe) options.pathToClaudeCodeExecutable = exe
 
     return options
   }
@@ -1640,10 +1675,25 @@ export class VoiceAgentHost {
   }
 }
 
+/**
+ * The `claude` binary an SDK session should run, or undefined for the SDK's
+ * own lookup. Shared with Claude Live's sessions (electron/live/).
+ */
+export function claudeExecutablePath(): string | undefined {
+  // Normally unnecessary — the SDK ships its own CLI and resolves it fine on
+  // Windows. This is the fallback for a machine where that lookup fails, and
+  // it points at the same `claude` on PATH that every Forge pane runs.
+  if (process.env['FORGE_VOICE_CLAUDE_PATH']) return process.env['FORGE_VOICE_CLAUDE_PATH']
+  if (process.env['FORGE_VOICE_CLAUDE_FROM_PATH'] === '1') return whichCommand('claude') ?? undefined
+  // An installed Forge's SDK lookup lands inside app.asar, which cannot be
+  // executed; this is the same binary in app.asar.unpacked.
+  return claudeSdkExecutable() ?? undefined
+}
+
 /* ------------------------------------------------------------ link tools */
 
 /** One tool as `tool()` makes it. The shapes differ per tool, so the list is loosely typed. */
-type ForgeToolDef = SdkMcpToolDefinition<any> // eslint-disable-line @typescript-eslint/no-explicit-any
+export type ForgeToolDef = SdkMcpToolDefinition<any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
 /** A Forge tool whose text Claude Voice gets trimmed (`capVoiceToolText`). Any other passes as it is. */
 function capForVoice(def: ForgeToolDef): ForgeToolDef {

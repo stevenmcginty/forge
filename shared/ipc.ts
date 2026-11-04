@@ -255,6 +255,8 @@ export const IPC = {
    */
   realtimeOpenAIConnect: 'realtime:openai-connect',
   realtimeGeminiToken: 'realtime:gemini-token',
+  /** Claude Live's OpenAI ears: a transcription-only session (electron/realtime/tokens.ts `connectOpenAITranscription`). */
+  realtimeOpenAITranscribeConnect: 'realtime:openai-transcribe-connect',
   realtimeScreenshot: 'realtime:screenshot',
   /** `window.forge.screen.look()`: the whole screen to a PNG file, plus the app in front. electron/desktop-hands.ts. */
   screenLook: 'screen:look',
@@ -996,6 +998,21 @@ export const IPC = {
   shotcardToMiniBar: 'shotcard:toMiniBar',
   /** Shot card → main, (on: boolean): as minibarClickThrough, for the card's window. */
   shotcardClickThrough: 'shotcard:clickThrough',
+  /**
+   * Claude Live's desktop card (electron/live-card-window.ts, shared/live-card.ts).
+   * Main renderer → main: `LiveCardOffer`; shown only while Forge is away.
+   */
+  livecardOffer: 'livecard:offer',
+  /** Main → card: `LiveCardOffer`. */
+  livecardShow: 'livecard:show',
+  /** Card → main: `LiveCardAnswer`; main hides the card and passes it on. */
+  livecardAnswer: 'livecard:answer',
+  /** Card → main: the card has faded out; hide the window. */
+  livecardDone: 'livecard:done',
+  /** Card → main, (on: boolean): as shotcardClickThrough, for the card's window. */
+  livecardClickThrough: 'livecard:clickThrough',
+  /** Main → main renderer: `LiveCardAnswer`, a tap on the card. */
+  livecardChoice: 'livecard:choice',
   /**
    * Host → main, invoke, (paneId): a Claude pane's last reply from its session
    * JSONL, `{ text, at } | null` (null for other panes or no transcript yet).

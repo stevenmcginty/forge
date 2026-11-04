@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { isSttSetupError, type SttStatus } from '@shared/types'
 import { agentVoiceAlways, agentVoiceNow } from '@/components/hub/barMode'
+import { liveEarsHoldPhrases } from '@/lib/live/ears-parakeet'
 import {
   barDictationPhase,
   barDictationSink,
@@ -188,6 +189,9 @@ export function useDictationEngine(): Dictation {
 
   useEffect(() => {
     return window.forge.stt.onPhrase(({ text }) => {
+      // Claude Live is listening through Parakeet: its ears take the phrase
+      // (src/lib/live/ears-parakeet.ts); nothing is typed anywhere.
+      if (liveEarsHoldPhrases()) return
       // The agent's turn: hand it to the bus and stop. No insertion, so a phrase
       // aimed at the agent cannot also land in the pane behind the panel.
       if (toAgentRef.current) {

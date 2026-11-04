@@ -1,0 +1,196 @@
+/*
+ * Claude Live's cards (LiveCards.tsx): floated over the terminal beside the
+ * bar, so the bar and the terminal never move. The phone's tokens where
+ * there are some, the desk's theme where there are not. Each state is a
+ * shape and a word; the colour only agrees with them.
+ */
+
+.lcards {
+  --lc-bg: var(--p-raised, var(--bg-panel-raised, #1a1b1f));
+  --lc-ink: var(--p-ink, var(--text-primary, #e8eaed));
+  --lc-ink-2: var(--p-ink-2, var(--text-secondary, #9aa0a6));
+  --lc-line: var(--p-line-strong, rgba(255, 255, 255, 0.14));
+  --lc-attn: var(--p-attn, var(--warn, #ffb347));
+  --lc-bad: var(--p-danger, var(--danger, #ff5c48));
+  --lc-ok: var(--ok, #5ee6a8);
+  --lc-hit: var(--p-hit, 44px);
+  position: absolute;
+  z-index: 3;
+  right: var(--p-4, 12px);
+  bottom: calc(100% + var(--p-2, 8px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(340px, calc(100vw - 32px));
+  pointer-events: none;
+  font-family: var(--p-font, var(--font-ui, system-ui, sans-serif));
+}
+
+.lcards[data-face='deck'] {
+  right: auto;
+  left: 0;
+  bottom: calc(100% + 10px);
+}
+
+.lcards[data-face='deck'][data-place='top'] {
+  bottom: auto;
+  top: calc(100% + 10px);
+}
+
+.lcards__head,
+.lcard,
+.lcards__more {
+  pointer-events: auto;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--lc-bg) 94%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  backdrop-filter: blur(16px) saturate(1.5);
+  box-shadow:
+    inset 0 0 0 1px var(--lc-line),
+    0 14px 36px rgba(0, 0, 0, 0.32);
+  color: var(--lc-ink);
+}
+
+.lcards__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-end;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--lc-ink-2);
+}
+
+.lcards[data-face='deck'] .lcards__head {
+  align-self: flex-start;
+}
+
+.lcards__spin {
+  stroke: currentColor;
+  animation: lcards-turn 1.1s linear infinite;
+}
+
+@keyframes lcards-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lcard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 12px;
+  box-shadow:
+    inset 0 0 0 1px var(--lc-line),
+    inset 4px 0 0 var(--lc-state, var(--lc-line)),
+    0 14px 36px rgba(0, 0, 0, 0.32);
+}
+
+.lcard[data-state='needs-you'] {
+  --lc-state: var(--lc-attn);
+}
+
+.lcard[data-state='done'] {
+  --lc-state: var(--lc-ok);
+}
+
+.lcard[data-state='failed'] {
+  --lc-state: var(--lc-bad);
+}
+
+.lcard__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lcard__mark {
+  flex: none;
+  stroke: var(--lc-state, currentColor);
+  fill: var(--lc-state, currentColor);
+}
+
+.lcard__word {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.lcard__title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lcard__line {
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--lc-ink-2);
+}
+
+.lcard__acts {
+  display: flex;
+  gap: 8px;
+}
+
+.lcard__btn {
+  flex: 1 1 0;
+  min-height: var(--lc-hit);
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lc-ink) 10%, transparent);
+  box-shadow: inset 0 0 0 1px var(--lc-line);
+  color: var(--lc-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.lcard__btn[data-kind='open'] {
+  background: color-mix(in srgb, var(--lc-ink) 18%, transparent);
+}
+
+.lcard__btn[data-kind='stop'] {
+  box-shadow: inset 0 0 0 1.5px var(--lc-bad);
+}
+
+.lcard__btn:active {
+  transform: scale(0.98);
+}
+
+.lcard__btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.lcard__btn:focus-visible {
+  outline: 2px solid var(--lc-ink);
+  outline-offset: 2px;
+}
+
+.lcards__more {
+  align-self: flex-end;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--lc-ink-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lcards__spin {
+    animation: none;
+  }
+}

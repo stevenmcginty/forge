@@ -2,9 +2,11 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '@shared/ipc'
 import { AGENT_BRAIN_TEST_CHANNEL } from '@shared/agent-brain'
+import { LIVE_IPC } from '@shared/live'
 import type { ForgeApi } from '@shared/api'
 import type { Shot } from '@shared/types'
 import type { MiniBarState } from '@shared/minibar'
+import type { LiveCardOffer } from '@shared/live-card'
 import { hubPreloadApi } from './hub-preload'
 import { browserApi } from './browser-panes/preload-api'
 
@@ -50,6 +52,15 @@ if (location.hash === '#shotcard') {
     if (shotSubscribers > 0) return
     shotsEarly.push(payload.shot)
     if (shotsEarly.length > 3) shotsEarly.shift()
+  })
+}
+/** The live card's first offer, likewise held until its page subscribes (only the newest matters). */
+let liveCardEarly: LiveCardOffer | null = null
+let liveCardSubscribers = 0
+if (location.hash === '#livecard') {
+  ipcRenderer.on(IPC.livecardShow, (_e, offer: LiveCardOffer) => {
+    if (liveCardSubscribers > 0) return
+    liveCardEarly = offer
   })
 }
 
@@ -154,8 +165,22 @@ const api: ForgeApi = {
     test: (target) => ipcRenderer.invoke(AGENT_BRAIN_TEST_CHANNEL, target)
   },
 
+  live: {
+    ask: (turnId, text, opts) =>
+      ipcRenderer.invoke(LIVE_IPC.ask, String(turnId ?? ''), String(text ?? ''), { typed: opts?.typed === true }),
+    cancelTurn: (turnId) => ipcRenderer.invoke(LIVE_IPC.cancel, String(turnId ?? '')),
+    jobAction: (jobId, action) => ipcRenderer.invoke(LIVE_IPC.jobAction, String(jobId ?? ''), action),
+    ledger: () => ipcRenderer.invoke(LIVE_IPC.ledger),
+    status: () => ipcRenderer.invoke(LIVE_IPC.status),
+    start: () => ipcRenderer.invoke(LIVE_IPC.start),
+    stop: () => ipcRenderer.invoke(LIVE_IPC.stop),
+    logLatency: (sample) => ipcRenderer.send(LIVE_IPC.latency, sample),
+    onEvent: (cb) => subscribe(LIVE_IPC.event, cb)
+  },
+
   realtime: {
     openaiConnect: (req) => ipcRenderer.invoke(IPC.realtimeOpenAIConnect, req),
+    openaiTranscribeConnect: (req) => ipcRenderer.invoke(IPC.realtimeOpenAITranscribeConnect, { sdp: String(req?.sdp ?? '') }),
     geminiToken: () => ipcRenderer.invoke(IPC.realtimeGeminiToken),
     screenshot: () => ipcRenderer.invoke(IPC.realtimeScreenshot)
   },
@@ -544,6 +569,26 @@ const api: ForgeApi = {
     done: () => ipcRenderer.send(IPC.shotcardDone),
     toMiniBar: (paths) => ipcRenderer.send(IPC.shotcardToMiniBar, paths),
     setClickThrough: (on) => ipcRenderer.send(IPC.shotcardClickThrough, on === true)
+  },
+
+  liveCard: {
+    isLiveCard: () => location.hash === '#livecard',
+    onShow: (cb) => {
+      liveCardSubscribers += 1
+      const early = liveCardEarly
+      liveCardEarly = null
+      if (early) cb(early)
+      const off = subscribe<LiveCardOffer>(IPC.livecardShow, cb)
+      return () => {
+        liveCardSubscribers -= 1
+        off()
+      }
+    },
+    answer: (answer) => ipcRenderer.send(IPC.livecardAnswer, answer),
+    done: () => ipcRenderer.send(IPC.livecardDone),
+    setClickThrough: (on) => ipcRenderer.send(IPC.livecardClickThrough, on === true),
+    offer: (offer) => ipcRenderer.send(IPC.livecardOffer, offer),
+    onChoice: (cb) => subscribe(IPC.livecardChoice, cb)
   },
 
   screen: {

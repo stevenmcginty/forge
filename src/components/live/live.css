@@ -1,0 +1,1561 @@
+/*
+ * Claude Live on the desktop: Design B, "Conductor Rail"
+ * (docs/live-agent-design/B.html). Forge works on the canvas itself: a rail
+ * on the right is its score — who it is and what it is doing now, then the
+ * crew as cards — what it says rises as captions out of the bar, and "show
+ * me" rings the real pane.
+ *
+ * Calm at rest: lime is kept for live and go, Steve's voice is the dictation
+ * violet, amber is "needs you". Every state is a word and a shape; colour
+ * only agrees. Everything that floats over terminals is opaque. Motion is
+ * transform and opacity only, and off under reduced motion.
+ *
+ * Every class is `live-*`: nothing here can reach the bar (Composer.css,
+ * Dock.css), which keeps its place and its overlap of the terminal.
+ */
+
+.live-surface {
+  /* Placement: the shell may override any of these on .live-surface. */
+  --live-top: calc(var(--titlebar-h, 38px) + 12px);
+  --live-edge: 12px;
+  --live-bar-clear: calc(var(--dock-clear, 88px) + 24px);
+  --live-bar-w: clamp(600px, 72vw, 1240px);
+  --live-bar-left: max(16px, calc((100vw - var(--live-bar-w)) / 2));
+  --live-rail-w: clamp(340px, 26vw, 412px);
+  --live-fly-w: 392px;
+
+  /* Ink and the three signal colours. */
+  --live-ink-2: color-mix(in srgb, var(--text-primary) 62%, var(--text-secondary));
+  --live-ink-3: var(--text-secondary);
+  --live-ink-dim: color-mix(in srgb, var(--text-dim) 86%, var(--text-primary));
+  --live-line: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  --live-line-mid: color-mix(in srgb, var(--text-primary) 13%, transparent);
+  --live-line-strong: var(--glass-line-strong, rgba(232, 234, 237, 0.19));
+  --live-violet: var(--dictation-ink, #b3a2ff);
+  --live-violet-core: var(--dictation-accent, #a58bff);
+  --live-info: var(--info, #7fd1ff);
+  --live-info-soft: color-mix(in srgb, var(--live-info) 11%, transparent);
+  --live-warn: var(--warn, #ffb347);
+  --live-warn-soft: color-mix(in srgb, var(--live-warn) 10%, transparent);
+  --live-warn-line: color-mix(in srgb, var(--live-warn) 45%, transparent);
+  --live-on-warn: #1a1208;
+  --live-surface-a: color-mix(in srgb, var(--bg-panel-raised) 72%, var(--bg-panel));
+  --live-surface-b: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-base));
+  --live-shadow:
+    0 2px 3px rgba(0, 0, 0, 0.32),
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 var(--glass-hi, rgba(255, 255, 255, 0.07));
+  --live-hush: rgba(3, 4, 6, 0.44);
+
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-dock, 45) - 1);
+  pointer-events: none;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* No weight: any button class below sets its own ink over this. */
+:where(.live-surface) button {
+  font: inherit;
+  color: inherit;
+}
+
+.live-glyph {
+  display: block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.live-spin {
+  transform-origin: 50% 50%;
+  animation: live-spin 1.1s linear infinite;
+}
+
+@keyframes live-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes live-breathe {
+  50% {
+    transform: scale(0.7);
+  }
+}
+
+/* One keyboard ring for every control, the deck's own. */
+.live-surface button:focus-visible {
+  outline: var(--focus-ring, 2px solid var(--accent));
+  outline-offset: var(--focus-offset, 2px);
+}
+
+/* ------------------------------------------------------------ state badges
+ * The word in capitals and its shape. Colour agrees; it never decides. */
+
+.live-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.live-st .live-glyph {
+  width: 13px;
+  height: 13px;
+}
+
+.live-st[data-kind='working'] {
+  color: var(--accent-ink, var(--accent));
+  background: var(--accent-softer);
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.live-st[data-kind='reading'] {
+  color: var(--live-info);
+  background: var(--live-info-soft);
+  border-color: color-mix(in srgb, var(--live-info) 28%, transparent);
+}
+
+.live-st[data-kind='needs'] {
+  color: var(--live-warn);
+  background: var(--live-warn-soft);
+  border-color: var(--live-warn-line);
+}
+
+.live-st[data-kind='waiting'] {
+  color: var(--live-ink-3);
+  border-style: dashed;
+  border-color: var(--live-line-strong);
+}
+
+.live-st[data-kind='done'],
+.live-st[data-kind='stopped'] {
+  color: var(--live-ink-2);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  border-color: var(--live-line-mid);
+}
+
+.live-st[data-kind='problem'] {
+  color: var(--live-warn);
+  background: var(--live-warn-soft);
+  border-color: var(--live-warn-line);
+}
+
+.live-st[data-kind='failed'] {
+  color: var(--danger-ink, var(--danger));
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+}
+
+/* ------------------------------------------------------------------ rail */
+
+.live-rail {
+  position: absolute;
+  top: var(--live-top);
+  right: var(--live-edge);
+  bottom: var(--live-bar-clear);
+  width: var(--live-rail-w);
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: linear-gradient(180deg, var(--live-surface-a), var(--live-surface-b));
+  border: 1px solid var(--live-line-strong);
+  box-shadow: var(--live-shadow);
+  pointer-events: auto;
+  animation: live-rail-in 520ms var(--ease-out) both;
+}
+
+@keyframes live-rail-in {
+  from {
+    opacity: 0;
+    transform: translate3d(22px, 0, 0);
+  }
+}
+
+/* A hairline of lime along the top: Forge is live. */
+.live-rail::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 14%;
+  right: 14%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.75;
+}
+
+.live-sec {
+  flex: none;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--live-line);
+}
+
+.live-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--live-ink-3);
+}
+
+.live-eyebrow > .live-glyph {
+  color: var(--accent);
+}
+
+.live-eyebrow em {
+  margin-left: auto;
+  font-style: normal;
+  font-weight: 500;
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--live-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------- who: presence */
+
+.live-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.live-who__nm {
+  min-width: 0;
+  flex: 1;
+}
+
+.live-who h2 {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+
+.live-who__state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--accent-ink, var(--accent));
+}
+
+.live-who__state[data-phase='hearing'] {
+  color: var(--live-violet);
+}
+
+.live-who__state[data-phase='starting'] {
+  color: var(--live-ink-2);
+}
+
+.live-who__hint {
+  margin-top: 3px;
+  font-size: 13.5px;
+  color: var(--live-ink-3);
+}
+
+.live-who__away {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px 0 11px;
+  border-radius: 9px;
+  border: 1px solid var(--live-line-mid);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--live-ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.live-who__away:hover {
+  color: var(--text-primary);
+  border-color: var(--live-line-strong);
+}
+
+.live-who__away .live-glyph {
+  width: 12px;
+  height: 12px;
+}
+
+.live-who__problem {
+  flex-basis: 100%;
+  display: flex;
+  gap: 9px;
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--live-warn-line);
+  background: var(--live-warn-soft);
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.live-who__problem .live-glyph {
+  margin-top: 2px;
+  color: var(--live-warn);
+}
+
+.live-who__problem b {
+  margin-right: 4px;
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--live-warn);
+}
+
+/* The orb: a lime core with rings that ripple while Forge speaks. */
+.live-orb {
+  position: relative;
+  flex: none;
+  width: 62px;
+  height: 62px;
+  color: var(--accent);
+}
+
+.live-orb > i {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+}
+
+.live-orb > i:nth-child(1) {
+  inset: 22px;
+  border: 0;
+  background: currentColor;
+  box-shadow: 0 0 18px color-mix(in srgb, currentColor 55%, transparent);
+}
+
+.live-orb > i:nth-child(2) {
+  inset: 14px;
+  opacity: 0.75;
+}
+
+.live-orb > i:nth-child(3) {
+  inset: 7px;
+  opacity: 0.45;
+}
+
+.live-orb > i:nth-child(4) {
+  inset: 0;
+  opacity: 0.2;
+}
+
+.live-orb__arc {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+.live-orb[data-phase='speaking'] > i:nth-child(n + 2),
+.live-orb[data-phase='hearing'] > i:nth-child(n + 2) {
+  animation: live-ring 1.6s ease-out infinite;
+}
+
+.live-orb[data-phase='speaking'] > i:nth-child(3),
+.live-orb[data-phase='hearing'] > i:nth-child(3) {
+  animation-delay: 0.35s;
+}
+
+.live-orb[data-phase='speaking'] > i:nth-child(4),
+.live-orb[data-phase='hearing'] > i:nth-child(4) {
+  animation-delay: 0.7s;
+}
+
+@keyframes live-ring {
+  0% {
+    transform: scale(0.86);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.06);
+    opacity: 0.12;
+  }
+}
+
+/* Hearing Steve: the orb takes his voice's violet, and ripples quicker. */
+.live-orb[data-phase='hearing'] {
+  color: var(--live-violet-core);
+}
+
+.live-orb[data-phase='hearing'] > i:nth-child(n + 2) {
+  animation-duration: 1.1s;
+}
+
+/* Listening: still rings, the core breathing slowly. */
+.live-orb[data-phase='listening'] > i:nth-child(1) {
+  animation: live-core 2.6s ease-in-out infinite;
+}
+
+.live-orb[data-phase='listening'] > i:nth-child(3) {
+  opacity: 0.3;
+}
+
+.live-orb[data-phase='listening'] > i:nth-child(4) {
+  opacity: 0.12;
+}
+
+@keyframes live-core {
+  50% {
+    transform: scale(0.82);
+    opacity: 0.8;
+  }
+}
+
+/* Thinking and starting: the rings go quiet and an arc goes round. */
+.live-orb:is([data-phase='thinking'], [data-phase='starting']) > i:nth-child(n + 2) {
+  opacity: 0.14;
+}
+
+.live-orb:is([data-phase='thinking'], [data-phase='starting']) .live-orb__arc {
+  opacity: 0.9;
+  transform-origin: 50% 50%;
+  animation: live-spin 1.3s linear infinite;
+}
+
+.live-orb[data-phase='starting'] > i:nth-child(1) {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.live-orb[data-size='sm'] {
+  width: 30px;
+  height: 30px;
+}
+
+.live-orb[data-size='sm'] > i:nth-child(1) {
+  inset: 10px;
+}
+
+.live-orb[data-size='sm'] > i:nth-child(2) {
+  inset: 6px;
+}
+
+.live-orb[data-size='sm'] > i:nth-child(3) {
+  inset: 2.5px;
+}
+
+.live-orb[data-size='sm'] > i:nth-child(4) {
+  display: none;
+}
+
+/* Beside the state word: equaliser bars (speaking, hearing), a ring (listening). */
+.live-eq {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 16px;
+}
+
+.live-eq b {
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: live-eq 900ms ease-in-out infinite alternate;
+}
+
+.live-eq b:nth-child(1) {
+  height: 7px;
+  animation-delay: -0.2s;
+}
+.live-eq b:nth-child(2) {
+  height: 14px;
+  animation-delay: -0.5s;
+}
+.live-eq b:nth-child(3) {
+  height: 10px;
+  animation-delay: -0.1s;
+}
+.live-eq b:nth-child(4) {
+  height: 15px;
+  animation-delay: -0.7s;
+}
+.live-eq b:nth-child(5) {
+  height: 6px;
+  animation-delay: -0.3s;
+}
+
+@keyframes live-eq {
+  to {
+    transform: scaleY(0.45);
+  }
+}
+
+.live-ear {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  animation: live-breathe 2.6s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------------- now */
+
+.live-now__title {
+  margin: 6px 0 10px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+}
+
+.live-now__free {
+  margin: 8px 0 2px;
+  font-size: 16px;
+  color: var(--live-ink-2);
+}
+
+.live-now__state {
+  margin: -2px 0 10px;
+}
+
+.live-steps {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The thread the steps hang on. */
+.live-steps::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  background: var(--live-line-strong);
+}
+
+.live-stp {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 30px;
+  padding: 2px 0;
+  font-size: 14px;
+  color: var(--live-ink-2);
+}
+
+.live-stp__text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.live-stp__dot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--live-surface-a);
+  border: 2px solid var(--live-ink-2);
+  color: var(--text-primary);
+}
+
+.live-stp__dot .live-glyph {
+  width: 12px;
+  height: 12px;
+}
+
+.live-stp time {
+  flex: none;
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--live-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-stp[data-kind='live'] {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.live-stp[data-kind='live'] .live-stp__dot {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-softer);
+}
+
+.live-stp[data-kind='live'] .live-stp__dot i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: live-breathe 1.4s ease-in-out infinite;
+}
+
+.live-stp[data-kind='live'] time {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-ink, var(--accent));
+}
+
+.live-stp[data-kind='next'] {
+  color: var(--live-ink-dim);
+}
+
+.live-stp[data-kind='next'] .live-stp__dot {
+  border-style: dashed;
+  border-color: var(--live-ink-dim);
+}
+
+/* ------------------------------------------------------------------ crew */
+
+.live-crew {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 10px 10px 14px;
+  border-bottom: 1px solid var(--live-line);
+}
+
+.live-crew__head {
+  padding: 0 10px 2px 6px;
+}
+
+.live-crew__list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 4px 2px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  /* A touchpad has no wheel to discover a scroll by: keep the thumb visible. */
+  scrollbar-color: color-mix(in srgb, var(--text-primary) 24%, transparent) transparent;
+}
+
+.live-crew {
+  position: relative;
+}
+
+/* Cards below the fold say so, and one press brings them up. */
+.live-crew__fade {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  height: 64px;
+  padding-bottom: 10px;
+  background: linear-gradient(180deg, transparent, var(--live-surface-b) 78%);
+  pointer-events: none;
+}
+
+.live-crew__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--live-line-strong);
+  background: var(--bg-panel-raised);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.live-crew__more .live-glyph {
+  width: 12px;
+  height: 12px;
+  transform: rotate(90deg);
+}
+
+.live-empty {
+  margin: 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--live-ink-3);
+}
+
+.live-card {
+  position: relative;
+  flex: none;
+  border-radius: 14px;
+  border: 1px solid var(--live-line-mid);
+  background: color-mix(in srgb, var(--text-primary) 2%, transparent);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.live-card:hover {
+  border-color: var(--live-line-strong);
+  background: var(--bg-hover);
+}
+
+.live-card__main {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 10px 13px 11px;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.live-card__top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.live-card__top .live-st {
+  margin-left: auto;
+}
+
+.live-ava {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 750;
+  color: #0b0c0e;
+}
+
+.live-ava[data-size='sm'] {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.live-card__nm {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.live-card__nm b {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.live-card__sub {
+  font-size: 13px;
+  color: var(--live-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-card__nm--row {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.live-card__nm--row b {
+  flex: none;
+  font-size: 15px;
+}
+
+.live-card__status {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 7px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--live-ink-2);
+}
+
+/* A mono peek at the last thing it did, and how long it has been at it. */
+.live-peek {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  margin-top: 8px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--live-line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--live-ink-3);
+}
+
+.live-peek__text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-peek__time {
+  flex: none;
+  color: var(--live-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stop: on every live card, always shown. The last row makes room for it. */
+.live-card[data-stop='true'] .live-card__main > :last-child {
+  margin-right: 72px;
+}
+
+.live-card__stop {
+  position: absolute;
+  right: 11px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--live-line-strong);
+  background: var(--live-surface-b);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--live-ink-2);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.live-card__stop .live-glyph {
+  width: 10px;
+  height: 10px;
+}
+
+.live-card__stop:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--text-primary) 34%, transparent);
+}
+
+.live-card[data-kind='needs'] {
+  border-color: var(--live-warn-line);
+  background: var(--live-warn-soft);
+  box-shadow: inset 3px 0 0 var(--live-warn);
+}
+
+.live-card[data-kind='failed'] {
+  border-color: var(--danger-line);
+}
+
+.live-card[data-compact='true'] {
+  opacity: 0.92;
+}
+
+.live-card[data-compact='true'] .live-card__main {
+  padding: 9px 13px;
+}
+
+/* -------------------------------------------------------------- the foot */
+
+.live-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 54px;
+  padding: 0 14px 0 20px;
+  font-size: 14px;
+  color: var(--live-ink-2);
+}
+
+.live-foot > .live-glyph {
+  width: 16px;
+  height: 16px;
+  color: var(--live-ink-3);
+}
+
+.live-foot b {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.live-foot__open {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 9px;
+  border: 1px solid var(--live-line-strong);
+  background: transparent;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.live-foot__open:hover {
+  background: var(--bg-hover);
+}
+
+.live-foot__open .live-glyph {
+  width: 12px;
+  height: 12px;
+}
+
+.live-foot__open[aria-pressed='true'] .live-glyph {
+  transform: rotate(180deg);
+}
+
+/* ------------------------------------------------------------ transcript */
+
+.live-talk {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 4px 8px 8px 6px;
+  list-style: none;
+}
+
+.live-turn__who {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-ink, var(--accent));
+}
+
+.live-turn[data-who='you'] .live-turn__who {
+  color: var(--live-violet);
+}
+
+.live-turn__who time {
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--live-ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-turn p {
+  margin: 3px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.live-turn[data-who='you'] p {
+  color: var(--live-ink-2);
+}
+
+/* --------------------------------------------- needs you: the flyout
+ * Speaks from beside its card, the arrow pointing at it. */
+
+.live-fly-wrap {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 16px);
+  width: min(var(--live-fly-w), calc(100vw - var(--live-rail-w) - var(--live-edge) * 2 - 32px));
+  pointer-events: auto;
+  animation: live-fly-in 460ms var(--ease-out) both;
+}
+
+@keyframes live-fly-in {
+  from {
+    opacity: 0;
+    transform: translate3d(18px, 0, 0);
+  }
+}
+
+.live-fly {
+  position: relative;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--bg-hover), color-mix(in srgb, var(--bg-panel) 70%, var(--bg-panel-raised)));
+  border: 1px solid var(--live-warn-line);
+  box-shadow:
+    0 2px 3px rgba(0, 0, 0, 0.32),
+    0 18px 44px rgba(0, 0, 0, 0.55),
+    inset 3px 0 0 var(--live-warn);
+  transition: transform var(--dur-glide, 330ms) var(--spring-glide, var(--ease-out));
+}
+
+.live-fly__arrow {
+  position: absolute;
+  right: -9px;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  background: color-mix(in srgb, var(--bg-hover) 70%, var(--bg-panel-raised));
+  border-top: 1px solid var(--live-warn-line);
+  border-right: 1px solid var(--live-warn-line);
+  transform: rotate(45deg);
+}
+
+.live-fly__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.live-fly__head .live-ava {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.live-fly__head .live-st {
+  margin-left: auto;
+}
+
+.live-fly__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.live-fly__who b {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.live-fly__who span {
+  font-size: 12.5px;
+  color: var(--live-ink-3);
+}
+
+.live-fly__said {
+  display: flex;
+  gap: 9px;
+  margin: 12px 0 13px;
+}
+
+.live-fly__said > .live-glyph {
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  color: var(--live-ink-3);
+}
+
+.live-fly__said p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.live-fly__said small {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--live-ink-3);
+}
+
+.live-fly__acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--live-line-strong);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-instant) var(--ease-out);
+}
+
+.live-btn .live-glyph {
+  width: 15px;
+  height: 15px;
+}
+
+.live-btn:hover {
+  background: color-mix(in srgb, var(--text-primary) 11%, transparent);
+}
+
+.live-btn:active {
+  transform: translateY(1px);
+}
+
+.live-btn--go {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.live-btn--go:hover {
+  background: var(--accent-bright, var(--accent));
+}
+
+.live-btn--ghost {
+  padding: 0 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--live-ink-3);
+}
+
+.live-btn--ghost:hover {
+  color: var(--text-primary);
+}
+
+.live-fly__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--live-ink-3);
+}
+
+.live-fly__hint .live-glyph {
+  width: 13px;
+  height: 13px;
+}
+
+.live-fly__more {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--live-warn);
+}
+
+/* --------------------------------------------------- put away: the pill */
+
+.live-pill {
+  position: absolute;
+  top: var(--live-top);
+  right: var(--live-edge);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 10px 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--live-line-strong);
+  background: linear-gradient(180deg, var(--live-surface-a), var(--live-surface-b));
+  box-shadow: var(--live-shadow);
+  pointer-events: auto;
+  cursor: pointer;
+  animation: live-rail-in 360ms var(--ease-out) both;
+}
+
+.live-pill__nm {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  text-align: left;
+}
+
+.live-pill__nm b {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.live-pill__word {
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-ink, var(--accent));
+}
+
+.live-surface[data-phase='hearing'] .live-pill__word {
+  color: var(--live-violet);
+}
+
+.live-pill__count {
+  font-size: 13px;
+  color: var(--live-ink-2);
+}
+
+.live-pill__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--live-line-mid);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.live-pill__open .live-glyph {
+  width: 12px;
+  height: 12px;
+  transform: rotate(180deg);
+}
+
+/* --------------------------------------------- captions, out of the bar */
+
+.live-caps {
+  position: absolute;
+  left: var(--live-bar-left);
+  right: calc(var(--live-rail-w) + var(--live-edge) * 2);
+  bottom: var(--live-bar-clear);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* The rail put away: the captions take the bar's full width. */
+.live-surface:has(.live-pill) .live-caps {
+  right: var(--live-bar-left);
+}
+
+.live-cap {
+  max-width: min(100%, 940px);
+  margin: 0;
+  padding: 10px 22px 13px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-base) 94%, var(--bg-panel));
+  border: 1px solid var(--live-line-mid);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+  text-align: center;
+  animation: live-caps-in 420ms var(--ease-out) both;
+}
+
+@keyframes live-caps-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+}
+
+.live-cap__who {
+  display: inline-block;
+  margin-right: 12px;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  vertical-align: 0.42em;
+}
+
+.live-cap--you {
+  padding: 7px 18px 9px;
+}
+
+.live-cap--you .live-cap__who {
+  color: var(--live-violet);
+  vertical-align: 0.3em;
+}
+
+.live-cap--you .live-cap__text {
+  font-size: 24px;
+  line-height: 1.3;
+  color: var(--live-ink-2);
+}
+
+.live-cap--you[data-hearing='true'] {
+  border-color: color-mix(in srgb, var(--live-violet-core) 50%, transparent);
+}
+
+.live-cap--forge {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.live-cap--forge .live-cap__who {
+  color: var(--accent-ink, var(--accent));
+}
+
+.live-cap--forge .live-cap__text {
+  font-size: clamp(27px, 2.05vw, 32px);
+  line-height: 1.36;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.live-cap__said {
+  color: var(--text-primary);
+}
+
+.live-cap__next {
+  color: var(--live-ink-dim);
+}
+
+.live-caret {
+  display: inline-block;
+  width: 3px;
+  height: 0.95em;
+  margin: 0 4px 0 3px;
+  border-radius: 1px;
+  background: var(--accent);
+  vertical-align: -0.14em;
+  animation: live-blink 1s steps(2) infinite;
+}
+
+.live-caret--you {
+  width: 2.5px;
+  background: var(--live-violet);
+}
+
+@keyframes live-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* --------------------------------------------------- forge is showing you */
+
+.live-show {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out);
+}
+
+.live-show[data-on='true'] {
+  opacity: 1;
+}
+
+/* The ring, and everything outside it stepped back. */
+.live-show__ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: calc(var(--r-pane, 12px) + 3px);
+  border: 2px solid var(--accent);
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 0 0 200vmax var(--live-hush);
+  animation: live-ring-in 600ms var(--ease-out) both;
+}
+
+@keyframes live-ring-in {
+  from {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+
+.live-show__tag {
+  /* A flag on the ring's top edge, at the pane's left: clear of the pane's
+     name below it and never under the rail on the right. */
+  position: absolute;
+  top: -20px;
+  left: 14px;
+  max-width: calc(100% - var(--live-show-cover, 0px) - 28px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 3px 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-header-live, #16171b));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--accent-ink, var(--accent));
+  pointer-events: auto;
+}
+
+.live-show__tag > i {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  animation: live-breathe 1.4s ease-in-out infinite;
+}
+
+.live-show__done {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  cursor: pointer;
+}
+
+.live-show__done .live-glyph {
+  width: 10px;
+  height: 10px;
+}
+
+.live-show__word {
+  flex: none;
+}
+
+.live-show[data-roomy='false'] .live-show__note {
+  display: none;
+}
+
+/* What Forge is pointing out, in plain words after the label. */
+.live-show__note {
+  min-width: 0;
+  padding-left: 9px;
+  border-left: 1px solid var(--accent-line);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 1180px) {
+  .live-surface {
+    --live-rail-w: 320px;
+    --live-fly-w: 350px;
+  }
+}
+
+/* Short windows: the rail's header and NOW tighten so the crew keeps room. */
+@media (max-height: 860px) {
+  .live-sec {
+    padding: 12px 18px;
+  }
+
+  .live-who {
+    gap: 14px;
+  }
+
+  .live-orb {
+    width: 52px;
+    height: 52px;
+  }
+
+  .live-orb > i:nth-child(1) {
+    inset: 18px;
+  }
+
+  .live-orb > i:nth-child(2) {
+    inset: 11px;
+  }
+
+  .live-orb > i:nth-child(3) {
+    inset: 5px;
+  }
+
+  .live-now__title {
+    font-size: 17px;
+    margin: 5px 0 8px;
+  }
+
+  .live-stp {
+    min-height: 28px;
+  }
+
+  /* Four rows or more: the oldest step gives way. */
+  .live-stp:first-child:nth-last-child(n + 4) {
+    display: none;
+  }
+
+  .live-foot {
+    height: 48px;
+  }
+}
+
+/* -------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .live-surface *,
+  .live-surface *::before,
+  .live-surface *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+:root[data-reduced-motion='true'] .live-surface *,
+:root[data-reduced-motion='true'] .live-surface *::before,
+:root[data-reduced-motion='true'] .live-surface *::after {
+  animation: none !important;
+  transition: none !important;
+}

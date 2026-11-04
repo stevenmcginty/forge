@@ -66,6 +66,7 @@ import {
  */
 import { readMirrorInput, type MirrorInput, type RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
+import type { LiveActionResult, LiveJobAction, LiveLatencySample } from '@shared/live'
 import {
   CHAT_MIRROR_FEATURE,
   readChatClientFrame,
@@ -845,10 +846,16 @@ let viewerSeq = 0
 
 /** A browser's Claude voice session, as the host hands it over. */
 export interface VoiceClaudeLink {
-  /** One turn; the host adds the app context. */
-  say(text: string): Promise<void>
+  /** One turn; the host adds the app context. Claude Live names it with the browser's `turnId`. */
+  say(text: string, turnId?: string): Promise<void>
   interrupt(): Promise<void>
   close(): void
+  /** Claude Live only: the phone's ears — its SDP offer in, OpenAI's transcription answer out. */
+  ears?(sdp: string): Promise<{ ok: true; sdp: string; expiresAt: number | null } | { ok: false; error: string }>
+  /** Claude Live only: a tap on a job card. */
+  job?(jobId: string, action: LiveJobAction): Promise<LiveActionResult>
+  /** Claude Live only: one turn's latency, for the desktop's log. */
+  latency?(sample: LiveLatencySample): void
 }
 
 /**
@@ -859,7 +866,7 @@ export interface VoiceClaudeLink {
  */
 interface VoiceClaudeState {
   link: VoiceClaudeLink | null
-  /** Which agent the browser opened: Claude Voice speaks with Kokoro. */
+  /** Which agent the browser opened: Claude Voice and Claude Live speak with Kokoro. */
   agent: WebVoiceClaudeAgent
   queue: WebVoiceClaudeEvent[]
   waiter: ((events: WebVoiceClaudeEvent[]) => void) | null
@@ -3943,7 +3950,8 @@ export class WebServer {
     const op = request.op
     if (op === 'open') {
       this.closeVoiceClaude(client)
-      const agent: WebVoiceClaudeAgent = request.agent === 'claude-voice' ? 'claude-voice' : 'claude'
+      const agent: WebVoiceClaudeAgent =
+        request.agent === 'claude-voice' || request.agent === 'claude-live' ? request.agent : 'claude'
       const state: VoiceClaudeState = { link: null, agent, queue: [], waiter: null, waitTimer: null, turn: null, dead: false }
       client.voiceClaude = state
       state.link = voiceClaudeOpen((event) => this.pushVoiceClaude(client, state, event), agent)
@@ -4045,7 +4053,9 @@ export class WebServer {
           failed('bad-frame', 'There was nothing to say.')
           return
         }
-        await link.say(text)
+        const turnId = wireString(request.turnId, 64)
+        if (turnId) await link.say(text, turnId)
+        else await link.say(text)
         answer({ kind: 'ok' })
         return
       }
@@ -4055,7 +4065,7 @@ export class WebServer {
           failed('bad-frame', 'There was nothing to speak.')
           return
         }
-        const res = await voiceSpeak(text, state.agent === 'claude-voice' ? 'kokoro' : 'edge')
+        const res = await voiceSpeak(text, state.agent === 'claude' ? 'edge' : 'kokoro')
         if (!res.ok) {
           failed('failed', res.error)
           return
@@ -4065,6 +4075,54 @@ export class WebServer {
       }
       case 'interrupt': {
         await link.interrupt()
+        answer({ kind: 'ok' })
+        return
+      }
+      case 'ears': {
+        if (!link.ears) {
+          failed('unsupported', 'Only Claude Live opens its own ears.')
+          return
+        }
+        // Raw, not wireString: trimming would cut the offer's final CRLF.
+        const sdp = typeof request.sdp === 'string' ? request.sdp : ''
+        if (!sdp.startsWith('v=') || sdp.length > VOICE_SDP_MAX) {
+          failed('bad-frame', 'That is not an SDP offer.')
+          return
+        }
+        const res = await link.ears(sdp)
+        if (!res.ok) {
+          failed('failed', res.error)
+          return
+        }
+        answer({ kind: 'voice-connect', sdp: res.sdp, expiresAt: res.expiresAt })
+        return
+      }
+      case 'job': {
+        if (!link.job) {
+          failed('unsupported', 'Only Claude Live has jobs.')
+          return
+        }
+        const jobId = wireString(request.jobId, 128)
+        const action = request.action
+        if (!jobId || (action !== 'stop' && action !== 'show')) {
+          failed('bad-frame', 'That is not a job action.')
+          return
+        }
+        const res = await link.job(jobId, action)
+        if (!res.ok) {
+          failed('failed', res.error ?? 'That did not work.')
+          return
+        }
+        answer({ kind: 'ok' })
+        return
+      }
+      case 'latency': {
+        const sample = voiceLatency(request.sample)
+        if (!sample) {
+          failed('bad-frame', 'That is not a latency sample.')
+          return
+        }
+        link.latency?.(sample)
         answer({ kind: 'ok' })
         return
       }
@@ -4394,6 +4452,29 @@ function voiceTools(value: unknown): WebVoiceToolSpec[] | null {
     })
   }
   return tools
+}
+
+/**
+ * `voice-claude` `latency`'s sample (shared/live.ts `LiveLatencySample`),
+ * rebuilt field by field: milliseconds are finite, non-negative and under an
+ * hour, or absent. Anything else is not a sample.
+ */
+function voiceLatency(value: unknown): LiveLatencySample | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const turnId = wireString(raw.turnId, 64)
+  const msOf = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 3_600_000 ? Math.round(v) : undefined
+  const eosToSendMs = msOf(raw.eosToSendMs)
+  if (!turnId || eosToSendMs === undefined) return null
+  const sample: LiveLatencySample = { turnId, eosToSendMs, ack: raw.ack === true }
+  const sendToFirstTextMs = msOf(raw.sendToFirstTextMs)
+  const firstTextToAudioMs = msOf(raw.firstTextToAudioMs)
+  const eosToAudioMs = msOf(raw.eosToAudioMs)
+  if (sendToFirstTextMs !== undefined) sample.sendToFirstTextMs = sendToFirstTextMs
+  if (firstTextToAudioMs !== undefined) sample.firstTextToAudioMs = firstTextToAudioMs
+  if (eosToAudioMs !== undefined) sample.eosToAudioMs = eosToAudioMs
+  return sample
 }
 
 /**

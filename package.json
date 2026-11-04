@@ -41,6 +41,8 @@
     "voice-hotkey:check": "node scripts/voice-hotkey-check.mjs",
     "copilot-key:check": "node scripts/copilot-key-check.mjs",
     "realtime:check": "node scripts/realtime-check.mjs",
+    "live:check": "node scripts/live-check.mjs",
+    "live-voice:check": "node scripts/live-voice-check.mjs",
     "voice-alerts:check": "node scripts/voice-alerts-check.mjs",
     "gemini-live:check": "node scripts/gemini-live-check.mjs",
     "canvas:check": "node scripts/canvas-check.mjs",

@@ -35,7 +35,8 @@ const MAKER: Record<AgentBrainId, Maker> = {
   groq: 'groq',
   openrouter: 'openrouter',
   'forge-brain': 'forge',
-  'claude-voice': 'claude'
+  'claude-voice': 'claude',
+  'claude-live': 'claude'
 }
 
 /**

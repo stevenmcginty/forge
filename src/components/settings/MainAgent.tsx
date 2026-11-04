@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { Settings } from '@shared/types'
+import type { LiveConductorModel, LiveEars, LiveVoiceModel, Settings } from '@shared/types'
 import {
   AGENT_BRAINS,
   isForgeBrainAgent,
@@ -86,6 +86,10 @@ const BRAIN_COPY: Record<string, { good: string; cost: string }> = {
   'claude-voice': {
     good: 'A spoken conversation with Claude and every Forge tool — short answers, talk over it any time. Parakeet hears you, Kokoro speaks on your GPU (Edge while it loads).',
     cost: 'Free with your Claude plan · the voice runs on this PC'
+  },
+  'claude-live': {
+    good: 'Talks fast, works in the background — a quick Claude talks with you while a second Claude does the jobs and tells you when they need you or are done.',
+    cost: 'The worker is free with your Claude plan · the voice uses your Anthropic key if you add one, your Claude login if not'
   }
 }
 
@@ -113,6 +117,65 @@ const CLAUDE_VOICE_MODELS = [
   { id: 'claude-opus-5-5', label: 'Opus 5.5 — smartest, slower to start talking' },
   { id: 'haiku', label: 'Haiku — lightest' }
 ]
+
+/** Claude Live's voice brain (`liveVoiceModel`), smartest to fastest. Opus is the default. */
+const LIVE_VOICE_CHOICES: Array<{ id: LiveVoiceModel; name: string; word: string }> = [
+  { id: 'claude-opus-5-5', name: 'Opus', word: 'smartest' },
+  { id: 'claude-sonnet-5-5', name: 'Sonnet', word: 'balanced' },
+  { id: 'claude-haiku-5-5', name: 'Haiku', word: 'fastest' }
+]
+
+/** Claude Live's worker (`liveConductorModel`), on your Claude login. Opus is the default. */
+const LIVE_CONDUCTOR_CHOICES: Array<{ id: LiveConductorModel; name: string; word: string }> = [
+  { id: 'claude-opus-5-5', name: 'Opus', word: 'deepest' },
+  { id: 'claude-sonnet-5-5', name: 'Sonnet', word: 'quicker' },
+  { id: 'claude-fable-5-1', name: 'Fable', word: 'Fable 5.1' }
+]
+
+/** Claude Live's ears (`liveEars`). */
+const LIVE_EARS_CHOICES: Array<{ id: LiveEars; name: string; word: string }> = [
+  { id: 'openai', name: 'OpenAI', word: 'talk over it' },
+  { id: 'parakeet', name: 'Parakeet', word: 'on this PC, free' }
+]
+
+/** One row of Claude Live's three-way picks: a name and one word under it, and a tick on the pick. */
+function LiveSeg<T extends string>({
+  label,
+  choices,
+  value,
+  onPick
+}: {
+  label: string
+  choices: Array<{ id: T; name: string; word: string }>
+  value: T
+  onPick: (id: T) => void
+}): ReactNode {
+  return (
+    <div className="seg mag__liveseg" role="radiogroup" aria-label={label}>
+      {choices.map((m) => {
+        const on = value === m.id
+        return (
+          <button
+            key={m.id}
+            type="button"
+            role="radio"
+            className="seg__btn"
+            aria-checked={on}
+            aria-label={`${m.name} — ${m.word}`}
+            data-on={on ? 'true' : undefined}
+            onClick={() => onPick(m.id)}
+          >
+            <span className="mag__liveseg-name">
+              {on ? '✓ ' : ''}
+              {m.name}
+            </span>
+            <span className="mag__liveseg-word">{m.word}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 const GEMINI_MODELS = [
   { id: 'gemini-3.8-flash', label: 'Flash 3.8 — newest Flash' },
@@ -405,6 +468,49 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
             ))}
           </select>
         </Row>
+      ) : null}
+
+      {spec.id === 'claude-live' ? (
+        <>
+          <Row
+            label="Voice model"
+            hint={
+              (s.anthropicKey ?? '').trim()
+                ? 'The Claude that talks with you, on your Anthropic key. Takes effect on the next turn.'
+                : 'The Claude that talks with you, on your Claude login. An Anthropic key in Models & APIs makes it answer faster. Takes effect on the next turn.'
+            }
+          >
+            <LiveSeg
+              label="Claude Live voice model"
+              choices={LIVE_VOICE_CHOICES}
+              value={s.liveVoiceModel}
+              onPick={(id) => actions.patchSettings({ liveVoiceModel: id })}
+            />
+          </Row>
+          <Row label="Worker model" hint="The Claude that does the jobs in the background, on your Claude login. Takes effect on the next job.">
+            <LiveSeg
+              label="Claude Live worker model"
+              choices={LIVE_CONDUCTOR_CHOICES}
+              value={s.liveConductorModel}
+              onPick={(id) => actions.patchSettings({ liveConductorModel: id })}
+            />
+          </Row>
+          <Row
+            label="Ears"
+            hint={
+              s.liveEars === 'openai' && !(s.openaiKey ?? '').trim()
+                ? 'OpenAI hears you as you talk and lets you talk over Forge — it needs an OpenAI key in Models & APIs. Until then Live listens with Parakeet.'
+                : 'OpenAI hears you as you talk and lets you talk over Forge (your OpenAI key). Parakeet runs on this PC for free; talking over Forge still stops it. Takes effect the next time Listen goes on.'
+            }
+          >
+            <LiveSeg
+              label="Claude Live ears"
+              choices={LIVE_EARS_CHOICES}
+              value={s.liveEars}
+              onPick={(id) => actions.patchSettings({ liveEars: id })}
+            />
+          </Row>
+        </>
       ) : null}
 
       {live?.vendor ? <LiveVoices vendor={live.vendor} /> : null}

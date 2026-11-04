@@ -115,7 +115,7 @@ export function takeSentences(buffer: string): { chunks: string[]; rest: string 
   return { chunks, rest }
 }
 
-function b64FromBytes(bytes: Uint8Array): string {
+export function b64FromBytes(bytes: Uint8Array): string {
   let bin = ''
   for (let i = 0; i < bytes.length; i += 0x8000) {
     bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
@@ -123,14 +123,14 @@ function b64FromBytes(bytes: Uint8Array): string {
   return btoa(bin)
 }
 
-function bytesFromB64(b64: string): Uint8Array<ArrayBuffer> {
+export function bytesFromB64(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64)
   const out = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
   return out
 }
 
-function joinFrames(frames: Int16Array[]): Uint8Array {
+export function joinFrames(frames: Int16Array[]): Uint8Array {
   const total = frames.reduce((n, f) => n + f.length, 0)
   const out = new Int16Array(total)
   let at = 0

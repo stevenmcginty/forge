@@ -28,6 +28,7 @@ import { buildRolloverSummary } from '@/lib/realtime/summary'
 import { speakable } from '@/lib/speech'
 import { toolLabel } from '@/lib/toolLabels'
 import { ClaudeVoiceSession } from './claudeVoice'
+import { liveJobsOpen, LiveVoiceSession } from './liveVoice'
 import { alertNote, PaneAlertTracker, parsePaneStates, type PaneAlert } from './voice-alerts'
 import { readVoiceAgent, updateDesktopWords, voiceFailureWords, type WebVoiceAgent, type WebVoicePhase } from './voice-words'
 
@@ -262,6 +263,13 @@ export function setVoiceNavigator(next: VoiceNavigator | null): void {
   navigate = next
 }
 
+/** Go somewhere on this page's own deck (a Live card's Open). False when no navigator is installed. */
+export function goToVoiceNav(nav: WebVoiceNav): boolean {
+  if (!navigate) return false
+  navigate(nav)
+  return true
+}
+
 async function ask(body: WebRequest): Promise<WebResult> {
   if (!link) return { kind: 'failed', code: 'no-window', message: 'Not connected to the desktop.' }
   return link.request(body)
@@ -311,9 +319,9 @@ function onPhase(): void {
   } else idleTimer = clearTimer(idleTimer)
 }
 
-/** A pane still working, or an alert not yet said: quiet is not the end of the conversation. */
+/** A pane still working, an alert not yet said, or a Live job open: quiet is not the end of the conversation. */
 function holdingIdle(): boolean {
-  return paneAlerts.anyWorking() || heldAlerts.length > 0
+  return paneAlerts.anyWorking() || heldAlerts.length > 0 || (state.agent === 'claude-live' && liveJobsOpen())
 }
 
 /**
@@ -346,8 +354,9 @@ function deliverAlerts(): void {
   if (talkingAt && Date.now() - talkingAt < TALKING_GRACE_MS) return
   const note = alertNote(heldAlerts)
   heldAlerts = []
-  // Forge Brain hears about the panes itself, and says what matters (hearBrainSays).
-  if (!note || state.agent === 'forge-brain') return
+  // Forge Brain hears about the panes itself, and says what matters (hearBrainSays);
+  // Claude Live's ledger already has them, and its news says what matters.
+  if (!note || state.agent === 'forge-brain' || state.agent === 'claude-live') return
   if (setup?.provider === 'claude') {
     alertTurns.add(note)
     live.sendText(note)
@@ -585,6 +594,19 @@ function claudeVoiceAsk(): (body: WebRequest) => Promise<WebResult> {
 
 /** The session for the setup's provider, or null for one this page cannot run. */
 function makeSession(setup: WebVoiceSetup, events: RealtimeSessionEvents, agent: WebVoiceAgent): LiveSession | null {
+  // Claude Live: the desktop's Live voice brain, heard and spoken here (./liveVoice.ts).
+  if (setup.provider === 'claude' && agent === 'claude-live') {
+    return new LiveVoiceSession({
+      ask,
+      events: {
+        ...events,
+        onActivity: (running) => {
+          desktopTools = running
+          onPhase()
+        }
+      }
+    })
+  }
   if (setup.provider === 'claude') {
     return new ClaudeVoiceSession({
       ask: agent === 'forge-brain' ? forgeBrainAsk() : agent === 'claude-voice' ? claudeVoiceAsk() : ask,
@@ -636,8 +658,10 @@ async function open(carryover: string | null): Promise<void> {
   const mine = ++run
   const agent = state.agent
   // Forge Brain is heard the way Claude is: Claude's setup, without Claude
-  // thinking. Claude Voice is Claude's setup too, with its own persona and voice.
-  const provider: WebVoiceProvider = agent === 'forge-brain' || agent === 'claude-voice' ? 'claude' : agent
+  // thinking. Claude Voice is Claude's setup too, with its own persona and voice,
+  // and so is Claude Live, whose brains are the desktop's own.
+  const provider: WebVoiceProvider =
+    agent === 'forge-brain' || agent === 'claude-voice' || agent === 'claude-live' ? 'claude' : agent
   set({ phase: 'connecting', error: null, ended: null })
   const res = await ask({ kind: 'voice-setup', provider, ...(carryover ? { carryover } : {}) })
   if (mine !== run) return
@@ -660,9 +684,11 @@ async function open(carryover: string | null): Promise<void> {
       ? 'Forge Brain'
       : agent === 'claude-voice'
         ? 'Claude Voice'
-        : provider === 'claude'
-          ? 'Claude'
-          : providerSpec(provider).label
+        : agent === 'claude-live'
+          ? 'Claude Live'
+          : provider === 'claude'
+            ? 'Claude'
+            : providerSpec(provider).label
   const live: LiveSession | null = makeSession(res.setup, {
     onState: (st, detail) => {
       if (session !== live) return

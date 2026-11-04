@@ -136,6 +136,8 @@ import type { PackPlugin, SkillPack } from './skillpack'
 import type { CommandsFeed } from './commands'
 import type { ChatBotId } from './chatbots'
 import type { BrainTestResult, BrainTestTarget } from './agent-brain'
+import type { LiveEvent, LiveJobAction, LiveLatencySample, LiveLedgerSnapshot, LiveStatus } from './live'
+import type { LiveCardAnswer, LiveCardOffer } from './live-card'
 import type { MiniBarHostApi, MiniBarViewApi, ShotCardApi } from './minibar'
 import type { ScreenLookResult } from './screen'
 import type { BrowserAgentReply } from './browser'
@@ -462,8 +464,36 @@ export interface ForgeApi {
     test(target: BrainTestTarget): Promise<BrainTestResult>
   }
 
+  /**
+   * Claude Live (agentBrain `claude-live`, shared/live.ts): the quick voice
+   * brain, the Conductor and their shared job ledger, all held in main
+   * (electron/live/). Callers must optional-chain this: a stale preload will
+   * not have it.
+   */
+  live: {
+    /** A finished user turn. */
+    ask(turnId: string, text: string, opts?: { typed?: boolean }): Promise<void>
+    /** Barge-in: stop the voice brain's current reply only (jobs keep running). */
+    cancelTurn(turnId: string): Promise<void>
+    jobAction(jobId: string, action: LiveJobAction): Promise<{ ok: boolean; error?: string }>
+    ledger(): Promise<LiveLedgerSnapshot>
+    status(): Promise<LiveStatus>
+    /** Warm both brains. */
+    start(): Promise<LiveStatus>
+    stop(): Promise<void>
+    /** Main writes `[live] latency …` to the dev log. */
+    logLatency(sample: LiveLatencySample): void
+    onEvent(cb: (e: LiveEvent) => void): () => void
+  }
+
   realtime: {
     openaiConnect(req: RealtimeOpenAIConnectRequest): Promise<RealtimeOpenAIConnectResult>
+    /**
+     * Claude Live's OpenAI ears (src/lib/live/ears-openai.ts): the same handshake
+     * for a transcription-only session — OpenAI listens, Claude answers. Optional:
+     * a stale preload will not have it, and Live then listens with Parakeet.
+     */
+    openaiTranscribeConnect?(req: { sdp: string }): Promise<RealtimeOpenAIConnectResult>
     geminiToken(): Promise<RealtimeGeminiTokenResult>
     screenshot(): Promise<RealtimeScreenshotResult>
   }
@@ -1456,6 +1486,21 @@ export interface ForgeApi {
   minibarHost?: MiniBarHostApi
   /** The desktop shot card, in the #shotcard window (electron/shot-card-window.ts). */
   shotCard?: ShotCardApi
+  /**
+   * Claude Live's desktop card (electron/live-card-window.ts, shared/live-card.ts).
+   * The #livecard window uses `isLiveCard` / `onShow` / `answer` / `done`; the
+   * main window uses `offer` / `onChoice`. Optional: a stale preload has none.
+   */
+  liveCard?: {
+    isLiveCard(): boolean
+    onShow(cb: (offer: LiveCardOffer) => void): () => void
+    answer(answer: LiveCardAnswer): void
+    done(): void
+    /** True while the pointer is over see-through room: clicks there fall through to the app below. */
+    setClickThrough(on: boolean): void
+    offer(offer: LiveCardOffer): void
+    onChoice(cb: (answer: LiveCardAnswer) => void): () => void
+  }
 
   /**
    * A look at Steve's whole screen, saved as a PNG under `<data dir>\screen-looks`,

@@ -10,11 +10,12 @@ export type WebVoicePhase = 'off' | 'connecting' | 'listening' | 'thinking' | 's
 
 /**
  * Who Listen talks to: a voice agent (`WebVoiceProvider`), Forge Brain
- * itself — heard the way Claude is, answered by the brain pane — or Claude
+ * itself — heard the way Claude is, answered by the brain pane — Claude
  * Voice: Claude's session with its own persona, spoken by Kokoro on the
- * desktop's GPU (./voiceAgent.ts).
+ * desktop's GPU (./voiceAgent.ts) — or Claude Live: the desktop's Live voice
+ * brain and its Conductor, heard and spoken here (./liveVoice.ts).
  */
-export type WebVoiceAgent = WebVoiceProvider | 'forge-brain' | 'claude-voice'
+export type WebVoiceAgent = WebVoiceProvider | 'forge-brain' | 'claude-voice' | 'claude-live'
 
 /** What an older desktop is told to do: it answers the voice requests `unsupported`. */
 export const UPDATE_DESKTOP_WORDS = 'Update the desktop app to use voice here'
@@ -56,14 +57,15 @@ function isWebVoiceAgent(id: string): id is WebVoiceAgent {
     id === 'gpt-realtime-mini' ||
     id === 'claude' ||
     id === 'forge-brain' ||
-    id === 'claude-voice'
+    id === 'claude-voice' ||
+    id === 'claude-live'
   )
 }
 
 /**
  * The agents the Listen chip offers, in its menu's order: the desktop's visible
  * list (shared/agent-brain.ts VISIBLE_AGENT_BRAINS) — Forge Brain, Claude
- * Voice, Gemini, ChatGPT. ChatGPT is GPT Realtime, the full model. Claude and ChatGPT mini keep
+ * Live, Claude Voice, Gemini, ChatGPT. ChatGPT is GPT Realtime, the full model. Claude and ChatGPT mini keep
  * their code here and come back when that list names them again.
  */
 export const WEB_VOICE_AGENTS: readonly WebVoiceAgent[] = VISIBLE_AGENT_BRAINS.filter(isWebVoiceAgent)
@@ -85,6 +87,8 @@ export function voiceAgentWord(agent: WebVoiceAgent): string {
       return 'Forge Brain'
     case 'claude-voice':
       return 'Claude Voice'
+    case 'claude-live':
+      return 'Claude Live'
   }
 }
 
@@ -94,6 +98,11 @@ export function voiceAgentWord(agent: WebVoiceAgent): string {
  */
 export function readVoiceAgent(stored: string | null | undefined): WebVoiceAgent {
   return stored && (WEB_VOICE_AGENTS as readonly string[]).includes(stored) ? (stored as WebVoiceAgent) : DEFAULT_WEB_VOICE_AGENT
+}
+
+/** The agents that wear Claude's mark: Claude, Claude Voice and Claude Live. */
+export function isClaudeVoiceAgent(agent: WebVoiceAgent): boolean {
+  return agent === 'claude' || agent === 'claude-voice' || agent === 'claude-live'
 }
 
 /** The phase as the switch's word. Muted is its own word: the mic is shut while D records. */
