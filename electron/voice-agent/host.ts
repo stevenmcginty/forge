@@ -111,6 +111,38 @@ const MAX_TURNS = 50
 export const DEFAULT_VOICE_CLAUDE_MODEL = 'opus'
 
 /**
+ * Claude Voice's model when `claudeVoiceModel` is empty: Sonnet, at low effort
+ * (see `options`). Measured 2026-11-04 on Opus with thinking: 3–17 s from his
+ * last word to the first spoken text. A conversation cannot wait that long;
+ * Opus stays one pick away in Settings → Main agent.
+ */
+export const DEFAULT_CLAUDE_VOICE_MODEL = 'claude-sonnet-5-5'
+
+/**
+ * Claude Voice's budget for one tool's text result. A pane read stays in the
+ * session for every later turn — one took the cached context from 23k to 81k
+ * tokens — and every turn after it is slower for it.
+ */
+const VOICE_RESULT_MAX_LINES = 60
+const VOICE_RESULT_MAX_CHARS = 4000
+
+/**
+ * The Forge tools whose text Claude Voice gets trimmed, and which end it
+ * keeps: a terminal's newest lines are at the bottom, a listing's most
+ * important ones at the top. Everything else (the browser's numbered controls,
+ * one-sentence outcomes) is passed whole.
+ */
+const VOICE_CAPPED_TOOLS: Readonly<Record<string, 'head' | 'tail'>> = {
+  read_pane: 'tail',
+  run_command: 'tail',
+  get_app_state: 'head',
+  window_read: 'head',
+  list_windows: 'head',
+  list_desktop_apps: 'head',
+  list_files: 'head'
+}
+
+/**
  * Models the Claude brain used to hand to the Codex CLI with no Forge tools.
  * A turn on one of these now runs on the codex-cli adapter (./cli-brains.ts),
  * with every Forge tool; settings migrate off it (shared/agent-brain.ts).
@@ -141,6 +173,11 @@ export interface VoiceAgentDeps {
   sendToolRequest(request: { id: string; name: string; args: unknown }): void
   /** `settings.voiceClaudeModel`. Read per session start, so it can change. */
   getModel(): string
+  /**
+   * `settings.claudeVoiceModel`: the model Claude Voice runs. Absent or empty =
+   * `DEFAULT_CLAUDE_VOICE_MODEL`.
+   */
+  getClaudeVoiceModel?(): string
   /**
    * `settings.agentBrain`. 'codex-cli' and 'gemini-cli' run on a hidden CLI
    * (./cli-brains.ts); anything else is this Claude session. Absent = Claude.
@@ -207,6 +244,26 @@ function asToolText(value: unknown): string {
   }
 }
 
+/**
+ * One tool result cut to Claude Voice's budget (`VOICE_RESULT_MAX_LINES`,
+ * `VOICE_RESULT_MAX_CHARS`), keeping the end that matters, with one line saying
+ * so. Under the budget it comes back untouched.
+ */
+export function capVoiceToolText(body: string, keep: 'head' | 'tail'): string {
+  const lines = body.split('\n')
+  if (lines.length <= VOICE_RESULT_MAX_LINES && body.length <= VOICE_RESULT_MAX_CHARS) return body
+  let text = (keep === 'tail' ? lines.slice(-VOICE_RESULT_MAX_LINES) : lines.slice(0, VOICE_RESULT_MAX_LINES)).join('\n')
+  if (text.length > VOICE_RESULT_MAX_CHARS) {
+    text = keep === 'tail' ? text.slice(-VOICE_RESULT_MAX_CHARS) : text.slice(0, VOICE_RESULT_MAX_CHARS)
+  }
+  const kept = text.split('\n').length
+  const note =
+    keep === 'tail'
+      ? `[Trimmed for voice: the last ${kept} of ${lines.length} lines. Anything further up is not shown — if he needs it, say so, or offer a terminal agent to read the whole thing.]`
+      : `[Trimmed for voice: the first ${kept} of ${lines.length} lines. For the rest, call it again on something narrower — one window, one folder, one project.]`
+  return keep === 'tail' ? `${note}\n${text}` : `${text}\n${note}`
+}
+
 /* --------------------------------------------------------------- the host */
 
 export class VoiceAgentHost {
@@ -219,6 +276,11 @@ export class VoiceAgentHost {
   private readonly cli: CliBrainRunner
   /** The last live-app block a turn carried, for a CLI conversation that starts later. */
   private lastContext = ''
+
+  /** When the last utterance went in, until its first text delta is logged. 0 = none waiting. */
+  private sentAt = 0
+  /** The model the SDK last said it resolved to, so the log line is not repeated every turn. */
+  private initModel = ''
 
   /** Utterances waiting to be pulled by the input generator. */
   private readonly inbox: SDKUserMessage[] = []
@@ -269,11 +331,16 @@ export class VoiceAgentHost {
     | { kind: 'cli'; brain: CliBrainId; model: string | null } {
     const brain = this.deps.getBrain?.() ?? 'claude'
     if (isCliBrain(brain)) return { kind: 'cli', brain, model: null }
+    // Claude Voice: this same session and every tool, with its own short,
+    // conversational persona (./persona.ts CLAUDE_VOICE_PERSONA) and its own
+    // model setting — Sonnet unless he picked another.
+    if (brain === 'claude-voice') {
+      const model = (this.deps.getClaudeVoiceModel?.() ?? '').trim() || DEFAULT_CLAUDE_VOICE_MODEL
+      return { kind: 'claude', model, persona: CLAUDE_VOICE_PERSONA }
+    }
     const model = this.deps.getModel().trim() || DEFAULT_VOICE_CLAUDE_MODEL
     if (CODEX_VOICE_MODELS.has(model) || isCodexClaudeModel(model)) return { kind: 'cli', brain: 'codex-cli', model }
-    // Claude Voice: this same session and every tool, with its own short,
-    // conversational persona (./persona.ts CLAUDE_VOICE_PERSONA).
-    return { kind: 'claude', model, persona: brain === 'claude-voice' ? CLAUDE_VOICE_PERSONA : VOICE_PERSONA }
+    return { kind: 'claude', model, persona: VOICE_PERSONA }
   }
 
   /* ------------------------------------------------------------- lifecycle */
@@ -377,6 +444,7 @@ export class VoiceAgentHost {
       message: { role: 'user', content: say },
       parent_tool_use_id: null
     })
+    this.sentAt = Date.now()
     this.flush()
     return this.status()
   }
@@ -569,7 +637,21 @@ export class VoiceAgentHost {
     switch (message.type) {
       case 'stream_event': {
         const text = textDelta(message.event)
+        if (text && this.sentAt) {
+          // Dev evidence: his utterance in to the first word out, per turn.
+          console.log(`[voice-agent] first-text ms=${Date.now() - this.sentAt} model=${this.model}`)
+          this.sentAt = 0
+        }
         if (text) this.deps.sendEvent({ type: 'delta', text })
+        return
+      }
+
+      case 'system': {
+        // The SDK repeats init every turn; the model it resolved to is logged when it changes.
+        if (message.subtype === 'init' && message.model !== this.initModel) {
+          this.initModel = message.model
+          console.log(`[voice-agent] session model=${message.model}`)
+        }
         return
       }
 
@@ -667,14 +749,18 @@ export class VoiceAgentHost {
    * `run_app_action`'s description carries the action vocabulary that used to
    * be a section of that prompt.
    */
-  private forgeServer(): McpServerConfig {
+  private forgeServer(voice = false): McpServerConfig {
+    const defs = this.forgeToolDefs()
     return createSdkMcpServer({
       name: 'forge',
       version: '1.0.0',
       // These are the app's eyes and hands. Deferring them behind tool search
       // would mean the agent occasionally answers about Forge without them.
       alwaysLoad: true,
-      tools: this.forgeToolDefs()
+      // Claude Voice: big text results trimmed to a voice-sized budget, in this
+      // session's own server only — the brain link (`callLinkTool`) and the
+      // hidden Claude session get every line, as before.
+      tools: voice ? defs.map(capForVoice) : defs
     })
   }
 
@@ -1409,7 +1495,8 @@ export class VoiceAgentHost {
    *    callback is the backstop that says no to everything else.
    */
   private options(model: string, cwd: string, persona: string = VOICE_PERSONA): Options {
-    const servers: Record<string, McpServerConfig> = { forge: this.forgeServer() }
+    const voice = persona === CLAUDE_VOICE_PERSONA
+    const servers: Record<string, McpServerConfig> = { forge: this.forgeServer(voice) }
     // The same server every Claude pane gets, so the voice agent can generate
     // an image or ask Gemini without a second implementation of either.
     const bridge = this.deps.getBridgeServer?.() ?? null
@@ -1524,6 +1611,9 @@ export class VoiceAgentHost {
         if (line) console.error(`[voice-agent:cli] ${line}`)
       }
     }
+    // Claude Voice answers out loud, so the first word matters more than the
+    // depth: low effort keeps thinking short, whichever model he picked.
+    if (voice) options.effort = 'low'
 
     // Normally unnecessary — the SDK ships its own CLI and resolves it fine on
     // Windows. This is the fallback for a machine where that lookup fails, and
@@ -1554,6 +1644,24 @@ export class VoiceAgentHost {
 
 /** One tool as `tool()` makes it. The shapes differ per tool, so the list is loosely typed. */
 type ForgeToolDef = SdkMcpToolDefinition<any> // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** A Forge tool whose text Claude Voice gets trimmed (`capVoiceToolText`). Any other passes as it is. */
+function capForVoice(def: ForgeToolDef): ForgeToolDef {
+  const keep = VOICE_CAPPED_TOOLS[def.name]
+  if (!keep) return def
+  return {
+    ...def,
+    handler: async (args: Record<string, unknown>, extra: unknown) => {
+      const result = (await def.handler(args as never, extra as never)) as CallToolResult
+      return {
+        ...result,
+        content: result.content.map((block) =>
+          block.type === 'text' ? { ...block, text: capVoiceToolText(block.text, keep) } : block
+        )
+      }
+    }
+  }
+}
 
 /** How much of a transcript's end list_subagents reads: recent work, not the whole history. */
 const SUBAGENT_TAIL_BYTES = 512 * 1024

@@ -56,7 +56,7 @@ import { bargeIn } from '@/lib/bargein'
 import { claimsCompletedAction, companionReplyText } from '@/lib/brainjson'
 import { earconListening } from '@/lib/earcon'
 import { speakable, speaker } from '@/lib/speech'
-import { chooseEngine, pickVaried, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
+import { chooseEngine, nextAck, pickVaried, SPEAK_CHUNK_MAX, takeSpeechChunks, voiceSpeaker, type VoiceConfig } from '@/lib/tts'
 import { DEFAULT_KOKORO_VOICE } from '@shared/tts'
 import { buildActionPanes } from '@/lib/actionPanes'
 import { resolveProfile } from '@/lib/agents'
@@ -190,6 +190,8 @@ interface ClaudeRun {
   chunk: number
   /** Talked over. Nothing more from this turn reaches the mouth. */
   aborted: boolean
+  /** Some reply text has arrived, so no acknowledgement is needed (Claude Voice). */
+  replied: boolean
   onText?: (text: string) => void
   /** Why it ended badly, or null for the ordinary end. Undefined until it ends. */
   error?: string | null
@@ -224,6 +226,18 @@ const CLAUDE_TURN_TIMEOUT_MS = 5 * 60_000
  * emits nothing must not stall the new turn waiting for it.
  */
 const INTERRUPT_UNWIND_MS = 5_000
+
+/**
+ * Claude Voice: a spoken turn with no reply text this long after it was sent
+ * gets an instant "Sure." from the clips made at warm-up (`primeAcks` in
+ * src/lib/tts.ts), so he hears he was heard while the model starts.
+ */
+const ACK_AFTER_MS = 600
+
+/** When Claude Voice first tries to make its acknowledgement clips, and how often after that while Kokoro loads. */
+const ACK_PRIME_FIRST_MS = 3_000
+const ACK_PRIME_RETRY_MS = 15_000
+const ACK_PRIME_TRIES = 8
 
 /**
  * Agent mode, as a state machine.
@@ -763,6 +777,8 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
   const claudeAsk = useRef<{ id: string; parts: string[]; at: number; voiced: boolean } | null>(null)
   /** Counts `runClaudeTurn` calls, so one overtaken while it waited stands down. */
   const claudeTicket = useRef(0)
+  /** The last acknowledgement Claude Voice played, so the next one is a different line. */
+  const lastAck = useRef<string | undefined>(undefined)
 
   /* --------------------------------------------------------------- the mouth
    *
@@ -1776,8 +1792,12 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
       switch (event.type) {
         case 'delta': {
           if (run.silent || run.aborted) return
+          run.replied = true
           run.buffer += event.text
-          const { chunks, rest } = takeSpeechChunks(run.buffer)
+          // Claude Voice: the reply's first chunk may stop at a clause, so Kokoro starts sooner.
+          const { chunks, rest } = takeSpeechChunks(run.buffer, SPEAK_CHUNK_MAX, {
+            firstClause: run.chunk === 0 && Boolean(voiceConfigRef.current.kokoroVoice)
+          })
           run.buffer = rest
           for (const chunk of chunks) {
             openMouth()
@@ -1793,6 +1813,13 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
           // Working, not talking. Only when the mouth is idle: a tool call in
           // the middle of a spoken reply must not blank the speaking phase.
           if (event.phase === 'start' && armedRef.current && !speakingRef.current) setPhase('thinking')
+          // Claude Voice: the clause said before a tool ("Checking now.") is spoken now,
+          // not held until the text after the tool arrives and glued to it.
+          if (event.phase === 'start' && !run.silent && !run.aborted && run.buffer.trim() && voiceConfigRef.current.kokoroVoice) {
+            openMouth()
+            pushSpeech(`${run.id}:s${run.chunk++}`, run.buffer.trim())
+            run.buffer = ''
+          }
           if (event.phase === 'start') {
             toolsInFlight.current += 1
             cancelToolClear()
@@ -1867,7 +1894,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
     async (
       id: string,
       said: string,
-      opts: { silent?: boolean; onText?: (text: string) => void }
+      opts: { silent?: boolean; ack?: boolean; onText?: (text: string) => void }
     ): Promise<string> => {
       if (!agentBrainAvailable()) {
         throw new Error('The voice session is unavailable — the preload bundle is stale. Rebuild and restart.')
@@ -1911,6 +1938,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         said: [],
         chunk: 0,
         aborted: false,
+        replied: false,
         onText: opts.onText,
         done,
         finish: (error?: string) => {
@@ -1924,6 +1952,7 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         if (agentBrainAvailable()) void interruptAgentBrain().catch(() => undefined)
         run.finish(run.aborted ? undefined : 'The brain did not come back')
       }, CLAUDE_TURN_TIMEOUT_MS)
+      let ackTimer: number | undefined
 
       try {
         if (!sessionOpen.current) {
@@ -1949,12 +1978,28 @@ export function VoiceAgentProvider({ children }: { children: ReactNode }): React
         } catch {
           /* a turn without context is still a turn */
         }
+        // Claude Voice, said aloud here: no reply text by ACK_AFTER_MS, and a
+        // Kokoro clip made at warm-up says "Sure." through the same mouth — so
+        // barge-in and the echo guard cover it. No clip held, no ack.
+        if (opts.ack && !run.silent && voiceConfigRef.current.kokoroVoice) {
+          const sentAt = Date.now()
+          ackTimer = window.setTimeout(() => {
+            if (run.replied || run.aborted || claudeRun.current !== run) return
+            const line = nextAck(voiceSpeaker.readyAcks(voiceConfigRef.current), lastAck.current)
+            if (!line) return
+            lastAck.current = line
+            if (import.meta.env.DEV) console.info(`[hub] event=ack-played phrase="${line}" ms=${Date.now() - sentAt}`)
+            openMouth()
+            pushSpeech(`${run.id}:ack`, line)
+          }, ACK_AFTER_MS)
+        }
         await sendUtterance(fresh ? `[${fresh}]
 
 ${said}` : said)
         await done
       } finally {
         window.clearTimeout(watchdog)
+        window.clearTimeout(ackTimer)
         if (claudeRun.current === run) claudeRun.current = null
         // Whatever was left in the buffer never made a full sentence. Say it
         // anyway: a reply that ends without a full stop is still a reply.
@@ -1962,13 +2007,41 @@ ${said}` : said)
         if (tail && !run.silent && !run.aborted) pushSpeech(`${run.id}:s${run.chunk++}`, tail)
         closeMouth()
         await speakRun.current
+        // Quiet now: a good moment to finish making the acknowledgement clips, if Kokoro was still loading before.
+        if (voiceConfigRef.current.kokoroVoice) void voiceSpeaker.primeAcks(voiceConfigRef.current)
       }
 
       if (run.error) throw new Error(run.error)
       return run.said.join('\n').trim()
     },
-    [closeMouth, pushSpeech, buildContextNow]
+    [openMouth, closeMouth, pushSpeech, buildContextNow]
   )
+
+  // Claude Voice: make the acknowledgement clips once Kokoro is warm. Main
+  // warms it with the app; until it is ready main answers in Edge, which
+  // `primeAcks` turns down, so it tries again a little later — only while
+  // nothing is being said, because Kokoro makes one clip at a time.
+  useEffect(() => {
+    if (!kokoroVoice) return undefined
+    let stopped = false
+    let tries = 0
+    let timer: number | undefined
+    const attempt = (wait: number): void => {
+      timer = window.setTimeout(() => {
+        if (stopped) return
+        tries += 1
+        const busy = speakingRef.current || claudeRun.current !== null
+        void (busy ? Promise.resolve(false) : voiceSpeaker.primeAcks(voiceConfigRef.current)).then((done) => {
+          if (!done && !stopped && tries < ACK_PRIME_TRIES) attempt(ACK_PRIME_RETRY_MS)
+        })
+      }, wait)
+    }
+    attempt(ACK_PRIME_FIRST_MS)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+  }, [kokoroVoice])
 
   /**
    * "Type this into Everest: echo hi" (B11): his words, raw, into that pane —
@@ -2429,6 +2502,7 @@ ${asked}` : asked
         try {
           const text = await runClaudeTurn(id, heard, {
             silent: opts?.silent,
+            ack: spokenHere,
             onText: (partial) =>
               setTurns((prev) =>
                 prev.map((t) =>

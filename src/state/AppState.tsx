@@ -295,6 +295,7 @@ const FALLBACK_SETTINGS: Settings = {
   voiceEngine: 'edge',
   voiceEdgeVoice: '',
   kokoroVoice: DEFAULT_KOKORO_VOICE,
+  claudeVoiceModel: 'claude-sonnet-5-5',
   voiceTtsVoice: '',
   voiceTtsModel: '',
   voiceEarcons: true,

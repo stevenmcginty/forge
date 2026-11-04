@@ -1908,6 +1908,16 @@ export interface Settings {
    */
   kokoroVoice: string
   /**
+   * Which Claude model Claude Voice runs (agentBrain `claude-voice`) — its own
+   * setting, so the hidden `claude` brain keeps `voiceClaudeModel`. A model id
+   * (`claude-sonnet-5-5`, pinned because the `sonnet` alias resolves to an older
+   * Sonnet) or an alias. Sonnet 5.5 by default, at low effort
+   * (electron/voice-agent/host.ts): a spoken reply has to start within a
+   * second or two, and Opus with thinking took 3–17 s. Opus stays one pick away
+   * in Settings → Main agent.
+   */
+  claudeVoiceModel: string
+  /**
    * A prebuilt Gemini voice name. Empty means `DEFAULT_TTS_VOICE` in
    * electron/gemini-tts.ts — Sulafat, the one Google documents as "Warm".
    */

@@ -120,6 +120,7 @@ function ensureHost(): VoiceAgentHost {
     sendEvent: (event) => send(IPC.voiceAgentEvent, event),
     sendToolRequest: (request) => send(IPC.voiceAgentToolRequest, request),
     getModel: () => getSettings().voiceClaudeModel || DEFAULT_VOICE_CLAUDE_MODEL,
+    getClaudeVoiceModel: () => getSettings().claudeVoiceModel,
     getBrain: () => getSettings().agentBrain,
     getCliSetup: cliBrainSetup,
     getBridgeServer: bridgeServer,
@@ -181,6 +182,7 @@ function ensureWebHost(): VoiceAgentHost {
     sendEvent: (event) => webSink?.(event),
     sendToolRequest: (request) => send(IPC.voiceAgentToolRequest, request),
     getModel: webClaudeModel,
+    getClaudeVoiceModel: () => getSettings().claudeVoiceModel,
     // Always this Claude session: `agentBrain` picks the desk's brain, and a
     // CLI brain there must not answer a browser that asked for Claude. Claude
     // Voice is the same session with its own persona (./host.ts `route`).

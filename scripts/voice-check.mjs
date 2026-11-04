@@ -3590,6 +3590,79 @@ await test('a decimal point is not a sentence, and an unfinished one waits', () 
   assert.deepEqual(takeSpeechChunks('It costs 3.14 pounds. ').chunks, ['It costs 3.14 pounds.'])
 })
 
+const { nextAck, ACK_LINES, FIRST_CLAUSE_MIN_WORDS } = await import('../src/lib/tts.ts')
+
+await test('Claude Voice: the first chunk may end at a clause once it has four words', () => {
+  const first = { firstClause: true }
+  const tidy = (s) => s.replace(/\s+/g, ' ').trim()
+  assert.equal(FIRST_CLAUSE_MIN_WORDS, 4)
+  // A comma after four words lets the first chunk out before the full stop is written.
+  const a = takeSpeechChunks('On it, opening the Forge project, then I will read Zeb', SPEAK_CHUNK_MAX, first)
+  assert.deepEqual(a.chunks, ['On it, opening the Forge project,'])
+  assert.equal(tidy([...a.chunks, a.rest].join(' ')), 'On it, opening the Forge project, then I will read Zeb')
+  // "On it," alone is too short to say on its own; with no later clause it waits.
+  assert.deepEqual(takeSpeechChunks('On it, opening', SPEAK_CHUNK_MAX, first).chunks, [])
+  // Semicolons, colons and spaced dashes count; the whitespace after has to be there already.
+  assert.deepEqual(takeSpeechChunks('Here is the short answer: yes', SPEAK_CHUNK_MAX, first).chunks, ['Here is the short answer:'])
+  assert.deepEqual(takeSpeechChunks('Zeb has finished the build — it', SPEAK_CHUNK_MAX, first).chunks, ['Zeb has finished the build —'])
+  assert.deepEqual(takeSpeechChunks('It came to about 3,000 lines', SPEAK_CHUNK_MAX, first).chunks, [], 'a thousands comma is not a clause')
+  assert.deepEqual(takeSpeechChunks('Zeb has finished the build,', SPEAK_CHUNK_MAX, first).chunks, [], 'no whitespace yet, so not yet')
+  // A full stop before any long-enough clause still wins.
+  assert.deepEqual(takeSpeechChunks('Yes, done. Now the tests, all of them, ', SPEAK_CHUNK_MAX, first).chunks, ['Yes, done.'])
+  // Only the first chunk: after it, chunks are sentences again.
+  const b = takeSpeechChunks('Sure, I will check the Forge project, and then Zeb, and then the build. Done. ', SPEAK_CHUNK_MAX, first)
+  assert.deepEqual(b.chunks, ['Sure, I will check the Forge project,', 'and then Zeb, and then the build.', 'Done.'])
+  // Without the option nothing changes: the other brains still wait for a sentence.
+  assert.deepEqual(takeSpeechChunks('On it, opening the Forge project, then I will read Zeb').chunks, [])
+})
+
+await test('Claude Voice: acknowledgements rotate, never the same twice running', () => {
+  assert.deepEqual(ACK_LINES, ['Okay.', 'Sure.', 'One sec.', 'Let me check.'])
+  assert.equal(nextAck(ACK_LINES), 'Okay.')
+  assert.equal(nextAck(ACK_LINES, 'Okay.'), 'Sure.')
+  assert.equal(nextAck(ACK_LINES, 'Let me check.'), 'Okay.', 'wraps round')
+  // Only the ready ones are offered; the one just played is skipped.
+  assert.equal(nextAck(['Okay.', 'One sec.'], 'Okay.'), 'One sec.')
+  assert.equal(nextAck(['Okay.', 'One sec.'], 'One sec.'), 'Okay.')
+  // One ready and it was the last one played: nothing, rather than a repeat.
+  assert.equal(nextAck(['Sure.'], 'Sure.'), null)
+  assert.equal(nextAck([], undefined), null, 'Kokoro not ready: no ack at all')
+  let prev
+  for (let i = 0; i < 12; i++) {
+    const line = nextAck(ACK_LINES, prev)
+    assert.notEqual(line, prev)
+    prev = line
+  }
+})
+
+await test('Claude Voice: ack clips are made in Kokoro only, held, and played from memory', async () => {
+  const KOKORO = { engine: 'edge', hasKey: false, edgeVoice: '', geminiVoice: '', ttsModel: '', localVoice: '', kokoroVoice: 'bf_emma' }
+  // Kokoro still loading: main answers in Edge (mp3). That is turned down, and priming stops at once.
+  fake = fakeTts(() => ({ ok: true, audio: '', format: 'mp3', mime: 'audio/mpeg', sampleRate: 0, channels: 1, model: 'edge-neural', voice: 'en-GB-SoniaNeural', ms: 5 }))
+  setTtsBackend(fake.backend)
+  voiceSpeaker.clearCache()
+  assert.equal(await voiceSpeaker.primeAcks(KOKORO), false)
+  assert.equal(fake.calls.speak.length, 1, 'one Edge answer is enough to know Kokoro is not ready')
+  assert.deepEqual(voiceSpeaker.readyAcks(KOKORO), [])
+  // Kokoro warm: every line is made once, in Kokoro, and held.
+  fake = fakeTts(() => ({ ok: true, audio: fakePcm(0.2).toString('base64'), format: 'pcm16', mime: 'audio/L16;rate=24000', sampleRate: 24_000, channels: 1, model: 'kokoro-82m', voice: 'bf_emma', ms: 5 }))
+  setTtsBackend(fake.backend)
+  assert.equal(await voiceSpeaker.primeAcks(KOKORO), true)
+  assert.deepEqual(fake.calls.speak.map((r) => [r.text, r.engine, r.voice]), ACK_LINES.map((l) => [l, 'kokoro', 'bf_emma']))
+  assert.deepEqual(voiceSpeaker.readyAcks(KOKORO), [...ACK_LINES])
+  assert.deepEqual(voiceSpeaker.readyAcks({ ...KOKORO, kokoroVoice: '' }), [], 'not Claude Voice: no acks')
+  // Playing one asks for nothing: it comes from memory, through the normal speaker.
+  const before = fake.calls.speak.length
+  const r = await voiceSpeaker.speak('Sure.', KOKORO)
+  assert.equal(r.spoke, true)
+  assert.equal(r.cached, true)
+  assert.equal(fake.calls.speak.length, before)
+  // A second prime has nothing left to make.
+  assert.equal(await voiceSpeaker.primeAcks(KOKORO), true)
+  assert.equal(fake.calls.speak.length, before)
+  voiceSpeaker.clearCache()
+})
+
 /* ------------------------------------------------------------------- live */
 
 /**

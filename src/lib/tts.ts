@@ -380,6 +380,27 @@ export const SPEAK_CHUNK_MAX = 220
 const SENTENCE_END = /[.!?]["')\]]?(?=\s)/
 
 /**
+ * A clause end — a comma, semicolon or colon, or a spaced dash — followed by
+ * whitespace that is already there, for the same reason as `SENTENCE_END`.
+ */
+const CLAUSE_END = /(?:[,;:]|\s[—–-])(?=\s)/g
+
+/** A first chunk cut at a clause has at least this many words, so it sounds like a phrase, not a stammer. */
+export const FIRST_CLAUSE_MIN_WORDS = 4
+
+/** Where the first clause of ≥ `FIRST_CLAUSE_MIN_WORDS` words ends, before `limit` (-1 = anywhere). -1 when there is none. */
+function clauseCut(text: string, limit: number): number {
+  CLAUSE_END.lastIndex = 0
+  for (let m = CLAUSE_END.exec(text); m; m = CLAUSE_END.exec(text)) {
+    const end = m.index + m[0].length
+    if (limit >= 0 && end >= limit) return -1
+    const words = text.slice(0, end).split(/\s+/).filter((w) => /\w/.test(w)).length
+    if (words >= FIRST_CLAUSE_MIN_WORDS) return end
+  }
+  return -1
+}
+
+/**
  * Split a growing reply into the parts that can already be spoken.
  *
  * The contract is what makes sentence-by-sentence speech safe: everything
@@ -391,8 +412,17 @@ const SENTENCE_END = /[.!?]["')\]]?(?=\s)/
  * occasionally cut a chunk early; the cost of that is a comma-length pause in
  * the middle of a sentence, and the cost of the alternative is a page of
  * abbreviation tables. Wrong pauses are cheap here in a way wrong words are not.
+ *
+ * `firstClause` (Claude Voice, the first chunk of a reply only): the first
+ * chunk may end at a clause — "Sure, I'll check the Forge project," — once it
+ * has `FIRST_CLAUSE_MIN_WORDS` words, so Kokoro starts on it before the full
+ * stop is written. Every later chunk is still a sentence.
  */
-export function takeSpeechChunks(buffer: string, max: number = SPEAK_CHUNK_MAX): {
+export function takeSpeechChunks(
+  buffer: string,
+  max: number = SPEAK_CHUNK_MAX,
+  opts: { firstClause?: boolean } = {}
+): {
   chunks: string[]
   rest: string
 } {
@@ -402,6 +432,10 @@ export function takeSpeechChunks(buffer: string, max: number = SPEAK_CHUNK_MAX):
   for (;;) {
     const hit = SENTENCE_END.exec(rest)
     let cut = hit ? hit.index + hit[0].length : -1
+    if (opts.firstClause && chunks.length === 0) {
+      const clause = clauseCut(rest, cut)
+      if (clause > 0 && clause <= max) cut = clause
+    }
     // No sentence end yet — but an over-long run still has to be let out.
     if (cut < 0) {
       if (rest.length <= max) break
@@ -506,6 +540,27 @@ function tryCacheKey(body: string, engine: NeuralEngine, voice: string, config: 
 /** Sentences Claude Voice may have in synthesis ahead of the one playing. */
 const PREFETCH_MAX = 4
 
+/**
+ * Claude Voice's instant acknowledgements: made in Kokoro once it is warm
+ * (`primeAcks`) and held, so one can play the moment a turn is slow to start.
+ * Words, never a tone — Steve had the per-turn earcon removed.
+ */
+export const ACK_LINES: readonly string[] = ['Okay.', 'Sure.', 'One sec.', 'Let me check.']
+
+/**
+ * The acknowledgement to play after `previous`: the next of `ACK_LINES`, in
+ * order, that is `ready` — never `previous` again, so null when it is the only
+ * one ready (or none is).
+ */
+export function nextAck(ready: readonly string[], previous?: string): string | null {
+  const at = previous ? ACK_LINES.indexOf(previous) : -1
+  for (let i = 1; i <= ACK_LINES.length; i++) {
+    const line = ACK_LINES[(at + i + ACK_LINES.length) % ACK_LINES.length]!
+    if (line !== previous && ready.includes(line)) return line
+  }
+  return null
+}
+
 let requestSeq = 0
 
 /**
@@ -535,6 +590,13 @@ class VoiceSpeaker {
    * waits on one of these instead of asking again.
    */
   private readonly ahead = new Map<string, { requestId: string; done: Promise<void> }>()
+  /**
+   * Claude Voice's acknowledgement clips (`ACK_LINES`), by cache key. Kept out
+   * of the LRU so a long reply cannot push them out; `speak` plays from here.
+   */
+  private readonly acks = new Map<string, CachedClip>()
+  /** The `primeAcks` run in flight, so two callers share one. */
+  private priming: Promise<boolean> | null = null
 
   get speaking(): boolean {
     return this.active
@@ -598,7 +660,7 @@ class VoiceSpeaker {
           return { spoke: false, engine, cached: false, latencyMs: Date.now() - started }
         }
       }
-      const hit = this.cache.get(key)
+      const hit = this.cache.get(key) ?? this.acks.get(key)
       if (hit) {
         const played = await this.playClip(hit, body, generation)
         return { spoke: played, engine, cached: true, latencyMs: Date.now() - started }
@@ -717,7 +779,7 @@ class VoiceSpeaker {
     const body = stripFiller(speakable(text))
     if (!body) return
     const key = tryCacheKey(body, 'kokoro', voice, config)
-    if (this.cache.get(key) || this.ahead.has(key) || this.ahead.size >= PREFETCH_MAX) return
+    if (this.cache.get(key) || this.acks.has(key) || this.ahead.has(key) || this.ahead.size >= PREFETCH_MAX) return
     const requestId = `say_${++requestSeq}`
     const generation = this.generation
     const done = (async (): Promise<void> => {
@@ -760,9 +822,56 @@ class VoiceSpeaker {
     this.playing?.duck(level)
   }
 
+  /**
+   * Claude Voice: make each `ACK_LINES` clip in Kokoro, one at a time, and keep
+   * it. Stops at the first answer that is not Kokoro's — Edge speaking while
+   * Kokoro loads — because an acknowledgement in another voice is worse than
+   * none; a later call carries on. Resolves true once every line is held.
+   * Main's Kokoro queue is serial, so call it while nothing is being said.
+   */
+  primeAcks(config: VoiceConfig): Promise<boolean> {
+    const voice = config.kokoroVoice?.trim()
+    if (!voice) return Promise.resolve(false)
+    if (this.priming) return this.priming
+    const run = (async (): Promise<boolean> => {
+      try {
+        for (const line of ACK_LINES) {
+          const body = stripFiller(speakable(line))
+          const key = tryCacheKey(body, 'kokoro', voice, config)
+          if (!body || this.acks.has(key)) continue
+          const result = await io().speak({ text: body, engine: 'kokoro', voice, requestId: `ack_${++requestSeq}` })
+          if (!result.ok || result.format === 'mp3') return false
+          this.acks.set(key, {
+            pcm: base64ToPcm(result.audio),
+            sampleRate: result.sampleRate,
+            channels: result.channels,
+            voice: result.voice,
+            model: result.model
+          })
+        }
+        return true
+      } catch {
+        return false
+      }
+    })()
+    this.priming = run
+    void run.finally(() => {
+      if (this.priming === run) this.priming = null
+    })
+    return run
+  }
+
+  /** The `ACK_LINES` whose Kokoro clip is held for `config`'s voice — the ones that would play at once. */
+  readyAcks(config: VoiceConfig): string[] {
+    const voice = config.kokoroVoice?.trim()
+    if (!voice) return []
+    return ACK_LINES.filter((line) => this.acks.has(tryCacheKey(stripFiller(speakable(line)), 'kokoro', voice, config)))
+  }
+
   /** Forget every cached clip — for a voice or model change in Settings. */
   clearCache(): void {
     this.cache.clear()
+    this.acks.clear()
   }
 
   /**

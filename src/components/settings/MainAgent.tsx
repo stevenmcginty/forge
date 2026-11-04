@@ -107,6 +107,13 @@ const CLAUDE_MODELS = [
   { id: 'haiku', label: 'Haiku — lightest' }
 ]
 
+/** Claude Voice's own row (`claudeVoiceModel`): Sonnet first, because it speaks sooner. */
+const CLAUDE_VOICE_MODELS = [
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5 — answers fastest, the default' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5 — smartest, slower to start talking' },
+  { id: 'haiku', label: 'Haiku — lightest' }
+]
+
 const GEMINI_MODELS = [
   { id: 'gemini-3.8-flash', label: 'Flash 3.8 — newest Flash' },
   { id: 'gemini-3.6-flash', label: 'Flash 3.6 — fastest, recommended' },
@@ -335,6 +342,10 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
   const { state, actions } = useApp()
   const s = state.settings
   const live = isRealtimeBrain(spec.id) ? providerSpec(spec.id) : null
+  // Claude Voice has its own model setting; the hidden Claude brain keeps voiceClaudeModel.
+  const voiceModel = spec.id === 'claude-voice'
+  const claudeModel = voiceModel ? s.claudeVoiceModel : s.voiceClaudeModel
+  const claudeModels = voiceModel ? CLAUDE_VOICE_MODELS : CLAUDE_MODELS
 
   const commitKey = (key: AgentBrainKey, value: string): void => {
     if (key === 'geminiKey') actions.setGeminiKey(value)
@@ -364,20 +375,30 @@ function BrainDetails({ spec, probe }: { spec: AgentBrainSpec; probe: Probe | un
       ) : null}
 
       {spec.id === 'claude' || spec.id === 'claude-voice' ? (
-        <Row label="Model" hint="Opus, Sonnet and Haiku use your Claude login. Takes effect on the next turn. For GPT, pick Codex as the main agent." htmlFor="mag-claude-model">
+        <Row
+          label="Model"
+          hint={
+            voiceModel
+              ? 'Claude Voice’s own model, on your Claude login, at low effort so it starts talking sooner. Takes effect on the next turn.'
+              : 'Opus, Sonnet and Haiku use your Claude login. Takes effect on the next turn. For GPT, pick Codex as the main agent.'
+          }
+          htmlFor="mag-claude-model"
+        >
           <select
             id="mag-claude-model"
             className="select"
-            value={s.voiceClaudeModel}
+            value={claudeModel}
             onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => actions.patchSettings({ voiceClaudeModel: e.target.value })}
+            onChange={(e) =>
+              actions.patchSettings(voiceModel ? { claudeVoiceModel: e.target.value } : { voiceClaudeModel: e.target.value })
+            }
           >
-            {CLAUDE_MODELS.some((m) => m.id === s.voiceClaudeModel) ? null : (
-              <option value={s.voiceClaudeModel}>
-                {/luna/i.test(s.voiceClaudeModel) ? 'GPT-5.6 Luna — no longer offered, pick another' : s.voiceClaudeModel}
+            {claudeModels.some((m) => m.id === claudeModel) ? null : (
+              <option value={claudeModel}>
+                {/luna/i.test(claudeModel) ? 'GPT-5.6 Luna — no longer offered, pick another' : claudeModel}
               </option>
             )}
-            {CLAUDE_MODELS.map((m) => (
+            {claudeModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
               </option>

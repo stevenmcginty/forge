@@ -20,6 +20,7 @@ import {
   DEFAULT_AGENT_BRAIN,
   defaultVoiceMenu,
   isAgentBrainId,
+  isCodexClaudeModel,
   migrateAgentBrain,
   migrateCodexClaudeModel,
   normaliseVoiceMenu,
@@ -293,6 +294,8 @@ function defaultSettings(): Settings {
     voiceEdgeVoice: '',
     // Claude Voice's Kokoro voice (electron/kokoro-tts.ts).
     kokoroVoice: DEFAULT_KOKORO_VOICE,
+    // Claude Voice's own model: Sonnet, for a reply that starts in a second or two.
+    claudeVoiceModel: 'claude-sonnet-5-5',
     // Empty = the built-ins in electron/gemini-tts.ts (Sulafat, 3.1 flash TTS).
     voiceTtsVoice: '',
     voiceTtsModel: '',
@@ -893,6 +896,10 @@ function normaliseSettings(raw: Partial<Settings> | null): Settings {
           : DEFAULT_SETTINGS.voiceEngine,
     voiceEdgeVoice: typeof s.voiceEdgeVoice === 'string' ? s.voiceEdgeVoice.trim().slice(0, 60) : '',
     kokoroVoice: typeof s.kokoroVoice === 'string' && isKokoroVoice(s.kokoroVoice) ? s.kokoroVoice.trim() : DEFAULT_KOKORO_VOICE,
+    claudeVoiceModel:
+      typeof s.claudeVoiceModel === 'string' && s.claudeVoiceModel.trim() && !isCodexClaudeModel(s.claudeVoiceModel)
+        ? s.claudeVoiceModel.trim().slice(0, 80)
+        : DEFAULT_SETTINGS.claudeVoiceModel,
     // Blank is meaningful for both: "whatever gemini-tts.ts defaults to".
     voiceTtsVoice: typeof s.voiceTtsVoice === 'string' ? s.voiceTtsVoice.trim().slice(0, 40) : '',
     voiceTtsModel: typeof s.voiceTtsModel === 'string' ? s.voiceTtsModel.trim().slice(0, 80) : '',
