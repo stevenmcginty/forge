@@ -1,12 +1,16 @@
 # Handoff
 
-## Claude Live: new conductor voice agent, architecture C, building (2026-11-04 ~18:00; branch `claude-live`, worktree `C:\Users\steve\Desktop\forge-worktrees\forge-live`, not merged)
+## Claude Live: new conductor voice agent, architecture C (2026-11-04 ~19:30; built on `claude-live` 1bd4b6c, merged to master 166ea95, local, NOT pushed, NOT checked live)
 
 - **Asked (Steve):** a real back-and-forth with a Claude agent that speaks human-like, choreographs work, spins up agents, has full control of Forge (computer use, screen, projects) and shows the work; "think outside the box"; must work very well on his phone too. He said "pick the best one and start building", then: voice brain on Opus by default with a selector ("I'm not going to use it all day").
 - **Decided:** architecture C (`docs/live-agent-plan.md` on the branch): a quick Claude voice brain on the Messages API (Anthropic API credit; `liveVoiceModel` Opus 5.5 default at effort low, Sonnet/Haiku selectable) + a deep Conductor (Agent SDK, Opus 5.5, subscription) + a job ledger in main that the UI and spoken news read; full-duplex ears (OpenAI semantic-VAD transcription, Parakeet fallback), Kokoro clause speech with spoken acks. UI = Design B (`docs/live-agent-design/B.png`): right Conductor rail, big captions over the bar, crew cards, needs-you flyout, "Forge is showing you" ring. Research/audit notes were in the session scratchpad (agent-capability-audit.md, voice-agent-sota.md).
 - **Crew (gaffer foreman):** L0 foundation (shared/live.ts contract, electron/live ledger + IPC, kind `claude-live`, settings, Anthropic key) → L1 main brains, L2 renderer voice shell, L3 UI (designer) → L4 desktop integration, L5 phone/browser.
-- **Live already (master e3d264a, renderer by HMR; main needs a restart):** Claude Voice on Sonnet 5.5 low effort, spoken ack, first-clause speech, capped tool text.
-- **Steve must:** paste an Anthropic API key in Settings when L0 lands; restart Forge after the merge.
+- **Built (all six jobs verified by the foreman; re-checked on the merge: typecheck 0, live:check 27/0, live-voice:check 25, web:check good; foreman also ran voice:check 191, voice:brain 18/0, agent-bar 46/0, brain-confirm 28/0, realtime 31):** code in `electron/live/*`, `shared/live.ts`, `shared/live-card.ts`, `electron/live-card-window.ts`, `src/state/live/LiveController.tsx`, `src/lib/live/*`, `src/components/live/*`, `src/minibar/LiveCardApp.*`, `web/src/deck/{liveVoice,live-ears,live-words}.ts`, `web/src/components/LiveCards.*`. Without an Anthropic key the voice brain runs on the subscription. Ears = `gpt-4o-mini-transcribe` (needs the OpenAI key) else Parakeet.
+- **Probe (subscription route):** first text Opus 1.1-1.8 s, Haiku 0.6-0.9 s; Conductor smoke done in 5.1 s. API route not probed (no key outside the app).
+- **Deviations:** the SDK's bundled CLI (2.1.220) refuses claude-opus-5-5, so Live runs the `claude` on PATH (`electron/live/claude-cli.ts`, needs >= 2.1.280; Steve has 2.1.318). Real fix = SDK bump (npm install). Listen off never stops Live's jobs. Steps capped at 50 per job.
+- **Known gaps:** with Parakeet ears, Dictate-key words go to Live, not the pane; Forge Brain lines and mini-bar announcements still use the old voice and can talk over Live; phone `voice-setup` gate still asks for a Groq/Gemini key; OpenAI transcription-type secret on WebRTC not confirmed live.
+- **Not checked live:** no window opened — rail space, desktop card, phone UI, OpenAI ears, Kokoro through Live, 2 s phone latency target.
+- **Next:** Steve restarts Forge (main + preload changed), picks Claude Live (behind More), taps Listen. D.m.p to push (deploys Forge Web for the phone).
 
 ## Voice bar "garbled speech-to-text" was split turns; Edge TTS 403 fixed (2026-11-04 17:10; master 9d8c599 + 174be02, local, NOT pushed)
 
