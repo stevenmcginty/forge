@@ -2938,6 +2938,27 @@ export interface MobileStatus {
   detail: string
   /** The ngrok tunnel, when one is configured. `state: 'off'` otherwise. */
   tunnel: MobileTunnelStatus
+  /** Phone hands (docs/PHONE-HANDS.md): the phone's native service, as electron/phone-hands.ts last heard it. */
+  phoneHands?: PhoneHandsStatus
+}
+
+/**
+ * Phone hands as the Settings line shows it: whether a hands socket is open,
+ * and the phone's last `hands:status` (absent fields = never said).
+ */
+export interface PhoneHandsStatus {
+  connected: boolean
+  deviceName: string
+  accessibility?: boolean
+  notifications?: boolean
+  contacts?: boolean
+  /** The phone's "Let Forge use this phone" switch. */
+  enabled?: boolean
+  locked?: boolean
+  app?: string
+  version?: string
+  /** When that status arrived (ms epoch). */
+  statusAt?: number
 }
 
 /* --------------------------------------------------------------- forge web */

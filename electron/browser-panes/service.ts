@@ -15,6 +15,7 @@ import {
   type BrowserViewBounds
 } from '@shared/browser'
 import { DESKTOP_LINK_OPS } from '../desktop-hands'
+import { PHONE_LINK_OPS } from '../phone-hands'
 import { BrowserAgentOps } from './agent-ops'
 import { BrowserLink } from './link'
 import { BrowserManager } from './manager'
@@ -45,8 +46,8 @@ export interface BrowserServiceDeps {
   appOp?: (op: string, args: Record<string, unknown>, caller: BrowserOwner) => Promise<BrowserAgentReply>
 }
 
-/** Pipe ops that are the app's, not the browser's — the desktop's eyes and hands among them (../desktop-hands.ts). */
-export const APP_LINK_OPS: ReadonlySet<string> = new Set(['open_agent_pane', 'open_in_reader', 'show_view', 'forge_command', ...DESKTOP_LINK_OPS])
+/** Pipe ops that are the app's, not the browser's — the desktop's eyes and hands among them (../desktop-hands.ts), and the phone's (../phone-hands.ts). */
+export const APP_LINK_OPS: ReadonlySet<string> = new Set(['open_agent_pane', 'open_in_reader', 'show_view', 'forge_command', ...DESKTOP_LINK_OPS, ...PHONE_LINK_OPS])
 
 export class BrowserService {
   readonly manager: BrowserManager

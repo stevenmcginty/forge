@@ -14,11 +14,15 @@ import {
   MOBILE_WS_PATH,
   isVideoId,
   parseFrame,
+  parseHandsFrame,
   readMirrorInput,
   wireDim,
   wireString,
   wordPair,
   type ClientFrame,
+  type HandsReqFrame,
+  type HandsResFrame,
+  type HandsStatusFrame,
   type MirrorInput,
   type MobileChatClientFrame,
   type MobileChatServerFrame,
@@ -274,8 +278,23 @@ export interface MobileServerHost {
    * everything else on this port, which is what keeps it a LAN answer.
    */
   tvApk?: () => string
+
+  /**
+   * Phone hands (docs/PHONE-HANDS.md): a `role: "hands"` socket opened, closed,
+   * answered a request or said what it can do. Optional, like everything here:
+   * a host without it still accepts hands sockets and simply hears nothing.
+   * Requests go the other way through `sendHands`.
+   */
+  onHands?: (event: HandsEvent) => void
   log?: (line: string) => void
 }
+
+/** What a hands socket did. `socketId` names the socket for `sendHands`. */
+export type HandsEvent =
+  | { kind: 'open'; socketId: string; deviceName: string }
+  | { kind: 'close'; socketId: string }
+  | { kind: 'res'; socketId: string; frame: HandsResFrame }
+  | { kind: 'status'; socketId: string; frame: HandsStatusFrame }
 
 /** What the desktop prompt needs to ask a human the question. */
 export interface MobileApprovalAsk {
@@ -322,6 +341,8 @@ interface Client {
    */
   chatSecond: number
   chatCount: number
+  /** 'hands' once a `role: "hands"` hello is accepted. See `handsWelcome`. */
+  role: 'app' | 'hands'
 }
 
 interface ApprovalWait {
@@ -377,6 +398,12 @@ export class MobileServer {
   private http: Server | null = null
   private wss: WebSocketServer | null = null
   private clients = new Set<Client>()
+  /**
+   * Phone-hands sockets, apart from `clients` on purpose: every push, the
+   * presence count and the watch list walk `clients`, and a hands socket must
+   * be in none of them. See `handsWelcome`.
+   */
+  private handsClients = new Set<Client>()
   private heartbeat: NodeJS.Timeout | null = null
   private listening: { host: string; port: number } | null = null
   /**
@@ -515,8 +542,9 @@ export class MobileServer {
       clearInterval(this.heartbeat)
       this.heartbeat = null
     }
-    for (const client of [...this.clients]) this.drop(client, 1001, 'Server stopping')
+    for (const client of [...this.clients, ...this.handsClients]) this.drop(client, 1001, 'Server stopping')
     this.clients.clear()
+    this.handsClients.clear()
     // Whoever was watching is not watching any more. Said explicitly rather
     // than left to the close handlers above, because a screen capture that
     // outlives the server relaying it is a desktop being encoded for nobody.
@@ -622,7 +650,7 @@ export class MobileServer {
 
   /** Close any live socket belonging to a revoked device, immediately. */
   disconnectDevice(deviceId: string): void {
-    for (const client of [...this.clients]) {
+    for (const client of [...this.clients, ...this.handsClients]) {
       if (client.device?.id === deviceId) this.drop(client, 4003, 'Device revoked')
     }
   }
@@ -681,7 +709,8 @@ export class MobileServer {
       alive: true,
       approval: null,
       chatSecond: 0,
-      chatCount: 0
+      chatCount: 0,
+      role: 'app'
     }
     this.clients.add(client)
 
@@ -694,6 +723,11 @@ export class MobileServer {
     }, HEARTBEAT_GRACE_MS)
 
     socket.on('message', (raw) => {
+      // A hands socket speaks three frames and nothing else; see onHandsMessage.
+      if (client.role === 'hands') {
+        this.onHandsMessage(client, String(raw))
+        return
+      }
       const frame = parseFrame(String(raw))
       if (!frame) {
         this.send(client, { t: 'err', code: 'bad-frame', msg: 'Unreadable frame' })
@@ -720,6 +754,13 @@ export class MobileServer {
     socket.on('close', () => {
       clearTimeout(helloTimer)
       this.clients.delete(client)
+      // A hands socket held nothing: no approval, no viewer, no subs, no chat.
+      if (client.role === 'hands') {
+        this.handsClients.delete(client)
+        this.log(`${client.device?.name ?? 'Phone'} hands disconnected`)
+        this.host.onHands?.({ kind: 'close', socketId: client.viewer })
+        return
+      }
       // A phone that hangs up mid-approval takes its question with it — the
       // desktop prompt is withdrawn, or Steve would be left approving a socket
       // that no longer exists (and priming an Allow for the next asker).
@@ -1040,6 +1081,12 @@ export class MobileServer {
       case 'chat:input':
       case 'chat:focusComposer':
         return this.onChat(client, frame)
+
+      // Only a hands socket may say these, and it never reaches this switch
+      // (see onHandsMessage). From the app they mean nothing.
+      case 'hands:res':
+      case 'hands:status':
+        return
     }
   }
 
@@ -1151,6 +1198,32 @@ export class MobileServer {
 
     const token = wireString(frame.token, 512)
 
+    // Phone hands: the paired device token and nothing else — no pairing code,
+    // no approval door. A hands socket that cannot prove it is a paired phone
+    // is refused like any other bad hello.
+    if (frame.role === 'hands') {
+      const msg = 'Phone hands need this phone to be paired first. Pair it in the Forge app, then try again.'
+      if (token.length <= 30) {
+        this.send(client, { t: 'err', code: 'auth', msg })
+        this.drop(client, 4001, msg)
+        return
+      }
+      const result = this.host.auth.authenticate({
+        source: client.source,
+        deviceId: wireString(frame.deviceId, 128),
+        deviceName: wireString(frame.deviceName, 64) || 'Phone',
+        token
+      })
+      if (!result.ok) {
+        this.log(`hands auth refused from ${client.source}: ${result.msg}`)
+        this.send(client, { t: 'err', code: result.code, msg: result.msg })
+        this.drop(client, 4001, result.msg)
+        return
+      }
+      this.handsWelcome(client, result.device)
+      return
+    }
+
     // Pairing by approval — only for a hello with no credential at all, and
     // only while the door is open for this particular caller (see
     // `acceptingPairs`). When it is not, the flag is *ignored* rather than
@@ -1221,6 +1294,75 @@ export class MobileServer {
     // when nothing has been said, so a desktop with Remote Yes off is silent.
     if (this.lastRemoteYes) this.send(client, { t: 'remote-yes', ...this.lastRemoteYes })
     this.host.onPresence?.(this.connectedCount)
+  }
+
+  /* ----------------------------------------------------------- phone hands */
+
+  /**
+   * Accept a hands socket. It moves out of `clients` into `handsClients`, so no
+   * push, presence count or watch list ever sees it, and the same phone's app
+   * socket — still in `clients` — is left exactly as it was. The hello-ok is
+   * the bare minimum the contract's phone waits for: no projects, no sessions,
+   * no features, no token, and no Remote Yes replay after it.
+   */
+  private handsWelcome(client: Client, device: MobileDevice): void {
+    client.device = device
+    client.role = 'hands'
+    this.clients.delete(client)
+    this.handsClients.add(client)
+    this.log(`${device.name} hands connected from ${client.source}`)
+    this.send(client, {
+      t: 'hello-ok',
+      proto: MOBILE_PROTO,
+      appVersion: this.host.appVersion,
+      deviceName: device.name,
+      ...(this.host.desktopName?.() ? { desktopName: this.host.desktopName() } : {}),
+      projects: [],
+      profiles: [],
+      workspaces: {},
+      sessions: []
+    })
+    this.host.onHands?.({ kind: 'open', socketId: client.viewer, deviceName: device.name })
+  }
+
+  /** One frame from a hands socket: ping, hands:res or hands:status. Everything else is ignored, silently. */
+  private onHandsMessage(client: Client, raw: string): void {
+    const frame = parseHandsFrame(raw)
+    if (!frame) return
+    try {
+      switch (frame.t) {
+        case 'ping':
+          this.send(client, { t: 'pong' })
+          return
+        case 'hands:res':
+          this.host.onHands?.({ kind: 'res', socketId: client.viewer, frame })
+          return
+        case 'hands:status':
+          this.host.onHands?.({ kind: 'status', socketId: client.viewer, frame })
+          return
+      }
+    } catch (err) {
+      this.log(`hands frame "${frame.t}" failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /**
+   * Send one request down a hands socket. False when that socket is gone or not
+   * open. The frame carries both `t` (this wire) and `type` (the contract).
+   */
+  sendHands(socketId: string, frame: Omit<HandsReqFrame, 't' | 'type'>): boolean {
+    for (const client of this.handsClients) {
+      if (client.viewer !== socketId) continue
+      if (client.socket.readyState !== client.socket.OPEN) return false
+      this.send(client, { t: 'hands:req', type: 'hands:req', ...frame })
+      return true
+    }
+    return false
+  }
+
+  /** The hands sockets open now, oldest first. */
+  handsConnections(): Array<{ socketId: string; deviceName: string }> {
+    return [...this.handsClients].map((c) => ({ socketId: c.viewer, deviceName: c.device?.name ?? 'Phone' }))
   }
 
   /* ------------------------------------------------- pairing by approval */
@@ -1365,6 +1507,7 @@ export class MobileServer {
 
   private drop(client: Client, code: number, reason: string): void {
     this.clients.delete(client)
+    this.handsClients.delete(client)
     try {
       client.socket.close(code, reason)
     } catch {
@@ -1373,7 +1516,7 @@ export class MobileServer {
   }
 
   private sweep(): void {
-    for (const client of [...this.clients]) {
+    for (const client of [...this.clients, ...this.handsClients]) {
       if (!client.alive) {
         this.drop(client, 4008, 'Heartbeat lost')
         continue

@@ -57,6 +57,7 @@ import {
 import { addPtySink, getManager, getReplay, killPane, viewerGone, viewerResize, viewerWrite } from './pty-host'
 import { UNSUPPORTED, layoutEngine } from './layout-engine'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
+import { phoneHands } from './phone-hands'
 
 /**
  * Forge Mobile — the Electron half.
@@ -265,7 +266,8 @@ export function mobileStatus(): MobileStatus {
     connected: server?.connectedCount ?? 0,
     acceptUntil: armedUntil(),
     detail: lastDetail,
-    tunnel: tunnelStatus
+    tunnel: tunnelStatus,
+    phoneHands: phoneHands.status()
   }
 }
 
@@ -714,6 +716,9 @@ async function start(): Promise<void> {
       watched = new Set(ids)
       publishWatched()
     },
+    // Phone hands (electron/phone-hands.ts): the phone's native service, on
+    // its own sockets. Requests go back down through `sendHands`, set below.
+    onHands: (event) => phoneHands.handle(event),
     log: (line) => console.log(line)
   })
 
@@ -745,6 +750,7 @@ async function start(): Promise<void> {
 
   server = instance
   starting = false
+  phoneHands.setLink({ send: (socketId, frame) => instance.sendHands(socketId, frame) })
 
   // Foreman's state, fanned out from the moment the link is up — the phone's
   // twin of the subscription electron/web-host.ts holds. The snapshot in
@@ -875,6 +881,7 @@ async function stop(): Promise<void> {
   releaseBlocker()
   const instance = server
   server = null
+  phoneHands.setLink(null)
   await instance?.stop()
 }
 
@@ -1077,6 +1084,8 @@ export function publishMobileState(projectId?: string): void {
 
 export function registerMobileHandlers(): void {
   ipcMain.handle(IPC.mobileStatus, () => mobileStatus())
+  // The Settings line "Phone hands: …" rides the status broadcast.
+  phoneHands.onChange(() => report())
 
   // Every line the build prints reaches the settings page through here.
   onTvBuildChange(reportTv)

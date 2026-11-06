@@ -39,6 +39,7 @@ import { brainSpecAllowed, brainSpecTools } from '../brain-tools-mcp'
 import { refuseCommand } from './launch-guard'
 import { listAppsReply, openAppReply, openTargetReply } from './desktop-open'
 import { BRAIN_BROWSER_ALLOWED, brainBrowserTools } from '../browser-panes/brain'
+import { PHONE_BRAIN_ALLOWED, phoneBrainTools } from '../phone-hands'
 import { transcriptPath } from '../bridge/claude-transcripts'
 import { MAIN_AGENT_TOOL_SPECS, PROJECT_PROPERTY, withProjectArg } from '@shared/brain-tools'
 import type { BrainRisk } from '@shared/brain'
@@ -1331,6 +1332,10 @@ export class VoiceAgentHost {
         ),
 
         ...brainBrowserTools().map((t) => tool(t.name, t.description, t.shape, t.handler)),
+        // Steve's phone: phone_status, phone_read, phone_tap… (../phone-hands.ts),
+        // answered in-process down the phone's hands socket. Not gated: the
+        // confirm rule lives in their descriptions, and a gate would ask on every tap.
+        ...phoneBrainTools().map((t) => tool(t.name, t.description, t.shape, t.handler)),
         // open_agent_pane, type_into_pane, help_prompt, read_pane — generated
         // from shared/brain-tools.ts, the same specs every brain gets, plus the
         // `project` argument this side answers (the realtime brains' copies
@@ -1594,6 +1599,7 @@ export class VoiceAgentHost {
       ...extra.map((def) => `mcp__forge__${def.name}`),
       ...brainSpecAllowed(),
       ...BRAIN_BROWSER_ALLOWED,
+      ...PHONE_BRAIN_ALLOWED,
       ...(bridge
         ? [
             'mcp__forge-bridge__make_image',

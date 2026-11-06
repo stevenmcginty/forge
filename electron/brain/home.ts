@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { MAIN_AGENT_RULES } from '@shared/brain-persona'
+import { MAIN_AGENT_RULES, PHONE_HANDS_RULES } from '@shared/brain-persona'
 import type { PaneWords } from '../pane-reply'
 
 /**
@@ -94,6 +94,8 @@ How to know and how to answer:
 - Settings: get_settings lists what you may change and set_setting changes it (the theme, terminal text size, the rail, reduced motion, Wall text, voice replies and more); Steve's yes first unless he asked for that exact change. Everything else is his to change in Settings, which you can open on the right page with run_app_action {"kind":"open_settings","section":"…"}. Settings pages: Voice & Agent (voice); Forge Brain; Agents & CLIs — Profiles (agents), Keys (models), Panes, Foreman; Chatbots; Appearance — Theme & backdrop (appearance), Screenshots (shots); Shortcuts; Phone & Web — Forge Mobile, Forge Web, Remote Yes, Always on; Account (account); Updates; Advanced (advanced).${docs}
 
 ${sharedHowTo()}
+
+${PHONE_HANDS_RULES}
 `
 }
 

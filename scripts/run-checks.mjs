@@ -99,6 +99,7 @@ const CHECKS = [
   { name: 'memory:smoke', lane: 'fast' },
   { name: 'mirror:check', lane: 'fast' },
   { name: 'mobile:auth', lane: 'fast' },
+  { name: 'phone-hands:check', lane: 'fast', note: 'hands socket beside the app socket over loopback, phoneOp round trips, the three tool lists agree' },
   { name: 'pack:check', lane: 'fast', note: 'shells out to PowerShell Expand-Archive as the zip oracle' },
   { name: 'preview:check', lane: 'fast' },
   { name: 'pwa:check', lane: 'fast' },

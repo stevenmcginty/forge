@@ -1,5 +1,5 @@
 import { app, ipcMain, type BrowserWindow } from 'electron'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { VOICE_OWNER, type BrowserAgentReply, type BrowserOwner } from '@shared/browser'
 import { getDataDir, getProjects } from '../store'
 import { liveSessions } from '../pty-host'
@@ -9,6 +9,7 @@ import { anchoredOpenAction, paneOpenReply } from '../foreman/pane-caller'
 import { openInReader } from '../reader'
 import { DESKTOP_LINK_OPS } from '../desktop-hands'
 import { desktopLinkOp } from '../desktop-hands-ipc'
+import { PHONE_LINK_OPS, phoneLinkOp } from '../phone-hands'
 import { setBrainBrowserRunner } from './brain'
 import { setBrowserLinkFile } from './env'
 import { BrowserService, type BrowserServiceDeps } from './service'
@@ -61,6 +62,10 @@ function isDesktopOp(op: string): boolean {
   return (DESKTOP_LINK_OPS as readonly string[]).includes(op)
 }
 
+function isPhoneOp(op: string): boolean {
+  return PHONE_LINK_OPS.includes(op)
+}
+
 /** Build the service and register the renderer's handlers. Call once, with the other handlers. */
 export function registerBrowserPanes(): void {
   if (service) return
@@ -75,9 +80,11 @@ export function registerBrowserPanes(): void {
     // project of its own and gets the main agent's tool, in the one on screen.
     // open_in_reader never reaches the renderer: main owns the reader's route in.
     // Nor do the desktop ops (screen_look, window_*): ../desktop-hands.ts runs them here.
+    // Nor the phone ops (phone_*): ../phone-hands.ts sends them down the phone's hands socket.
     appOp: async (op, args, caller) => {
       if (op === 'open_in_reader') return openInReaderFor(args, caller)
       if (isDesktopOp(op)) return desktopLinkOp(op, args)
+      if (isPhoneOp(op)) return phoneLinkOp(op, args, { shotDir: join(getDataDir(), 'phone-looks') })
       const anchored = op === 'open_agent_pane' ? anchoredOpenAction(args, caller.id) : null
       return paneOpenReply(anchored ? await askAnchoredAppAction(anchored) : await askRendererTool(op, args))
     }

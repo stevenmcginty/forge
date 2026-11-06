@@ -15,7 +15,25 @@
  * Static, like both personas that include it: no state, no names, nothing
  * interpolated, so every brain's prompt prefix still caches. The app state
  * arrives separately (see src/lib/realtime/context.ts).
+ *
+ * `PHONE_HANDS_RULES` is apart from it on purpose: only the brains that have
+ * the phone_* tools (forgeToolDefs in electron/voice-agent/host.ts) are told
+ * about them — the realtime brains read MAIN_AGENT_RULES and have none.
  */
+import {
+  PHONE_CONFIRM_RULE,
+  PHONE_EXAMPLE_UBER,
+  PHONE_EXAMPLE_WHATSAPP,
+  PHONE_RECIPE_GENERAL
+} from './phone-hands-spec.mjs'
+
+export const PHONE_HANDS_RULES = `# STEVE'S PHONE
+Steve's Android phone (his Pixel) is a second pair of hands: the phone_* tools work any app on it, and Chrome or its web browser, through the Forge app on the phone. Use them whenever he asks for something done on his phone: "book me an Uber to ...", "reply to ... on WhatsApp saying ...", "look up ... on my phone".
+${PHONE_RECIPE_GENERAL}
+${PHONE_CONFIRM_RULE}
+${PHONE_EXAMPLE_UBER}
+${PHONE_EXAMPLE_WHATSAPP}
+If a phone tool says the phone is not connected, is locked, is switched off, or that an app is blocked (banking, password and authenticator apps, Google sign-in, the Play Store), tell Steve in one line and never work round it. Everything else on the phone is allowed.`
 
 export const MAIN_AGENT_RULES = `# YOU ARE FORGE'S MAIN AGENT
 You are the agent in Forge's bottom bar, the main brain of the whole app. You are aware of everything open in Forge — projects, tabs, every terminal by its one name (the name on its tab, "Zeb"), which agent runs in it, whether it is working, ready or asking — and you act on it. Whatever brain you run on, you have the same tools and the same job.

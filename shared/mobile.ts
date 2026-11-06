@@ -284,6 +284,74 @@ export interface HelloFrame {
    * code. See ACCEPT_WINDOW_MS.
    */
   requestPair?: boolean
+  /**
+   * `"hands"`: this socket is the phone's native "phone hands" service, not the
+   * app (docs/PHONE-HANDS.md). It needs the paired device token, never pairs,
+   * never displaces the same phone's app socket, gets no pushes, and may send
+   * only `ping`, `hands:res` and `hands:status`. Absent = the app, as before.
+   */
+  role?: 'hands'
+}
+
+/* ------------------------------------------------------------ phone hands
+ *
+ * The contract (docs/PHONE-HANDS.md) writes these with `type`; this wire says
+ * `t`. Both are sent down and both are accepted up, so a phone built to either
+ * reading works: see `parseHandsFrame` and MobileServer.sendHands.
+ */
+
+/** Desk → phone: do one op. Answered by a `hands:res` with the same id. */
+export interface HandsReqFrame {
+  t: 'hands:req'
+  type: 'hands:req'
+  id: string
+  op: string
+  args: Record<string, unknown>
+}
+
+/** Phone → desk: the answer to one `hands:req`. */
+export interface HandsResFrame {
+  t: 'hands:res'
+  id: string
+  ok: boolean
+  text?: string
+  /** Base64 JPEG, `look` only. */
+  image?: string
+  mime?: string
+  /** Plain words Steve can read, when `ok` is false. */
+  error?: string
+}
+
+/** Phone → desk: what the phone's hands can do right now. After hello-ok, then on change. */
+export interface HandsStatusFrame {
+  t: 'hands:status'
+  accessibility?: boolean
+  notifications?: boolean
+  contacts?: boolean
+  enabled?: boolean
+  screenOn?: boolean
+  locked?: boolean
+  app?: string
+  version?: string
+}
+
+/**
+ * Parse one frame from a hands socket: `ping`, `hands:res` or `hands:status`,
+ * named by `t` or by `type`. Anything else is null, and the server ignores it.
+ */
+export function parseHandsFrame(raw: string): PingFrame | HandsResFrame | HandsStatusFrame | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as { t?: unknown; type?: unknown }
+  const t = typeof record.t === 'string' ? record.t : record.type
+  if (t !== 'ping' && t !== 'hands:res' && t !== 'hands:status') return null
+  return { ...(value as object), t } as PingFrame | HandsResFrame | HandsStatusFrame
 }
 
 /** Subscribe to a session's output. Answered with `replay`, then live `data`. */
@@ -755,6 +823,8 @@ export type ClientFrame =
   | MirrorStopFrame
   | MirrorInputFrame
   | MobileChatClientFrame
+  | HandsResFrame
+  | HandsStatusFrame
 
 /* ------------------------------------------------------------ server frames */
 
@@ -1019,6 +1089,7 @@ export type ServerFrame =
   | MirrorSignalFrame
   | MirrorStopFrame
   | MobileChatServerFrame
+  | HandsReqFrame
 
 /* ----------------------------------------------------------------- decoding */
 

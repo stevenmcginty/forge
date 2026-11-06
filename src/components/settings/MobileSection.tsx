@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { normaliseNgrokDomain } from '@shared/mobile'
-import type { ForgeTvStatus, MobileDeviceRecord, MobilePairOffer, MobileStatus } from '@shared/types'
+import type { ForgeTvStatus, MobileDeviceRecord, MobilePairOffer, MobileStatus, PhoneHandsStatus } from '@shared/types'
 import { useApp } from '@/state/AppState'
 import { Card, maskKey, Row, Section, StateChip, TextField, Toggle, type ChipTone } from './parts'
 
@@ -492,6 +492,7 @@ export function MobileSection(): ReactNode {
             This machine will not sleep while that is true.
           </p>
         )}
+        {status.phoneHands && <p className="scard__hint">{phoneHandsLine(status.phoneHands)}</p>}
       </Card>
 
       <ForgeTvCard
@@ -671,4 +672,11 @@ function lastSeen(at: number): string {
   const hours = Math.round(minutes / 60)
   if (hours < 24) return `${hours}h ago`
   return `${Math.round(hours / 24)}d ago`
+}
+
+/** "Phone hands: connected — accessibility on, notifications on, switch on", from the phone's last hands:status. */
+function phoneHandsLine(hands: PhoneHandsStatus): string {
+  if (!hands.connected) return 'Phone hands: not connected.'
+  const word = (value: boolean | undefined): string => (value === undefined ? 'unknown' : value ? 'on' : 'off')
+  return `Phone hands: connected — accessibility ${word(hands.accessibility)}, notifications ${word(hands.notifications)}, switch ${word(hands.enabled)}.`
 }

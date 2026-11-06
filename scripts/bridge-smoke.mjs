@@ -175,14 +175,14 @@ async function handshake(session, label) {
   return init
 }
 
-const TOOL_NAMES = ['ask_gemini', 'browser_click', 'browser_close', 'browser_key', 'browser_list', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_text', 'browser_type', 'browser_upload', 'edit_image', 'forge_command', 'make_image', 'make_video', 'open_agent_pane', 'open_in_reader', 'screen_look', 'show_on_board', 'show_view', 'summarize_video', 'window_click', 'window_key', 'window_list', 'window_read', 'window_type']
+const TOOL_NAMES = ['ask_gemini', 'browser_click', 'browser_close', 'browser_key', 'browser_list', 'browser_open', 'browser_read', 'browser_screenshot', 'browser_text', 'browser_type', 'browser_upload', 'edit_image', 'forge_command', 'make_image', 'make_video', 'open_agent_pane', 'open_in_reader', 'phone_apps', 'phone_find_contact', 'phone_key', 'phone_look', 'phone_notifications', 'phone_open_app', 'phone_open_link', 'phone_read', 'phone_reply', 'phone_scroll', 'phone_status', 'phone_tap', 'phone_type', 'screen_look', 'show_on_board', 'show_view', 'summarize_video', 'window_click', 'window_key', 'window_list', 'window_read', 'window_type']
 
 async function listTools(session, label) {
   const res = await session.request('tools/list', {})
   const tools = res.result?.tools ?? []
   const names = tools.map((t) => t.name).sort()
   check(
-    `${label}: tools/list returns exactly the twenty-six bridge tools`,
+    `${label}: tools/list returns exactly the thirty-nine bridge tools`,
     JSON.stringify(names) === JSON.stringify(TOOL_NAMES),
     JSON.stringify(names)
   )
@@ -222,7 +222,21 @@ async function listTools(session, label) {
     window_read: [],
     window_click: [],
     window_type: ['text'],
-    window_key: ['keys']
+    window_key: ['keys'],
+    // Steve's phone (bridge/phone-tools.mjs, from shared/phone-hands-spec.mjs).
+    phone_status: [],
+    phone_look: [],
+    phone_read: [],
+    phone_tap: [],
+    phone_type: ['text'],
+    phone_scroll: ['direction'],
+    phone_key: ['key'],
+    phone_open_app: [],
+    phone_open_link: ['url'],
+    phone_apps: [],
+    phone_notifications: [],
+    phone_reply: ['n', 'text'],
+    phone_find_contact: ['name']
   }
   for (const t of tools) {
     check(

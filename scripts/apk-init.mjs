@@ -319,6 +319,118 @@ patch(APP_GRADLE, 'applicationId hook for -PforgeTv (the TV build)', (text) => {
   )
 })
 
+/* ------------------------------------------------ 4c. the phone hands
+ *
+ * The native half of "Forge agents operate the phone": an accessibility
+ * service (eyes and fingers), a notification listener (read/reply), a
+ * specialUse foreground service that holds the desk socket, and a boot
+ * receiver that brings it back after a reboot. All inert unless Steve turns
+ * the master switch on and grants the two restricted settings by hand.
+ */
+
+// specialUse rather than dataSync (6 h/day cap on target 35) or connectedDevice
+// (needs a network-state prerequisite). No runtime prerequisite; the
+// PROPERTY_SPECIAL_USE_FGS_SUBTYPE is only read by Play review, which this
+// sideloaded app never faces. POST_NOTIFICATIONS for the ongoing notification
+// on 13+, RECEIVE_BOOT_COMPLETED for the boot receiver, READ_CONTACTS for
+// find_contact, and the battery-optimisation opt-out so the socket survives
+// Doze with the app closed.
+patch(MANIFEST, 'phone-hands permissions', (text) => {
+  if (text.includes('FOREGROUND_SERVICE_SPECIAL_USE')) return text
+  const perms = [
+    '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
+    '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />',
+    '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+    '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />',
+    '<uses-permission android:name="android.permission.READ_CONTACTS" />',
+    '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />'
+  ].join('\n    ')
+  return text.replace(
+    /(\s*)(<uses-permission android:name="android\.permission\.INTERNET")/,
+    `$1${perms}$1$2`
+  )
+})
+
+// A scoped launcher query, not QUERY_ALL_PACKAGES: apps/open_app need to see
+// launchable apps, and nothing more. Added inside the <queries> block the
+// speech recogniser and RustDesk already share.
+// WAKE_LOCK: a screen op "wakes it if off" (the contract), and a service with
+// no Activity can only do that by acquiring a screen wake lock — which throws a
+// SecurityException without this normal (install-time) permission.
+patch(MANIFEST, 'phone-hands WAKE_LOCK permission', (text) => {
+  if (text.includes('android.permission.WAKE_LOCK')) return text
+  return text.replace(
+    /(\s*)(<uses-permission android:name="android\.permission\.INTERNET")/,
+    `$1<uses-permission android:name="android.permission.WAKE_LOCK" />$1$2`
+  )
+})
+
+patch(MANIFEST, 'phone-hands <queries> launcher intent', (text) => {
+  if (text.includes('phone-hands: launcher query')) return text
+  return text.replace(
+    /(\s*)(<package android:name="com\.carriez\.flutter_hbb" \/>)/,
+    `$1<!-- phone-hands: launcher query (apps/open_app; scoped, not an all-packages grant) -->` +
+      `$1<intent>$1  <action android:name="android.intent.action.MAIN" />` +
+      `$1  <category android:name="android.intent.category.LAUNCHER" />$1</intent>$1$2`
+  )
+})
+
+patch(MANIFEST, 'phone-hands services and boot receiver', (text) => {
+  if (text.includes('ForgeHandsAccessibilityService')) return text
+  const block = [
+    '',
+    '        <!-- Phone hands: Forge agents operating the phone over the desk socket. -->',
+    '        <service',
+    '            android:name=".ForgeHandsAccessibilityService"',
+    '            android:exported="true"',
+    '            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">',
+    '            <intent-filter>',
+    '                <action android:name="android.accessibilityservice.AccessibilityService" />',
+    '            </intent-filter>',
+    '            <meta-data',
+    '                android:name="android.accessibilityservice"',
+    '                android:resource="@xml/forge_hands_accessibility" />',
+    '        </service>',
+    '',
+    '        <service',
+    '            android:name=".ForgeNotificationListener"',
+    '            android:exported="true"',
+    '            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">',
+    '            <intent-filter>',
+    '                <action android:name="android.service.notification.NotificationListenerService" />',
+    '            </intent-filter>',
+    '        </service>',
+    '',
+    '        <service',
+    '            android:name=".ForgeHandsService"',
+    '            android:exported="false"',
+    '            android:foregroundServiceType="specialUse">',
+    '            <property',
+    '                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"',
+    '                android:value="forge-phone-hands" />',
+    '        </service>',
+    '',
+    '        <receiver',
+    '            android:name=".ForgeHandsBootReceiver"',
+    '            android:exported="true">',
+    '            <intent-filter>',
+    '                <action android:name="android.intent.action.BOOT_COMPLETED" />',
+    '                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />',
+    '            </intent-filter>',
+    '        </receiver>',
+    ''
+  ].join('\n')
+  return text.replace(/(\s*)<\/application>/, `${block}$1</application>`)
+})
+
+patch(APP_GRADLE, 'OkHttp dependency (the phone-hands socket)', (text) => {
+  if (text.includes('com.squareup.okhttp3:okhttp')) return text
+  return text.replace(
+    /(\s*)(implementation project\(':capacitor-cordova-android-plugins'\))/,
+    `$1$2$1implementation "com.squareup.okhttp3:okhttp:4.12.0"`
+  )
+})
+
 patch(MANIFEST, 'usesCleartextTraffic on <application>', (text) => {
   if (text.includes('android:usesCleartextTraffic')) return text
   return text.replace(/<application(\s)/, '<application\n        android:usesCleartextTraffic="true"$1')
@@ -355,6 +467,19 @@ if (!existsSync(filePaths)) {
   })
 }
 
+// The accessibility service config, copied like file_paths.xml above. Kept in
+// mobile/native so it is reviewed as a resource, not patched in as a string.
+{
+  const dest = join(XML_DIR, 'forge_hands_accessibility.xml')
+  const fresh = readFileSync(join(NATIVE, 'forge_hands_accessibility.xml'), 'utf8')
+  if (!existsSync(dest) || readFileSync(dest, 'utf8') !== fresh) {
+    writeFileSync(dest, fresh)
+    console.log('  copied  forge_hands_accessibility.xml')
+  } else {
+    console.log('  ok      forge_hands_accessibility.xml (current)')
+  }
+}
+
 /* -------------------------------------------------- 6. Kotlin sources */
 
 // The generated Java MainActivity is replaced with the Kotlin one that
@@ -364,7 +489,16 @@ if (existsSync(generatedMain)) {
   rmSync(generatedMain)
   console.log('  removed generated MainActivity.java')
 }
-for (const source of ['MainActivity.kt', 'ForgeUpdaterPlugin.kt']) {
+for (const source of [
+  'MainActivity.kt',
+  'ForgeUpdaterPlugin.kt',
+  'ForgeHandsPlugin.kt',
+  'ForgeHandsService.kt',
+  'ForgeHandsAccessibilityService.kt',
+  'ForgeNotificationListener.kt',
+  'ForgeHandsOps.kt',
+  'ForgeHandsBootReceiver.kt'
+]) {
   const target = join(JAVA_DIR, source)
   const fresh = readFileSync(join(NATIVE, source), 'utf8')
   if (!existsSync(target) || readFileSync(target, 'utf8') !== fresh) {

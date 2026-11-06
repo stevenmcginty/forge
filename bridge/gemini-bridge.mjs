@@ -36,6 +36,7 @@ import { autoPost, SHOW_ON_BOARD_TOOL, showOnBoardHandler } from './canvas-tools
 import { BROWSER_HANDLERS, BROWSER_INSTRUCTIONS, BROWSER_TOOLS } from './browser-tools.mjs'
 import { APP_HANDLERS, APP_INSTRUCTION_LINE, APP_TOOLS } from './forge-app-tools.mjs'
 import { DESKTOP_HANDLERS, DESKTOP_INSTRUCTION_LINE, DESKTOP_TOOLS } from './desktop-tools.mjs'
+import { PHONE_HANDLERS, PHONE_INSTRUCTION_LINE, PHONE_TOOLS } from './phone-tools.mjs'
 
 const SERVER_NAME = 'forge-bridge'
 const SERVER_VERSION = '1.0.0'
@@ -382,7 +383,8 @@ const TOOLS = [
   SHOW_ON_BOARD_TOOL,
   ...BROWSER_TOOLS,
   ...APP_TOOLS,
-  ...DESKTOP_TOOLS
+  ...DESKTOP_TOOLS,
+  ...PHONE_TOOLS
 ]
 
 /* ------------------------------------------------------------- text (REST)
@@ -1407,7 +1409,8 @@ const HANDLERS = {
   show_on_board: showOnBoardHandler(ok, fail),
   ...BROWSER_HANDLERS,
   ...APP_HANDLERS,
-  ...DESKTOP_HANDLERS
+  ...DESKTOP_HANDLERS,
+  ...PHONE_HANDLERS
 }
 
 /**
@@ -1423,7 +1426,8 @@ const server = new Server(
   { name: SERVER_NAME, version: SERVER_VERSION },
   { capabilities: { tools: {} }, instructions: `${BROWSER_INSTRUCTIONS}
 ${APP_INSTRUCTION_LINE}
-${DESKTOP_INSTRUCTION_LINE}` }
+${DESKTOP_INSTRUCTION_LINE}
+${PHONE_INSTRUCTION_LINE}` }
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
