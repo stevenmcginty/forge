@@ -1,4 +1,4 @@
-package com.forge.mobile
+package com.forge.hands
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -32,17 +32,20 @@ import java.util.concurrent.TimeUnit
  * that Forge can drive the phone — with a Stop action that flips the master
  * switch off.
  *
- * It reads the desk address and token fresh from Capacitor's prefs on every
- * connect, so pairing in the WebView and this socket never drift. No token or
- * origin means the phone is not paired: it waits and retries every 60 s rather
- * than hammering a desk that was never set.
+ * It reads the desk address and token fresh from Forge Hands' own prefs on
+ * every connect, so a new pairing on the setup screen is picked up at once
+ * (the screen sends ACTION_RECONNECT). No token or origin means the phone is
+ * not paired: it waits and retries every 60 s rather than hammering a desk
+ * that was never set. A token the desk refuses is forgotten, and the setup
+ * screen says to pair again.
  */
 class ForgeHandsService : Service() {
 
   companion object {
     private const val CHANNEL = "forge_hands"
     private const val NOTIF_ID = 42
-    private const val ACTION_STOP = "com.forge.mobile.hands.STOP"
+    private const val ACTION_STOP = "com.forge.hands.STOP"
+    private const val ACTION_RECONNECT = "com.forge.hands.RECONNECT"
 
     private const val PING_MS = 15_000L
     private const val RETRY_UNPAIRED_MS = 60_000L
@@ -58,6 +61,49 @@ class ForgeHandsService : Service() {
     fun stop(ctx: Context) {
       ctx.stopService(Intent(ctx, ForgeHandsService::class.java))
     }
+
+    /** True while the service is running (switched on, or started by accessibility). */
+    @Volatile
+    var alive = false
+      private set
+
+    /**
+     * Drop the socket and dial again now, with whatever address and token are
+     * stored: used right after pairing. Starts nothing when the switch is off
+     * and the service is not already running.
+     */
+    fun reconnect(ctx: Context) {
+      if (!alive && !ForgeHands.isEnabled(ctx)) return
+      val intent = Intent(ctx, ForgeHandsService::class.java).setAction(ACTION_RECONNECT)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(intent)
+      else ctx.startService(intent)
+    }
+
+    /** http(s)/ws(s)://host[:port] -> ws(s)://host[:port]/link. */
+    internal fun toWs(origin: String): String? {
+      val trimmed = origin.trim().trimEnd('/')
+      val ws = when {
+        trimmed.startsWith("https://") -> "wss://" + trimmed.removePrefix("https://")
+        trimmed.startsWith("http://") -> "ws://" + trimmed.removePrefix("http://")
+        trimmed.startsWith("wss://") || trimmed.startsWith("ws://") -> trimmed
+        else -> return null
+      }
+      return "$ws/link"
+    }
+
+    /**
+     * The server checks Origin matches Host (electron/mobile/server.ts:468). A
+     * phone loading the bundle has an Origin of this very server; we have no
+     * page, so we set one that matches: the http(s) form of the same authority.
+     */
+    internal fun handshakeHeaders(wsUrl: String): Headers {
+      val authority = wsUrl.removePrefix("wss://").removePrefix("ws://").substringBefore("/")
+      val scheme = if (wsUrl.startsWith("wss://")) "https" else "http"
+      return Headers.Builder()
+        .add("Origin", "$scheme://$authority")
+        .add("ngrok-skip-browser-warning", "1")
+        .build()
+    }
   }
 
   private val client = OkHttpClient.Builder()
@@ -65,6 +111,7 @@ class ForgeHandsService : Service() {
     .build()
 
   private val main = Handler(Looper.getMainLooper())
+  @Volatile
   private var socket: WebSocket? = null
   private var attempt = 0
   private var running = false
@@ -83,6 +130,7 @@ class ForgeHandsService : Service() {
 
   override fun onCreate() {
     super.onCreate()
+    alive = true
     createChannel()
     ForgeHands.statusListener = { pushStatus(it) }
   }
@@ -97,12 +145,15 @@ class ForgeHandsService : Service() {
     if (!running) {
       running = true
       connect()
+    } else if (intent?.action == ACTION_RECONNECT) {
+      redial()
     }
     return START_STICKY
   }
 
   override fun onDestroy() {
     running = false
+    alive = false
     ForgeHands.linked = false
     main.removeCallbacksAndMessages(null)
     socket?.close(1000, "service stopping")
@@ -119,7 +170,7 @@ class ForgeHandsService : Service() {
     val origin = ForgeHands.origin(this)
     val token = ForgeHands.deviceToken(this)
     if (origin.isEmpty() || token.isEmpty()) {
-      updateNotification("Not paired yet — pair Forge on this phone first.")
+      updateNotification("Not paired yet — open Forge Hands to pair.")
       main.postDelayed({ connect() }, RETRY_UNPAIRED_MS)
       return
     }
@@ -134,6 +185,18 @@ class ForgeHandsService : Service() {
     socket = client.newWebSocket(request, listener)
   }
 
+  /** A new pairing: forget the old socket and its backoff, dial now. */
+  private fun redial() {
+    main.removeCallbacksAndMessages(null)
+    val old = socket
+    socket = null
+    ForgeHands.linked = false
+    helloAcked = false
+    attempt = 0
+    old?.close(1000, "re-pairing")
+    connect()
+  }
+
   private val listener = object : WebSocketListener() {
     override fun onOpen(webSocket: WebSocket, response: Response) {
       val hello = JSONObject()
@@ -146,8 +209,10 @@ class ForgeHandsService : Service() {
       webSocket.send(hello.toString())
     }
 
+    // A callback from a socket that redial() already replaced is ignored, so
+    // an old socket closing cannot schedule a second dial.
     override fun onMessage(webSocket: WebSocket, text: String) {
-      handle(text)
+      if (webSocket === socket) handle(text)
     }
 
     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -155,11 +220,11 @@ class ForgeHandsService : Service() {
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-      scheduleReconnect()
+      if (webSocket === socket) scheduleReconnect()
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-      scheduleReconnect()
+      if (webSocket === socket) scheduleReconnect()
     }
   }
 
@@ -171,13 +236,32 @@ class ForgeHandsService : Service() {
     when (kind) {
       "hands:req" -> onRequest(frame)
       "hello-ok" -> onHelloOk()
+      "err" -> onRefused(frame.optString("code"), frame.optString("msg"))
       // pong and any desk push are ignored: a hands socket gets no pushes.
+    }
+  }
+
+  /**
+   * The desk refused the hello. `auth` means it does not know (or no longer
+   * trusts) this token: forget it so we stop knocking, and let the setup
+   * screen say "pair again". Lockouts and cooldowns keep the token; the
+   * normal backoff tries again after the close that follows.
+   */
+  private fun onRefused(code: String, msg: String) {
+    val words = msg.ifEmpty { "The desk refused this phone." }
+    if (code == "auth") {
+      ForgeHands.forgetToken(this)
+      ForgeHands.linkNote = "$words Pair again with a new link from Forge."
+      updateNotification("Not paired — open Forge Hands to pair again.")
+    } else {
+      ForgeHands.linkNote = words
     }
   }
 
   private fun onHelloOk() {
     helloAcked = true
     ForgeHands.linked = true
+    ForgeHands.linkNote = ""
     attempt = 0
     updateNotification("Forge can use this phone")
     main.removeCallbacks(pinger)
@@ -278,42 +362,17 @@ class ForgeHandsService : Service() {
     val stopIntent = Intent(this, ForgeHandsService::class.java).setAction(ACTION_STOP)
     val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     val stop = PendingIntent.getService(this, 1, stopIntent, flags)
+    val open = PendingIntent.getActivity(this, 2, Intent(this, SetupActivity::class.java), flags)
     val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
       Notification.Builder(this, CHANNEL) else @Suppress("DEPRECATION") Notification.Builder(this)
     return builder
-      .setContentTitle("Forge phone hands")
+      .setContentTitle("Forge Hands")
       .setContentText(text)
+      .setContentIntent(open)
       .setSmallIcon(android.R.drawable.ic_menu_manage)
       .setOngoing(true)
       .addAction(Notification.Action.Builder(null, "Stop", stop).build())
       .build()
   }
 
-  /* --------------------------------------------------------- address */
-
-  /** http(s)://host[:port] -> ws(s)://host[:port]/link. */
-  private fun toWs(origin: String): String? {
-    val trimmed = origin.trim().trimEnd('/')
-    val ws = when {
-      trimmed.startsWith("https://") -> "wss://" + trimmed.removePrefix("https://")
-      trimmed.startsWith("http://") -> "ws://" + trimmed.removePrefix("http://")
-      trimmed.startsWith("wss://") || trimmed.startsWith("ws://") -> trimmed
-      else -> return null
-    }
-    return "$ws/link"
-  }
-
-  /**
-   * The server checks Origin matches Host (electron/mobile/server.ts:468). A
-   * phone loading the bundle has an Origin of this very server; we have no
-   * page, so we set one that matches: the http(s) form of the same authority.
-   */
-  private fun handshakeHeaders(wsUrl: String): Headers {
-    val authority = wsUrl.removePrefix("wss://").removePrefix("ws://").substringBefore("/")
-    val scheme = if (wsUrl.startsWith("wss://")) "https" else "http"
-    return Headers.Builder()
-      .add("Origin", "$scheme://$authority")
-      .add("ngrok-skip-browser-warning", "1")
-      .build()
-  }
 }

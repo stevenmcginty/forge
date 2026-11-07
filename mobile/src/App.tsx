@@ -30,8 +30,7 @@ import { simDevice } from './lib/sim'
 import { tvBridge } from './lib/tv-bridge'
 import { mirrorListeners } from './lib/mirror'
 import { UpdateSheet } from './components/Update'
-import { PhoneHandsSheet } from './components/PhoneHands'
-import { CURRENT_VERSION_NAME, isNativeApp, openRustDesk, startAutoUpdate, updateStore } from './lib/update'
+import { CURRENT_VERSION_NAME, openRustDesk, startAutoUpdate, updateStore } from './lib/update'
 
 /**
  * Forge Mobile.
@@ -104,7 +103,6 @@ function LiveApp(): React.JSX.Element {
   // on screen until it has been acted on or superseded.
   const [hint, setHint] = useState('')
   const [showUpdate, setShowUpdate] = useState(false)
-  const [showHands, setShowHands] = useState(false)
   // Whether there is a newer APK, asked and answered without the user's
   // involvement — and, since startAutoUpdate, fetched and offered to the
   // installer without it either. The pill is what is left over for the cases
@@ -550,7 +548,6 @@ function LiveApp(): React.JSX.Element {
         updateReady={updateReady}
         onForget={forget}
         onUpdate={() => setShowUpdate(true)}
-        onHands={isNativeApp() ? () => setShowHands(true) : undefined}
       />
 
       {/*
@@ -676,13 +673,6 @@ function LiveApp(): React.JSX.Element {
       )}
 
       {showUpdate && <UpdateSheet onClose={() => setShowUpdate(false)} />}
-      {showHands && (
-        <PhoneHandsSheet
-          deviceId={deviceId()}
-          deviceName={deviceName()}
-          onClose={() => setShowHands(false)}
-        />
-      )}
       {notice && <div className="toast">{notice}</div>}
     </div>
   )
@@ -697,8 +687,7 @@ function StatusStrip({
   version,
   updateReady,
   onForget,
-  onUpdate,
-  onHands
+  onUpdate
 }: {
   state: LinkState
   detail: string
@@ -713,8 +702,6 @@ function StatusStrip({
   updateReady: boolean
   onForget: () => void
   onUpdate: () => void
-  /** Open the Phone hands card. Undefined in a browser, where it is hidden. */
-  onHands?: () => void
 }): React.JSX.Element {
   return (
     <div className={`status status-${state}`}>
@@ -734,11 +721,6 @@ function StatusStrip({
       >
         {updateReady ? 'Update' : `v${CURRENT_VERSION_NAME}`}
       </button>
-      {onHands && (
-        <button type="button" className="status-forget" onClick={onHands}>
-          Hands
-        </button>
-      )}
       <button type="button" className="status-forget" onClick={onForget}>
         Unpair
       </button>

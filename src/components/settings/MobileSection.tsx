@@ -56,7 +56,9 @@ export function MobileSection(): ReactNode {
   const [status, setStatus] = useState<MobileStatus | null>(null)
   const [tv, setTv] = useState<ForgeTvStatus | null>(null)
   const [offer, setOffer] = useState<Extract<MobilePairOffer, { ok: true }> | null>(null)
-  const [qr, setQr] = useState('')
+  // The Forge Hands link (forgehands://pair?…): a separate offer from the QR above.
+  const [handsOffer, setHandsOffer] = useState<Extract<MobilePairOffer, { ok: true }> | null>(null)
+  const [handsError, setHandsError] = useState('')
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -95,55 +97,29 @@ export function MobileSection(): ReactNode {
 
   // Only ticks while something on this page changes second by second.
   useEffect(() => {
-    if (!offer && !armed) return
+    if (!offer && !handsOffer && !armed) return
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [offer, armed])
+  }, [offer, handsOffer, armed])
 
   // A code that has expired is worse than no code: it looks usable and is not.
   useEffect(() => {
     if (offer && secondsLeft(offer.expiresAt, now) === 0) setOffer(null)
-  }, [offer, now])
+    if (handsOffer && secondsLeft(handsOffer.expiresAt, now) === 0) setHandsOffer(null)
+  }, [offer, handsOffer, now])
 
-  // The QR is derived state: it exists exactly as long as the offer does, so
-  // expiry and Cancel clear it through the same `offer` path — a QR outliving
-  // its code would look scannable and pair nothing. Encoding happens here, on
-  // this machine; the link embeds the pairing credential and must never go to
-  // some QR-rendering service. Dark modules on a light ground with a real
-  // quiet zone, whatever theme the card is drawn in — inverted codes fail on
-  // many scanner libraries, and a margin-less code fails on most.
-  useEffect(() => {
-    if (!offer?.link) {
-      setQr('')
-      return
-    }
-    let stale = false
-    void import('qrcode')
-      .then(({ toDataURL }) =>
-        toDataURL(offer.link, {
-          errorCorrectionLevel: 'M',
-          margin: 3,
-          width: 256,
-          color: { dark: '#000000', light: '#ffffff' }
-        })
-      )
-      .then((url) => {
-        if (!stale) setQr(url)
-      })
-      .catch(() => {
-        if (!stale) setQr('')
-      })
-    return () => {
-      stale = true
-    }
-  }, [offer?.link])
+  const qr = useQr(offer?.link ?? '')
+  const handsQr = useQr(handsOffer?.link ?? '')
 
   const toggle = useCallback(async (on: boolean) => {
     setBusy(true)
     setError('')
     try {
       setStatus(on ? await window.forge.mobile.start() : await window.forge.mobile.stop())
-      if (!on) setOffer(null)
+      if (!on) {
+        setOffer(null)
+        setHandsOffer(null)
+      }
     } finally {
       setBusy(false)
     }
@@ -164,6 +140,24 @@ export function MobileSection(): ReactNode {
     }
     setNow(Date.now())
     setOffer(result)
+  }, [])
+
+  const pairHands = useCallback(async () => {
+    setHandsError('')
+    const result = await window.forge.mobile.handsPair()
+    if (!result.ok) {
+      setHandsError(result.error)
+      return
+    }
+    setNow(Date.now())
+    setHandsOffer(result)
+  }, [])
+
+  // Hide revokes the code too: a link once on screen must not stay live for
+  // its five minutes after Steve has put it away.
+  const hideHandsOffer = useCallback(async (token: string) => {
+    setHandsOffer(null)
+    await window.forge.mobile.handsPairCancel(token)
   }, [])
 
   const cancelPairing = useCallback(async () => {
@@ -493,6 +487,29 @@ export function MobileSection(): ReactNode {
           </p>
         )}
         {status.phoneHands && <p className="scard__hint">{phoneHandsLine(status.phoneHands)}</p>}
+        {status.state === 'listening' &&
+          (handsOffer ? (
+            <div className="mobile-pair">
+              {/* The same single-use, five-minute kind of code as the QR above,
+                  but it can only ever pair Forge Hands (a hands-scoped device). */}
+              {handsQr && <img className="mobile-pair__qr" src={handsQr} alt="Forge Hands pairing QR code" width={256} height={256} />}
+              <p className="mobile-pair__lead">Scan or tap this on the phone to pair Forge Hands. It works once.</p>
+              <code className="mobile-address">{handsOffer.link}</code>
+              <p className="mobile-pair__ttl">
+                Expires in {secondsLeft(handsOffer.expiresAt, now)}s{' '}
+                <button type="button" className="sbtn" onClick={() => void hideHandsOffer(handsOffer.token)}>
+                  Hide
+                </button>
+              </p>
+            </div>
+          ) : (
+            <p className="scard__hint">
+              <button type="button" className="sbtn" onClick={() => void pairHands()}>
+                Pair Forge Hands
+              </button>
+            </p>
+          ))}
+        {handsError && <p className="mobile-error">{handsError}</p>}
       </Card>
 
       <ForgeTvCard
@@ -674,9 +691,49 @@ function lastSeen(at: number): string {
   return `${Math.round(hours / 24)}d ago`
 }
 
-/** "Phone hands: connected — accessibility on, notifications on, switch on", from the phone's last hands:status. */
+/**
+ * A pairing link as a QR data URL, or '' while there is none. Derived state: it
+ * exists exactly as long as the link does, so expiry and Cancel clear it
+ * through the same path — a QR outliving its code would look scannable and
+ * pair nothing. Encoding happens here, on this machine; the link embeds the
+ * pairing credential and must never go to some QR-rendering service. Dark
+ * modules on a light ground with a real quiet zone, whatever theme the card is
+ * drawn in — inverted codes fail on many scanner libraries, and a margin-less
+ * code fails on most.
+ */
+function useQr(link: string): string {
+  const [qr, setQr] = useState('')
+  useEffect(() => {
+    if (!link) {
+      setQr('')
+      return
+    }
+    let stale = false
+    void import('qrcode')
+      .then(({ toDataURL }) =>
+        toDataURL(link, {
+          errorCorrectionLevel: 'M',
+          margin: 3,
+          width: 256,
+          color: { dark: '#000000', light: '#ffffff' }
+        })
+      )
+      .then((url) => {
+        if (!stale) setQr(url)
+      })
+      .catch(() => {
+        if (!stale) setQr('')
+      })
+    return () => {
+      stale = true
+    }
+  }, [link])
+  return qr
+}
+
+/** "Forge Hands: connected — accessibility on, notifications on, switch on", from the phone's last hands:status. */
 function phoneHandsLine(hands: PhoneHandsStatus): string {
-  if (!hands.connected) return 'Phone hands: not connected.'
+  if (!hands.connected) return 'Forge Hands (phone hands): not connected.'
   const word = (value: boolean | undefined): string => (value === undefined ? 'unknown' : value ? 'on' : 'off')
-  return `Phone hands: connected — accessibility ${word(hands.accessibility)}, notifications ${word(hands.notifications)}, switch ${word(hands.enabled)}.`
+  return `Forge Hands (phone hands): connected — accessibility ${word(hands.accessibility)}, notifications ${word(hands.notifications)}, switch ${word(hands.enabled)}.`
 }

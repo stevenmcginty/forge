@@ -53,6 +53,14 @@ export interface PairingOffer {
   expiresAt: number
 }
 
+/**
+ * Which kind of device an offer mints, and which socket a hello asks for.
+ * `'hands'` is the Forge Hands helper app (docs/PHONE-HANDS.md): its offer
+ * mints a hands-scoped device, and a hands-scoped token is accepted only on a
+ * `role: "hands"` hello. Absent means a normal Forge Mobile pairing, as before.
+ */
+export type PairScope = 'hands'
+
 export type AuthResult =
   | { ok: true; device: MobileDevice; issuedToken?: string }
   | { ok: false; code: 'auth' | 'locked'; msg: string }
@@ -111,6 +119,13 @@ export class MobileAuth {
   private readonly pairTtlMs: number
   /** Pending pairings, in memory only — a restart cancels them by design. */
   private pending: PairingOffer | null = null
+  /**
+   * The Forge Hands offer, in a slot of its own: minting a helper link from
+   * chat must not kill a QR that is on screen in Settings. Two live offers is
+   * still at most one more way in, and this one can only mint a hands-scoped
+   * device — never a Forge Mobile session.
+   */
+  private pendingHands: PairingOffer | null = null
   private strikes = new Map<string, Strike>()
 
   constructor(host: AuthStoreHost) {
@@ -123,27 +138,30 @@ export class MobileAuth {
    * Mint a pairing token for the QR in Settings. Replaces any outstanding
    * offer: two live QRs would mean two ways in and only one of them on screen.
    */
-  offerPairing(): PairingOffer {
+  offerPairing(scope?: PairScope): PairingOffer {
     const offer: PairingOffer = {
       token: newToken(PAIR_TOKEN_BYTES),
       expiresAt: this.now() + this.pairTtlMs
     }
-    this.pending = offer
+    if (scope === 'hands') this.pendingHands = offer
+    else this.pending = offer
     return offer
   }
 
-  cancelPairing(): void {
-    this.pending = null
+  cancelPairing(scope?: PairScope): void {
+    if (scope === 'hands') this.pendingHands = null
+    else this.pending = null
   }
 
   /** The outstanding offer, or null if there is none or it has expired. */
-  pendingOffer(): PairingOffer | null {
-    if (!this.pending) return null
-    if (this.now() >= this.pending.expiresAt) {
-      this.pending = null
+  pendingOffer(scope?: PairScope): PairingOffer | null {
+    const offer = scope === 'hands' ? this.pendingHands : this.pending
+    if (!offer) return null
+    if (this.now() >= offer.expiresAt) {
+      this.cancelPairing(scope)
       return null
     }
-    return this.pending
+    return offer
   }
 
   devices(): MobileDevice[] {
@@ -169,6 +187,13 @@ export class MobileAuth {
    * and the right token lands in one that is always empty. Guessing a bucket is
    * not a way in: the credentials themselves are 128 and 256 bits, and what the
    * shared address bucket still buys is a stop on credential-less hammering.
+   *
+   * ## role
+   *
+   * `'hands'` for a `role: "hands"` hello. A pairing code is then checked
+   * against the Forge Hands offer only (and a normal hello against the normal
+   * offer only), and a hands-scoped device token is refused unless the role is
+   * `'hands'`. A normal token is accepted with either role, as before.
    */
   authenticate(input: {
     source: string
@@ -176,6 +201,7 @@ export class MobileAuth {
     deviceName: string
     token?: string
     pairToken?: string
+    role?: 'app' | 'hands'
   }): AuthResult {
     const key = this.strikeKey(input)
     const locked = this.lockout(key)
@@ -204,9 +230,16 @@ export class MobileAuth {
     return `ip:${input.source}`
   }
 
-  private pair(input: { source: string; deviceId: string; deviceName: string; pairToken?: string }): AuthResult {
+  private pair(input: {
+    source: string
+    deviceId: string
+    deviceName: string
+    pairToken?: string
+    role?: 'app' | 'hands'
+  }): AuthResult {
     const key = this.strikeKey(input)
-    const offer = this.pendingOffer()
+    const scope: PairScope | undefined = input.role === 'hands' ? 'hands' : undefined
+    const offer = this.pendingOffer(scope)
     if (!offer) return this.fail(key, 'No pairing is open — start one in Settings')
     if (!sameDigest(sha256(offer.token), sha256(String(input.pairToken)))) {
       return this.fail(key, 'Pairing code is not valid')
@@ -216,9 +249,12 @@ export class MobileAuth {
     // cannot spend the same offer twice. Nothing is cleared on success — a
     // bucket empties with time, not because its owner happened to succeed; see
     // `fail`.
-    this.pending = null
+    this.cancelPairing(scope)
 
-    const { device, issuedToken } = this.mintDevice(input.deviceId, input.deviceName)
+    // A hands device gets an id of its own: the helper may well report the same
+    // Android id as Forge Mobile on that phone, and re-pairing replaces by id.
+    const deviceId = scope === 'hands' && input.deviceId && !input.deviceId.startsWith('hands-') ? `hands-${input.deviceId}` : input.deviceId
+    const { device, issuedToken } = this.mintDevice(deviceId, input.deviceName, scope)
     return { ok: true, device, issuedToken }
   }
 
@@ -237,14 +273,15 @@ export class MobileAuth {
    * on: the raw token goes to the return value, and only its SHA-256 goes to
    * `save`.
    */
-  mintDevice(deviceId: string, deviceName: string): { device: MobileDevice; issuedToken: string } {
+  mintDevice(deviceId: string, deviceName: string, scope?: PairScope): { device: MobileDevice; issuedToken: string } {
     const raw = newToken(TOKEN_BYTES)
     const device: MobileDevice = {
       id: deviceId || newToken(8),
       name: deviceName || 'Phone',
       tokenHash: sha256(raw),
       createdAt: this.now(),
-      lastSeenAt: this.now()
+      lastSeenAt: this.now(),
+      ...(scope === 'hands' ? { scope } : {})
     }
     // Re-pairing a device Steve already knows replaces it rather than adding a
     // second row with the same name and a stale hash.
@@ -254,7 +291,7 @@ export class MobileAuth {
     return { device, issuedToken: raw }
   }
 
-  private resume(input: { source: string; deviceId: string; token?: string }): AuthResult {
+  private resume(input: { source: string; deviceId: string; token?: string; role?: 'app' | 'hands' }): AuthResult {
     const devices = this.host.load()
     const presented = sha256(String(input.token))
     // Matched on the token alone, not on deviceId: the token is the secret, and
@@ -262,6 +299,10 @@ export class MobileAuth {
     // let a caller choose its own oracle.
     const found = devices.find((d) => sameDigest(d.tokenHash, presented))
     if (!found) return this.fail(this.strikeKey(input), 'This device is not paired')
+    // A Forge Hands token opens a hands socket and nothing else.
+    if (found.scope === 'hands' && input.role !== 'hands') {
+      return this.fail(this.strikeKey(input), 'This is a Forge Hands pairing; it cannot open Forge Mobile')
+    }
 
     found.lastSeenAt = this.now()
     this.host.save(devices)

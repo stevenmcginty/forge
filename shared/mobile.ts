@@ -1194,6 +1194,17 @@ export function pairLink(host: string, port: number, secure: boolean, token: str
 }
 
 /**
+ * The Forge Hands pairing link: `pairLink`'s params exactly, under the helper
+ * app's own scheme (docs/PHONE-HANDS.md), so tapping it opens Forge Hands and
+ * never Forge Mobile. The code inside is a Forge Hands offer, which mints a
+ * hands-scoped device only.
+ */
+export function handsPairLink(host: string, port: number, secure: boolean, token: string): string {
+  const link = pairLink(host, port, secure, token)
+  return link ? `forgehands://${link.slice('forge://'.length)}` : ''
+}
+
+/**
  * The ngrok domain as a human supplies it, made safe — or '' when it cannot be.
  *
  * Lives here rather than in the store because two sides need the same answer:

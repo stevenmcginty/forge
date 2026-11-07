@@ -1,4 +1,4 @@
-package com.forge.mobile
+package com.forge.hands
 
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
@@ -22,17 +22,16 @@ import java.io.ByteArrayOutputStream
  * Shared state and policy for the phone hands: the master switch, the block
  * list, and the status snapshot the socket pushes. Kept in one object so the
  * accessibility service, the notification listener, the socket service and the
- * Capacitor plugin all read the same truth without a web of cross-references.
+ * setup screen all read the same truth without a web of cross-references.
  */
 object ForgeHands {
 
   private const val PREFS = "forge_hands"
   private const val KEY_ENABLED = "enabled"
   private const val KEY_DEVICE_ID = "handsDeviceId"
-  private const val KEY_DEVICE_NAME = "handsDeviceName"
-
-  /** Capacitor Preferences lands here; the WebView app saved the pairing. */
-  const val CAPACITOR_PREFS = "CapacitorStorage"
+  private const val KEY_ORIGIN = "origin"
+  private const val KEY_TOKEN = "deviceToken"
+  private const val KEY_DESKTOP = "desktopName"
 
   /** Packages Forge must never touch, even with everything else granted. */
   private val BLOCKED_EXACT = setOf(
@@ -79,9 +78,7 @@ object ForgeHands {
   }
 
   /**
-   * A stable id/name for the hands socket, set by the plugin from the WebView's
-   * own identity when the UI is open and falling back to a minted id so the
-   * boot-started socket still has one. Auth is on the token alone
+   * A stable id for the hands socket, minted once. Auth is on the token alone
    * (electron/mobile/auth.ts), so this only names the device.
    */
   fun handsDeviceId(ctx: Context): String {
@@ -92,26 +89,41 @@ object ForgeHands {
     return minted
   }
 
-  fun deviceName(ctx: Context): String =
-    prefs(ctx).getString(KEY_DEVICE_NAME, null) ?: "${Build.MODEL} (hands)"
-
-  fun setIdentity(ctx: Context, id: String?, name: String?) {
-    val e = prefs(ctx).edit()
-    if (!id.isNullOrEmpty()) e.putString(KEY_DEVICE_ID, id)
-    if (!name.isNullOrEmpty()) e.putString(KEY_DEVICE_NAME, name)
-    e.apply()
-  }
+  /** The name the desk lists this phone under (contract v2). */
+  fun deviceName(@Suppress("UNUSED_PARAMETER") ctx: Context): String = "Forge Hands (${Build.MODEL})"
 
   /* --------------------------------------------- the paired desk address */
 
-  fun origin(ctx: Context): String =
-    ctx.getSharedPreferences(CAPACITOR_PREFS, Context.MODE_PRIVATE).getString("forge.origin", "").orEmpty()
+  // Forge Hands pairs as its own device (scope "hands"), so the desk address
+  // and token live in this app's own prefs, written once by ForgeHandsPairing.
 
-  fun deviceToken(ctx: Context): String =
-    ctx.getSharedPreferences(CAPACITOR_PREFS, Context.MODE_PRIVATE).getString("forge.deviceToken", "").orEmpty()
+  fun origin(ctx: Context): String = prefs(ctx).getString(KEY_ORIGIN, "").orEmpty()
 
-  fun desktopName(ctx: Context): String =
-    ctx.getSharedPreferences(CAPACITOR_PREFS, Context.MODE_PRIVATE).getString("forge.desktopName", "").orEmpty()
+  fun deviceToken(ctx: Context): String = prefs(ctx).getString(KEY_TOKEN, "").orEmpty()
+
+  fun desktopName(ctx: Context): String = prefs(ctx).getString(KEY_DESKTOP, "").orEmpty()
+
+  /** Store a fresh pairing. commit(), not apply(): the code is already spent. */
+  fun savePairing(ctx: Context, origin: String, token: String, desktopName: String) {
+    prefs(ctx).edit()
+      .putString(KEY_ORIGIN, origin)
+      .putString(KEY_TOKEN, token)
+      .putString(KEY_DESKTOP, desktopName)
+      .commit()
+  }
+
+  /** The desk no longer knows our token: drop it, keep the address and name. */
+  fun forgetToken(ctx: Context) {
+    prefs(ctx).edit().remove(KEY_TOKEN).commit()
+  }
+
+  /**
+   * The last thing worth telling Steve about the desk link, in words ("The desk
+   * no longer knows this phone. Pair again."), or "" when all is well. Set by
+   * the socket service, shown by the setup screen.
+   */
+  @Volatile
+  var linkNote: String = ""
 
   /* ------------------------------------------------------------ status */
 
@@ -130,7 +142,7 @@ object ForgeHands {
   var statusListener: ((Status) -> Unit)? = null
 
   /** True while the socket has a live, hello-acked link to the desk. Set by
-   *  ForgeHandsService; read by the plugin for the UI's "Desk link" row. */
+   *  ForgeHandsService; read by the setup screen's "Desk link" row. */
   @Volatile
   var linked: Boolean = false
 

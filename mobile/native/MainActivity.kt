@@ -66,7 +66,6 @@ class MainActivity : BridgeActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     registerPlugin(ForgeUpdaterPlugin::class.java)
-    registerPlugin(ForgeHandsPlugin::class.java)
     super.onCreate(savedInstanceState)
     if (!packageName.endsWith(TV_SUFFIX)) return
 

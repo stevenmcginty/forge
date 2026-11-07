@@ -265,6 +265,8 @@ const api: ForgeApi = {
     stop: () => ipcRenderer.invoke(IPC.mobileStop),
     pair: () => ipcRenderer.invoke(IPC.mobilePair),
     pairCancel: () => ipcRenderer.invoke(IPC.mobilePairCancel),
+    handsPair: () => ipcRenderer.invoke(IPC.mobileHandsPair),
+    handsPairCancel: (token) => ipcRenderer.invoke(IPC.mobileHandsPairCancel, String(token ?? '')),
     previewPair: () => ipcRenderer.invoke(IPC.mobilePreviewPair),
     setAccept: (on) => ipcRenderer.invoke(IPC.mobileAccept, on === true),
     revoke: (deviceId) => ipcRenderer.invoke(IPC.mobileRevoke, deviceId ?? ''),

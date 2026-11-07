@@ -18,6 +18,7 @@ import {
   APPROVAL_TIMEOUT_MS,
   MOBILE_DISCOVERY_PORT,
   MOBILE_PORT,
+  handsPairLink,
   pairLink,
   type HelloOkFrame,
   type MirrorInput,
@@ -29,6 +30,7 @@ import type {
   MobileApprovalEvent,
   MobileDeviceRecord,
   MobileMirrorEvent,
+  MobilePairOffer,
   MobilePreviewOffer,
   MobileStatus,
   MobileTunnelStatus,
@@ -58,6 +60,7 @@ import { addPtySink, getManager, getReplay, killPane, viewerGone, viewerResize, 
 import { UNSUPPORTED, layoutEngine } from './layout-engine'
 import { getDataDir, getProjects, getSettings, getWorkspace, setSettings } from './store'
 import { phoneHands } from './phone-hands'
+import { PHONE_PAIR_OFF } from '../shared/phone-hands-spec.mjs'
 
 /**
  * Forge Mobile — the Electron half.
@@ -1080,12 +1083,46 @@ export function publishMobileState(projectId?: string): void {
   })
 }
 
+/**
+ * Mint a Forge Hands pairing offer and its `forgehands://pair?…` link — for
+ * the phone_pair tool (agents, from chat) and the "Pair Forge Hands" button in
+ * Settings. The same single-use, PAIR_TTL_MS machinery as the QR, in the
+ * offer slot of its own (see MobileAuth.offerPairing), and the same address
+ * rule: the live tunnel when there is one, else the LAN.
+ */
+export function mintHandsPairing(): MobilePairOffer {
+  if (!server) return { ok: false, error: PHONE_PAIR_OFF }
+  const offer = getAuth().offerPairing('hands')
+  const endpoint = pairEndpoint(tunnelStatus, reachableAddresses()[0] ?? '127.0.0.1', server.address()?.port ?? MOBILE_PORT)
+  return {
+    ok: true,
+    token: offer.token,
+    expiresAt: offer.expiresAt,
+    ttlMs: PAIR_TTL_MS,
+    host: endpoint.host,
+    port: endpoint.port,
+    url: endpoint.url,
+    link: handsPairLink(endpoint.host, endpoint.port, endpoint.port === 0, offer.token)
+  }
+}
+
 /* ------------------------------------------------------------------- IPC */
 
 export function registerMobileHandlers(): void {
   ipcMain.handle(IPC.mobileStatus, () => mobileStatus())
   // The Settings line "Phone hands: …" rides the status broadcast.
   phoneHands.onChange(() => report())
+  // phone_pair (agents) mints here; so does the Settings button below.
+  phoneHands.setPairer(mintHandsPairing)
+  ipcMain.handle(IPC.mobileHandsPair, (): MobilePairOffer => mintHandsPairing())
+  // "Hide" under the hands QR: the code dies with it, as the QR's Cancel does.
+  // Only that code: one phone_pair minted since is a different link, still live.
+  ipcMain.handle(IPC.mobileHandsPairCancel, (_e, token: unknown): boolean => {
+    const auth = getAuth()
+    if (typeof token !== 'string' || !token || auth.pendingOffer('hands')?.token !== token) return false
+    auth.cancelPairing('hands')
+    return true
+  })
 
   // Every line the build prints reaches the settings page through here.
   onTvBuildChange(reportTv)

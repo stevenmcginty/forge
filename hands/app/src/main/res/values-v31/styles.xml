@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ draws its own launch splash; keep it dark like the screen. -->
+    <style name="ForgeHands" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#15171C</item>
+        <item name="android:colorPrimaryDark">#0F1115</item>
+        <item name="android:colorAccent">#F2A541</item>
+        <item name="android:windowBackground">#0F1115</item>
+        <item name="android:statusBarColor">#0F1115</item>
+        <item name="android:navigationBarColor">#0F1115</item>
+        <item name="android:textColorPrimary">#E8EAED</item>
+        <item name="android:textColorSecondary">#9AA0A6</item>
+        <item name="android:windowSplashScreenBackground">#0F1115</item>
+    </style>
+</resources>

@@ -1,4 +1,4 @@
-package com.forge.mobile
+package com.forge.hands
 
 import android.content.BroadcastReceiver
 import android.content.Context

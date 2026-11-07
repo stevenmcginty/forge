@@ -187,31 +187,7 @@ if (!existsSync(manifestXml)) {
   const plugin = readFileSync(join(javaDir, 'ForgeUpdaterPlugin.kt'), 'utf8')
   const main = readFileSync(join(javaDir, 'MainActivity.kt'), 'utf8')
   log(main.includes('registerPlugin(ForgeUpdaterPlugin::class.java)'), 'MainActivity registers ForgeUpdater before the bridge builds')
-  log(main.includes('registerPlugin(ForgeHandsPlugin::class.java)'), 'MainActivity registers ForgeHands (the phone-hands UI plugin)')
   log(!existsSync(join(javaDir, 'MainActivity.java')), 'the generated Java MainActivity is gone (would be a duplicate class)')
-
-  // The phone hands: every native class copied in, the manifest wiring, the
-  // accessibility config and the socket library — a piece missing here is a
-  // feature that silently does nothing on the phone.
-  log(xml.includes('android.permission.FOREGROUND_SERVICE_SPECIAL_USE'), 'AndroidManifest declares FOREGROUND_SERVICE_SPECIAL_USE — the hands socket is a specialUse FGS')
-  log(xml.includes('android.permission.POST_NOTIFICATIONS'), 'AndroidManifest declares POST_NOTIFICATIONS for the ongoing hands notification')
-  log(xml.includes('android.permission.RECEIVE_BOOT_COMPLETED'), 'AndroidManifest declares RECEIVE_BOOT_COMPLETED for the boot receiver')
-  log(xml.includes('android.permission.READ_CONTACTS'), 'AndroidManifest declares READ_CONTACTS for find_contact')
-  log(xml.includes('android.permission.WAKE_LOCK'), 'AndroidManifest declares WAKE_LOCK — a screen op can wake the display without crashing')
-  log(xml.includes('android:foregroundServiceType="specialUse"'), 'the hands service is foregroundServiceType specialUse (no 6 h/day dataSync cap)')
-  log(xml.includes('PROPERTY_SPECIAL_USE_FGS_SUBTYPE'), 'the specialUse service declares its subtype property')
-  log(xml.includes('android.accessibilityservice.AccessibilityService'), 'the accessibility service is wired to its intent-filter')
-  log(xml.includes('@xml/forge_hands_accessibility'), 'the accessibility service points at its config XML')
-  log(xml.includes('android.service.notification.NotificationListenerService'), 'the notification listener is wired to its intent-filter')
-  log(xml.includes('android.intent.action.BOOT_COMPLETED'), 'the boot receiver listens for BOOT_COMPLETED')
-  log(!xml.includes('android.permission.QUERY_ALL_PACKAGES'), 'apps/open_app use a scoped <queries>, never the QUERY_ALL_PACKAGES permission')
-  log(gradle.includes('com.squareup.okhttp3:okhttp'), 'build.gradle pulls in OkHttp for the hands WebSocket')
-  const handsXml = join(ANDROID, 'app', 'src', 'main', 'res', 'xml', 'forge_hands_accessibility.xml')
-  const handsXmlText = existsSync(handsXml) ? readFileSync(handsXml, 'utf8') : ''
-  log(
-    handsXmlText.includes('canTakeScreenshot="true"') && handsXmlText.includes('canRetrieveWindowContent="true"'),
-    'forge_hands_accessibility.xml grants window-content and screenshot capture'
-  )
   log(plugin.includes('DownloadManager'), 'the plugin downloads via DownloadManager')
   log(
     plugin.includes('checksum-mismatch') && /file\.delete\(\)[\s\S]*?checksum-mismatch/.test(plugin),
@@ -223,16 +199,7 @@ if (!existsSync(manifestXml)) {
 
   // The native templates and the copies in the android tree must be the same
   // bytes, or apk:init has drifted from what is actually building.
-  for (const source of [
-    'MainActivity.kt',
-    'ForgeUpdaterPlugin.kt',
-    'ForgeHandsPlugin.kt',
-    'ForgeHandsService.kt',
-    'ForgeHandsAccessibilityService.kt',
-    'ForgeNotificationListener.kt',
-    'ForgeHandsOps.kt',
-    'ForgeHandsBootReceiver.kt'
-  ]) {
+  for (const source of ['MainActivity.kt', 'ForgeUpdaterPlugin.kt']) {
     log(
       readFileSync(join(MOBILE, 'native', source), 'utf8') === readFileSync(join(javaDir, source), 'utf8'),
       `mobile/native/${source} matches the copy in the android tree`

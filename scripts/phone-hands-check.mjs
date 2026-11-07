@@ -13,17 +13,20 @@
  *
  *   node scripts/phone-hands-check.mjs --serve 8490 [--token <device token>]
  *
- * keeps the server up on 0.0.0.0:<port>, prints a device token (and a pairing
- * code the app can use), and takes ops two ways: one line on stdin
- * (`read`, `tap {"n":3}`, `open_link {"url":"https://wa.me/447..."}`), or HTTP
- * on 127.0.0.1:<port+1> — POST /op {"op":"read","args":{}}, GET /status,
- * GET /pair. Pictures are saved and their path printed.
+ * keeps the server up on 0.0.0.0:<port>, prints a device token, a pairing
+ * code the app can use, and Forge Hands pairing links (forgehands://pair?…,
+ * for this machine's LAN address and for an emulator; `--host <h>` picks the
+ * LAN one), and takes ops two ways: one line on stdin
+ * (`read`, `tap {"n":3}`, `open_link {"url":"https://wa.me/447..."}`, `pair`
+ * for a fresh Forge Hands link), or HTTP on 127.0.0.1:<port+1> —
+ * POST /op {"op":"read","args":{}}, GET /status, GET /pair, GET /pair-hands.
+ * Pictures are saved and their path printed.
  */
 import './ts-hooks.mjs'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer as createNetServer } from 'node:net'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { WebSocket } from 'ws'
@@ -35,6 +38,7 @@ const { MobileServer } = await import('../electron/mobile/server.ts')
 const { MobileAuth, hashToken } = await import('../electron/mobile/auth.ts')
 const PH = await import('../electron/phone-hands.ts')
 const SPEC = await import('../shared/phone-hands-spec.mjs')
+const { handsPairLink } = await import('../shared/mobile.ts')
 
 const WS_PATH = '/link'
 
@@ -114,7 +118,23 @@ function makeServer(auth, hands, extra = {}) {
 
 /* ==================================================================== serve */
 
-async function serve(port, pinnedToken) {
+/** A Forge Hands pairer over a test auth, built the way mobile-host's mintHandsPairing builds one. */
+function handsPairer(auth, host, port) {
+  return () => {
+    const offer = auth.offerPairing('hands')
+    return { ok: true, token: offer.token, expiresAt: offer.expiresAt, ttlMs: 0, host, port, url: '', link: handsPairLink(host, port, false, offer.token) }
+  }
+}
+
+/** This machine's first non-internal IPv4 address, for a LAN link. */
+function lanAddress() {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) return a.address
+  }
+  return '127.0.0.1'
+}
+
+async function serve(port, pinnedToken, lanHost) {
   const devices = []
   const auth = makeAuth(devices)
   let token = pinnedToken
@@ -129,8 +149,10 @@ async function serve(port, pinnedToken) {
   await server.start({ host: '0.0.0.0', port })
   const shotDir = mkdtempSync(join(tmpdir(), 'forge-phone-looks-'))
   const pair = auth.offerPairing()
+  hands.setPairer(handsPairer(auth, lanHost, port))
 
   const run = async (op, args) => {
+    if (op === 'pair') return hands.pair()
     const reply = await hands.request(op, args ?? {})
     if (reply.ok && reply.image) {
       const saved = await PH.phoneLinkOp(`phone_${op}`, {}, { shotDir, hands: { request: async () => reply } })
@@ -143,6 +165,10 @@ async function serve(port, pinnedToken) {
     const answer = (code, body) => res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(body, null, 2))
     if (req.method === 'GET' && req.url === '/status') return answer(200, hands.status())
     if (req.method === 'GET' && req.url === '/pair') return answer(200, auth.offerPairing())
+    if (req.method === 'GET' && req.url === '/pair-hands') {
+      const offer = auth.offerPairing('hands')
+      return answer(200, { ...offer, link: handsPairLink(lanHost, port, false, offer.token), emulatorLink: handsPairLink('10.0.2.2', port, false, offer.token) })
+    }
     if (req.method === 'POST' && req.url === '/op') {
       let body = ''
       req.on('data', (c) => (body += c))
@@ -156,13 +182,18 @@ async function serve(port, pinnedToken) {
       })
       return
     }
-    answer(404, { error: 'POST /op, GET /status, GET /pair' })
+    answer(404, { error: 'POST /op, GET /status, GET /pair, GET /pair-hands' })
   })
   await new Promise((r) => http.listen(port + 1, '127.0.0.1', r))
 
   console.log(`phone-hands test desk on 0.0.0.0:${port} (ws path ${WS_PATH}); emulator: ws://10.0.2.2:${port}${WS_PATH}`)
   console.log(`device token: ${token}`)
   console.log(`pairing code (30 min, one use): ${pair.token}`)
+  // One Forge Hands offer, two addresses for it: whichever the phone uses spends it.
+  const handsOffer = auth.offerPairing('hands')
+  console.log(`Forge Hands link (30 min, one use; "pair" on stdin or GET /pair-hands for a fresh one):`)
+  console.log(`  LAN:      ${handsPairLink(lanHost, port, false, handsOffer.token)}`)
+  console.log(`  emulator: ${handsPairLink('10.0.2.2', port, false, handsOffer.token)}`)
   console.log(`ops: one per line on stdin, e.g. "read" or 'tap {"n":3}'; or POST http://127.0.0.1:${port + 1}/op {"op":"read","args":{}}`)
 
   const lines = createInterface({ input: process.stdin })
@@ -415,22 +446,110 @@ async function check() {
     await waitFor(() => phone3.closed !== null && app.closed !== null, 2000, 'revoke closes both')
     ok(phone3.closed === 4003 && app.closed === 4003, 'revoking the device closes its hands socket with its app socket')
 
+    const { VoiceAgentHost } = await import('../electron/voice-agent/host.ts')
+    const host = new VoiceAgentHost({ sendEvent() {}, sendToolRequest() {}, getModel: () => 'opus', getBrain: () => 'codex-cli' })
+    const ptOf = (link) => new URL(String(link).replace('forgehands://', 'http://x/')).searchParams.get('pt')
+
+    console.log('Forge Hands — the link')
+    ok(
+      handsPairLink('cure-task-legroom.ngrok-free.dev', 0, true, 'abc_-123') === 'forgehands://pair?host=cure-task-legroom.ngrok-free.dev&scheme=wss&pt=abc_-123',
+      'handsPairLink, tunnel: forgehands://pair?host=<domain>&scheme=wss&pt=<code>, no port'
+    )
+    ok(
+      handsPairLink('192.168.1.20', 8420, false, 'abc') === 'forgehands://pair?host=192.168.1.20&port=8420&pt=abc',
+      'handsPairLink, LAN: forgehands://pair?host=<ip>&port=<port>&pt=<code>'
+    )
+    ok(handsPairLink('', 8420, false, 'abc') === '' && handsPairLink('h', 8420, false, '') === '', 'handsPairLink: no host or no code, no link')
+
+    console.log('Forge Hands — phone_pair runs on the PC, with no phone connected')
+    ok(!hands.connected, 'no hands socket is open now')
+    const offPair = hands.pair()
+    ok(!offPair.ok && offPair.error === SPEC.PHONE_PAIR_OFF, 'with no pairer (phone link off), phone_pair says so in words', offPair)
+    const offLink = await host.callLinkTool('phone_pair', {})
+    ok(offLink.content?.[0]?.text === SPEC.PHONE_PAIR_OFF, 'and through the brain link (the shared instance has no pairer in this process)', offLink)
+    const normalOffer = auth.offerPairing()
+    hands.setPairer(handsPairer(auth, '127.0.0.1', port))
+    const piped = await PH.phoneLinkOp('phone_pair', {}, { shotDir, hands })
+    const pairLine = piped.text?.split('\n') ?? []
+    ok(piped.ok && /^forgehands:\/\/pair\?host=127\.0\.0\.1&port=\d+&pt=[\w-]{22}$/.test(pairLine[0]), 'phone_pair over the pipe: the first line is a forgehands://pair link', piped)
+    ok(
+      pairLine[1] === SPEC.PHONE_PAIR_WORDS &&
+        SPEC.PHONE_PAIR_WORDS === 'Tap this link on your phone (works once, for 5 minutes). If tapping does nothing, long-press it, copy it, then open Forge Hands - it offers to use the copied link.',
+      'then the contract’s words, word for word'
+    )
+    ok(pairLine[2] === SPEC.PHONE_PAIR_LAN_NOTE, 'and, with no tunnel, the home-network note')
+    ok(auth.pendingOffer() === normalOffer, 'minting a Forge Hands link leaves the Forge Mobile QR offer live')
+    auth.cancelPairing()
+    const viaBrain = await brain.find((t) => t.name === 'phone_pair').handler({})
+    const brainLink = viaBrain.content[0].text.split('\n')[0]
+    ok(brainLink.startsWith('forgehands://pair?') && brainLink !== pairLine[0], 'phone_pair for the brains: a fresh link, replacing the last', viaBrain)
+    const code = ptOf(brainLink)
+    ok(code === auth.pendingOffer('hands')?.token, 'its code is the live Forge Hands offer')
+
+    console.log('Forge Hands — a hands-scoped device')
+    const stale = await connect(port)
+    stale.send({ t: 'hello', proto: 1, deviceId: 'helper-1', role: 'hands', token: ptOf(pairLine[0]) })
+    await waitFor(() => stale.closed !== null, 3000, 'replaced-code close')
+    ok(stale.closed === 4001, 'the replaced code is dead (4001)')
+    const asApp = await connect(port)
+    asApp.send({ t: 'hello', proto: 1, deviceId: 'helper-1', deviceName: 'Forge Hands (Pixel 10)', token: code })
+    await waitFor(() => asApp.closed !== null, 3000, 'hands-code-as-app close')
+    ok(asApp.closed === 4001 && auth.pendingOffer('hands') !== null, 'a Forge Hands code cannot pair Forge Mobile (no role hands), and the offer is not spent')
+    const helper = await connect(port)
+    helper.send({ t: 'hello', proto: 1, deviceId: 'helper-1', deviceName: 'Forge Hands (Pixel 10)', role: 'hands', token: code })
+    await waitFor(() => helper.first('hello-ok') || helper.closed !== null, 3000, 'helper hello-ok')
+    const helperOk = helper.first('hello-ok')
+    const handsToken = helperOk?.deviceToken
+    ok(typeof handsToken === 'string' && handsToken.length === 43, 'a Forge Hands code pairs with role hands, and hello-ok returns a device token', helperOk)
+    ok(helperOk && helperOk.sessions.length === 0 && helperOk.projects.length === 0 && !helperOk.features, 'that hello-ok is otherwise bare', helperOk)
+    ok(auth.pendingOffer('hands') === null, 'the offer is spent')
+    const record = devices.find((d) => d.tokenHash === hashToken(handsToken ?? ''))
+    ok(record && record.scope === 'hands' && record.id === 'hands-helper-1' && record.name === 'Forge Hands (Pixel 10)', 'the device is saved with scope hands, its own id and the helper’s name', record)
+    ok(devices.some((d) => d.id === 'pixel-10' && !d.scope), 'the Forge Mobile device is untouched')
+    await waitFor(() => hands.connected, 2000, 'helper connected')
+    ok(hands.connected, 'phone-hands hears the helper’s socket open')
+    helper.socket.close()
+    await waitFor(() => !hands.connected, 2000, 'helper closed')
+
+    const resumed = await connect(port)
+    resumed.send({ t: 'hello', proto: 1, deviceId: 'hands-helper-1', role: 'hands', token: handsToken })
+    await waitFor(() => resumed.first('hello-ok') || resumed.closed !== null, 3000, 'hands resume')
+    ok(!!resumed.first('hello-ok') && !resumed.first('hello-ok').deviceToken, 'the hands token resumes with role hands (no new token)')
+    resumed.socket.close()
+    const escalate = await connect(port)
+    escalate.send({ t: 'hello', proto: 1, deviceId: 'hands-helper-1', token: handsToken })
+    await waitFor(() => escalate.closed !== null, 3000, 'hands-token-as-app close')
+    ok(escalate.closed === 4001 && !escalate.first('hello-ok') && escalate.first('err')?.code === 'auth', 'the hands token is REFUSED without role hands (4001, err auth)', escalate.frames)
+    const appRole = await connect(port)
+    appRole.send({ t: 'hello', proto: 1, deviceId: 'hands-helper-1', token: handsToken, role: 'app' })
+    await waitFor(() => appRole.closed !== null, 3000, 'hands-token-role-app close')
+    ok(appRole.closed === 4001, 'and with any other role')
+
+    const normalApp = await connect(port)
+    normalApp.send({ t: 'hello', proto: 1, deviceId: 'pixel-10', token })
+    const normalHands = await connect(port)
+    normalHands.send({ t: 'hello', proto: 1, deviceId: 'pixel-10', token, role: 'hands' })
+    await waitFor(() => (normalApp.first('hello-ok') || normalApp.closed !== null) && (normalHands.first('hello-ok') || normalHands.closed !== null), 3000, 'normal token both ways')
+    ok(!!normalApp.first('hello-ok') && !!normalHands.first('hello-ok'), 'a normal token still works both ways: app and hands')
+    normalApp.socket.close()
+    normalHands.socket.close()
+
     console.log('phone hands — the three name lists agree')
     const { PHONE_TOOLS, PHONE_HANDLERS, PHONE_INSTRUCTION_LINE } = await import('../bridge/phone-tools.mjs')
     const bridgeNames = PHONE_TOOLS.map((t) => t.name)
     const brainNames = brain.map((t) => t.name)
     const contract = ['status', 'look', 'read', 'tap', 'type', 'scroll', 'key', 'open_app', 'open_link', 'apps', 'notifications', 'reply', 'find_contact']
     ok(JSON.stringify(SPEC.PHONE_OPS) === JSON.stringify(contract), 'the spec has the contract’s thirteen ops, in order')
-    ok(JSON.stringify(bridgeNames) === JSON.stringify(contract.map((op) => `phone_${op}`)), 'PHONE_TOOLS is phone_<op> for every op', bridgeNames)
+    ok(JSON.stringify(bridgeNames) === JSON.stringify([...contract.map((op) => `phone_${op}`), 'phone_pair']), 'PHONE_TOOLS is phone_<op> for every op, then phone_pair', bridgeNames)
+    ok(bridgeNames.includes('phone_pair') && brainNames.includes('phone_pair') && PH.PHONE_LINK_OPS.includes('phone_pair'), 'phone_pair is in all three name lists')
     ok(JSON.stringify(bridgeNames) === JSON.stringify(brainNames), 'PHONE_TOOLS names == phoneBrainTools names', brainNames)
     ok(JSON.stringify(bridgeNames) === JSON.stringify([...PH.PHONE_LINK_OPS]), 'PHONE_TOOLS names == PHONE_LINK_OPS', PH.PHONE_LINK_OPS)
     ok(bridgeNames.every((n) => typeof PHONE_HANDLERS[n] === 'function'), 'every bridge tool has a handler')
     ok(JSON.stringify(PH.PHONE_BRAIN_ALLOWED) === JSON.stringify(bridgeNames.map((n) => `mcp__forge__${n}`)), 'PHONE_BRAIN_ALLOWED names every one as mcp__forge__<name>')
     ok(PHONE_TOOLS.every((t, i) => t.description === brain[i].description), 'pane and brain tools share each description word for word')
-    ok(PHONE_TOOLS.every((t, i) => JSON.stringify(t.inputSchema.required) === JSON.stringify(SPEC.PHONE_TOOL_SPECS[i].required)), 'bridge schemas carry the spec’s required lists')
+    const allSpecs = [...SPEC.PHONE_TOOL_SPECS, SPEC.PHONE_PAIR_SPEC]
+    ok(PHONE_TOOLS.length === allSpecs.length && PHONE_TOOLS.every((t, i) => JSON.stringify(t.inputSchema.required) === JSON.stringify(allSpecs[i].required)), 'bridge schemas carry the spec’s required lists')
 
-    const { VoiceAgentHost } = await import('../electron/voice-agent/host.ts')
-    const host = new VoiceAgentHost({ sendEvent() {}, sendToolRequest() {}, getModel: () => 'opus', getBrain: () => 'codex-cli' })
     const defNames = host.listLinkTools().map((t) => t.name).filter((n) => n.startsWith('phone_'))
     ok(JSON.stringify(defNames) === JSON.stringify(bridgeNames), 'forgeToolDefs phone_* names == PHONE_TOOLS names', defNames)
     const viaLink = await host.callLinkTool('phone_status', {})
@@ -447,6 +566,14 @@ async function check() {
     ok(/PHONE_INSTRUCTION_LINE/.test(src('bridge/gemini-bridge.mjs')) && PHONE_INSTRUCTION_LINE.includes('Any app:'), 'forge-bridge instructions carry the phone line, general recipe first')
     const { PHONE_HANDS_RULES } = await import('../shared/brain-persona.ts')
     ok(PHONE_HANDS_RULES.indexOf('Any app:') < PHONE_HANDS_RULES.indexOf('Example, Uber') && PHONE_HANDS_RULES.includes('wait for yes'), 'the persona puts the general recipe before the examples, with the confirm rule')
+    ok(
+      PHONE_HANDS_RULES.includes('Forge Hands') && PHONE_HANDS_RULES.includes('use phone_pair') && PHONE_INSTRUCTION_LINE.includes('Forge Hands') && PHONE_INSTRUCTION_LINE.includes('use phone_pair'),
+      'persona and forge-bridge instructions name Forge Hands and say when to use phone_pair'
+    )
+    ok(
+      SPEC.PHONE_NOT_CONNECTED === "The phone is not connected. Open Forge Hands on the phone and turn on 'Let Forge use this phone'. If it was never set up, use phone_pair.",
+      'the not-connected sentence is the v2 contract’s, word for word'
+    )
   } finally {
     await server.stop()
     rmSync(shotDir, { recursive: true, force: true })
@@ -460,7 +587,8 @@ const at = process.argv.indexOf('--serve')
 if (at >= 0) {
   const port = Number(process.argv[at + 1]) || 8490
   const t = process.argv.indexOf('--token')
-  await serve(port, t >= 0 ? process.argv[t + 1] : '')
+  const h = process.argv.indexOf('--host')
+  await serve(port, t >= 0 ? process.argv[t + 1] : '', h >= 0 ? process.argv[h + 1] : lanAddress())
 } else {
   await check()
 }

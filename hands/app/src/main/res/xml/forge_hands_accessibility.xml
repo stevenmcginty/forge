@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Config for ForgeHandsAccessibilityService (copied into res/xml by
-  scripts/apk-init.mjs, the same way file_paths.xml is).
+  Config for ForgeHandsAccessibilityService.
 
   The window-content, gesture and screenshot capabilities MUST be declared
   here in the meta-data XML: AccessibilityService.setServiceInfo() cannot turn
@@ -15,6 +14,7 @@
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
+    android:description="@string/a11y_description"
     android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"

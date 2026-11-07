@@ -39,3 +39,9 @@ export const PHONE_EXAMPLE_UBER: string
 export const PHONE_EXAMPLE_WHATSAPP: string
 export const PHONE_INSTRUCTION_LINE: string
 export const PHONE_TOOL_SPECS: readonly PhoneToolSpec[]
+export const PHONE_PAIR_WORDS: string
+export const PHONE_PAIR_LAN_NOTE: string
+export const PHONE_PAIR_OFF: string
+export const PHONE_SETUP_RULE: string
+/** phone_pair: runs on the PC, so it has no contract op. */
+export const PHONE_PAIR_SPEC: Omit<PhoneToolSpec, 'op'>

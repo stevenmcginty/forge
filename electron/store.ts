@@ -1212,7 +1212,10 @@ function mobileDevices(raw: unknown): MobileDeviceRecord[] {
       name: str(d.name).slice(0, 64) || 'Phone',
       tokenHash: str(d.tokenHash).toLowerCase(),
       createdAt: Number(d.createdAt) || 0,
-      lastSeenAt: Number(d.lastSeenAt) || 0
+      lastSeenAt: Number(d.lastSeenAt) || 0,
+      // Kept, or a Forge Hands token would come back from disk unscoped — a
+      // full Forge Mobile credential. See MobileDeviceRecord.scope.
+      ...(d.scope === 'hands' ? { scope: 'hands' as const } : {})
     }))
     .filter((d) => d.id && /^[0-9a-f]{64}$/.test(d.tokenHash))
     .slice(0, 20)

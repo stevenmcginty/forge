@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// hands/version.json is the single source of the version: scripts/hands-ship.mjs
+// bumps it, and the APK reads it here, so the two cannot disagree.
+def handsVersion = new groovy.json.JsonSlurper().parse(rootProject.file('version.json'))
+
+android {
+    namespace 'com.forge.hands'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.forge.hands'
+        minSdk 26
+        targetSdk 35
+        versionCode handsVersion.versionCode as int
+        versionName handsVersion.versionName as String
+    }
+
+    buildTypes {
+        release {
+            // Signed by scripts/hands-build.mjs with the Forge release keystore,
+            // so no key path ever appears in this tree.
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // The WebSocket to the desk (the same client Forge Watch uses).
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}

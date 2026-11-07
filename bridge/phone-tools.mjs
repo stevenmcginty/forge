@@ -3,7 +3,8 @@
  * phone_read, phone_tap, phone_type, phone_scroll, phone_key, phone_open_app,
  * phone_open_link, phone_apps, phone_notifications, phone_reply and
  * phone_find_contact — one per op of the phone-hands contract
- * (docs/PHONE-HANDS.md).
+ * (docs/PHONE-HANDS.md) — and phone_pair, which Forge answers on the PC
+ * (a Forge Hands pairing link) without the phone.
  *
  * Every name, description and argument comes from shared/phone-hands-spec.mjs,
  * the one copy the Claude brains' forgeToolDefs() is built from too. They ride
@@ -16,12 +17,12 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { PHONE_INSTRUCTION_LINE, PHONE_TOOL_SPECS } from '../shared/phone-hands-spec.mjs'
+import { PHONE_INSTRUCTION_LINE, PHONE_PAIR_SPEC, PHONE_TOOL_SPECS } from '../shared/phone-hands-spec.mjs'
 import { browserAsk } from './browser-tools.mjs'
 
 export { PHONE_INSTRUCTION_LINE }
 
-export const PHONE_TOOLS = PHONE_TOOL_SPECS.map((spec) => ({
+export const PHONE_TOOLS = [...PHONE_TOOL_SPECS, PHONE_PAIR_SPEC].map((spec) => ({
   name: spec.name,
   description: spec.description,
   inputSchema: {

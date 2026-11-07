@@ -240,13 +240,13 @@ function parseList(chunk: string[]): ReactNode {
 
 const TOKEN_SOURCE = [
   '(`+)([^`]+?)\\1', //                                          1,2  code span
-  '\\[([^\\]\\n]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)', //          3,4  link
+  '\\[([^\\]\\n]+)\\]\\(((?:https?|forgehands):\\/\\/[^\\s)]+)\\)', // 3,4  link
   '\\*\\*([^*\\n]+?)\\*\\*', //                                  5    bold **
   '__([^_\\n]+)__', //                                           6    bold __
   '\\*([^*\\n]+)\\*', //                                         7    italic *
   '(?<![\\w`])_([^_\\n]+)_(?![\\w`])', //                        8    italic _
   '~~([^~\\n]+)~~', //                                           9    strike
-  '(?<![\\w/+@])(https?:\\/\\/[^\\s<>`"]+)' //                   10   bare URL
+  '(?<![\\w/+@])((?:https?|forgehands):\\/\\/[^\\s<>`"]+)' //     10   bare URL
 ].join('|')
 
 /** What may end a sentence, a bracket or an emphasis run, and so is not the end of a URL. */
@@ -268,7 +268,43 @@ export function trimBareUrl(raw: string): string {
     else break
   }
   // Nothing but the scheme is not a place to go.
-  return /^https?:\/\/[^\s/?#]/i.test(url) ? url : ''
+  return /^(?:https?|forgehands):\/\/[^\s/?#]/i.test(url) ? url : ''
+}
+
+/**
+ * The one scheme besides http(s) that is ever linked: `forgehands://pair?…`,
+ * the Forge Hands pairing link an agent gives Steve in chat (phone_pair,
+ * docs/PHONE-HANDS.md). Tapping it must open the helper app, so it gets no new
+ * tab: Android hands a same-window custom-scheme link straight to the app.
+ */
+function linkProps(url: string): { href: string; target?: string; rel?: string } {
+  return isHandsLink(url) ? { href: url } : { href: url, target: '_blank', rel: 'noopener noreferrer' }
+}
+
+function isHandsLink(url: string): boolean {
+  return /^forgehands:\/\//i.test(url)
+}
+
+/**
+ * The PC a forgehands:// link pairs the phone with — its `host`, plus `:port`
+ * when it names one — or '' when it names none. A pairing link hands the
+ * phone to whatever host it carries, so the reader must always see that host:
+ * a written link's own words are dropped for "Pair Forge Hands with <host>",
+ * and a link with no host is not linked at all. Exported for
+ * scripts/web-phone-six-check.mjs.
+ */
+export function handsLinkHost(url: string): string {
+  const query = url.includes('?') ? url.slice(url.indexOf('?') + 1).split('#')[0]! : ''
+  const params = new URLSearchParams(query)
+  const host = params.get('host')?.trim() ?? ''
+  // ForgeHandsPairing.parse's rule: a hostname or IPv4, or a bracketed IPv6.
+  // Anything else (`@`, `/`, escapes, line breaks) could show one host and
+  // dial another, and the phone refuses it anyway.
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252})$/.test(host) && !/^\[[0-9A-Fa-f:.]+\]$/.test(host)) return ''
+  const port = params.get('port')?.trim() ?? ''
+  // The phone takes only a port of 1..65535 too.
+  if (port && !/^\d{1,5}$/.test(port)) return ''
+  return port ? `${host}:${port}` : host
 }
 
 /** The closing bracket on the end of `url` has an opener inside it. */
@@ -298,13 +334,14 @@ function parseInline(text: string, depth = 0, linked = false): ReactNode {
   const token = new RegExp(TOKEN_SOURCE, 'g')
   for (let m = token.exec(text); m; m = token.exec(text)) {
     if (m[10] !== undefined) {
-      // A bare URL: only http(s), by the rule itself. Its trailing
+      // A bare URL: only http(s) and forgehands, by the rule itself. Its trailing
       // punctuation is prose, so the scan picks up again right after the link.
       const url = linked ? '' : trimBareUrl(m[10])
-      if (!url) continue
+      // A pairing link names its PC in its own words; one that names none is prose.
+      if (!url || (isHandsLink(url) && !handsLinkHost(url))) continue
       if (m.index > last) out.push(text.slice(last, m.index))
       out.push(
-        <a key={key++} className="md__link" href={url} target="_blank" rel="noopener noreferrer">
+        <a key={key++} className="md__link" {...linkProps(url)}>
           {url}
         </a>
       )
@@ -320,11 +357,25 @@ function parseInline(text: string, depth = 0, linked = false): ReactNode {
         </code>
       )
     } else if (m[3] !== undefined && m[4] !== undefined) {
-      out.push(
-        <a key={key++} className="md__link" href={m[4]} target="_blank" rel="noopener noreferrer">
-          {parseInline(m[3], depth + 1, true)}
-        </a>
-      )
+      if (isHandsLink(m[4])) {
+        // Its words could say anything; the host is what it pairs with.
+        const host = handsLinkHost(m[4])
+        out.push(
+          host ? (
+            <a key={key++} className="md__link" {...linkProps(m[4])}>
+              Pair Forge Hands with {host}
+            </a>
+          ) : (
+            m[0]
+          )
+        )
+      } else {
+        out.push(
+          <a key={key++} className="md__link" {...linkProps(m[4])}>
+            {parseInline(m[3], depth + 1, true)}
+          </a>
+        )
+      }
     } else if (m[5] !== undefined || m[6] !== undefined) {
       out.push(<strong key={key++}>{parseInline(m[5] ?? m[6]!, depth + 1, linked)}</strong>)
     } else if (m[7] !== undefined || m[8] !== undefined) {

@@ -1,0 +1,12 @@
+// Forge Hands — the small native helper that lets Forge agents operate the
+// phone. One setup screen; everything else runs in the background.
+// :app — Kotlin, framework views only (no WebView, no Capacitor).
+
+plugins {
+    id 'com.android.application' version '8.7.2' apply false
+    id 'org.jetbrains.kotlin.android' version '2.0.21' apply false
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

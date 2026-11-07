@@ -2759,6 +2759,13 @@ export interface MobileDeviceRecord {
   tokenHash: string
   createdAt: number
   lastSeenAt: number
+  /**
+   * `'hands'`: paired through a Forge Hands offer (the phone-hands helper app,
+   * docs/PHONE-HANDS.md). Its token opens a `role: "hands"` socket and nothing
+   * else, so a stolen helper token is not a Forge Mobile session. Absent on a
+   * normal device, which may open either.
+   */
+  scope?: 'hands'
 }
 
 /**
@@ -2794,6 +2801,8 @@ export type MobilePairOffer =
        * `toOrigin`/`pairTokenOf` on the phone; carrying it pre-built means the
        * renderer never assembles a link the phone might read differently.
        * Note it embeds `token`, so it is as much a credential as the token is.
+       * A Forge Hands offer carries `forgehands://pair?…` here instead, from
+       * `handsPairLink` — same params, the helper app's scheme.
        */
       link: string
     }

@@ -288,5 +288,40 @@ console.log('bare URLs: what is left alone')
   is(table.map((el) => el.props.href), ['https://x.dev/t'], 'a URL in a table cell is a link too')
 }
 
+console.log('bare URLs: the Forge Hands pairing link (phone_pair)')
+{
+  const pair = 'forgehands://pair?host=cure-task-legroom.ngrok-free.dev&scheme=wss&pt=AbC_dEf-123'
+  const [a] = linkEls(`Tap this link on your phone:\n\n${pair}`)
+  is(a?.props.href, pair, 'a bare forgehands:// link is a link, whole')
+  ok(a?.props.target === undefined && a?.props.rel === undefined, 'and opens in place (no new tab), so Android hands it to the app')
+  is(links(`It is ${pair}.`), [pair], 'a full stop after it is the sentence\'s')
+  is(links(`[Pair Forge Hands](${pair})`), [pair], 'a written markdown link to it works too')
+  is(links('`forgehands://pair?host=h&port=1&pt=x`'), [], 'but not inside inline code')
+  is(links('xforgehands://pair?host=h and forgehands://'), [], 'nor as the tail of a word, nor a bare scheme')
+  is(links('intent://x forge://pair?host=h&pt=x data:text/html,x'), [], 'and no other app scheme is linked')
+}
+
+console.log('the Forge Hands pairing link always shows the PC it pairs with')
+{
+  const pair = 'forgehands://pair?host=cure-task-legroom.ngrok-free.dev&scheme=wss&pt=AbC_dEf-123'
+  const [written] = linkEls(`[Pair Forge Hands](${pair})`)
+  is(words(written), 'Pair Forge Hands with cure-task-legroom.ngrok-free.dev', 'a written link reads "Pair Forge Hands with <host>"')
+  const evil = 'forgehands://pair?host=evil.example&port=9000&pt=x'
+  const [hidden] = linkEls(`[Steve's PC](${evil})`)
+  is(hidden?.props.href, evil, 'a label that hides the host still links to that link')
+  is(words(hidden), 'Pair Forge Hands with evil.example:9000', 'but shows the host and port, not the label')
+  ok(!words(renderMarkdown(`[Steve's PC](${evil})`)).includes("Steve's PC"), 'and the label is gone')
+  is(words(linkEls(`Tap ${evil} now`)[0]), evil, 'a bare link shows itself, host and all')
+  is(links('[Pair](forgehands://pair?pt=x)'), [], 'a written link with no host is not a link')
+  is(links('[Pair](forgehands://pair?host=&pt=x)'), [], 'nor with an empty host')
+  is(links('Tap forgehands://pair?pt=x now'), [], 'nor is a bare one with no host')
+  is(links('[Pair](forgehands://pair?host=192.168.1.10%40evil.com&pt=x)'), [], 'nor one whose host hides another behind @')
+  is(links('Tap forgehands://pair?host=192.168.1.10%40evil.com&pt=x now'), [], 'bare, too')
+  is(links('[Pair](forgehands://pair?host=a%0Ab&pt=x)'), [], 'nor one with a line break in its host')
+  is(links('[Pair](forgehands://pair?host=evil.com%2Fx&pt=x)'), [], 'nor one with a path in its host')
+  is(links('[Pair](forgehands://pair?host=h&port=1%0Ax&pt=x)'), [], 'nor one whose port is not a number')
+  is(words(linkEls('[the docs](https://x.dev/docs)')[0]), 'the docs', 'an https link keeps its own words')
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

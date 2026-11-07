@@ -731,6 +731,18 @@ export interface ForgeApi {
     pair(): Promise<MobilePairOffer>
     pairCancel(): Promise<boolean>
     /**
+     * Mint a single-use Forge Hands pairing offer: `link` is the
+     * forgehands://pair?… link for the helper app (docs/PHONE-HANDS.md). Its
+     * code mints a hands-scoped device only. Same 5-minute life as the QR.
+     */
+    handsPair(): Promise<MobilePairOffer>
+    /**
+     * Revoke the pending Forge Hands code if it is still `token` (the offer
+     * Settings shows), so a link seen and then hidden pairs nothing. A newer
+     * code (phone_pair since) is left alone. True when one was revoked.
+     */
+    handsPairCancel(token: string): Promise<boolean>
+    /**
      * Mint a single-use pairing code for the Devices preview frames. Same
      * single-use, single-pending machinery as the QR — which is why the Devices
      * view asks for these one frame at a time, never two at once.

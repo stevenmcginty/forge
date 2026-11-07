@@ -4,9 +4,13 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { HandsReqFrame, HandsResFrame, HandsStatusFrame } from '@shared/mobile'
 import type { BrowserAgentReply } from '@shared/browser'
-import type { PhoneHandsStatus } from '@shared/types'
+import type { MobilePairOffer, PhoneHandsStatus } from '@shared/types'
 import {
   PHONE_NOT_CONNECTED,
+  PHONE_PAIR_LAN_NOTE,
+  PHONE_PAIR_OFF,
+  PHONE_PAIR_SPEC,
+  PHONE_PAIR_WORDS,
   PHONE_TIMED_OUT,
   PHONE_TIMEOUT_MS,
   PHONE_TOOL_SPECS,
@@ -17,8 +21,8 @@ import type { HandsEvent } from './mobile/server'
 /**
  * Phone hands, the desk half: Forge agents operate Steve's phone.
  *
- * The phone's native service dials the mobile link with `role: "hands"`
- * (electron/mobile/server.ts keeps those sockets apart); this module turns a
+ * Forge Hands, the helper app on the phone, dials the mobile link with
+ * `role: "hands"` (electron/mobile/server.ts keeps those sockets apart); this module turns a
  * tool call into one `hands:req` down the most recently connected of them and
  * waits for the `hands:res` with the same id. The wire contract is
  * docs/PHONE-HANDS.md; every word an agent reads is shared/phone-hands-spec.mjs.
@@ -59,6 +63,8 @@ export class PhoneHands {
   private lastStatus: (HandsStatusFrame & { at: number }) | null = null
   private listeners = new Set<() => void>()
   private readonly timeoutMs: number
+  /** Mints a Forge Hands pairing offer: electron/mobile-host.ts, or a check's own. */
+  private pairer: (() => MobilePairOffer) | null = null
 
   constructor(options: { timeoutMs?: number } = {}) {
     this.timeoutMs = options.timeoutMs ?? PHONE_TIMEOUT_MS
@@ -70,6 +76,28 @@ export class PhoneHands {
       // The server is gone, and every socket with it.
       for (const { socketId } of [...this.sockets]) this.handle({ kind: 'close', socketId })
     }
+  }
+
+  /** Who answers phone_pair. Null (the default) answers that the phone link is off. */
+  setPairer(pairer: (() => MobilePairOffer) | null): void {
+    this.pairer = pairer
+  }
+
+  /**
+   * phone_pair: a Forge Hands pairing link plus the words for Steve. Runs on
+   * the PC and never touches a hands socket, so it works with no phone
+   * connected — that is when it is needed.
+   */
+  pair(): PhoneReply {
+    let offer: MobilePairOffer
+    try {
+      offer = this.pairer ? this.pairer() : { ok: false, error: PHONE_PAIR_OFF }
+    } catch (err) {
+      offer = { ok: false, error: `No pairing link was made: ${err instanceof Error ? err.message : String(err)}` }
+    }
+    if (!offer.ok) return { ok: false, error: offer.error }
+    if (!offer.link) return { ok: false, error: 'No pairing link was made: the PC has no address to put in it.' }
+    return { ok: true, text: [offer.link, PHONE_PAIR_WORDS, ...(offer.url ? [] : [PHONE_PAIR_LAN_NOTE])].join('\n') }
   }
 
   /** Told whenever the connection or the phone's status changes. Returns the unsubscribe. */
@@ -215,7 +243,7 @@ export function phoneHandsStatus(): PhoneHandsStatus {
 /* ------------------------------------------------------------- the tools */
 
 /** forge-bridge pipe ops answered here (bridge/phone-tools.mjs). Its own set, apart from DESKTOP_LINK_OPS. */
-export const PHONE_LINK_OPS: readonly string[] = PHONE_TOOL_SPECS.map((spec) => spec.name)
+export const PHONE_LINK_OPS: readonly string[] = [...PHONE_TOOL_SPECS.map((spec) => spec.name), PHONE_PAIR_SPEC.name]
 
 /** Tool name → contract op (phone_open_app → open_app). */
 function opOf(name: string): string | null {
@@ -251,9 +279,14 @@ export async function phoneLinkOp(
   args: Record<string, unknown>,
   options: { shotDir: string; hands?: PhoneHands }
 ): Promise<BrowserAgentReply> {
+  const hands = options.hands ?? phoneHands
+  if (name === PHONE_PAIR_SPEC.name) {
+    const paired = hands.pair()
+    return paired.ok ? { ok: true, text: paired.text } : { ok: false, text: paired.error }
+  }
   const op = opOf(name)
   if (!op) return { ok: false, text: `There is no phone tool called ${name}.` }
-  const reply = await (options.hands ?? phoneHands).request(op, args ?? {})
+  const reply = await hands.request(op, args ?? {})
   if (!reply.ok) return { ok: false, text: reply.error }
   const text = reply.text || 'The phone did that.'
   if (!reply.image) return { ok: true, text }
@@ -289,9 +322,18 @@ function zodOf(param: PhoneParamSpec): z.ZodType {
   return base.describe(param.description)
 }
 
-/** The thirteen phone_* tools for forgeToolDefs(): Forge Brain, Telegram, the CLI brains, voice, the Conductor. */
+/** The phone_* tools for forgeToolDefs(): Forge Brain, Telegram, the CLI brains, voice, the Conductor. */
 export function phoneBrainTools(hands: PhoneHands = phoneHands): PhoneBrainTool[] {
-  return PHONE_TOOL_SPECS.map((spec) => {
+  const pair: PhoneBrainTool = {
+    name: PHONE_PAIR_SPEC.name,
+    description: PHONE_PAIR_SPEC.description,
+    shape: {},
+    handler: async (): Promise<ToolResult> => {
+      const reply = hands.pair()
+      return { content: [{ type: 'text', text: reply.ok ? reply.text : reply.error }] }
+    }
+  }
+  const ops = PHONE_TOOL_SPECS.map((spec): PhoneBrainTool => {
     const shape: Record<string, z.ZodType> = {}
     for (const [key, param] of Object.entries(spec.params)) {
       const field = zodOf(param)
@@ -310,7 +352,8 @@ export function phoneBrainTools(hands: PhoneHands = phoneHands): PhoneBrainTool[
       }
     }
   })
+  return [...ops, pair]
 }
 
 /** Their names as the Claude session's canUseTool sees them, for host.ts's allowedTools. */
-export const PHONE_BRAIN_ALLOWED: readonly string[] = PHONE_TOOL_SPECS.map((spec) => `mcp__forge__${spec.name}`)
+export const PHONE_BRAIN_ALLOWED: readonly string[] = PHONE_LINK_OPS.map((name) => `mcp__forge__${name}`)

@@ -2,23 +2,58 @@
 
 Forge agents on the PC can operate Steve's Android phone (his Pixel): any app on it, and Chrome or its web browser. Steve types "book me an Uber to X" or "reply to Y on WhatsApp saying Z" into a pane agent, Forge Brain, Telegram, the voice agent or Claude Live, and the agent does it on the phone with the `phone_*` tools.
 
+## Forge Hands, the helper app
+
+The phone half is a small native app of its own, **Forge Hands** (package `com.forge.hands`), so Steve can keep using Forge Web in Chrome: Android gives accessibility and notification access only to an installed app. It has one setup screen and otherwise runs in the background. It pairs with the PC as its own, limited device.
+
+APK: `npm run hands:build` builds it into `dist-apk\forge-hands.apk` (it prints the sha256), and the file is sent to Steve's phone directly. There is no release page yet.
+
+### Pairing
+
+- The PC mints a **Forge Hands offer**: single use, 5 minutes, 128 bits, like the Forge Mobile QR, but in a slot of its own (`MobileAuth.offerPairing('hands')`), so it never cancels a QR on screen.
+- The link has the Forge Mobile pairing params under the helper's own scheme (`handsPairLink`, `shared/mobile.ts`):
+  - tunnel live: `forgehands://pair?host=<domain>&scheme=wss&pt=<code>` (no port)
+  - no tunnel: `forgehands://pair?host=<lan ip>&port=<port>&pt=<code>` (works only on the home network)
+- The helper's first hello carries the code in `token` with `role: "hands"`. The desk checks it against the Forge Hands offer only, mints a device with `scope: "hands"` (id prefixed `hands-`, name "Forge Hands (<model>)"), and returns `deviceToken` in that one `hello-ok`. The helper keeps origin, token and desktop name in its own storage and reconnects with the token.
+- **A hands-scoped token is accepted only on a `role: "hands"` hello.** On a normal hello it is refused like a bad token, so a stolen helper token cannot open terminals or type into a shell. A normal Forge Mobile token with `role: "hands"` still works, as before. A Forge Mobile pairing code cannot open a hands socket, and a Forge Hands code cannot open Forge Mobile.
+- Ways to get a link:
+  1. Ask any Forge agent: the `phone_pair` tool (pane agents, Forge Brain, Telegram, the voice agent, the Conductor) returns the link and the words for Steve. It runs on the PC and works with no phone connected. It needs the phone link on (Settings → Forge Mobile).
+  2. Settings → Forge Mobile → "Pair Forge Hands": a QR of the link and the link text.
+  3. The helper reads the clipboard when its screen opens and offers a copied `forgehands://pair` link.
+- **A link never pairs on its own.** Any web page or message can carry a `forgehands://pair` link, and pairing hands the phone to the host the link names. So a tapped, pasted or copied link only opens a card in Forge Hands: "Pair with this PC?" (or "Pair with the copied link?"), the desk address (host, and port if there is one) on its own line, and **Pair** / **Not now**. Only Pair pairs. Not now hides the card and changes nothing. A rotation keeps the card as a card; reopening the app from Recents or after a restart does not offer the link again.
+- **A different PC turns the switch off.** If the phone already has a saved desk and the link's host is a different one, the card says "This replaces your current PC: <name> (<host>)". When that pairing succeeds, the helper turns "Let Forge use this phone" off before it stores the new desk (`ForgeHandsPairing.replacesDesk`), and Steve turns it on again by hand. Pairing again with the same host leaves the switch as it is.
+- Forge Web's chat renders `forgehands://` links as tappable (`web/src/lib/markdown.tsx`; the only scheme besides http and https, and it opens in place, not in a new tab). A written link `[words](forgehands://…)` always reads "Pair Forge Hands with <host>", whatever its words say, and a link with no host is not tappable.
+- Settings' "Hide" under the Forge Hands QR revokes the code at once, as Cancel does for the Forge Mobile QR.
+
+### Steve's steps
+
+1. Install Forge Hands on the phone (APK link above) and open it once.
+2. In Forge Web (or any Forge chat), ask: "pair Forge Hands". The agent sends a link.
+3. Tap the link on the phone. Forge Hands opens and shows the PC's address: check it is your PC, then press Pair. If tapping does nothing, long-press it, copy it, then open Forge Hands: it offers to use the copied link.
+4. In Forge Hands, turn on accessibility and notification access when it asks, then turn on "Let Forge use this phone".
+5. Check: ask an agent "what's on my phone screen?" (phone_status / phone_read).
+
+The link works once, for 5 minutes. If it has expired, ask for a new one.
+
 ## How it fits together
 
-- **Phone half** (Forge Mobile APK, native Kotlin in `mobile/native/`): an accessibility service, a notification listener and a socket. The socket dials the desk's normal mobile link with `role: "hands"`.
+- **Phone half** (the Forge Hands app, `hands/`; first built inside the Forge Mobile APK in `mobile/native/`): an accessibility service, a notification listener and a socket. The socket dials the desk's normal mobile link with `role: "hands"`.
 - **Desk half**:
-  - `electron/mobile/server.ts` accepts hands sockets with the paired device token, keeps them in their own registry (they never displace the phone's app socket, never get pushes, and may only send `ping`, `hands:res`, `hands:status`), and sends `hands:req` frames down them (`sendHands`).
+  - `electron/mobile/server.ts` accepts hands sockets with a paired device token or a Forge Hands pairing code, keeps them in their own registry (they never displace the phone's app socket, never get pushes, and may only send `ping`, `hands:res`, `hands:status`), and sends `hands:req` frames down them (`sendHands`).
   - `electron/phone-hands.ts` turns one tool call into one request by id over the most recently connected hands socket, waits 15 s, keeps the last `hands:status`, and answers in plain words.
-  - `shared/phone-hands-spec.mjs` is the one copy of the 13 tools (names, descriptions, arguments) and the agent rules.
+  - `shared/phone-hands-spec.mjs` is the one copy of the 13 phone tools (names, descriptions, arguments), `phone_pair` (`PHONE_PAIR_SPEC`, answered on the PC by `PhoneHands.pair()` → `mintHandsPairing` in `electron/mobile-host.ts`) and the agent rules.
   - Pane agents: `bridge/phone-tools.mjs` (forge-bridge) → the pane pipe → `APP_LINK_OPS` / `PHONE_LINK_OPS` (`electron/browser-panes/service.ts`) → `phoneLinkOp` (`electron/browser-panes/ipc.ts`).
   - Forge Brain, Telegram, the CLI brains, the voice agent and the Conductor: `phoneBrainTools()` in `forgeToolDefs()` (`electron/voice-agent/host.ts`), allowed by name in `allowedTools`, not gated.
   - Persona: `PHONE_HANDS_RULES` (`shared/brain-persona.ts`) in the voice, Conductor and Forge Brain prompts; `PHONE_INSTRUCTION_LINE` in forge-bridge's instructions. The realtime brains (Gemini Live, GPT Realtime) have no phone tools and are not told about them.
-  - Settings → Forge Mobile shows "Phone hands: connected / not connected" with accessibility, notifications and the switch, from the last `hands:status`.
+  - Settings → Forge Mobile shows "Forge Hands (phone hands): connected / not connected" with accessibility, notifications and the switch, from the last `hands:status`, and the "Pair Forge Hands" button.
 
 The wire carries `t` as the frame name everywhere else; the contract below writes `type`. The desk sends both on `hands:req` and accepts either on frames from a hands socket.
 
 ## Wire contract
 
 ### Phone hands: wire contract (fixed; both halves build to this)
+
+(Written when the phone half lived in Forge Mobile. The frames and ops still hold; pairing and the token now belong to Forge Hands, see above.)
 
 Feature: Forge agents on the PC operate Steve's Pixel 10 Pro XL. The phone half is native Kotlin
 inside the Forge Mobile APK (com.forge.mobile). The desk half is Forge's Electron main process.
@@ -114,12 +149,13 @@ ok:false "The phone is locked. Ask Steve to unlock it, then try again." `notific
 
 ## Steve's setup
 
-1. Open Forge Mobile and pair it with the desk as normal. The hands use the same saved address and token.
-2. In the status strip, tap Hands and turn on "Let Forge use this phone".
-3. Tap Accessibility and turn on Forge. If Android says "Restricted setting": on the card, tap Open App info → the three-dot menu → Allow restricted settings, then try again.
-4. Tap Notification access and turn on Forge (the same restricted-setting step if Android asks).
-5. Tap Contacts → Allow. Tap Notifications → Allow. Tap Battery → set Unrestricted.
-6. Check that Desk link shows Connected. The ongoing "Forge phone hands" notification has a Stop button that turns the switch off at any time.
+Pair first, as in "Steve's steps" above (Forge Hands has its own pairing; Forge Mobile is not needed). Then, on the Forge Hands screen:
+
+1. Accessibility → Open, and turn on Forge Hands. If Android says "Restricted setting": on the "Restricted setting" card, tap App info → the three-dot menu → Allow restricted settings, then try again.
+2. Notification access → Open, and turn on Forge Hands (the same restricted-setting step if Android asks).
+3. Contacts → Allow. Notifications → Allow. Battery unrestricted → Allow.
+4. Turn on "Let Forge use this phone".
+5. Check that Desk link shows Connected. The ongoing "Forge Hands" notification has a Stop button that turns the switch off at any time.
 
 ## End-to-end result (emulator, 6 Nov 2026)
 

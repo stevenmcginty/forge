@@ -143,6 +143,8 @@
     "apk:check": "node scripts/apk-check.mjs",
     "apk:tv": "node scripts/apk-tv-build.mjs",
     "apk:tv:release": "node scripts/apk-tv-release.mjs",
+    "hands:build": "node scripts/hands-build.mjs",
+    "hands:ship": "node scripts/hands-ship.mjs",
     "discovery:check": "node scripts/discovery-check.mjs",
     "tv-fetch:check": "node scripts/tv-fetch-check.mjs"
   },

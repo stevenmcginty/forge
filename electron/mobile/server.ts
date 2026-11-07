@@ -1198,12 +1198,14 @@ export class MobileServer {
 
     const token = wireString(frame.token, 512)
 
-    // Phone hands: the paired device token and nothing else — no pairing code,
-    // no approval door. A hands socket that cannot prove it is a paired phone
-    // is refused like any other bad hello.
+    // Phone hands: a paired device token, or a Forge Hands pairing code (the
+    // helper app's first hello) — never the approval door. The code is told
+    // apart by length, as below, and auth checks it against the Forge Hands
+    // offer only; what it mints is a hands-scoped device. A hands socket that
+    // cannot prove either is refused like any other bad hello.
     if (frame.role === 'hands') {
-      const msg = 'Phone hands need this phone to be paired first. Pair it in the Forge app, then try again.'
-      if (token.length <= 30) {
+      const msg = 'Forge Hands is not paired with this PC. Ask Forge for a pairing link, then try again.'
+      if (!token) {
         this.send(client, { t: 'err', code: 'auth', msg })
         this.drop(client, 4001, msg)
         return
@@ -1211,8 +1213,10 @@ export class MobileServer {
       const result = this.host.auth.authenticate({
         source: client.source,
         deviceId: wireString(frame.deviceId, 128),
-        deviceName: wireString(frame.deviceName, 64) || 'Phone',
-        token
+        deviceName: wireString(frame.deviceName, 64) || 'Forge Hands',
+        token: token.length > 30 ? token : undefined,
+        pairToken: token.length <= 30 ? token : undefined,
+        role: 'hands'
       })
       if (!result.ok) {
         this.log(`hands auth refused from ${client.source}: ${result.msg}`)
@@ -1220,7 +1224,7 @@ export class MobileServer {
         this.drop(client, 4001, result.msg)
         return
       }
-      this.handsWelcome(client, result.device)
+      this.handsWelcome(client, result.device, result.issuedToken)
       return
     }
 
@@ -1303,9 +1307,10 @@ export class MobileServer {
    * push, presence count or watch list ever sees it, and the same phone's app
    * socket — still in `clients` — is left exactly as it was. The hello-ok is
    * the bare minimum the contract's phone waits for: no projects, no sessions,
-   * no features, no token, and no Remote Yes replay after it.
+   * no features, no Remote Yes replay after it, and no token — except once, on
+   * the connection that paired through a Forge Hands code.
    */
-  private handsWelcome(client: Client, device: MobileDevice): void {
+  private handsWelcome(client: Client, device: MobileDevice, issuedToken?: string): void {
     client.device = device
     client.role = 'hands'
     this.clients.delete(client)
@@ -1320,7 +1325,8 @@ export class MobileServer {
       projects: [],
       profiles: [],
       workspaces: {},
-      sessions: []
+      sessions: [],
+      ...(issuedToken ? { deviceToken: issuedToken } : {})
     })
     this.host.onHands?.({ kind: 'open', socketId: client.viewer, deviceName: device.name })
   }

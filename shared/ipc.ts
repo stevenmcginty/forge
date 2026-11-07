@@ -349,6 +349,10 @@ export const IPC = {
   /** Mint a single-use pairing token for the QR in Settings. */
   mobilePair: 'mobile:pair',
   mobilePairCancel: 'mobile:pair-cancel',
+  /** Mint a single-use Forge Hands pairing link (forgehands://pair?…) — Settings' "Pair Forge Hands". */
+  mobileHandsPair: 'mobile:hands-pair',
+  /** Revoke the pending Forge Hands code at once — Settings' "Hide" under its QR. */
+  mobileHandsPairCancel: 'mobile:hands-pair-cancel',
   /**
    * Mint a pairing code for the Devices preview — the same single-use machinery
    * as the QR, but pointed at loopback and without touching the Settings detail

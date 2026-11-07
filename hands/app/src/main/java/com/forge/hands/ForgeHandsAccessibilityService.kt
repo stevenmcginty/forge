@@ -1,4 +1,4 @@
-package com.forge.mobile
+package com.forge.hands
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
@@ -17,8 +17,8 @@ import java.util.concurrent.Executors
  * The hands' eyes and fingers.
  *
  * This is the one component that outlives the app: once Steve turns it on in
- * Android's accessibility settings it stays bound and running with the WebView
- * closed, through Doze, and (after it is re-enabled) across a reboot. So it is
+ * Android's accessibility settings it stays bound and running with the setup
+ * screen closed, through Doze, and (after it is re-enabled) across a reboot. So it is
  * also where the socket service is kicked from — onServiceConnected starts
  * ForgeHandsService, which is the only reliable "the app is alive again" signal
  * we get when nothing else of ours is running.

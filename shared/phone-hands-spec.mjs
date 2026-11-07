@@ -1,9 +1,10 @@
 /**
  * Phone hands: the one copy of every word an agent is told about Steve's phone.
  *
- * Forge agents on the PC operate Steve's Pixel through the Forge Mobile app,
- * which dials into the mobile link with `role: "hands"` (docs/PHONE-HANDS.md
- * carries the wire contract). This file is the tool list and the rules, as
+ * Forge agents on the PC operate Steve's Pixel through Forge Hands, a small
+ * helper app on the phone (com.forge.hands), which dials into the mobile link
+ * with `role: "hands"` (docs/PHONE-HANDS.md carries the wire contract). This
+ * file is the tool list and the rules, as
  * plain data, so every brain reads the same sentences:
  *
  *  - pane agents: bridge/phone-tools.mjs builds forge-bridge's phone_* tools
@@ -16,7 +17,8 @@
  *
  * Plain JavaScript, not TypeScript, because the bridge runs under bare `node`
  * and cannot import a .ts file; ./phone-hands-spec.d.mts types it for the rest.
- * Tool name = `phone_<op>`, one per contract op.
+ * Tool name = `phone_<op>`, one per contract op, plus phone_pair
+ * (PHONE_PAIR_SPEC), which runs on the PC and never reaches the phone.
  */
 
 /** The contract's ops, in its order. */
@@ -40,11 +42,11 @@ export const PHONE_OPS = [
 export const PHONE_TIMEOUT_MS = 15_000
 
 export const PHONE_NOT_CONNECTED =
-  "The phone is not connected. Open the Forge app on the phone and turn on 'Let Forge use this phone'."
+  "The phone is not connected. Open Forge Hands on the phone and turn on 'Let Forge use this phone'. If it was never set up, use phone_pair."
 export const PHONE_TIMED_OUT = 'The phone did not answer in 15 s.'
 
 const SCOPE =
-  "Acts on Steve's Android phone (his Pixel) through the Forge app on it: any app on the phone, and Chrome or the phone's web browser. Not Forge, not his PC."
+  "Acts on Steve's Android phone (his Pixel) through the Forge Hands app on it: any app on the phone, and Chrome or the phone's web browser. Not Forge, not his PC."
 
 /** The contract's agent rule, word for word in substance. */
 export const PHONE_CONFIRM_RULE =
@@ -63,8 +65,23 @@ export const PHONE_EXAMPLE_UBER =
 export const PHONE_EXAMPLE_WHATSAPP =
   'Example, WhatsApp reply (com.whatsapp): phone_notifications app "WhatsApp" → if the person has a notification marked (can reply), phone_reply n text. Otherwise phone_find_contact name → phone_open_link "https://wa.me/<digits>?text=<url-encoded text>" → phone_read → tap the Send button.'
 
+/** What phone_pair hands Steve with the link (contract v2, word for word). */
+export const PHONE_PAIR_WORDS =
+  'Tap this link on your phone (works once, for 5 minutes). If tapping does nothing, long-press it, copy it, then open Forge Hands - it offers to use the copied link.'
+
+/** Added by phone_pair when no tunnel is live, so the link names a home-network address. */
+export const PHONE_PAIR_LAN_NOTE =
+  "This link only works while the phone is on the same network as the PC: Forge's internet tunnel is off."
+
+/** phone_pair's answer when the PC's phone link is not running. */
+export const PHONE_PAIR_OFF = "Forge's phone link is off, so there is nothing to pair with. Turn it on in Settings > Mobile on the PC, then try again."
+
+/** If phone_status says the phone is not connected and Steve wants it set up. */
+export const PHONE_SETUP_RULE =
+  "If the phone is not connected and Steve wants to set it up, use phone_pair and give him the link it returns."
+
 /** One line for forge-bridge's server instructions (pane agents). */
-export const PHONE_INSTRUCTION_LINE = `Steve's phone (any app on his Pixel, and its web browser): the phone_* tools. ${PHONE_RECIPE_GENERAL} ${PHONE_CONFIRM_RULE}`
+export const PHONE_INSTRUCTION_LINE = `Steve's phone (any app on his Pixel, and its web browser), through the Forge Hands app on it: the phone_* tools. ${PHONE_RECIPE_GENERAL} ${PHONE_CONFIRM_RULE} ${PHONE_SETUP_RULE}`
 
 const n = (what) => ({ type: 'integer', description: `The number in square brackets from your last phone_read${what}.` })
 
@@ -226,3 +243,19 @@ export const PHONE_TOOL_SPECS = [
     required: ['name']
   }
 ]
+
+/**
+ * phone_pair: the one phone tool that runs on the PC. It mints a Forge Hands
+ * pairing link (single use, 5 minutes, a hands-scoped device) and works with
+ * no phone connected. Not a contract op, so not in PHONE_TOOL_SPECS: every
+ * list of tools appends it after the thirteen.
+ */
+export const PHONE_PAIR_SPEC = {
+  name: 'phone_pair',
+  description: [
+    "Makes a one-time link that pairs the Forge Hands app on Steve's phone with this PC (works once, for 5 minutes). Runs on the PC: needs no phone connected.",
+    'Use it when the phone is not connected and Steve wants to set it up, or when he asks to pair Forge Hands. Give Steve the link on a line of its own, as plain text (not in code or a code block), with the words that come with it.'
+  ].join('\n'),
+  params: {},
+  required: []
+}

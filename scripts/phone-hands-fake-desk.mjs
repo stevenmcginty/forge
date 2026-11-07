@@ -1,9 +1,10 @@
 /**
- * A throwaway "desk" for exercising the phone-hands socket without Forge.
+ * A throwaway "desk" for exercising the Forge Hands helper app (hands/,
+ * com.forge.hands) without Forge.
  *
- * It is NOT the real desk: no Origin/token check, no displacement rules. It
- * serves /link, answers the phone's hello with a minimal hello-ok (the shape
- * of HelloOkFrame in shared/mobile.ts), prints every hands:status the phone
+ * It is NOT the real desk: no Origin check, no displacement rules. It serves
+ * /link, answers the phone's hello with a minimal hello-ok (the shape of
+ * HelloOkFrame in shared/mobile.ts), prints every hands:status the phone
  * pushes, and then fires a scripted list of hands:req ops, printing each
  * hands:res — the base64 image is reported only by its length, never dumped.
  *
@@ -12,23 +13,42 @@
  *     '{"op":"open_link","args":{"url":"https://example.com"}}' \
  *     '{"op":"read"}'
  *
+ * Pairing (contract v2): with --pair-code <code>, a hello whose token is that
+ * code (a pairing code is <= 30 chars; server.ts tells the two apart by
+ * length) is answered with hello-ok plus a fresh 43-char deviceToken, and the
+ * code is spent. From then on only a hello carrying that deviceToken is let
+ * in and runs the script; any other credential gets {t:'err',code:'auth'} and
+ * a 4001 close, like the real desk. Open the helper with
+ *   adb -s <serial> shell am start -a android.intent.action.VIEW \
+ *     -d "forgehands://pair?host=10.0.2.2&port=8799&pt=<code>"
+ * A later run can let the same phone back in with --token <deviceToken>
+ * (read it from the debug build: adb shell run-as com.forge.hands cat
+ * shared_prefs/forge_hands.xml). With neither flag any hello is let in.
+ *
  * Each positional argument is one op as JSON: {"op":"<name>","args":{...}}.
  * Flags: --port <n> (default 8799), --keep (stay open after the script),
- *         --timeout <ms> (per op, default 15000).
+ *         --timeout <ms> (per op, default 15000), --pair-code <code>, --token <t>,
+ *         --idle <ms> (exit if no socket has run the script by then, default 45000).
  */
 import { WebSocketServer } from 'ws'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 
 const argv = process.argv.slice(2)
 let port = 8799
 let keep = false
 let timeoutMs = 15000
+let pairCode = ''
+let issuedToken = ''
+let idleMs = 45000
 const ops = []
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i]
   if (a === '--port') port = Number(argv[++i])
   else if (a === '--keep') keep = true
   else if (a === '--timeout') timeoutMs = Number(argv[++i])
+  else if (a === '--pair-code') pairCode = String(argv[++i] ?? '')
+  else if (a === '--token') issuedToken = String(argv[++i] ?? '')
+  else if (a === '--idle') idleMs = Number(argv[++i])
   else ops.push(JSON.parse(a))
 }
 
@@ -48,24 +68,20 @@ const wss = new WebSocketServer({ port, path: '/link' })
 console.log(`[fake-desk] listening on ws://0.0.0.0:${port}/link  (reachable from the emulator as 10.0.2.2:${port})`)
 console.log(`[fake-desk] ${ops.length} op(s) scripted`)
 
+if (pairCode) console.log(`[fake-desk] pairing code ${pairCode} (single use)`)
+
 let handled = false
 
 // Don't hang a test run forever if the phone never dials in.
 const idleExit = setTimeout(() => {
   if (!handled) {
-    console.log('[fake-desk] no phone connected in 45 s — exiting.')
+    console.log(`[fake-desk] no phone ran the script in ${Math.round(idleMs / 1000)} s — exiting.`)
     process.exit(2)
   }
-}, 45000)
+}, idleMs)
 
 wss.on('connection', (ws, req) => {
-  clearTimeout(idleExit)
   console.log(`[fake-desk] socket from ${req.socket.remoteAddress}  origin=${req.headers.origin ?? '-'}`)
-  if (handled) {
-    console.log('[fake-desk] a socket is already being driven; ignoring this one')
-    return
-  }
-  handled = true
 
   const pending = new Map() // id -> { resolve, timer }
 
@@ -78,7 +94,28 @@ wss.on('connection', (ws, req) => {
     }
     const kind = frame.t || frame.type
     if (kind === 'hello') {
-      console.log(`[fake-desk] <- hello  role=${frame.role ?? 'app'}  deviceId=${frame.deviceId}  token=${frame.token ? `${frame.token.length} chars` : 'none'}`)
+      const token = typeof frame.token === 'string' ? frame.token : ''
+      console.log(
+        `[fake-desk] <- hello  role=${frame.role ?? 'app'}  deviceId=${frame.deviceId}  deviceName=${frame.deviceName}  token=${token ? `${token.length} chars` : 'none'}`
+      )
+      if (pairCode || issuedToken) {
+        if (token.length > 0 && token.length <= 30) {
+          if (!pairCode || token !== pairCode) return refuse(ws, 'That pairing code is not valid (used, expired or mistyped).')
+          pairCode = '' // single use
+          issuedToken = randomBytes(32).toString('base64url')
+          console.log(`[fake-desk] -> hello-ok + deviceToken (${issuedToken.length} chars, ends ...${issuedToken.slice(-6)}); code spent`)
+          ws.send(JSON.stringify({ ...HELLO_OK, deviceToken: issuedToken }))
+          return
+        }
+        if (!issuedToken || token !== issuedToken) return refuse(ws, 'This phone is not paired with this desk.')
+        console.log(`[fake-desk] token matches the one issued at pairing (...${token.slice(-6)})`)
+      }
+      if (handled) {
+        console.log('[fake-desk] a socket is already being driven; ignoring this one')
+        return
+      }
+      handled = true
+      clearTimeout(idleExit)
       ws.send(JSON.stringify(HELLO_OK))
       void runScript(ws, pending)
       return
@@ -129,6 +166,12 @@ async function runScript(ws, pending) {
   if (!keep) {
     setTimeout(() => process.exit(0), 300)
   }
+}
+
+function refuse(ws, msg) {
+  console.log(`[fake-desk] -> err auth "${msg}" + close 4001`)
+  ws.send(JSON.stringify({ t: 'err', code: 'auth', msg }))
+  ws.close(4001, msg)
 }
 
 function send(ws, pending, req) {

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Forge Hands</string>
+    <string name="a11y_description">Lets Forge agents on your PC see and operate this phone. They can only act while \"Let Forge use this phone\" is on in Forge Hands. Banking, password and authenticator apps are always blocked.</string>
+</resources>
