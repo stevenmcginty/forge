@@ -748,7 +748,9 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'grok-2', label: 'Grok 2', note: 'the oldest this picker still names' }
   ],
   claude: [
-    { id: 'claude-fable-5-1', label: 'Fable 5.1', note: 'the hardest, longest-running tasks' },
+    // Fable 5.2 added 2026-11-09: the id Claude Code itself reports running on.
+    { id: 'claude-fable-5-2', label: 'Fable 5.2', note: 'the newest Fable — the hardest, longest-running tasks' },
+    { id: 'claude-fable-5-1', label: 'Fable 5.1', note: 'the previous Fable' },
     { id: 'claude-opus-5-5[1m]', label: 'Opus 5.5', note: 'complex reasoning — the usual default' },
     { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'the newest Sonnet — daily coding, faster' },
     { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'simple tasks, the lightest' }
