@@ -1,0 +1,73 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+// bubble/version.json is the single source of the version, as in hands/.
+def bubbleVersion = new groovy.json.JsonSlurper().parse(rootProject.file('version.json'))
+
+// The Forge Web Firebase project: the same two public identifiers the PWA
+// reads from web/public/config.json. That file is git-ignored, so a checkout
+// without it (a fresh worktree, CI) builds with empty values and the app says
+// "not configured" instead of dialling nothing.
+def webConfigFile = rootProject.file('../web/public/config.json')
+def webConfig = webConfigFile.exists() ? new groovy.json.JsonSlurper().parse(webConfigFile) : [:]
+def quoted = { Object v -> '"' + (v ?: '').toString().replace('\\', '\\\\').replace('"', '\\"') + '"' }
+
+android {
+    namespace 'com.forge.bubble'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.forge.bubble'
+        minSdk 30
+        targetSdk 35
+        versionCode bubbleVersion.versionCode as int
+        versionName bubbleVersion.versionName as String
+
+        buildConfigField 'String', 'FORGE_API_KEY', quoted(webConfig.apiKey)
+        buildConfigField 'String', 'FORGE_DB_URL', quoted(webConfig.databaseUrl)
+        buildConfigField 'String', 'FORGE_WEB_ORIGIN', '"https://forge-web-aadafc.web.app"'
+    }
+
+    buildFeatures {
+        buildConfig true
+        compose true
+    }
+
+    buildTypes {
+        release {
+            // Signed outside this tree with the Forge release keystore, as hands/ is.
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.activity:activity-compose:1.9.3'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7'
+    implementation 'androidx.savedstate:savedstate-ktx:1.2.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    // The screens: phone Compose, Material 3.
+    implementation platform('androidx.compose:compose-bom:2024.12.01')
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
+    // Forge Web, unchanged, in a Trusted Web Activity. 2.5.0 is the newest that
+    // builds here: 2.6.x pulls androidx.browser 1.9 and 2.7.x androidx.core
+    // 1.17, which both need compileSdk 36 and AGP 8.9.1.
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

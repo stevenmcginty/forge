@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.forge.bubble",
+      "sha256_cert_fingerprints": [
+        "B7:1A:43:8B:64:4F:77:09:AD:8F:58:8D:46:0D:DB:63:E4:73:99:DE:D3:E0:64:AF:F6:9E:0E:50:BD:68:55:6C"
+      ]
+    }
+  }
+]

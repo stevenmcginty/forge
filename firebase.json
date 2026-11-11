@@ -36,7 +36,10 @@
       "target": "web",
       "public": "web/dist",
       "ignore": ["firebase.json", "**/.*"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "rewrites": [
+        { "source": "/.well-known/assetlinks.json", "destination": "/well-known/assetlinks.json" },
+        { "source": "**", "destination": "/index.html" }
+      ],
       "headers": [
         {
           "source": "**",

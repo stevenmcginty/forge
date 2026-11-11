@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark everywhere; the Compose screens draw their own surfaces. -->
+    <style name="Forge" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorAccent">@color/forge_accent</item>
+        <item name="android:windowBackground">@color/forge_bg</item>
+        <item name="android:statusBarColor">@color/forge_bg</item>
+        <item name="android:navigationBarColor">@color/forge_bg</item>
+        <item name="android:textColorPrimary">@color/forge_text</item>
+    </style>
+
+    <!-- The TWA launcher shows for a moment before the browser takes over. -->
+    <style name="Forge.Launcher">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <!-- The talk panel: a see-through window; the panel draws at the bottom. -->
+    <style name="Forge.Talk">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
