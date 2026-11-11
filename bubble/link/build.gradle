@@ -1,0 +1,47 @@
+// com.forge.bubble.link — sign-in, the socket to the Forge desktop over the
+// Forge Web wire (bubble/docs/wire-spec.md), and the Claude Live voice lane.
+// No android.* here: the app supplies audio, storage and playback through the
+// interfaces in LinkConfig.kt.
+
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+    id 'java-library'
+}
+
+group = 'com.forge.bubble'
+version = '1.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+dependencies {
+    api 'com.squareup.okhttp3:okhttp:4.12.0'
+    api 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0'
+    // Android ships org.json; on the JVM the tests bring their own.
+    compileOnly 'org.json:json:20240303'
+
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+test {
+    useJUnit()
+    // The integration tests read these; a new dev server means a new run.
+    inputs.property('devWs', System.getenv('FORGE_DEV_WS') ?: '')
+    inputs.property('devToken', System.getenv('FORGE_DEV_TOKEN') ?: '')
+    inputs.property('devPin', System.getenv('FORGE_DEV_PIN') ?: '')
+    inputs.property('devControl', System.getenv('FORGE_DEV_CONTROL') ?: '')
+    outputs.upToDateWhen { false }
+    testLogging {
+        events 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
+}

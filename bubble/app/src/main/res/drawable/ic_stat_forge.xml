@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status bar: the Forge F, white on clear as the system wants. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M5.13,3.5H8.86A0.93,0.93 0,0 1,9.79,4.43V19.57A0.93,0.93 0,0 1,8.86,20.5H5.13A0.93,0.93 0,0 1,4.2,19.57V4.43A0.93,0.93 0,0 1,5.13,3.5ZM5.13,3.5H18.87A0.93,0.93 0,0 1,19.8,4.43V7.34A0.93,0.93 0,0 1,18.87,8.27H5.13A0.93,0.93 0,0 1,4.2,7.34V4.43A0.93,0.93 0,0 1,5.13,3.5ZM5.13,10.95H16.77A0.93,0.93 0,0 1,17.71,11.88V14.79A0.93,0.93 0,0 1,16.77,15.73H5.13A0.93,0.93 0,0 1,4.2,14.79V11.88A0.93,0.93 0,0 1,5.13,10.95Z" />
+</vector>

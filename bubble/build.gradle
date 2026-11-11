@@ -1,0 +1,16 @@
+// Forge (bubble) — the phone app: Forge Web in a Trusted Web Activity, plus an
+// always-on floating bubble that pops out a talk panel to Forge's voice agent.
+// :app — Kotlin, Jetpack Compose (phone, Material 3).
+
+plugins {
+    id 'com.android.application' version '8.7.2' apply false
+    id 'org.jetbrains.kotlin.android' version '2.0.21' apply false
+    // Kotlin 2 ships the Compose compiler as a plugin, versioned with Kotlin.
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.21' apply false
+    // :link is plain Kotlin/JVM; its version lives here so it is loaded once.
+    id 'org.jetbrains.kotlin.jvm' version '2.0.21' apply false
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory
+}

@@ -1,0 +1,21 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'forge-bubble'
+include ':app'
+// The link engine (pure Kotlin/JVM). It also builds alone from bubble/link,
+// which keeps its own settings.gradle for scripts/bubble-link-check.mjs.
+include ':link'

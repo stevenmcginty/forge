@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Forge mark from the PWA icon (web/public/icons/icon-512.png): the
+     heavy black F with its orange spark, in the adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="0.9" android:translateY="1.3">
+        <path android:fillColor="#3D3F7A10" android:pathData="M37.95,36H45.84A1.97,1.97 0,0 1,47.82,37.97V70.03A1.97,1.97 0,0 1,45.84,72H37.95A1.97,1.97 0,0 1,35.98,70.03V37.97A1.97,1.97 0,0 1,37.95,36ZM37.95,36H67.05A1.97,1.97 0,0 1,69.02,37.97V44.14A1.97,1.97 0,0 1,67.05,46.11H37.95A1.97,1.97 0,0 1,35.98,44.14V37.97A1.97,1.97 0,0 1,37.95,36ZM37.95,51.78H62.61A1.97,1.97 0,0 1,64.58,53.75V59.92A1.97,1.97 0,0 1,62.61,61.89H37.95A1.97,1.97 0,0 1,35.98,59.92V53.75A1.97,1.97 0,0 1,37.95,51.78Z" />
+    </group>
+    <path android:fillColor="#15171B" android:pathData="M37.95,36H45.84A1.97,1.97 0,0 1,47.82,37.97V70.03A1.97,1.97 0,0 1,45.84,72H37.95A1.97,1.97 0,0 1,35.98,70.03V37.97A1.97,1.97 0,0 1,37.95,36ZM37.95,36H67.05A1.97,1.97 0,0 1,69.02,37.97V44.14A1.97,1.97 0,0 1,67.05,46.11H37.95A1.97,1.97 0,0 1,35.98,44.14V37.97A1.97,1.97 0,0 1,37.95,36ZM37.95,51.78H62.61A1.97,1.97 0,0 1,64.58,53.75V59.92A1.97,1.97 0,0 1,62.61,61.89H37.95A1.97,1.97 0,0 1,35.98,59.92V53.75A1.97,1.97 0,0 1,37.95,51.78Z" />
+    <path android:fillColor="#FF7A2F" android:pathData="M67.82,34.40L68.92,38.50L73.02,39.60L68.92,40.70L67.82,44.80L66.72,40.70L62.62,39.60L66.72,38.50Z" />
+    <path android:fillColor="#FFF4E0" android:pathData="M67.82,37.40L68.29,39.13L70.02,39.60L68.29,40.07L67.82,41.80L67.35,40.07L65.62,39.60L67.35,39.13Z" />
+    <path android:fillColor="#FF7A2F" android:pathData="M64.22,31.00m-0.8,0a0.8,0.8 0,1 1,1.6 0a0.8,0.8 0,1 1,-1.6 0" />
+    <path android:fillColor="#FF7A2F" android:pathData="M73.02,33.40m-1,0a1,1 0,1 1,2 0a1,1 0,1 1,-2 0" />
+</vector>

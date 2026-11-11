@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: cleartext to the emulator's host (10.0.2.2), a way to
+     skip setup from adb, and the panel/bubble opened to adb for demoState. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application android:networkSecurityConfig="@xml/network_security_config">
+
+        <!-- Skip setup from adb; the command is in DebugActivity.kt. -->
+        <activity
+            android:name=".DebugActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+
+        <activity
+            android:name=".talk.TalkActivity"
+            android:exported="true"
+            tools:replace="android:exported" />
+
+        <service
+            android:name=".bubble.BubbleService"
+            android:exported="true"
+            tools:replace="android:exported" />
+
+    </application>
+</manifest>
