@@ -139,7 +139,67 @@ await check('asking → needs-you with news once; idle → working again; done �
   s = apply(s, ...done.events)
   assert.equal(s.jobs[0].state, 'done')
   assert.equal(L.attentionToLedger(s, { paneId: 'p1', state: 'done', prompt: '' }, 15), null, 'done twice: one news')
-  assert.equal(L.attentionToLedger(s, { paneId: 'other', state: 'asking', prompt: 'x' }, 16), null, 'a pane no job watches')
+  assert.equal(L.attentionToLedger(s, { paneId: 'other', state: 'done', prompt: '' }, 16), null, 'done from a pane no job watches: nothing')
+  assert.equal(L.attentionToLedger(s, { paneId: 'other', state: 'idle', prompt: '' }, 16), null, 'idle from a pane no job watches: nothing')
+})
+
+await check('a pane no job watches asks: a foreign pane job and one news; a new question news again; it stops asking → gone', () => {
+  const who = (paneId, projectId) => (paneId === 'p9' ? { name: 'Zeb', project: 'koraos' } : projectId ? { project: 'forge' } : null)
+  let s = L.EMPTY_LEDGER
+  const ask = { paneId: 'p9', state: 'asking', prompt: 'Allow git push?' }
+  const o1 = L.attentionToLedger(s, ask, 10, who)
+  assert.equal(o1.jobId, 'pane:p9')
+  assert.deepEqual(o1.news, { text: 'Zeb in koraos needs you: Allow git push?', urgency: 'needs-you' })
+  s = apply(s, ...o1.events)
+  const job = s.jobs[0]
+  assert.equal(s.jobs.length, 1)
+  assert.equal(job.id, 'pane:p9')
+  assert.equal(job.owner, 'pane')
+  assert.equal(job.title, 'Zeb')
+  assert.equal(job.paneName, 'Zeb')
+  assert.equal(job.project, 'koraos')
+  assert.equal(job.paneId, 'p9')
+  assert.equal(job.state, 'needs-you')
+  assert.deepEqual(job.steps.map((x) => x.text), ['Asked: Allow git push?'])
+  assert.ok(L.isForeignPaneJob(job))
+  assert.equal(L.attentionToLedger(s, ask, 11, who), null, 'the same question again: no second news')
+  const o2 = L.attentionToLedger(s, { ...ask, prompt: 'Allow npm publish?' }, 12, who)
+  assert.equal(o2.news.text, 'Zeb in koraos needs you: Allow npm publish?', 'a new question is news')
+  s = apply(s, ...o2.events)
+  const gone = L.attentionToLedger(s, { paneId: 'p9', state: 'idle', prompt: '' }, 13, who)
+  assert.equal(gone.news, null, 'no news when it stops asking')
+  s = apply(s, ...gone.events)
+  assert.equal(s.jobs.length, 0, 'stops asking (idle) → the job is removed')
+  s = apply(s, ...L.attentionToLedger(s, ask, 14, who).events)
+  const done = L.attentionToLedger(s, { paneId: 'p9', state: 'done', prompt: '' }, 15, who)
+  assert.equal(done.news, null)
+  assert.equal(apply(s, ...done.events).jobs.length, 0, 'stops asking (done) → removed too')
+  const unnamed = L.attentionToLedger(L.EMPTY_LEDGER, { paneId: 'q1', state: 'asking', prompt: '', projectId: 'x' }, 1, who)
+  assert.equal(unnamed.news.text, 'A pane in forge needs you.', 'no name known: still news')
+  assert.equal(L.attentionToLedger(L.EMPTY_LEDGER, { paneId: 'q2', state: 'asking', prompt: 'x' }, 1).news.text, 'A pane needs you: x', 'no resolver')
+})
+
+await check('LiveLedger: a foreign pane job is named by the resolver, removed in place, and not loaded back', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'live-foreign-'))
+  try {
+    const file = join(dir, 'ledger.jsonl')
+    const ledger = new L.LiveLedger({ file, now: () => Date.now(), resolvePane: () => ({ name: 'Kess', project: 'forge' }) })
+    const news = ledger.handleAttention({ paneId: 'p3', state: 'asking', prompt: 'Overwrite?' })
+    assert.equal(news.type, 'news')
+    assert.equal(news.jobId, 'pane:p3')
+    assert.equal(news.urgency, 'needs-you')
+    assert.equal(news.text, 'Kess in forge needs you: Overwrite?')
+    assert.equal(ledger.handleAttention({ paneId: 'p3', state: 'asking', prompt: 'Overwrite?' }), null, 'once per question')
+    ledger.createJob({ title: 'Mine', owner: 'conductor', state: 'running' })
+    const reloaded = new L.LiveLedger({ file })
+    reloaded.load()
+    assert.deepEqual(reloaded.snapshot().jobs.map((j) => j.title), ['Mine'], 'a restart forgets foreign pane jobs')
+    assert.equal(ledger.handleAttention({ paneId: 'p3', state: 'idle', prompt: '' }), null)
+    assert.equal(ledger.get('pane:p3'), null)
+    assert.equal(L.parseLedgerLine('{"t":"remove","at":1,"id":"x"}').t, 'remove', 'remove lines replay')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 await check('the newest unstopped job on a pane hears it; a stopped job does not', () => {
@@ -148,7 +208,10 @@ await check('the newest unstopped job on a pane hears it; a stopped job does not
   s = L.applyLedgerEvent(s, { t: 'state', at: 3, id: 'new', state: 'stopped' })
   assert.equal(L.jobForPane(s, 'p1').id, 'old')
   s = L.applyLedgerEvent(s, { t: 'state', at: 4, id: 'old', state: 'stopped' })
-  assert.equal(L.attentionToLedger(s, { paneId: 'p1', state: 'asking', prompt: 'x' }, 5), null)
+  // No job watches it now, so it asks like any pane: a foreign pane job, the stopped jobs untouched.
+  const o = L.attentionToLedger(s, { paneId: 'p1', state: 'asking', prompt: 'x' }, 5)
+  assert.equal(o.jobId, 'pane:p1')
+  assert.ok(o.events.every((e) => e.id !== 'old' && e.id !== 'new' && e.job?.id !== 'old'))
 })
 
 await check('LiveLedger.handleAttention applies it and hands back a news event', () => {
@@ -485,6 +548,122 @@ await check('the Conductor: a restart closes its lost jobs with a step; stop and
   assert.deepEqual(await conductor.cancel(onPane.id), { ok: true })
   assert.equal(ledger.get(onPane.id).state, 'stopped')
   await conductor.stop()
+})
+
+await check('the Conductor: a type answer with (pane id X) links the job and replaces a foreign job', async () => {
+  assert.equal(H.paneTypedInto('OK: typed into Zeb (koraos) and it took the Enter (pane id p9)'), 'p9')
+  assert.equal(H.paneTypedInto('OK: sent the prompt to Kess (pane id a-1)  '), 'a-1')
+  assert.equal(H.paneTypedInto('STILL STARTING: Zeb (pane id p9) is starting, nothing was typed yet'), null, 'not a success')
+  assert.equal(H.paneTypedInto('FAILED: Zeb (pane id p9) did not take the Enter'), null)
+  assert.equal(H.paneTypedInto('OK: typed into Zeb'), null, 'no id')
+  assert.ok(H.typesIntoPane('mcp__forge__type_into_pane', {}))
+  assert.ok(H.typesIntoPane('mcp__forge__run_app_action', { action: { kind: 'send_prompt', target: 'Zeb' } }))
+  assert.ok(!H.typesIntoPane('mcp__forge__run_app_action', { action: { kind: 'close_pane' } }))
+  assert.ok(!H.typesIntoPane('mcp__forge__read_pane', {}))
+
+  const C = await import('../electron/live/conductor.ts')
+  const ledger = new L.LiveLedger({ file: null, resolvePane: () => ({ name: 'Zeb', project: 'koraos' }) })
+  const conductor = new C.Conductor({ emit: () => {}, ledger, settings: () => ({}) }, { askRenderer: async () => 'unused' })
+  ledger.handleAttention({ paneId: 'p9', state: 'asking', prompt: 'Which branch?' })
+  assert.ok(ledger.get('pane:p9'), 'the foreign job is there first')
+  const job = ledger.createJob({ title: 'Answer Zeb', owner: 'conductor', state: 'running' })
+  conductor.current = job.id // the job the session is on (private in TS; set here, no session opens)
+  const hook = (tool_name, tool_input, tool_response) =>
+    conductor.stepHook({ hook_event_name: 'PostToolUse', tool_name, tool_input, tool_response }, undefined, { signal: new AbortController().signal })
+  await hook('mcp__forge__type_into_pane', { target: 'Zeb', project: 'koraos' }, [{ type: 'text', text: 'OK: typed into Zeb (pane id p9)' }])
+  assert.equal(ledger.get(job.id).paneId, 'p9', 'the job watches the pane now')
+  assert.equal(ledger.get(job.id).paneName, 'Zeb', 'under the pane name the foreign job knew')
+  assert.equal(ledger.get('pane:p9'), null, 'the foreign job is gone')
+  await hook('mcp__forge__run_app_action', { action: { kind: 'send_prompt', target: 'Kess' } }, 'OK: sent (pane id other)')
+  assert.equal(ledger.get(job.id).paneId, 'p9', 'a job that watches a pane keeps it')
+  assert.equal(L.jobForPane(ledger.snapshot(), 'p9').id, job.id, "the pane's attention now moves the Conductor's job")
+  conductor.current = null
+  await conductor.stop()
+})
+
+await check('foreign pane jobs: stop is refused with a clear answer; show still has the pane', async () => {
+  const C = await import('../electron/live/conductor.ts')
+  const ledger = new L.LiveLedger({ file: null })
+  const conductor = new C.Conductor({ emit: () => {}, ledger, settings: () => ({}) }, { askRenderer: async () => 'unused' })
+  ledger.handleAttention({ paneId: 'p4', state: 'asking', prompt: 'x' })
+  const res = await conductor.cancel('pane:p4')
+  assert.deepEqual(res, { ok: false, error: L.FOREIGN_JOB_STOP_REFUSAL })
+  assert.equal(ledger.get('pane:p4').state, 'needs-you', 'not stopped')
+  assert.equal(ledger.get('pane:p4').paneId, 'p4', 'show has a pane to show')
+  const indexSrc = readFileSync(new URL('../electron/live/index.ts', import.meta.url), 'utf8')
+  assert.ok(/if \(isForeignPaneJob\(job\)\) return \{ ok: false, error: FOREIGN_JOB_STOP_REFUSAL \}/.test(indexSrc), 'the job stop action refuses too')
+  await conductor.stop()
+})
+
+await check('the yes / no classifier (shared/confirm-voice.ts): plain answers only', async () => {
+  const V = await import('../shared/confirm-voice.ts')
+  assert.equal(V.parseConfirmAnswer('Yes.'), 'yes')
+  assert.equal(V.parseConfirmAnswer('Yeah, go ahead.'), 'yes')
+  assert.equal(V.parseConfirmAnswer('No'), 'no')
+  assert.equal(V.parseConfirmAnswer("Don't."), 'no')
+  for (const said of ['yes but use the other branch', 'what is it asking?', 'go ahead and push it to main']) {
+    assert.equal(V.parseConfirmAnswer(said), null, said)
+  }
+  assert.equal(H.spokenConfirmAnswer(1, 'yes'), 'yes')
+  assert.equal(H.spokenConfirmAnswer(1, 'no'), 'no')
+  assert.equal(H.spokenConfirmAnswer(0, 'yes'), null, 'nothing waiting: an ordinary turn')
+  assert.equal(H.spokenConfirmAnswer(2, 'yes'), null, 'two waiting: unclear which, so the voice brain hears it')
+  assert.equal(H.spokenConfirmAnswer(1, 'yes but wait'), null)
+  const desk = await import('../src/lib/brainConfirmVoice.ts')
+  assert.equal(desk.parseConfirmAnswer, V.parseConfirmAnswer, 'the desk voice agent uses the one copy')
+})
+
+await check('the gate decision on pane_question: asking → ask, not asking → pass, timeout or anything else → refuse', async () => {
+  const host = await import('../electron/voice-agent/host.ts')
+  assert.equal(host.paneGateDecision('ASKING: Zeb (koraos): Allow git push?'), 'ask')
+  assert.equal(host.paneGateDecision('NOT ASKING'), 'pass')
+  assert.equal(host.paneGateDecision('  NOT ASKING\n'), 'pass')
+  assert.equal(host.paneGateDecision('Forge did not answer pane_question within 15 seconds.'), 'refuse')
+  assert.equal(host.paneGateDecision('FAILED: Forge is still starting up — try again in a moment.'), 'refuse')
+  assert.equal(host.paneGateDecision('That failed: the app did not say why'), 'refuse')
+  assert.equal(host.paneGateDecision(''), 'refuse')
+  assert.equal(host.PANE_CHECK_FAILED, 'FAILED: Forge could not check that pane (the desktop window did not answer). Nothing was typed.')
+  const hostSrc = readFileSync(new URL('../electron/voice-agent/host.ts', import.meta.url), 'utf8')
+  assert.ok(/if \(decision === 'refuse'\) return \{ answer: PANE_CHECK_FAILED \}/.test(hostSrc), 'the gate refuses on it')
+  assert.ok(/GATED_TOOLS = new Set\(\[[^\]]*'forge_command'/.test(hostSrc), 'forge_command goes through the gate')
+})
+
+await check("the Conductor's confirms: news + a step while waiting, answerable by voice, timeout news; closes confirm for real", async () => {
+  const C = await import('../electron/live/conductor.ts')
+  const ledger = new L.LiveLedger({ file: null })
+  const events = []
+  const conductor = new C.Conductor({ emit: (e) => events.push(e), ledger, settings: () => ({}) }, { askRenderer: async () => 'unused' })
+  const job = ledger.createJob({ title: 'Tidy tabs', owner: 'conductor', state: 'running' })
+  conductor.current = job.id
+  const answers = []
+  const settle = conductor.onConfirm({ id: 'c1', summary: 'close the tab "Logs" and everything in it', risk: 'high', answer: (allow) => (answers.push(allow), true) })
+  assert.deepEqual(events.at(-1), {
+    type: 'news',
+    id: 'confirm-c1',
+    jobId: job.id,
+    text: 'Forge wants to close the tab "Logs" and everything in it. Say yes or no.',
+    urgency: 'needs-you'
+  })
+  assert.equal(ledger.get(job.id).steps.at(-1).text, 'Waiting for your yes: close the tab "Logs" and everything in it')
+  const pending = conductor.pendingConfirms()
+  assert.equal(pending.length, 1)
+  assert.equal(pending[0].answer(true), true)
+  assert.deepEqual(answers, [true])
+  settle('yes')
+  assert.equal(conductor.pendingConfirms().length, 0, 'answered: no longer waiting')
+  const count = events.length
+  conductor.onConfirm({ id: 'c2', summary: 'close the pane that has focus on screen', risk: 'high', answer: () => true })('timeout')
+  assert.deepEqual(events.slice(count).map((e) => [e.urgency, e.text]), [
+    ['needs-you', 'Forge wants to close the pane that has focus on screen. Say yes or no.'],
+    ['info', 'No answer, so I did not do it.']
+  ])
+  conductor.current = null
+  await conductor.stop()
+  const src = readFileSync(new URL('../electron/live/conductor.ts', import.meta.url), 'utf8')
+  assert.ok(/confirmCloses: true/.test(src) && /onConfirm: this\.onConfirm/.test(src) && /toolTimeoutMs: CONDUCTOR_TOOL_TIMEOUT_MS/.test(src))
+  assert.ok(/const CONDUCTOR_TOOL_TIMEOUT_MS = 17_000/.test(src), 'the Conductor waits longer than the desk host')
+  const indexSrc = readFileSync(new URL('../electron/live/index.ts', import.meta.url), 'utf8')
+  assert.ok(/if \(answerConfirmBySpeech\(id, String\(text \?\? ''\)\)\) return\s+try \{\s+await voice\.ask/.test(indexSrc), 'answered before the voice brain')
 })
 
 await check('host.ts: ask_brain and tell_brain are allowed; the Conductor profile is additive', () => {

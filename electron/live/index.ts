@@ -19,11 +19,12 @@ import { onAttention } from '../attention-bus'
 import { bridgeConfigPath } from '../bridge/mcp-config'
 import { getMainWindow } from '../main-window'
 import { isMainMinimised } from '../minibar-window'
-import { getDataDir, getSettings } from '../store'
+import { liveSessions } from '../pty-host'
+import { getDataDir, getProjects, getSettings } from '../store'
 import { askRendererTool, captureScreen } from '../voice-agent/ipc'
-import { anthropicKeyOf } from './brain-helpers'
+import { anthropicKeyOf, CONFIRM_SPOKEN_REPLY, spokenConfirmAnswer } from './brain-helpers'
 import { Conductor } from './conductor'
-import { LiveLedger } from './ledger'
+import { FOREIGN_JOB_STOP_REFUSAL, isForeignPaneJob, LiveLedger, type PaneWho } from './ledger'
 import type { LiveBrainContext, LiveConductor, LiveConductorFactory, LiveVoiceBrain, LiveVoiceBrainFactory } from './types'
 import { createVoiceBrain } from './voice-brain'
 
@@ -147,6 +148,7 @@ async function jobAction(jobId: string, action: LiveJobAction): Promise<LiveActi
     return { ok: true }
   }
   if (action === 'stop') {
+    if (isForeignPaneJob(job)) return { ok: false, error: FOREIGN_JOB_STOP_REFUSAL }
     if (!conductor) return { ok: false, error: 'Claude Live is not running.' }
     try {
       return await conductor.cancel(job.id)
@@ -171,11 +173,34 @@ export async function liveAsk(turnId: string, text: string, opts: LiveAskOpts = 
     return
   }
   if (lane !== 'desk') elsewhereTurns.add(id)
+  if (answerConfirmBySpeech(id, String(text ?? ''))) return
   try {
     await voice.ask(id, String(text ?? ''), { typed: opts.typed === true })
   } catch (err) {
     emitLive({ type: 'turn-end', turnId: id, ok: false, error: errText(err) })
   }
+}
+
+/**
+ * A turn that is a plain yes or no while exactly one of the Conductor's
+ * confirms waits answers it, with no model call: a short final `say` and the
+ * `turn-end`. True when it did; any other turn goes to the voice brain as is.
+ */
+function answerConfirmBySpeech(turnId: string, text: string): boolean {
+  const pending = conductor?.pendingConfirms?.() ?? []
+  const verdict = spokenConfirmAnswer(pending.length, text)
+  if (!verdict || !pending[0]!.answer(verdict === 'yes')) return false
+  emitLive({ type: 'say', turnId, text: CONFIRM_SPOKEN_REPLY[verdict], final: true })
+  emitLive({ type: 'turn-end', turnId, ok: true })
+  return true
+}
+
+/** A pane's name and project name for a foreign pane job: its live session first, then the saved project. */
+function paneWho(paneId: string, projectId?: string): PaneWho | null {
+  const session = liveSessions().find((s) => s.id === paneId)
+  const project = session?.projectName || (projectId ? getProjects().find((p) => p.id === projectId)?.name : undefined)
+  const name = session ? session.name || session.paneTitle : undefined
+  return name || project ? { ...(name ? { name } : {}), ...(project ? { project } : {}) } : null
 }
 
 /** Barge-in on one turn: its reply stops, the jobs keep running. */
@@ -249,7 +274,7 @@ export function initLive(deps: Partial<LiveDeps> = {}): void {
   if (ledger) return
   readSettings = deps.getSettings ?? getSettings
   const dataDir = (deps.getDataDir ?? getDataDir)()
-  ledger = new LiveLedger({ file: join(dataDir, 'live', 'ledger.jsonl') })
+  ledger = new LiveLedger({ file: join(dataDir, 'live', 'ledger.jsonl'), resolvePane: paneWho })
   ledger.load()
 
   const ctx: LiveBrainContext = {

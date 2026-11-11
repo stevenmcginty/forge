@@ -54,6 +54,7 @@ export type LedgerEvent =
   | { t: 'update'; at: number; id: string; patch: LiveJobPatch }
   | { t: 'step'; at: number; id: string; text: string }
   | { t: 'state'; at: number; id: string; state: LiveJobState; summary?: string }
+  | { t: 'remove'; at: number; id: string }
   | { t: 'put'; job: LiveJob }
 
 export type LiveNews = Extract<LiveEvent, { type: 'news' }>
@@ -140,6 +141,7 @@ function replaceJob(snap: LiveLedgerSnapshot, job: LiveJob): LiveLedgerSnapshot 
  *  - `stopped` is final: Steve stopped it, so nothing moves it again. Every
  *    other state may move to any state (a done pane can ask again).
  *  - over 200 jobs, the oldest finished ones are dropped first.
+ *  - `remove` takes a job out entirely (a pane that stopped asking, below).
  */
 export function applyLedgerEvent(snap: LiveLedgerSnapshot, event: LedgerEvent): LiveLedgerSnapshot {
   if (!event || typeof event !== 'object') return snap
@@ -194,6 +196,10 @@ export function applyLedgerEvent(snap: LiveLedgerSnapshot, event: LedgerEvent): 
       const at = isTime(event.at) ? event.at : job.updatedAt
       return replaceJob(snap, { ...next, updatedAt: Math.max(job.updatedAt, at) })
     }
+    case 'remove': {
+      if (!snap.jobs.some((j) => j.id === event.id)) return snap
+      return { jobs: snap.jobs.filter((j) => j.id !== event.id), seq: snap.seq + 1 }
+    }
     default:
       return snap
   }
@@ -225,15 +231,82 @@ export function jobForPane(snap: LiveLedgerSnapshot, paneId: string): LiveJob | 
   return best
 }
 
+/** A pane's name and project name, as main knows them (electron/pty-host.ts `liveSessions`). */
+export interface PaneWho {
+  name?: string
+  project?: string
+}
+
+/** Finds a pane's name and project; null or blanks when main does not know them. */
+export type PaneResolver = (paneId: string, projectId?: string) => PaneWho | null
+
+/**
+ * The job for a pane Claude Live does not watch that is asking for Steve
+ * ("foreign"): owner `pane`, id `pane:<paneId>`. It mirrors the pane's screen
+ * and nothing more — it lives while the pane asks, and goes when it stops.
+ */
+export function foreignPaneJobId(paneId: string): string {
+  return `pane:${paneId}`
+}
+
+export function isForeignPaneJob(job: Pick<LiveJob, 'id' | 'owner'>): boolean {
+  return job.owner === 'pane' && job.id.startsWith('pane:')
+}
+
+/** The answer to a stop on a foreign pane job: it is not Live's to stop. */
+export const FOREIGN_JOB_STOP_REFUSAL =
+  'That is a pane waiting for Steve, not a job Claude Live runs, so it cannot be stopped from here. Answer it in the pane, or show it.'
+
+/** A foreign pane started asking: its job, one step with the question, and one news. */
+function foreignJobFor(event: AttentionEvent, now: number, resolve?: PaneResolver): AttentionOutcome {
+  const who = resolve?.(event.paneId, event.projectId) ?? null
+  const paneName = optional(who?.name, NAME_MAX)
+  const project = optional(who?.project, NAME_MAX)
+  const name = paneName ?? 'A pane'
+  const prompt = clipLiveText(event.prompt, 160)
+  const id = foreignPaneJobId(event.paneId)
+  const job: LiveJobInit = {
+    id,
+    title: name,
+    owner: 'pane',
+    paneId: event.paneId,
+    state: 'needs-you',
+    summary: prompt ? `Asking: ${prompt}` : 'Waiting for you',
+    ...(paneName ? { paneName } : {}),
+    ...(project ? { project } : {})
+  }
+  const where = project ? `${name} in ${project}` : name
+  return {
+    jobId: id,
+    events: [
+      { t: 'create', at: now, job },
+      { t: 'step', at: now, id, text: prompt ? `Asked: ${prompt}` : 'Waiting for you' }
+    ],
+    news: { text: prompt ? `${where} needs you: ${prompt}` : `${where} needs you.`, urgency: 'needs-you' }
+  }
+}
+
 /**
  * A pane went asking / done / idle. `asking` → needs-you with news (once per
  * question), `done` → done with news (once), `idle` after needs-you → running
- * again (answered), no news. A pane no job watches → null.
+ * again (answered), no news.
+ *
+ * A pane no job watches: `asking` makes a foreign pane job (`foreignPaneJobId`,
+ * named by `resolve`) with one news; that job takes the same new-question rule,
+ * and goes — no news — when the pane stops asking (idle or done). Its other
+ * events → null.
  */
-export function attentionToLedger(snap: LiveLedgerSnapshot, event: AttentionEvent, now: number): AttentionOutcome | null {
+export function attentionToLedger(
+  snap: LiveLedgerSnapshot,
+  event: AttentionEvent,
+  now: number,
+  resolve?: PaneResolver
+): AttentionOutcome | null {
   const job = jobForPane(snap, event?.paneId)
-  if (!job) return null
-  const name = job.paneName || job.title
+  if (!job) return event?.paneId && event.state === 'asking' ? foreignJobFor(event, now, resolve) : null
+  const foreign = isForeignPaneJob(job)
+  if (foreign && event.state !== 'asking') return { jobId: job.id, events: [{ t: 'remove', at: now, id: job.id }], news: null }
+  const name = foreign && job.project ? `${job.paneName || job.title} in ${job.project}` : job.paneName || job.title
   const prompt = clipLiveText(event.prompt, 160)
   if (event.state === 'asking') {
     const summary = prompt ? `Asking: ${prompt}` : 'Waiting for you'
@@ -254,6 +327,27 @@ export function attentionToLedger(snap: LiveLedgerSnapshot, event: AttentionEven
     return { jobId: job.id, events: [{ t: 'state', at: now, id: job.id, state: 'running', summary: 'Answered, working again' }], news: null }
   }
   return null
+}
+
+/**
+ * The Conductor typed into a pane: job `jobId` watches it from now on, if it
+ * watches no pane yet. A foreign job on that pane goes — the Conductor's job
+ * takes over, under the pane's name. [] when there is nothing to do.
+ */
+export function adoptPaneEvents(snap: LiveLedgerSnapshot, jobId: string, paneId: string, now: number): LedgerEvent[] {
+  const job = snap.jobs.find((j) => j.id === jobId)
+  if (!job || job.paneId || !paneId) return []
+  const foreign = snap.jobs.find((j) => j.id === foreignPaneJobId(paneId) && isForeignPaneJob(j))
+  const events: LedgerEvent[] = []
+  if (foreign) events.push({ t: 'remove', at: now, id: foreign.id })
+  events.push({ t: 'update', at: now, id: jobId, patch: { paneId, ...(foreign?.paneName ? { paneName: foreign.paneName } : {}) } })
+  return events
+}
+
+/** Foreign pane jobs out: they mirror a screen, and a restart forgets every screen. */
+export function withoutForeignPaneJobs(snap: LiveLedgerSnapshot): LiveLedgerSnapshot {
+  const jobs = snap.jobs.filter((j) => !isForeignPaneJob(j))
+  return jobs.length === snap.jobs.length ? snap : { jobs, seq: snap.seq + 1 }
 }
 
 /* ---------------------------------------------------------------- digest */
@@ -324,7 +418,9 @@ export function parseLedgerLine(line: string): LedgerEvent | null {
     const parsed = JSON.parse(text) as unknown
     if (!parsed || typeof parsed !== 'object') return null
     const t = (parsed as { t?: unknown }).t
-    return t === 'create' || t === 'update' || t === 'step' || t === 'state' || t === 'put' ? (parsed as LedgerEvent) : null
+    return t === 'create' || t === 'update' || t === 'step' || t === 'state' || t === 'remove' || t === 'put'
+      ? (parsed as LedgerEvent)
+      : null
   } catch {
     return null
   }
@@ -335,6 +431,8 @@ export interface LiveLedgerOptions {
   file: string | null
   now?: () => number
   newId?: () => string
+  /** Names a pane Live does not watch when it asks (a foreign pane job). Absent = unnamed. */
+  resolvePane?: PaneResolver
 }
 
 type Listener = (snapshot: LiveLedgerSnapshot) => void
@@ -345,17 +443,20 @@ export class LiveLedger {
   private readonly file: string | null
   private readonly now: () => number
   private readonly newId: () => string
+  private readonly resolvePane: PaneResolver | undefined
 
   constructor(opts: LiveLedgerOptions) {
     this.file = opts.file
     this.now = opts.now ?? Date.now
     this.newId = opts.newId ?? (() => `job-${randomUUID().slice(0, 8)}`)
+    this.resolvePane = opts.resolvePane
   }
 
   /**
    * Replay the log, keep the last 24 h, and rewrite it as one `put` per job,
    * so the file never grows past the ledger it holds. A torn last line (a
-   * crash mid-append) is skipped. Never throws: a ledger that cannot load
+   * crash mid-append) is skipped. Foreign pane jobs are not kept: a pane
+   * still asking says so again. Never throws: a ledger that cannot load
    * starts empty.
    */
   load(): void {
@@ -371,7 +472,7 @@ export class LiveLedger {
     } catch (err) {
       console.error('[live] ledger could not be read:', err)
     }
-    this.snap = pruneLiveLedger(snap, this.now())
+    this.snap = withoutForeignPaneJobs(pruneLiveLedger(snap, this.now()))
     try {
       mkdirSync(dirname(this.file), { recursive: true })
       const tmp = `${this.file}.tmp`
@@ -417,13 +518,26 @@ export class LiveLedger {
     return this.get(id)
   }
 
+  /** Take a job out entirely. False when there was no such job. */
+  removeJob(id: string): boolean {
+    const had = this.get(id) !== null
+    this.apply({ t: 'remove', at: this.now(), id })
+    return had
+  }
+
+  /** Job `jobId` watches `paneId` from now on (see `adoptPaneEvents`). The job, or null. */
+  adoptPane(jobId: string, paneId: string): LiveJob | null {
+    for (const e of adoptPaneEvents(this.snap, jobId, paneId, this.now())) this.apply(e)
+    return this.get(jobId)
+  }
+
   digest(maxChars = 1500): string {
     return ledgerDigest(this.snap, maxChars, this.now())
   }
 
   /** Apply a pane's attention change; the news to speak, if any. */
   handleAttention(event: AttentionEvent): LiveNews | null {
-    const outcome = attentionToLedger(this.snap, event, this.now())
+    const outcome = attentionToLedger(this.snap, event, this.now(), this.resolvePane)
     if (!outcome) return null
     for (const e of outcome.events) this.apply(e)
     if (!outcome.news) return null

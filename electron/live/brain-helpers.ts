@@ -1,3 +1,4 @@
+import { parseConfirmAnswer } from '@shared/confirm-voice'
 import { clipLiveText, isLiveJobFinished, type LiveJob, type LiveJobState, type LiveLedgerSnapshot, type LiveNewsUrgency } from '@shared/live'
 
 /**
@@ -212,6 +213,53 @@ export function paneOpenedIn(text: string): { paneId: string; paneName?: string 
   if (!id) return null
   const name = /\b[Oo]pened (\S+) \(/.exec(text)?.[1]
   return name ? { paneId: id, paneName: name } : { paneId: id }
+}
+
+/** A call that types into a pane: type_into_pane, or run_app_action's send_prompt. */
+export function typesIntoPane(fullName: string, input: unknown): boolean {
+  const name = fullName.split('__').pop() ?? fullName
+  if (name === 'type_into_pane') return true
+  if (name !== 'run_app_action') return false
+  const action = (input && typeof input === 'object' ? (input as Record<string, unknown>)['action'] : null) as Record<string, unknown> | null
+  return !!action && typeof action === 'object' && action['kind'] === 'send_prompt'
+}
+
+/** The pane a successful type answer names: "OK: … (pane id abc)", the id at its end. Null otherwise. */
+export function paneTypedInto(text: string): string | null {
+  const t = text.trim()
+  if (!/^OK/.test(t)) return null
+  return /\(pane id ([^\s);,]+)\)$/.exec(t)?.[1] ?? null
+}
+
+/* ------------------------------------------------------------- confirms */
+
+function confirmWords(summary: string): string {
+  return clipLiveText(summary, 160).replace(/[\s.?!]+$/, '') || 'do something'
+}
+
+/** The news while one of the Conductor's confirms waits. */
+export function confirmNewsText(summary: string): string {
+  return `Forge wants to ${confirmWords(summary)}. Say yes or no.`
+}
+
+/** The step on the Conductor's job while it waits. */
+export function confirmStepText(summary: string): string {
+  return `Waiting for your yes: ${confirmWords(summary)}`
+}
+
+/** The news when a confirm ran out of time (it was a no). */
+export const CONFIRM_TIMEOUT_NEWS = 'No answer, so I did not do it.'
+
+/** What Live says when a spoken yes or no answered the confirm. */
+export const CONFIRM_SPOKEN_REPLY = { yes: 'Okay. Going ahead.', no: 'Okay. I will not do that.' } as const
+
+/**
+ * Does this turn answer the waiting confirm? Only with exactly one waiting
+ * (two would leave it unclear which), and only a plain yes or no, all of it
+ * (shared/confirm-voice.ts). Null = an ordinary turn for the voice brain.
+ */
+export function spokenConfirmAnswer(pending: number, text: string): 'yes' | 'no' | null {
+  return pending === 1 ? parseConfirmAnswer(text) : null
 }
 
 /** Every string inside a tool response (an MCP result, its content array, or plain text), joined. */

@@ -2,11 +2,24 @@ import { tool, type HookCallback, type McpServerConfig, type PostToolUseHookInpu
 import { z } from 'zod'
 import { DEFAULT_LIVE_CONDUCTOR_MODEL, isLiveConductorModel, isLiveJobFinished, type LiveActionResult } from '@shared/live'
 import type { VoiceAgentEvent } from '@shared/types'
-import { VoiceAgentHost, type ForgeToolDef, type VoiceAgentShot } from '../voice-agent/host'
+import { VoiceAgentHost, type ForgeToolDef, type GateConfirm, type GateConfirmOutcome, type VoiceAgentShot } from '../voice-agent/host'
 import { CONDUCTOR_PERSONA } from '../voice-agent/persona'
 import { liveClaudeExecutable } from './claude-cli'
-import { conductorBrief, conductorSteer, describeToolStep, jobsLostInRestart, paneOpenedIn, toolResponseText } from './brain-helpers'
-import type { LiveBrainContext, LiveConductor, LiveJobSpec } from './types'
+import {
+  CONFIRM_TIMEOUT_NEWS,
+  conductorBrief,
+  conductorSteer,
+  confirmNewsText,
+  confirmStepText,
+  describeToolStep,
+  jobsLostInRestart,
+  paneOpenedIn,
+  paneTypedInto,
+  toolResponseText,
+  typesIntoPane
+} from './brain-helpers'
+import { FOREIGN_JOB_STOP_REFUSAL, isForeignPaneJob } from './ledger'
+import type { LiveBrainContext, LiveConductor, LiveConfirm, LiveJobSpec } from './types'
 
 /**
  * Claude Live's Conductor (docs/live-agent-plan.md §3): the deep worker. One
@@ -52,6 +65,13 @@ const STOP_GRACE_MS = 10_000
 const CONDUCTOR_MAX_TURNS = 200
 /** Tools the Conductor must not have: the voice assistant reads the ledger. */
 const CONDUCTOR_DENY = ['say_to_voice_agent'] as const
+/**
+ * The Conductor's wait for one renderer tool: a little longer than the desk
+ * host's own (electron/voice-agent/host.ts TOOL_TIMEOUT_MS, 15 s), which this
+ * round trip passes through — so the desk host is the one place that answers,
+ * or says it timed out.
+ */
+const CONDUCTOR_TOOL_TIMEOUT_MS = 17_000
 
 interface QueuedTurn {
   jobId: string
@@ -72,6 +92,8 @@ export class Conductor implements LiveConductor {
   private lastText = ''
   private stopTimer: ReturnType<typeof setTimeout> | null = null
   private wasBusy = false
+  /** Confirms the gate raised for this session that wait for Steve, by id, oldest first. */
+  private readonly confirms = new Map<string, GateConfirm>()
 
   constructor(ctx: LiveBrainContext, deps: ConductorDeps) {
     this.ctx = ctx
@@ -89,9 +111,15 @@ export class Conductor implements LiveConductor {
       sendEvent: (event) => this.onEvent(event),
       // The renderer answers through the voice agent's own channel; the answer comes back here.
       sendToolRequest: (request) => {
+        const sentAt = Date.now()
+        // Nothing waiting for it any more: this side's own timer answered first.
+        const late = (taken: boolean | undefined): void => {
+          if (!taken) console.warn(`[live] late tool answer ${request.name} ${Date.now() - sentAt}ms`)
+        }
         void ask(request.name, request.args).then(
-          (text) => host?.resolveTool({ id: request.id, ok: true, result: text }),
-          (err: unknown) => host?.resolveTool({ id: request.id, ok: false, error: err instanceof Error ? err.message : String(err) })
+          (text) => late(host?.resolveTool({ id: request.id, ok: true, result: text })),
+          (err: unknown) =>
+            late(host?.resolveTool({ id: request.id, ok: false, error: err instanceof Error ? err.message : String(err) }))
         )
       },
       getModel: () => this.model(),
@@ -109,7 +137,10 @@ export class Conductor implements LiveConductor {
         deny: CONDUCTOR_DENY,
         extraTools: [this.reportTool()],
         hooks: { PostToolUse: [{ hooks: [this.stepHook] }] },
-        executable: liveClaudeExecutable
+        executable: liveClaudeExecutable,
+        toolTimeoutMs: CONDUCTOR_TOOL_TIMEOUT_MS,
+        confirmCloses: true,
+        onConfirm: this.onConfirm
       }
     })
     this.host = host
@@ -141,6 +172,10 @@ export class Conductor implements LiveConductor {
 
   busy(): boolean {
     return this.current !== null || this.queue.length > 0
+  }
+
+  pendingConfirms(): LiveConfirm[] {
+    return [...this.confirms.values()].map((c) => ({ id: c.id, summary: c.summary, answer: (allow: boolean) => c.answer(allow) }))
   }
 
   async delegate(spec: LiveJobSpec): Promise<LiveActionResult & { jobId?: string }> {
@@ -188,6 +223,7 @@ export class Conductor implements LiveConductor {
   async cancel(jobId: string): Promise<LiveActionResult> {
     const job = this.ctx.ledger.get(jobId)
     if (!job) return { ok: false, error: 'No such job.' }
+    if (isForeignPaneJob(job)) return { ok: false, error: FOREIGN_JOB_STOP_REFUSAL }
     this.queue = this.queue.filter((q) => q.jobId !== jobId)
     this.close(jobId, 'stopped', 'Stopped')
     if (jobId === this.current) {
@@ -319,7 +355,31 @@ export class Conductor implements LiveConductor {
     ) as ForgeToolDef
   }
 
-  /** One ledger step per main-thread tool call of the current job; an opened pane is recorded on the job. */
+  /**
+   * The gate raised a confirm for this session (electron/voice-agent/host.ts
+   * `onConfirm`): Steve hears it as news, the current job shows what it waits
+   * for, and Live's ask path may answer it by voice (`pendingConfirms`). A
+   * timeout — a no — is news too.
+   */
+  private readonly onConfirm = (confirm: GateConfirm): ((outcome: GateConfirmOutcome) => void) => {
+    this.confirms.set(confirm.id, confirm)
+    const jobId = this.current
+    if (jobId) this.ctx.ledger.addStep(jobId, confirmStepText(confirm.summary))
+    const about = jobId ? { jobId } : {}
+    this.ctx.emit({ type: 'news', id: `confirm-${confirm.id}`, ...about, text: confirmNewsText(confirm.summary), urgency: 'needs-you' })
+    return (outcome) => {
+      this.confirms.delete(confirm.id)
+      if (outcome === 'timeout') {
+        this.ctx.emit({ type: 'news', id: `confirm-${confirm.id}-timeout`, ...about, text: CONFIRM_TIMEOUT_NEWS, urgency: 'info' })
+      }
+    }
+  }
+
+  /**
+   * One ledger step per main-thread tool call of the current job. An opened
+   * pane is recorded on the job, and so is a pane it typed into when the job
+   * watches none yet (taking over a foreign pane job there).
+   */
   private readonly stepHook: HookCallback = async (input) => {
     try {
       const post = input as PostToolUseHookInput
@@ -330,6 +390,9 @@ export class Conductor implements LiveConductor {
       if (post.tool_name.endsWith('__open_agent_pane')) {
         const pane = paneOpenedIn(toolResponseText(post.tool_response))
         if (pane) this.ctx.ledger.updateJob(id, { paneId: pane.paneId, ...(pane.paneName ? { paneName: pane.paneName } : {}) })
+      } else if (typesIntoPane(post.tool_name, post.tool_input)) {
+        const paneId = paneTypedInto(toolResponseText(post.tool_response))
+        if (paneId) this.ctx.ledger.adoptPane(id, paneId)
       }
     } catch (err) {
       console.error('[live] conductor step hook failed:', err)

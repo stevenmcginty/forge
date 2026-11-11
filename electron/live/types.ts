@@ -45,6 +45,14 @@ export interface LiveJobSpec {
   owner?: LiveJobOwner
 }
 
+/** A confirm the Conductor's gate raised that is waiting for Steve's yes. */
+export interface LiveConfirm {
+  id: string
+  summary: string
+  /** Answer it. False when it was no longer waiting. */
+  answer(allow: boolean): boolean
+}
+
 /** The deep worker: takes jobs, reports them in the ledger. */
 export interface LiveConductor {
   start(): Promise<void>
@@ -55,6 +63,8 @@ export interface LiveConductor {
   cancel(jobId: string): Promise<LiveActionResult>
   /** True while it is working on anything (LiveStatus.conductorBusy). */
   busy(): boolean
+  /** Its confirms waiting for Steve, oldest first. Absent = none ever. */
+  pendingConfirms?(): LiveConfirm[]
 }
 
 export type LiveVoiceBrainFactory = (ctx: LiveBrainContext) => LiveVoiceBrain

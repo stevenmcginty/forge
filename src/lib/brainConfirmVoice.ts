@@ -26,29 +26,8 @@
 
 /* ------------------------------------------------------------------ the gate */
 
-const YES = new Set(['yes', 'yeah', 'yep', 'yes please', 'do it', 'go ahead', 'allow', 'allow it'])
-const NO = new Set(['no', 'nope', 'no thanks', 'dont', 'do not', 'cancel', 'stop'])
-
-/** Lower case, no punctuation, one space between words. "Yes, please." → "yes please"; "Don't!" → "dont". */
-function plain(text: string): string {
-  return String(text ?? '')
-    .toLowerCase()
-    .replace(/['’‘`]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-/**
- * Is this utterance, all of it, a yes or a no? Anything longer or different —
- * "yes but wait", "no I meant the other one", "yesterday" — is null: not an
- * answer, and it goes on to the commands and the brain like any other words.
- */
-export function parseConfirmAnswer(text: string): 'yes' | 'no' | null {
-  const t = plain(text)
-  if (YES.has(t)) return 'yes'
-  if (NO.has(t)) return 'no'
-  return null
-}
+/** The yes / no list itself lives in shared/confirm-voice.ts: Claude Live in main answers by it too. */
+export { parseConfirmAnswer } from '@shared/confirm-voice'
 
 /**
  * How long after its question was said aloud a spoken yes or no still counts.

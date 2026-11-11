@@ -94,7 +94,34 @@ const TOOL_TIMEOUT_MS = 15_000
 const CONFIRM_UNANSWERED_MS = 115_000
 
 /** The tools the confirm gate looks at (`VoiceAgentHost.gate`); every other call goes straight through. */
-const GATED_TOOLS = new Set(['create_project', 'set_setting', 'close_tab', 'type_into_pane', 'help_prompt', 'run_app_action'])
+const GATED_TOOLS = new Set(['create_project', 'set_setting', 'close_tab', 'type_into_pane', 'help_prompt', 'run_app_action', 'forge_command'])
+
+/**
+ * forge_command ids that close something (src/lib/forgeCommand.ts
+ * `DESTRUCTIVE_FORGE_COMMANDS`, which main cannot import). For a profile with
+ * `confirmCloses`, the gate asks Steve and sets `confirmed` itself.
+ */
+const CLOSING_FORGE_COMMANDS: ReadonlyMap<string, string> = new Map([
+  ['pane.close', 'close the pane that has focus on screen'],
+  ['tab.close', 'close the tab on screen and everything in it']
+])
+
+/** What the gate answers when it could not ask the renderer whether a pane is asking. */
+export const PANE_CHECK_FAILED = 'FAILED: Forge could not check that pane (the desktop window did not answer). Nothing was typed.'
+
+/**
+ * The gate's reading of the renderer's `pane_question` answer
+ * (src/lib/agenttools.ts): exactly `NOT ASKING` lets the typing through,
+ * `ASKING: …` asks Steve first, and anything else — a timeout, an error, a
+ * Forge still starting — refuses. Fails closed: typing blind into a pane that
+ * may be asking answers it for him.
+ */
+export function paneGateDecision(answer: string): 'pass' | 'ask' | 'refuse' {
+  const said = String(answer ?? '').trim()
+  if (said === 'NOT ASKING') return 'pass'
+  if (said.startsWith('ASKING: ')) return 'ask'
+  return 'refuse'
+}
 
 /**
  * Generous rather than tight. A voice turn that has to look at the app, act on
@@ -252,7 +279,28 @@ export interface VoiceAgentProfile {
   hooks?: Options['hooks']
   /** The `claude` binary to run. Absent = `claudeExecutablePath()`, as the voice agent does. */
   executable?: () => string | undefined
+  /** How long one renderer tool round trip may take. Absent = `TOOL_TIMEOUT_MS`. */
+  toolTimeoutMs?: number
+  /** forge_command's closing commands get a real confirm; the model's `confirmed` flag no longer counts. */
+  confirmCloses?: boolean
+  /**
+   * A confirm this session's gate raised, while it waits for Steve. The
+   * function it returns, if any, hears how it ended.
+   */
+  onConfirm?: (confirm: GateConfirm) => ((outcome: GateConfirmOutcome) => void) | void
 }
+
+/** One waiting confirm the gate raised (`VoiceAgentProfile.onConfirm`). */
+export interface GateConfirm {
+  /** Its id in electron/brain/host.ts's queue (`BrainStatus.confirms`). */
+  id: string
+  summary: string
+  risk: BrainRisk
+  /** Answer it (`answerConfirm`). False when it was no longer waiting. */
+  answer(allow: boolean): boolean
+}
+
+export type GateConfirmOutcome = 'yes' | 'no' | 'timeout'
 
 /* --------------------------------------------------------------- utilities */
 
@@ -494,13 +542,13 @@ export class VoiceAgentHost {
     return this.askRenderer(name, args)
   }
 
-  /** The renderer's answer to a `voice-agent:tool-request`. */
-  resolveTool(result: VoiceAgentToolResult): void {
+  /** The renderer's answer to a `voice-agent:tool-request`. False when nothing was waiting for it. */
+  resolveTool(result: VoiceAgentToolResult): boolean {
     const id = String(result?.id ?? '')
     const entry = this.pending.get(id)
     // Late, duplicate or invented — all three are the same non-event. The
     // timeout has already answered the model in the late case.
-    if (!entry) return
+    if (!entry) return false
     this.pending.delete(id)
     clearTimeout(entry.timer)
     entry.resolve(
@@ -508,6 +556,7 @@ export class VoiceAgentHost {
         ? asToolText(result.result)
         : `That failed: ${result.error?.trim() || 'the app did not say why'}`
     )
+    return true
   }
 
   /** App is quitting. Never respawn after this. */
@@ -760,12 +809,13 @@ export class VoiceAgentHost {
    * did not answer" is a fact it can tell Steve about and carry on from.
    */
   private askRenderer(name: string, args: unknown): Promise<string> {
+    const waitMs = this.deps.profile?.toolTimeoutMs ?? TOOL_TIMEOUT_MS
     return new Promise<string>((resolve) => {
       const id = randomUUID()
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        resolve(`Forge did not answer ${name} within ${TOOL_TIMEOUT_MS / 1000} seconds.`)
-      }, TOOL_TIMEOUT_MS)
+        resolve(`Forge did not answer ${name} within ${Math.round(waitMs / 1000)} seconds.`)
+      }, waitMs)
       this.pending.set(id, { resolve, timer })
       try {
         this.deps.sendToolRequest({ id, name, args })
@@ -1392,9 +1442,30 @@ export class VoiceAgentHost {
       const started = Date.now()
       // Loaded when used: electron/brain/host.ts imports this file's module
       // graph back (through ./ipc.ts) and Electron with it.
-      const { requestConfirm } = await import('../brain/host')
-      if (await requestConfirm(name, words, risk)) return { args: next }
-      return Date.now() - started >= CONFIRM_UNANSWERED_MS
+      const brain = await import('../brain/host')
+      const watch = this.deps.profile?.onConfirm
+      // requestConfirm queues its confirm synchronously, so the one id that is
+      // new straight after the call is this one.
+      const before = watch ? new Set(brain.brainStatus().confirms.map((c) => c.id)) : null
+      const asked = brain.requestConfirm(name, words, risk)
+      let settle: ((outcome: GateConfirmOutcome) => void) | void = undefined
+      if (watch && before) {
+        const id = brain.brainStatus().confirms.find((c) => !before.has(c.id))?.id
+        try {
+          if (id) settle = watch({ id, summary: words, risk, answer: (allow) => brain.answerConfirm({ id, allow }) })
+        } catch (err) {
+          console.error('[voice-agent] confirm watcher failed:', err)
+        }
+      }
+      const allowed = await asked
+      const unanswered = !allowed && Date.now() - started >= CONFIRM_UNANSWERED_MS
+      try {
+        settle?.(allowed ? 'yes' : unanswered ? 'timeout' : 'no')
+      } catch (err) {
+        console.error('[voice-agent] confirm watcher failed:', err)
+      }
+      if (allowed) return { args: next }
+      return unanswered
         ? { answer: `Steve did not answer, so nothing was done (${words}). Ask him again if it still matters.` }
         : { answer: `Steve did not allow it, so nothing was done (${words}).` }
     }
@@ -1409,14 +1480,17 @@ export class VoiceAgentHost {
     }
 
     // Typing into a pane that is showing a question answers it on Steve's behalf.
+    // Typing goes ahead only when the renderer says the pane is not asking.
     const intoPane = async (
       target: unknown,
       project: unknown,
       typed: string
     ): Promise<{ args: Record<string, unknown> } | { answer: string }> => {
       const where = typeof project === 'string' && project.trim() ? { project } : {}
-      const q = await this.askRenderer('pane_question', { target: typeof target === 'string' ? target : '', ...where })
-      if (!q.startsWith('ASKING: ')) return { args }
+      const q = (await this.askRenderer('pane_question', { target: typeof target === 'string' ? target : '', ...where })).trim()
+      const decision = paneGateDecision(q)
+      if (decision === 'pass') return { args }
+      if (decision === 'refuse') return { answer: PANE_CHECK_FAILED }
       const said = typed.trim() ? `typing "${typed.trim().slice(0, 80)}"` : 'pressing Enter'
       return ask(`answer ${q.slice('ASKING: '.length)} — by ${said}`, 'high')
     }
@@ -1450,6 +1524,16 @@ export class VoiceAgentHost {
           return intoPane(action['target'], action['project'], typed)
         }
         return { args }
+      }
+      case 'forge_command': {
+        // Only for a profile that asks for it (Claude Live's Conductor): the
+        // other brains keep their own ask-then-`confirmed` flow.
+        if (!this.deps.profile?.confirmCloses) return { args }
+        const rest = { ...args }
+        delete rest['confirmed']
+        const closing = CLOSING_FORGE_COMMANDS.get(said('id').replace(/^ui\./i, '').toLowerCase())
+        if (!closing) return { args: rest }
+        return ask(closing, 'high', { ...rest, confirmed: true })
       }
     }
     return { args }
