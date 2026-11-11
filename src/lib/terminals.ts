@@ -1,6 +1,13 @@
 import { Terminal, type ILink, type ILinkProvider, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import type { PaneLaunchPin, PtyDataEvent, PtyExitEvent, PtyGeometryEvent, PtyReplaySegment } from '@shared/types'
+import type {
+  CreateSessionResult,
+  PaneLaunchPin,
+  PtyDataEvent,
+  PtyExitEvent,
+  PtyGeometryEvent,
+  PtyReplaySegment
+} from '@shared/types'
 import { findRemoteSessionUrl } from '@shared/remote'
 import { findDevServerUrl } from '@shared/devserver'
 import { isTypedInput } from '@shared/typing'
@@ -26,6 +33,9 @@ import { cellText, findMarkdownRefs, type CellLine } from './reader-links'
  */
 
 export type PaneStatus = 'idle' | 'starting' | 'live' | 'exited' | 'error'
+
+/** How `startHidden` went — see there. */
+export type HiddenStart = 'present' | 'restored' | 'started' | 'failed'
 
 export interface PaneRuntime {
   status: PaneStatus
@@ -1063,10 +1073,21 @@ class TerminalHost {
    * by the next `attach` — the same terminal and the same process, never a
    * second one. Let go at once, so a later `focus` on it cannot take the keys
    * from the pane Steve is typing in. No-op for a pane that already has one.
+   *
+   * It also adopts a pane whose process is still running in main but which
+   * this window has no terminal for — every pane after a renderer reload (dev
+   * HMR, a crash). Main's create is idempotent: it re-adopts the live session
+   * and replays what it printed into this terminal, so the pane is readable,
+   * typeable and watched again without being relaunched. Never a WebGL
+   * context: a hidden terminal is drawn by nobody until `attach` moves it.
+   *
+   * Resolves once main has answered: `restored` for a re-adopted process,
+   * `started` for a fresh launch, `failed` when the launch failed, and
+   * `present` (at once) when this window already had a terminal for it.
    */
-  startHidden(paneId: string, spec: TerminalSpec): void {
+  startHidden(paneId: string, spec: TerminalSpec): Promise<HiddenStart> {
     this.wire()
-    if (this.entries.has(paneId)) return
+    if (this.entries.has(paneId)) return Promise.resolve('present')
     const shown = [...this.entries.values()].find((e) => e.container && e.mode === 'tab' && e.geometry)
     const size = shown?.geometry ?? DEFAULT_PANE_GEOMETRY
     const box = document.createElement('div')
@@ -1080,9 +1101,10 @@ class TerminalHost {
     entry.mode = 'tab'
     entry.term.open(entry.wrapper)
     this.fit(paneId)
-    void this.start(entry)
+    const started = this.start(entry)
     this.detach(paneId)
     box.remove()
+    return started.then((result) => (!result.ok ? 'failed' : result.restored ? 'restored' : 'started'))
   }
 
   /**
@@ -1701,7 +1723,7 @@ class TerminalHost {
     entry.term.write(`\x1b[${rgb}m── ${name}\x1b[0m\r\n`)
   }
 
-  private async start(entry: Entry): Promise<void> {
+  private async start(entry: Entry): Promise<CreateSessionResult> {
     // A relaunch gets a new Remote Control id, so the old URL must not survive
     // it. The *conversation* does: the pane keeps its session id, so restarting
     // a pane picks its Claude back up rather than starting over.
@@ -1740,6 +1762,7 @@ class TerminalHost {
       entry.term.write(`\r\n\x1b[38;2;255;92;72m✕ ${result.error}\x1b[0m\r\n`)
       this.setRuntime(entry, { status: 'error', error: result.error })
     }
+    return result
   }
 
   /**

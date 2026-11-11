@@ -109,8 +109,10 @@ export async function runMainAgentTool(
             text: `OK: the prompt is typed into ${label(found.pane)}, NOT sent. Ask him whether to send it; on yes call type_into_pane with target "${found.pane.name}", text "" and submit true.`
           }
         }
-        if (!text.trim()) return { ok: true, text: `OK: pressed Enter in ${label(found.pane)}.` }
-        return { ok: true, text: `OK: typed into ${label(found.pane)}${submit ? ' and pressed Enter' : ' (not sent)'}.` }
+        // The pane's id on the end, as open_agent_pane names the pane it opened.
+        const id = ` (pane id ${found.pane.paneId})`
+        if (!text.trim()) return { ok: true, text: `OK: pressed Enter in ${label(found.pane)}.${id}` }
+        return { ok: true, text: `OK: typed into ${label(found.pane)}${submit ? ' and pressed Enter' : ' (not sent)'}.${id}` }
       }
 
       case 'read_pane': {

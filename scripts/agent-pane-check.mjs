@@ -197,5 +197,194 @@ console.log('\na brief is never pasted into a shell')
   )
 }
 
+/* ------------------------------------------------------ every pane, reached */
+
+const AT = await import('../src/lib/agenttools.ts')
+const { setHubRuntime } = await import('../src/lib/hubRuntime.ts')
+
+const pane = (name, over = {}) => ({
+  paneId: `id-${name.toLowerCase()}`,
+  tabId: `tab-${name.toLowerCase()}`,
+  tabNumber: 1,
+  tabTitle: name,
+  number: 1,
+  name,
+  profileId: 'claude',
+  profileName: 'Claude Code',
+  live: true,
+  focused: false,
+  agent: true,
+  ...over
+})
+const where = { id: 'p-b', name: 'beta', path: 'C:/beta', onScreen: false }
+
+/**
+ * A stand-in for the live app and terminal host: `hasEntry` is whether this
+ * window has a terminal for the pane, `live` the ids main runs a process for.
+ */
+const fakeReach = ({ target, hasEntry = false, live = new Set(), screen = 'agent screen', listable = true } = {}) => {
+  const calls = []
+  let has = hasEntry
+  let status = hasEntry ? 'live' : 'idle'
+  let text = screen
+  const term = {
+    has: () => has,
+    startHidden: async (id, spec) => {
+      calls.push(['startHidden', id, spec])
+      const restored = live.has(id)
+      has = true
+      status = 'live'
+      return restored ? 'restored' : 'started'
+    },
+    snapshotText: () => (has ? text : null),
+    runtime: () => ({ status }),
+    readiness: () => ({ outputBytes: BRIEF_READY_BYTES + 500, quietForMs: BRIEF_READY_QUIET_MS + 100 }),
+    paste: (id, t) => calls.push(['paste', id, t]),
+    type: (id, t) => {
+      calls.push(['type', id, t])
+      return true
+    },
+    submit: (id) => {
+      calls.push(['submit', id])
+      text += '\nworking…'
+      return true
+    }
+  }
+  const leaf = { type: 'leaf', id: target.paneId, profileId: 'claude', title: target.name }
+  const r = {
+    app: { get: () => ({ workspaces: { [where.id]: { tabs: [{ id: target.tabId, root: leaf }] } } }) },
+    term,
+    activity: () => 'dormant',
+    panesOf: () => [target],
+    themes: [],
+    livePtys: async () => (listable ? live : null),
+    specFor: async (projectId, paneId) => (projectId === where.id && paneId === target.paneId ? { cwd: where.path } : null)
+  }
+  return { r, calls }
+}
+
+console.log('\na running pane with no terminal here is adopted, not called "not started"')
+{
+  const zeb = pane('Zeb')
+  const read = fakeReach({ target: zeb, live: new Set([zeb.paneId]), screen: '> fix the tests\n✻ Working' })
+  const readAnswer = await AT.readElsewhere(read.r, where, zeb, 40)
+  ok(read.calls[0]?.[0] === 'startHidden', 'read_pane adopts the live process before reading', JSON.stringify(read.calls))
+  ok(readAnswer.includes('Working') && readAnswer.startsWith('Zeb (beta)'), 'and reads its real screen', readAnswer)
+  ok(!/not started|has not started/.test(readAnswer), 'never "has not started yet"', readAnswer)
+
+  const type = fakeReach({ target: zeb, live: new Set([zeb.paneId]) })
+  const typed = await AT.typeElsewhere(type.r, where, zeb, 'run the tests', false)
+  ok(type.calls[0]?.[0] === 'startHidden', 'type_into_pane adopts it before typing', JSON.stringify(type.calls))
+  ok(type.calls.some((c) => c[0] === 'type' && c[2] === 'run the tests'), 'then types into the same pane', JSON.stringify(type.calls))
+  ok(typed.startsWith('OK: typed into Zeb (beta)'), 'and says so', typed)
+
+  const present = fakeReach({ target: zeb, hasEntry: true, live: new Set([zeb.paneId]) })
+  await AT.readElsewhere(present.r, where, zeb, 40)
+  ok(!present.calls.some((c) => c[0] === 'startHidden'), 'a pane with a terminal already is not started again')
+
+  const blind = fakeReach({ target: zeb, listable: false })
+  const blindRead = await AT.readElsewhere(blind.r, where, zeb, 40)
+  ok(blindRead.startsWith('FAILED') && !/not running|not started/.test(blindRead), 'main unreachable: says it could not check, claims nothing', blindRead)
+  ok(!blind.calls.length, 'and starts nothing')
+
+  ok(AT.wakeStep(true, null, 'x') === 'present', 'wakeStep: a terminal here is present')
+  ok(AT.wakeStep(false, new Set(['x']), 'x') === 'adopt', 'wakeStep: no terminal but a live process is adopted')
+  ok(AT.wakeStep(false, new Set(), 'x') === 'dormant', 'wakeStep: no process anywhere is dormant')
+  ok(AT.wakeStep(false, null, 'x') === 'unknown', 'wakeStep: main unasked is unknown, never dormant')
+
+  const tools = src('src/lib/agenttools.ts')
+  ok(!/has not started yet/.test(tools), 'no answer in agenttools says "has not started yet"')
+  ok(!/requestAnimationFrame\(/.test(tools), 'and nothing in it waits on an animation frame')
+  ok(/adoptLivePanes\(\)/.test(tools.slice(tools.indexOf('export function registerVoiceAgentTools'))), 'the adopt sweep runs once the tools register')
+  ok(/ADOPT_SWEEP_STEP_MS = 150/.test(tools), 'one adoption every 150 ms')
+  const host = src('src/lib/terminals.ts')
+  const hidden = host.slice(host.indexOf('  startHidden('), host.indexOf('  geometryFor('))
+  ok(hidden.length > 0 && !/setWebgl/.test(hidden), 'a hidden terminal takes no WebGL context')
+}
+
+console.log('\na dormant pane in another project starts when typed into')
+{
+  const kess = pane('Kess')
+  const sent = fakeReach({ target: kess })
+  const answer = await AT.typeElsewhere(sent.r, where, kess, 'review the diff', true)
+  ok(sent.calls[0]?.[0] === 'startHidden' && sent.calls[0]?.[2]?.cwd === where.path, 'it is started off screen with its own launch', JSON.stringify(sent.calls[0]))
+  ok(sent.calls.some((c) => c[0] === 'type' && c[2] === 'review the diff'), 'the text goes in once the agent is up', JSON.stringify(sent.calls))
+  ok(sent.calls.some((c) => c[0] === 'submit'), 'then Enter, in its own write', JSON.stringify(sent.calls))
+  ok(answer.startsWith('OK: ') && answer.includes('in and sent'), 'answered "in and sent" once the screen moved', answer)
+
+  const unsent = fakeReach({ target: kess })
+  const held = await AT.typeElsewhere(unsent.r, where, kess, 'line one\nline two', false)
+  ok(unsent.calls.some((c) => c[0] === 'paste'), 'multi-line text is pasted whole', JSON.stringify(unsent.calls))
+  ok(!unsent.calls.some((c) => c[0] === 'submit'), 'and not sent when not asked')
+  ok(held.includes('typed, not sent'), 'answered "typed, not sent"', held)
+
+  const still = AT.startedTypingAnswer('Kess', 'beta', 'id-kess', null, true)
+  ok(still.startsWith('STILL STARTING') && /check with read_pane before sending anything/i.test(still), 'past the wait: STILL STARTING, check with read_pane', still)
+  ok(still.includes('id-kess'), 'naming the pane', still)
+  const lost = AT.startedTypingAnswer('Kess', 'beta', 'id-kess', { outcome: 'pasted', sent: false }, true)
+  ok(lost.startsWith('FAILED') && lost.includes('did not take the Enter'), 'a lost Enter is a failure, not "sent"', lost)
+  const refused = AT.startedTypingAnswer('Kess', 'beta', 'id-kess', { outcome: 'refused', sent: false }, true)
+  ok(refused.startsWith('FAILED') && refused.includes('NOT typed'), 'a refused brief says NOT typed', refused)
+
+  const dormantRead = await AT.readElsewhere(fakeReach({ target: kess }).r, where, kess, 40)
+  ok(/is not running/.test(dormantRead) && /type_into_pane starts it/.test(dormantRead), 'read_pane on it: not running, typing starts it', dormantRead)
+  const readCalls = fakeReach({ target: kess })
+  await AT.readElsewhere(readCalls.r, where, kess, 40)
+  ok(!readCalls.calls.length, 'and reading never starts it')
+}
+
+console.log('\na pane named without a project is found in whichever project has it')
+{
+  const alpha = { id: 'p-a', name: 'alpha', path: 'C:/alpha' }
+  const beta = { id: 'p-b', name: 'beta', path: 'C:/beta' }
+  const groups = [
+    { project: alpha, panes: [pane('Viggo'), pane('Zeb')] },
+    { project: beta, panes: [pane('Zeb', { paneId: 'id-zeb-b' }), pane('Kess')] }
+  ]
+  const one = AT.findPaneAcrossProjects('kess', groups)
+  ok(one.kind === 'one' && one.hit.project.name === 'beta' && one.hit.pane.name === 'Kess', 'one match: that pane, in its project', JSON.stringify(one))
+  const several = AT.findPaneAcrossProjects('Zeb', groups)
+  ok(several.kind === 'several' && several.hits.length === 2, 'the same name in two projects: several', JSON.stringify(several))
+  const text = AT.severalPanesAnswer('Zeb', several.hits ?? [])
+  ok(text.startsWith('FAILED:') && text.includes('Zeb (alpha)') && text.includes('Zeb (beta)') && /say which project/i.test(text), 'answered with "name (project)" and "say which project"', text)
+  ok(AT.findPaneAcrossProjects('Ludo', groups).kind === 'none', 'no match: none (the on-screen tools answer)')
+  ok(AT.findPaneAcrossProjects('terminal 2', groups).kind === 'none', 'a number is never matched across projects')
+  ok(AT.findPaneAcrossProjects('claude', groups).kind === 'none', 'nor an agent word')
+  const tools = src('src/lib/agenttools.ts')
+  ok(/byNameOnly/.test(tools) && /paneOffScreen\(r, str\(args\['target'\]\)\)/.test(tools), 'answerAcrossProjects looks beyond the screen when no project is named')
+}
+
+console.log('\npane answers end with the pane id')
+{
+  ok(AT.withPaneId('OK: typed into Zeb.', 'p-9') === 'OK: typed into Zeb. (pane id p-9)', 'withPaneId appends " (pane id …)"')
+  const zeb = pane('Zeb', { paneId: 'p-zeb' })
+  const typed = await AT.typeElsewhere(fakeReach({ target: zeb, hasEntry: true }).r, where, zeb, 'go', false)
+  ok(typed.startsWith('OK'), 'cross-project typing succeeds first', typed)
+  const tools = src('src/lib/agenttools.ts')
+  ok(/typed\.startsWith\('OK'\) \? withPaneId\(typed, pane\.paneId\)/.test(tools), 'cross-project type_into_pane appends the id on success')
+
+  setHubRuntime({
+    panes: () => [zeb],
+    focusedPaneId: () => 'p-zeb',
+    activeProjectId: () => 'p-a',
+    prompts: () => [],
+    revealPane: () => {},
+    focusTerminal: () => {},
+    typeIntoPane: () => true
+  })
+  const deps = {
+    getSnapshot: () => ({}),
+    getProjectMemory: () => '',
+    remember: () => true,
+    actionContext: () => ctx({ panes: [zeb], focusedPaneId: 'p-zeb' }),
+    runAction: () => ({ ok: true, summary: 'Sending to Zeb… say “wait” to hold', requested: 1, done: 0 })
+  }
+  const onScreen = await AT.answerVoiceAgentTool('type_into_pane', { target: 'Zeb', text: 'go', submit: true }, deps)
+  ok(onScreen.ok && onScreen.result.endsWith(' (pane id p-zeb)'), 'on-screen type_into_pane ends with the pane id', JSON.stringify(onScreen))
+  const prompt = await AT.answerVoiceAgentTool('run_app_action', { kind: 'send_prompt', target: 'Zeb', text: 'go' }, deps)
+  ok(prompt.ok && prompt.result.endsWith(' (pane id p-zeb)'), 'on-screen send_prompt ends with the pane id', JSON.stringify(prompt))
+  setHubRuntime(null)
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

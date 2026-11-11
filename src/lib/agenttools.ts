@@ -1,9 +1,10 @@
 import { launchPinOf } from '@shared/agents'
 import { BRAIN_SETTINGS, brainSetting, type BrainSetting } from '@shared/brain-tools'
+import { nameKey, resolveTerminal } from '@shared/terminal-names'
 import type { Settings, VoiceAgentToolRequest, VoiceAgentToolResult, Workspace } from '@shared/types'
 import type { LiveApp } from '../state/AppState'
 import type { ActivityState } from './paneActivity'
-import type { terminalHost as TerminalHost } from './terminals'
+import type { terminalHost as TerminalHost, TerminalSpec } from './terminals'
 import {
   matchProfile,
   matchProject,
@@ -16,7 +17,7 @@ import {
   type AppAction
 } from './appactions'
 import { ACTION_SPECS, buildStateSection, type ManifestSnapshot } from './appmanifest'
-import { briefOutcomeOf, type BriefOutcome } from './briefDelivery'
+import { BRIEF_DEADLINE_MS, BriefDelivery, briefOutcomeOf, recordBriefOutcome, type BriefOutcome } from './briefDelivery'
 import { collectLeaves } from './splitTree'
 import { runHubTool } from './realtime/tools-hub'
 import { runMainAgentTool } from './realtime/tools-main'
@@ -210,10 +211,14 @@ export async function answerVoiceAgentTool(
       case 'run_app_action': {
         const action = asAction(args)
         if (!action) return { ok: false, error: 'that action had no "kind" — see the tool description' }
+        // Resolved before the run, against the context the executor resolves
+        // against, so the id named is the pane the prompt went to.
+        const sentTo = action.kind === 'send_prompt' ? sendPromptPaneId(deps, action.target) : null
         const outcome = await deps.runAction(action)
         // Neither brings a minimised Forge back (only show_view does); say so.
         const unseen = outcome.ok && (action.kind === 'set_view' || action.kind === 'focus_tab') && forgeIsAway()
-        return { ok: true, result: unseen ? `${describeOutcome(outcome)}\n${AWAY_NOTE}` : describeOutcome(outcome) }
+        const said = unseen ? `${describeOutcome(outcome)}\n${AWAY_NOTE}` : describeOutcome(outcome)
+        return { ok: true, result: outcome.ok && sentTo ? withPaneId(said, sentTo) : said }
       }
 
       case 'get_project_memory': {
@@ -279,6 +284,99 @@ export function describePaneText(
 ${text.trim() || '(empty)'}`
 }
 
+/**
+ * A pane answer with the pane's id on the end, as open_agent_pane names the
+ * pane it opened — so the caller can aim at exactly that pane next time.
+ */
+export function withPaneId(text: string, paneId: string): string {
+  return `${text} (pane id ${paneId})`
+}
+
+/** The pane an on-screen send_prompt to `target` goes to, by the executor's own resolver. */
+function sendPromptPaneId(deps: VoiceAgentToolDeps, target: unknown): string | null {
+  const ctx = deps.actionContext?.()
+  if (!ctx) return null
+  const hit = resolvePaneTarget(String(target ?? ''), ctx.panes ?? [], ctx.focusedPaneId)
+  return hit.kind === 'pane' ? hit.pane.paneId : null
+}
+
+/**
+ * What reaching a pane needs first. This window may have no terminal for a
+ * pane whose process main is still running — every pane after a renderer
+ * reload — so "no terminal" is only "not running" when main says so too.
+ * `live` is main's running pane ids, or null when it could not be asked.
+ */
+export type PaneWake = 'present' | 'adopt' | 'dormant' | 'unknown'
+
+export function wakeStep(hasTerminal: boolean, live: ReadonlySet<string> | null, paneId: string): PaneWake {
+  if (hasTerminal) return 'present'
+  if (!live) return 'unknown'
+  return live.has(paneId) ? 'adopt' : 'dormant'
+}
+
+/** A pane in some project, as `findPaneAcrossProjects` finds it. */
+export interface PaneSomewhere {
+  pane: ActionPane
+  project: { id: string; name: string; path: string }
+}
+
+export type AcrossResolution =
+  | { kind: 'one'; hit: PaneSomewhere }
+  | { kind: 'several'; hits: PaneSomewhere[] }
+  | { kind: 'none' }
+
+/**
+ * A pane named without a project, looked for in `groups` (every project but
+ * the one on screen). By name only — exact, then a unique prefix, then a
+ * close match, as a terminal's name is resolved anywhere — never by number,
+ * "this" or an agent word: "terminal 2" and "the claude one" mean the screen
+ * Steve is looking at, not a guess across projects.
+ */
+export function findPaneAcrossProjects(
+  target: string,
+  groups: ReadonlyArray<{ project: PaneSomewhere['project']; panes: ActionPane[] }>
+): AcrossResolution {
+  const all = groups.flatMap((g) => g.panes.map((pane) => ({ name: pane.name, pane, project: g.project })))
+  if (!str(target) || all.length === 0) return { kind: 'none' }
+  const agentWord = (word: string): boolean =>
+    all.some(({ pane }) => [pane.profileId, pane.profileName, pane.profileName.split(/\s+/)[0] ?? ''].some((k) => nameKey(k) === word))
+  const hit = resolveTerminal(target, all, { isKindWord: agentWord })
+  const plain = (h: (typeof all)[number]): PaneSomewhere => ({ pane: h.pane, project: h.project })
+  if (hit.kind === 'one') return { kind: 'one', hit: plain(hit.pane) }
+  if (hit.kind === 'ambiguous') return { kind: 'several', hits: hit.matches.map(plain) }
+  return { kind: 'none' }
+}
+
+export function severalPanesAnswer(target: string, hits: readonly PaneSomewhere[]): string {
+  const list = hits.map((h) => `${h.pane.name} (${h.project.name})`).join(', ')
+  return `FAILED: more than one pane matches "${target}" — ${list}. Say which project.`
+}
+
+/** How text typed into a pane Forge had to start went: delivered, and whether the Enter took. Null: not yet. */
+export interface StartedTyping {
+  outcome: BriefOutcome
+  /** The Enter landed (the screen moved). False when no Enter was asked for. */
+  sent: boolean
+}
+
+/**
+ * The answer for type_into_pane on a pane that was not running, which Forge
+ * started off screen to take the text — in the same words open_agent_pane
+ * uses for a new pane's brief. `typed` null: the wait ran out first.
+ */
+export function startedTypingAnswer(name: string, project: string, paneId: string, typed: StartedTyping | null, submit: boolean): string {
+  const head = `${name} in ${project} was not running, so Forge started it off screen`
+  if (!typed) {
+    return `STILL STARTING: ${head} (pane id ${paneId}); it has not taken the text after 12 s. The text is queued and goes in when the agent is up${submit ? ', then Enter' : ''}. Check with read_pane before sending anything.`
+  }
+  if (typed.outcome === 'pasted' || typed.outcome === 'typed') {
+    if (!submit) return `OK: ${head}; the text is typed, not sent — send it with type_into_pane.`
+    if (typed.sent) return `OK: ${head}; the text is in and sent. read_pane shows it, and you hear when it finishes.`
+    return `FAILED: ${head} (pane id ${paneId}) and typed the text, but the pane did not take the Enter: its screen did not change after two tries. Check with read_pane before sending anything.`
+  }
+  return `FAILED: ${head} (pane id ${paneId}), but the text was NOT typed — the pane died or showed no agent. Check with read_pane; if an agent is up, send it with type_into_pane.`
+}
+
 /* ----------------------------------------------- across every project
  *
  * The tools served from main — the Claude and CLI brains, Forge Brain — see
@@ -292,12 +390,52 @@ ${text.trim() || '(empty)'}`
  * imported: scripts/realtime-check.mjs imports this module headless, and these
  * pull in React, xterm and the app state.
  */
-interface Reach {
+export interface Reach {
   app: LiveApp
   term: typeof TerminalHost
   activity(paneId: string): ActivityState
   panesOf(workspace: Workspace | null | undefined): ActionPane[]
   themes: Array<{ id: string; name: string }>
+  /** The ids of every pane main has a process for now; null when it could not be asked. */
+  livePtys(): Promise<Set<string> | null>
+  /** The launch the pane's own TerminalPane would make, from app state; null when no loaded tab holds it. */
+  specFor(projectId: string, paneId: string): Promise<TerminalSpec | null>
+}
+
+/** Main's running pane ids. Guarded: a renderer call the preload lacks would take the renderer down. */
+async function livePtyIds(): Promise<Set<string> | null> {
+  try {
+    const list = await window.forge?.pty?.list?.()
+    return Array.isArray(list) ? new Set(list.map((s) => s.id)) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The launch a pane's TerminalPane would make — the profile's command with the
+ * pane's permission mode, the project folder, the pane's Claude session id —
+ * so a pane started (or re-adopted) off screen is the same pane, not a new one.
+ */
+async function launchSpecFor(app: LiveApp, projectId: string, paneId: string): Promise<TerminalSpec | null> {
+  const { launchCommand, leafLaunchPin, leafPermissionMode, paneDisplayTitle, resolveProfile } = await import('./agents')
+  const st = app.get()
+  const project = st.projects.find((p) => p.id === projectId)
+  const leaf = st.workspaces[projectId]?.tabs.flatMap((t) => collectLeaves(t.root)).find((l) => l.id === paneId)
+  if (!project || !leaf) return null
+  const profile = resolveProfile(st.settings.agentProfiles, leaf.profileId)
+  return {
+    cwd: project.path,
+    bootstrapCommand: launchCommand(profile, leafPermissionMode(leaf)),
+    fontSize: st.settings.terminalFontSize,
+    fontFamily: st.settings.terminalFontFamily,
+    accent: profile.accent,
+    projectName: project.name,
+    paneTitle: paneDisplayTitle(profile, leaf.title),
+    sessionId: leaf.sessionId,
+    repoUrl: project.repoUrl,
+    ...leafLaunchPin(leaf)
+  }
 }
 
 async function reach(): Promise<Reach | null> {
@@ -315,7 +453,9 @@ async function reach(): Promise<Reach | null> {
     term: terminalHost,
     activity: (paneId) => activityOf(paneId, terminalHost.runtime(paneId)).state,
     panesOf: (ws) => buildActionPanes(ws, app.get().settings.agentProfiles),
-    themes: [...BUILTIN_THEMES, ...app.get().settings.customThemes].map((t) => ({ id: t.id, name: t.name }))
+    themes: [...BUILTIN_THEMES, ...app.get().settings.customThemes].map((t) => ({ id: t.id, name: t.name })),
+    livePtys: livePtyIds,
+    specFor: (projectId, paneId) => launchSpecFor(app, projectId, paneId)
   }
 }
 
@@ -331,7 +471,18 @@ const STATE_WORD: Record<ActivityState, string> = {
   failed: 'failed'
 }
 
-interface Where {
+/**
+ * A pane's state word. A pane this window has no terminal for reads as
+ * dormant, but its process may be running in main all the same (a renderer
+ * reload, before the adopt sweep reaches it): that one is running, not "not
+ * started".
+ */
+function stateWord(r: Reach, paneId: string, live: ReadonlySet<string> | null): string {
+  const state = r.activity(paneId)
+  return state === 'dormant' && live?.has(paneId) ? 'running' : STATE_WORD[state]
+}
+
+export interface Where {
   id: string
   name: string
   path: string
@@ -391,7 +542,8 @@ async function paneIn(r: Reach, where: Where, target: string): Promise<ActionPan
 /** The snapshot with every project's terminals, and a state word on each. */
 async function withEveryProject(r: Reach, snapshot: ManifestSnapshot): Promise<ManifestSnapshot> {
   const st = r.app.get()
-  const word = (p: ActionPane): string => STATE_WORD[r.activity(p.paneId)]
+  const live = await r.livePtys()
+  const word = (p: ActionPane): string => stateWord(r, p.paneId, live)
   const here = r.panesOf(st.activeProjectId ? st.workspaces[st.activeProjectId] : null)
   const tabs = snapshot.tabs.map((tab) => ({
     ...tab,
@@ -413,20 +565,62 @@ async function withEveryProject(r: Reach, snapshot: ManifestSnapshot): Promise<M
   return { ...snapshot, tabs, otherProjects }
 }
 
-function listPanes(r: Reach, where: Where, panes: ActionPane[]): string {
+async function listPanes(r: Reach, where: Where, panes: ActionPane[]): Promise<string> {
   if (!panes.length) return `No panes are open in ${where.name}.`
+  const live = await r.livePtys()
   return [
     `${where.name}${where.onScreen ? ' (on screen)' : ''} — name · agent · state:`,
-    ...panes.map((p) => `- ${p.name} · ${p.profileName} · ${STATE_WORD[r.activity(p.paneId)]}`)
+    ...panes.map((p) => `- ${p.name} · ${p.profileName} · ${stateWord(r, p.paneId, live)}`)
   ].join('\n')
 }
 
-/** Type into a pane of a project not on screen, without bringing it forward. */
-async function typeElsewhere(r: Reach, where: Where, pane: ActionPane, text: string, submit: boolean): Promise<string> {
-  const status = r.term.runtime(pane.paneId).status
-  if (status === 'idle') {
-    return `FAILED: ${pane.name} in ${where.name} has not started yet — Forge starts a project's panes when it is on screen. Nothing was typed.`
+/**
+ * Give this window a terminal for `paneId` before anything is said about it.
+ * A pane whose process main is still running is adopted off screen
+ * (TerminalHost.startHidden: main re-adopts the process and replays what it
+ * printed), and its replay is waited for so a read sees the real screen.
+ * `dormant`: no process anywhere. `unknown`: main could not be asked.
+ * `failed`: running, but no loaded tab says how to reconnect to it, or the
+ * reconnect failed.
+ */
+async function wakePane(r: Reach, where: Where, paneId: string): Promise<'present' | 'adopted' | 'dormant' | 'unknown' | 'failed'> {
+  if (r.term.has(paneId)) return 'present'
+  const step = wakeStep(false, await r.livePtys(), paneId)
+  if (step !== 'adopt') return step
+  const spec = await r.specFor(where.id, paneId)
+  if (!spec) return 'failed'
+  if ((await r.term.startHidden(paneId, spec)) === 'failed') return 'failed'
+  await settledScreen(r, paneId)
+  return 'adopted'
+}
+
+/** Read a pane of a project not on screen. Exported for scripts/agent-pane-check.mjs. */
+export async function readElsewhere(r: Reach, where: Where, pane: ActionPane, want: number): Promise<string> {
+  const woke = await wakePane(r, where, pane.paneId)
+  if (woke === 'dormant') {
+    return `${pane.name} in ${where.name} is not running, so there is nothing to read. Typing into it with type_into_pane starts it.`
   }
+  if (woke === 'unknown') return `FAILED: Forge has no screen for ${pane.name} in ${where.name} and could not check whether it is running.`
+  if (woke === 'failed') return `FAILED: ${pane.name} in ${where.name} is running, but Forge could not pick its screen back up.`
+  const text = r.term.snapshotText(pane.paneId, want)
+  if (text === null) return `FAILED: Forge has no screen for ${pane.name} in ${where.name}.`
+  return `${pane.name} (${where.name}), last ${want} lines:\n${text.trim() || '(empty)'}`
+}
+
+/**
+ * Type into a pane of a project not on screen, without bringing it forward.
+ * A pane with no process is started off screen to take the text
+ * (`startAndType`). Exported for scripts/agent-pane-check.mjs.
+ */
+export async function typeElsewhere(r: Reach, where: Where, pane: ActionPane, text: string, submit: boolean): Promise<string> {
+  const woke = await wakePane(r, where, pane.paneId)
+  if (woke === 'dormant') return startAndType(r, where, pane, text, submit)
+  if (woke === 'unknown') {
+    return `FAILED: Forge has no terminal for ${pane.name} in ${where.name} and could not check whether it is running. Nothing was typed.`
+  }
+  if (woke === 'failed') return `FAILED: ${pane.name} in ${where.name} is running, but Forge could not reconnect to it. Nothing was typed.`
+  const status = r.term.runtime(pane.paneId).status
+  if (status === 'idle') return `FAILED: ${pane.name} in ${where.name} is not running. Nothing was typed.`
   // A pane still starting is PowerShell, which would run the text as a command.
   if (status === 'starting') return `FAILED: ${pane.name} in ${where.name} is still starting. Nothing was typed; try again in a moment.`
   if (status !== 'live') return `FAILED: ${pane.name} in ${where.name} is not running (${status}). Nothing was typed.`
@@ -487,6 +681,84 @@ async function settledScreen(r: Reach, paneId: string): Promise<string | null> {
     last = now
   }
   return last
+}
+
+/** How long type_into_pane waits on a pane it had to start, inside main's 15 s tool budget (as openElsewhere). */
+const STARTED_TYPE_WAIT_MS = 12_000
+
+/**
+ * type_into_pane on a pane with no process: start it off screen the way
+ * openElsewhere starts a new pane, then hand the text over under the brief
+ * rules (src/lib/briefDelivery.ts) — an agent's text waits for its banner and
+ * a quiet screen, never lands in the PowerShell that runs before it — and
+ * press Enter by submitAndWatch, so "sent" is seen, not assumed. Answered
+ * within STARTED_TYPE_WAIT_MS; past it the delivery carries on and the answer
+ * says it is still starting.
+ */
+async function startAndType(r: Reach, where: Where, pane: ActionPane, text: string, submit: boolean): Promise<string> {
+  const t0 = Date.now()
+  if (!text.trim()) {
+    return `FAILED: ${pane.name} in ${where.name} is not running, so there is no box to press Enter in. Send it the text with type_into_pane and it starts.`
+  }
+  const spec = await r.specFor(where.id, pane.paneId)
+  if (!spec) return `FAILED: ${pane.name} in ${where.name} is not running, and Forge could not find its tab to start it. Nothing was typed.`
+  if ((await r.term.startHidden(pane.paneId, spec)) === 'failed') {
+    return `FAILED: ${pane.name} in ${where.name} was not running, and it would not start. Nothing was typed.`
+  }
+  const job = (async (): Promise<StartedTyping> => {
+    const outcome = await deliverWhenUp(r, where.id, pane.paneId, text, pane.agent || /[\r\n]/.test(text))
+    const delivered = outcome === 'pasted' || outcome === 'typed'
+    return { outcome, sent: delivered && submit ? await submitAndWatch(r, pane.paneId) : false }
+  })()
+  const left = Math.max(0, STARTED_TYPE_WAIT_MS - (Date.now() - t0))
+  const typed = await Promise.race([job, sleep(left).then(() => null)])
+  return startedTypingAnswer(pane.name, where.name, pane.paneId, typed, submit)
+}
+
+/**
+ * Hand `text` to a pane that is starting, by the same rules AppState's brief
+ * drain uses (BriefDelivery): `gated` text waits for an agent's banner and a
+ * quiet screen and is refused at the deadline; ungated text goes in once the
+ * shell is live. Multi-line text is pasted whole, a line is typed. Timers
+ * only — this runs with Forge covered.
+ */
+function deliverWhenUp(r: Reach, projectId: string, paneId: string, text: string, gated: boolean): Promise<BriefOutcome> {
+  const delivery = new BriefDelivery<object>()
+  const entry = {}
+  const t0 = Date.now()
+  return new Promise((resolve) => {
+    const finish = (outcome: BriefOutcome): void => {
+      delivery.markDone(entry)
+      recordBriefOutcome(paneId, outcome)
+      resolve(outcome)
+    }
+    const tick = (): void => {
+      const ready = r.term.readiness(paneId)
+      const probe = {
+        status: r.term.runtime(paneId).status,
+        outputBytes: ready.outputBytes,
+        quietForMs: ready.quietForMs,
+        exists: leafIn(r, projectId, paneId)
+      }
+      const step = delivery.step(entry, gated, probe, Date.now())
+      if (step === 'drop') return finish('dropped')
+      if (step === 'refuse') return finish('refused')
+      if (step === 'deliver') {
+        if (/[\r\n]/.test(text)) r.term.paste(paneId, text)
+        else if (!r.term.type(paneId, text)) return finish('dropped')
+        return finish(/[\r\n]/.test(text) ? 'pasted' : 'typed')
+      }
+      // A pane that never even began starting runs no deadline of its own.
+      if (Date.now() - t0 > BRIEF_DEADLINE_MS + 5000) return finish('dropped')
+      setTimeout(tick, 120)
+    }
+    tick()
+  })
+}
+
+/** The pane is still in one of the project's tabs. */
+function leafIn(r: Reach, projectId: string, paneId: string): boolean {
+  return r.app.get().workspaces[projectId]?.tabs.some((t) => collectLeaves(t.root).some((l) => l.id === paneId)) ?? false
 }
 
 async function openElsewhere(r: Reach, where: Where, args: Record<string, unknown>): Promise<string> {
@@ -550,25 +822,10 @@ async function openElsewhere(r: Reach, where: Where, args: Record<string, unknow
  * when it never appeared (the pane then starts when its project is shown).
  */
 async function startOffScreen(r: Reach, projectId: string, paneId: string): Promise<boolean> {
-  const { launchCommand, leafLaunchPin, leafPermissionMode, paneDisplayTitle, resolveProfile } = await import('./agents')
   for (let tries = 0; tries < 40; tries++) {
-    const st = r.app.get()
-    const project = st.projects.find((p) => p.id === projectId)
-    const leaf = st.workspaces[projectId]?.tabs.flatMap((t) => collectLeaves(t.root)).find((l) => l.id === paneId)
-    if (project && leaf) {
-      const profile = resolveProfile(st.settings.agentProfiles, leaf.profileId)
-      r.term.startHidden(paneId, {
-        cwd: project.path,
-        bootstrapCommand: launchCommand(profile, leafPermissionMode(leaf)),
-        fontSize: st.settings.terminalFontSize,
-        fontFamily: st.settings.terminalFontFamily,
-        accent: profile.accent,
-        projectName: project.name,
-        paneTitle: paneDisplayTitle(profile, leaf.title),
-        sessionId: leaf.sessionId,
-        repoUrl: project.repoUrl,
-        ...leafLaunchPin(leaf)
-      })
+    const spec = await r.specFor(projectId, paneId)
+    if (spec) {
+      void r.term.startHidden(paneId, spec)
       return true
     }
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -695,7 +952,8 @@ const ACROSS = new Set([
 
 /**
  * One cross-project call, answered — or null to leave it to the ordinary
- * answers (a pane tool with no `project`, or naming the one on screen).
+ * answers (a pane tool with no `project` whose pane is on screen or in no
+ * project, or naming the one on screen).
  *
  * Two of these are asked by main itself and never offered to a model:
  * `pane_question` (is that pane asking something? — the confirm gate in
@@ -706,14 +964,16 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
   if (!ACROSS.has(name)) return null
   if (name === 'create_project') return createProject(args, deps)
   const action = name === 'run_app_action' ? asAction(args) : null
-  // run_app_action is ours only for a send_prompt naming a project.
-  if (name === 'run_app_action' && (action?.kind !== 'send_prompt' || !str(args['project']))) return null
+  // run_app_action is ours only for a send_prompt.
+  if (name === 'run_app_action' && action?.kind !== 'send_prompt') return null
   const spoken = str(args['project'])
   const paneTool = name === 'open_agent_pane' || name === 'type_into_pane' || name === 'read_pane' || name === 'run_app_action'
-  if ((paneTool || name === 'list_panes_with_names') && !spoken) return null
+  // A pane tool named by its pane alone: on screen first, then every project.
+  const byNameOnly = !spoken && (name === 'type_into_pane' || name === 'read_pane' || name === 'run_app_action')
+  if ((paneTool || name === 'list_panes_with_names') && !spoken && !byNameOnly) return null
 
   const r = await reach()
-  if (!r) return 'FAILED: Forge is still starting up — try again in a moment.'
+  if (!r) return byNameOnly ? null : 'FAILED: Forge is still starting up — try again in a moment.'
   switch (name) {
     case 'get_settings':
       return getSettings(r)
@@ -723,7 +983,18 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
       return closeTabIn(r, args)
   }
 
-  const where = findProject(r, spoken)
+  let where: Where | string
+  let found: ActionPane | null = null
+  if (byNameOnly) {
+    const elsewhere = await paneOffScreen(r, str(args['target']))
+    // On screen, or nowhere: the ordinary tools answer, exactly as before.
+    if (elsewhere === null) return null
+    if (typeof elsewhere === 'string') return elsewhere
+    where = elsewhere.where
+    found = elsewhere.pane
+  } else {
+    where = findProject(r, spoken)
+  }
   if (typeof where === 'string') return name === 'pane_question' ? 'NOT ASKING' : where
   if (name === 'list_panes_with_names') return listPanes(r, where, r.panesOf(await workspaceFor(r, where.id)))
   // The project on screen: the ordinary tools do it, exactly as before.
@@ -731,7 +1002,7 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
   if (name === 'open_agent_pane') return openElsewhere(r, where, args)
 
   const target = str(args['target'])
-  const pane = await paneIn(r, where, target)
+  const pane = found ?? (await paneIn(r, where, target))
   if (name === 'pane_question') {
     if (typeof pane === 'string' || !r.term.isAttention(pane.paneId)) return 'NOT ASKING'
     return `ASKING: ${pane.name} (${where.name}): ${r.term.attentionPrompt(pane.paneId) || 'a question on its screen'}`
@@ -745,15 +1016,14 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
     }
     case 'read_pane': {
       const want = Math.max(1, Math.min(PANE_READ_MAX_LINES, Math.floor(Number(args['lines']) || PANE_READ_DEFAULT_LINES)))
-      const text = r.term.snapshotText(pane.paneId, want)
-      if (text === null) return `${pane.name} in ${where.name} has not started yet, so there is nothing to read.`
-      return `${pane.name} (${where.name}), last ${want} lines:\n${text.trim() || '(empty)'}`
+      return await readElsewhere(r, where, pane, want)
     }
     case 'type_into_pane': {
       const text = String(args['text'] ?? '')
       const submit = args['submit'] === true
       if (!text.trim() && !submit) return 'FAILED: there is nothing to type.'
-      return await typeElsewhere(r, where, pane, text, submit)
+      const typed = await typeElsewhere(r, where, pane, text, submit)
+      return typed.startsWith('OK') ? withPaneId(typed, pane.paneId) : typed
     }
     case 'run_app_action': {
       // send_prompt: the same Enter rules as on screen (appactions.ts), minus
@@ -763,12 +1033,88 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
       const autoRelay = r.app.get().settings.voiceAutoRelay
       const submit = args['submit'] !== false && pane.agent && autoRelay
       const typed = await typeElsewhere(r, where, pane, text, submit)
-      if (submit || typed.startsWith('FAILED')) return typed
+      if (!typed.startsWith('OK')) return typed
+      if (submit) return withPaneId(typed, pane.paneId)
       const why = args['submit'] === false ? 'you asked me not to send it' : !pane.agent ? 'it is a plain shell' : 'auto-relay is off in Settings'
-      return `${typed} Not sent: ${why}.`
+      return withPaneId(`${typed} Not sent: ${why}.`, pane.paneId)
     }
   }
   return null
+}
+
+/**
+ * A pane named without a project, looked for beyond the one on screen. Null
+ * leaves it to the ordinary tools: the target resolves on screen (today's
+ * behaviour, exactly), or names no pane anywhere. A string is the refusal —
+ * the name is in more than one project.
+ */
+async function paneOffScreen(r: Reach, target: string): Promise<{ where: Where; pane: ActionPane } | string | null> {
+  if (!target) return null
+  const st = r.app.get()
+  const here = st.activeProjectId ? st.workspaces[st.activeProjectId] : null
+  const focused = here?.tabs.find((t) => t.id === here.activeTabId)?.activePaneId ?? null
+  if (resolvePaneTarget(target, r.panesOf(here), focused).kind !== 'none') return null
+  const groups = await Promise.all(
+    st.projects
+      .filter((p) => p.id !== st.activeProjectId)
+      .map(async (project) => ({ project, panes: r.panesOf(await workspaceFor(r, project.id)) }))
+  )
+  const hit = findPaneAcrossProjects(target, groups)
+  if (hit.kind === 'none') return null
+  if (hit.kind === 'several') return severalPanesAnswer(target, hit.hits)
+  const { project, pane } = hit.hit
+  return { where: { id: project.id, name: project.name, path: project.path, onScreen: false }, pane }
+}
+
+/** How long after load the adopt sweep waits: the screen's own panes attach first. */
+const ADOPT_SWEEP_DELAY_MS = 2500
+/** One adoption per beat, so a reload with a dozen live panes does not stall the page. */
+const ADOPT_SWEEP_STEP_MS = 150
+
+let adoptSwept = false
+
+/**
+ * Once per renderer load: give every pane whose process main is still running
+ * a terminal here again (TerminalHost.startHidden re-adopts it, off screen).
+ * After a reload the processes live on in main but this window starts with
+ * no terminals, so a pane in another project read as "not started", could not
+ * be read or typed into, and raised no "needs you" — the attention watch
+ * lives in the terminal. Only live processes are touched: a dormant pane is
+ * never started from here. A process no loaded tab claims is left alone.
+ */
+async function adoptLivePanes(): Promise<void> {
+  if (adoptSwept || typeof window === 'undefined') return
+  adoptSwept = true
+  await sleep(ADOPT_SWEEP_DELAY_MS)
+  let reached: Reach | null = null
+  for (let tries = 0; tries < 20 && !(reached && reached.app.get().ready); tries++) {
+    if (tries) await sleep(500)
+    reached = await reach()
+  }
+  if (!reached || !reached.app.get().ready) return
+  const r = reached
+  const live = await r.livePtys()
+  if (!live) return
+  const missing = new Set([...live].filter((id) => !r.term.has(id)))
+  if (missing.size === 0) return
+  // The projects whose tabs are already in state first, so a reload with
+  // nothing to adopt elsewhere reads no workspace off disk.
+  const st = r.app.get()
+  const ordered = [...st.projects].sort((a, b) => Number(!st.workspaces[a.id]) - Number(!st.workspaces[b.id]))
+  for (const project of ordered) {
+    if (missing.size === 0) break
+    const ws = st.workspaces[project.id] ?? (await workspaceFor(r, project.id))
+    for (const leaf of ws?.tabs.flatMap((t) => collectLeaves(t.root)) ?? []) {
+      if (!missing.has(leaf.id)) continue
+      missing.delete(leaf.id)
+      // Asked again for each: a pane that exited meanwhile must not be relaunched.
+      if (r.term.has(leaf.id) || !(await r.livePtys())?.has(leaf.id)) continue
+      const spec = await r.specFor(project.id, leaf.id)
+      if (!spec) continue
+      void r.term.startHidden(leaf.id, spec)
+      await sleep(ADOPT_SWEEP_STEP_MS)
+    }
+  }
 }
 
 /**
@@ -798,6 +1144,9 @@ export function registerVoiceAgentTools(deps: VoiceAgentToolDeps): Unregister {
   // Kept before the bridge check: the realtime brains answer through these
   // same deps in the renderer and need no IPC at all.
   liveDeps = deps
+  // The panes these tools reach have to be reachable: after a reload, every
+  // still-running process gets its terminal back, off screen.
+  void adoptLivePanes().catch((err) => console.warn('[voice-agent] adopting live panes failed:', err))
   const forget = (): void => {
     if (liveDeps === deps) liveDeps = null
   }
