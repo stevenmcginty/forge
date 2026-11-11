@@ -49,6 +49,7 @@ class TalkActivity : ComponentActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     driver = demoDriver(intent) ?: TalkDrivers.factory(applicationContext)
+    driver.bindClose { runOnUiThread { if (!isFinishing) finish() } }
     setContent {
       ForgeTheme {
         val ui by driver.ui.collectAsStateWithLifecycle()

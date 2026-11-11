@@ -28,6 +28,7 @@ enum class TalkState { IDLE, LISTENING, THINKING, SPEAKING }
  * desktop heard, [reply] the reply so far. [needsYou] counts needs-you cards
  * and confirms; [working] counts jobs running or queued. [notice] is a short
  * sentence about the last thing that went wrong ("" when nothing did).
+ * [laneOpen]: the Claude Live lane is open, so a turn can be sent.
  */
 data class EngineState(
     val link: LinkState = LinkState.STOPPED,
@@ -45,6 +46,7 @@ data class EngineState(
     val desktopName: String = "",
     val notice: String = "",
     val email: String? = null,
+    val laneOpen: Boolean = false,
 )
 
 /**
@@ -540,6 +542,7 @@ class BubbleEngine internal constructor(
             desktopName = s.desktopName,
             notice = notice,
             email = auth?.email(),
+            laneOpen = lane.ready.value,
         )
     }
 

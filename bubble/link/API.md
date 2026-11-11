@@ -51,6 +51,7 @@ Every method may be called from any thread; work runs on one private thread.
 | `cards` | Confirms (Yes/No), then needs-you (newest first, one per pane), then done/failed jobs of the last 30 min. Each `Card` has `title`, `line`, `state` (one word), `actions`. |
 | `working` / `needsYou` | Jobs running or queued / needs-you cards plus confirms. |
 | `desktopName`, `notice`, `email` | The desktop's name; the last thing that went wrong ("" if nothing); the signed-in email. |
+| `laneOpen` | The Claude Live lane is open: a turn (`sayText`, speech) can go now. |
 
 ## Rules the engine keeps (do not re-implement in the app)
 

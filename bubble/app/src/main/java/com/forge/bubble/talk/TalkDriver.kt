@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.update
 /**
  * The seam between the talk panel and whatever does the talking. The panel
  * draws [ui] and reports what the user does; the driver owns every decision.
- * [DemoDriver] fakes a conversation; the real one (the voice link to the desk)
- * plugs in through [TalkDrivers.factory].
+ * [LiveDriver] talks to the desktop through the engine; [DemoDriver] fakes a
+ * conversation for the debug `demoState` extra.
  */
 interface TalkDriver {
   val ui: StateFlow<PanelUi>
@@ -22,16 +22,25 @@ interface TalkDriver {
   fun onCardAction(cardId: String, action: String)
   fun onPanelShown()
   fun onPanelHidden()
+  /** The panel's "Open Forge" button: Forge Web, and the panel goes. */
+  fun onOpenForge() {}
+  /** TalkActivity hands over how to close the panel, for a driver that closes it by itself. */
+  fun bindClose(close: () -> Unit) {}
 }
 
 enum class TalkState { Idle, Listening, Thinking, Speaking, Offline }
 
+/**
+ * [kind] is "confirm", "needs-you" or "job"; [state] is the card's one-word
+ * state ("Needs you", "Done", "Some risk" ...), so it never rests on colour.
+ */
 data class CardUi(
   val id: String,
   val kind: String,
   val title: String,
   val line: String,
   val actions: List<String>,
+  val state: String = "",
 )
 
 data class PanelUi(
@@ -45,10 +54,10 @@ data class PanelUi(
   val notice: String? = null,
 )
 
-/** Where TalkActivity gets its driver. A3 swaps the factory for the real link. */
+/** Where TalkActivity gets its driver. */
 object TalkDrivers {
   @Volatile
-  var factory: (Context) -> TalkDriver = { DemoDriver() }
+  var factory: (Context) -> TalkDriver = { LiveDriver(it) }
 }
 
 /**

@@ -112,6 +112,8 @@ fun SetupScreen(
       var pin by remember { mutableStateOf("") }
       var remember by remember { mutableStateOf(true) }
       if (status.pinSet) Text("PIN entered. You can enter it again to change it.", color = ForgeColors.TextDim)
+      // A wrong PIN or a lockout, in the engine's words (step 1 shows notes before sign-in).
+      if (status.signedIn) status.note?.let { Text(it, color = ForgeColors.Accent) }
       OutlinedTextField(
         pin, { v -> pin = v.filter { it.isDigit() }.take(12) }, Modifier.fillMaxWidth(), singleLine = true,
         label = { Text("PIN (4 to 12 digits)") },

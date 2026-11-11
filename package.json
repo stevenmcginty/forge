@@ -145,6 +145,9 @@
     "apk:tv:release": "node scripts/apk-tv-release.mjs",
     "hands:build": "node scripts/hands-build.mjs",
     "hands:ship": "node scripts/hands-ship.mjs",
+    "bubble:build": "node scripts/bubble-build.mjs",
+    "bubble:link-check": "node scripts/bubble-link-check.mjs",
+    "bubble:dev-server": "node scripts/bubble-dev-server.mjs",
     "discovery:check": "node scripts/discovery-check.mjs",
     "tv-fetch:check": "node scripts/tv-fetch-check.mjs"
   },

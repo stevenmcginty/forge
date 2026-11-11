@@ -58,21 +58,30 @@ import androidx.compose.ui.unit.sp
 import com.forge.bubble.BuildConfig
 import com.forge.bubble.HomeActivity
 import com.forge.bubble.TAG
+import com.forge.bubble.engine.Engine
+import com.forge.bubble.link.EngineState
+import com.forge.bubble.link.LinkState
 import com.forge.bubble.setup.SetupActivity
 import com.forge.bubble.store.Prefs
+import com.forge.bubble.talk.LiveDriver
 import com.forge.bubble.talk.TalkActivity
 import com.forge.bubble.ui.BubbleFace
 import com.forge.bubble.ui.BubbleState
 import com.forge.bubble.ui.ForgeColors
 import com.forge.bubble.ui.ForgeTheme
+import com.forge.bubble.ui.word
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
 import kotlin.math.roundToInt
+import com.forge.bubble.link.TalkState as LinkTalk
 
 /**
  * The always-on floating bubble: a specialUse foreground service (the type a
@@ -86,19 +95,29 @@ import kotlin.math.roundToInt
  * Touch: drag anywhere and it snaps to the nearest side on release (position
  * kept per orientation); while dragging an "X" target shows at the bottom, and
  * a drop on it hides the bubble for an hour or until the next unlock; long
- * press opens a small menu; tap opens [TalkActivity]. After 6 s untouched it
- * shrinks to ~70% and dims. All timing is Handler timers, never frame callbacks.
+ * press opens a small menu; tap opens [TalkActivity] (or setup, while sign-in
+ * or the PIN is needed). After 6 s untouched it shrinks to ~70% and dims. All
+ * timing is Handler timers, never frame callbacks.
+ *
+ * It owns the engine's connection: start on screen-on / unlock when signed in,
+ * stop 2 minutes after screen-off, stop when the service goes. The face follows
+ * the engine's state ([faceOf]), always with a word as well as a shape.
  *
  * Debug builds accept `--es demoState <BubbleState name>` to pin the face.
  */
 class BubbleService : Service() {
 
-  /** What the bubble draws. The voice link (A3) pushes into [face]. */
+  /**
+   * What the bubble draws. [word] says the state in words (accessibility and
+   * the notification); [setup] = a tap opens setup instead of the panel.
+   */
   data class BubbleUi(
     val state: BubbleState = BubbleState.Idle,
     val level: Float = 0f,
     val working: Int = 0,
     val needsYou: Int = 0,
+    val word: String = "Idle",
+    val setup: Boolean = false,
   )
 
   companion object {
@@ -111,6 +130,7 @@ class BubbleService : Service() {
     const val EXTRA_DEMO_STATE = "demoState"
 
     private const val IDLE_MS = 6_000L
+    private const val STOP_AFTER_SCREEN_OFF_MS = 2 * 60 * 1000L
     private const val HIDE_FOR_MS = 60 * 60 * 1000L
     private const val IN_CALL_POLL_MS = 5_000L // API 30 only; 31+ has a listener
     private const val BUBBLE_DP = 56
@@ -138,6 +158,27 @@ class BubbleService : Service() {
     @Volatile
     var running = false
       private set
+
+    /** The bubble's face for an engine state; first match wins. */
+    fun faceOf(s: EngineState, level: Float): BubbleUi {
+      fun offline(word: String, setup: Boolean = false) =
+        BubbleUi(BubbleState.Offline, 0f, s.working, s.needsYou, word, setup)
+      fun face(state: BubbleState, word: String) =
+        BubbleUi(state, if (state == BubbleState.Listening) level else 0f, s.working, s.needsYou, word)
+      return when {
+        !Engine.configured && !Engine.dev -> offline(Engine.linkWords(s))
+        !Engine.signedIn() || s.link == LinkState.SIGNED_OUT -> offline("Sign in needed", setup = true)
+        s.link == LinkState.NEED_PIN -> offline("PIN needed", setup = true)
+        s.link == LinkState.OFFLINE || s.link == LinkState.LOCKED || s.link == LinkState.STOPPED ->
+          offline("Offline: ${Engine.linkWords(s)}")
+        s.talk == LinkTalk.SPEAKING -> face(BubbleState.Speaking, "Speaking")
+        s.talk == LinkTalk.THINKING -> face(BubbleState.Thinking, "Thinking")
+        s.talk == LinkTalk.LISTENING -> face(BubbleState.Listening, "Listening")
+        s.needsYou > 0 -> face(BubbleState.NeedsYou, "Needs you: ${s.needsYou}")
+        s.working > 0 -> face(BubbleState.Working, "Working: ${s.working}")
+        else -> face(BubbleState.Idle, "Idle")
+      }
+    }
   }
 
   private val main = Handler(Looper.getMainLooper())
@@ -156,8 +197,14 @@ class BubbleService : Service() {
   private var menu: View? = null
   private var snap: ValueAnimator? = null
   private var modeListener: Any? = null
+  /** A debug demoState pinned the face: engine states leave it alone. */
+  private var demoFace = false
 
   private val goIdle = Runnable { idle.value = true }
+  private val stopEngine = Runnable {
+    Log.i(TAG, "bubble: screen off 2 min; engine stop")
+    Engine.currentOrNull()?.stop()
+  }
   private val recheck = Runnable { evaluate() }
   private val inCallPoll = object : Runnable {
     override fun run() {
@@ -171,6 +218,12 @@ class BubbleService : Service() {
       // An unlock ends an "X" hide early.
       if (intent.action == Intent.ACTION_USER_PRESENT) Prefs.setHiddenUntil(context, 0L)
       Log.d(TAG, "bubble: ${intent.action}")
+      main.removeCallbacks(stopEngine)
+      if (intent.action == Intent.ACTION_SCREEN_OFF) {
+        main.postDelayed(stopEngine, STOP_AFTER_SCREEN_OFF_MS)
+      } else {
+        startEngine()
+      }
       evaluate()
     }
   }
@@ -204,6 +257,20 @@ class BubbleService : Service() {
     }
     // A non-Idle face (needs you, speaking...) wakes a dimmed bubble.
     scope.launch { face.collect { if (it.state != BubbleState.Idle) wake() } }
+    // The face follows the engine; the word goes to accessibility and the notification.
+    Engine.get(this)
+    scope.launch {
+      combine(Engine.state, LiveDriver.level) { s, l -> faceOf(s, l) }.collect { f ->
+        if (!demoFace) face.value = f
+      }
+    }
+    scope.launch {
+      face.map { it.word }.distinctUntilChanged().collect { w ->
+        bubble?.contentDescription = "Forge bubble: $w"
+        updateNotification()
+      }
+    }
+    if (getSystemService(PowerManager::class.java).isInteractive) startEngine()
     Log.i(TAG, "bubble: service created")
   }
 
@@ -229,10 +296,12 @@ class BubbleService : Service() {
     if (BuildConfig.DEBUG) {
       intent?.getStringExtra(EXTRA_DEMO_STATE)?.let { name ->
         BubbleState.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let { s ->
+          demoFace = true
           face.value = BubbleUi(
             state = s, level = 0.3f,
             working = if (s == BubbleState.Working) 2 else 0,
             needsYou = if (s == BubbleState.NeedsYou) 1 else 0,
+            word = s.word(),
           )
         }
       }
@@ -252,6 +321,7 @@ class BubbleService : Service() {
     removeBubble()
     scope.cancel()
     owner.destroy()
+    Engine.currentOrNull()?.stop()
     Log.i(TAG, "bubble: service destroyed")
     super.onDestroy()
   }
@@ -263,6 +333,13 @@ class BubbleService : Service() {
     val p = bubbleParams ?: return
     placeFromPrefs(p)
     bubble?.let { wm.updateViewLayout(it, p) }
+  }
+
+  /* ------------------------------------------------------------ the engine */
+
+  private fun startEngine() {
+    if (!Engine.signedIn()) return
+    Engine.get(this).start()
   }
 
   /* ------------------------------------------------------- show or hide */
@@ -341,6 +418,7 @@ class BubbleService : Service() {
         }
       }
     })
+    root.contentDescription = "Forge bubble: ${face.value.word}"
     try {
       wm.addView(root, p)
     } catch (t: Throwable) {
@@ -453,6 +531,11 @@ class BubbleService : Service() {
   }
 
   private fun openTalk() {
+    if (face.value.setup) {
+      Log.i(TAG, "bubble: tap -> setup (${face.value.word})")
+      launch(SetupActivity::class.java)
+      return
+    }
     Log.i(TAG, "bubble: tap -> talk panel")
     try {
       startActivity(Intent(this, TalkActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -560,6 +643,8 @@ class BubbleService : Service() {
             MenuItem("Hide") { closeMenu(); Prefs.setHiddenManual(this@BubbleService, true); evaluate() }
             MenuItem(if (muted) "Unmute voice" else "Mute voice") {
               closeMenu(); Prefs.setMuted(this@BubbleService, !muted)
+              // Muting cuts the clip that is playing; the captions go on.
+              if (!muted) Engine.player(this@BubbleService).stop()
             }
             MenuItem("Open Forge") { closeMenu(); launch(HomeActivity::class.java) }
             MenuItem("Settings") { closeMenu(); launch(SetupActivity::class.java) }
@@ -633,7 +718,7 @@ class BubbleService : Service() {
     )
     return Notification.Builder(this, CHANNEL)
       .setContentTitle("Forge")
-      .setContentText(if (hidden) "Bubble hidden" else "Bubble on")
+      .setContentText(if (hidden) "Bubble hidden" else "Bubble on · ${face.value.word}")
       .setContentIntent(open)
       .setSmallIcon(android.R.drawable.sym_action_chat)
       .setOngoing(true)
