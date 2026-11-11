@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +35,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -40,12 +44,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.forge.bubble.ui.ForgeColors
+import com.forge.bubble.ui.ForgeMark
 
 private val PIN_SHAPE = Regex("^\\d{4,12}$")
 
 /**
- * The setup steps. Each shows a mark and a word: a filled disc with a tick and
- * "Done", or a hollow ring and "Needed" — never colour alone.
+ * The setup steps. Each shows a mark and a word: a lime disc with a tick and
+ * "Done", or a hollow ring with its number and "Needed" — never colour alone.
  */
 @Composable
 fun SetupScreen(
@@ -72,7 +77,18 @@ fun SetupScreen(
       .padding(16.dp),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
-    Text("Set up Forge", color = ForgeColors.Text, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+      // The Forge Web icon in small: the dark F on its lime tile.
+      Box(
+        Modifier.size(44.dp).background(ForgeColors.Accent, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center,
+      ) { ForgeMark(size = 26.dp, color = ForgeColors.OnAccent) }
+      Spacer(Modifier.width(14.dp))
+      Column {
+        Text("Forge bubble", color = ForgeColors.TextFaint, fontSize = 13.sp)
+        Text("Set up Forge", color = ForgeColors.Text, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, lineHeight = 30.sp)
+      }
+    }
 
     Step(1, "Sign in", status.signedIn) {
       if (status.signedIn) {
@@ -165,7 +181,7 @@ fun SetupScreen(
     }
 
     val ready = status.signedIn && status.pinSet && checks.overlay && checks.mic
-    Button(enabled = ready, onClick = onFinish, modifier = Modifier.fillMaxWidth()) {
+    Button(enabled = ready, onClick = onFinish, modifier = Modifier.fillMaxWidth().height(52.dp)) {
       Text(if (ready) "Open Forge" else "Finish steps 1 to 4 first")
     }
   }
@@ -176,35 +192,42 @@ private fun Step(n: Int, title: String, done: Boolean, body: @Composable () -> U
   Column(
     Modifier
       .fillMaxWidth()
-      .border(1.dp, ForgeColors.Outline, RoundedCornerShape(12.dp))
-      .padding(14.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
+      .background(ForgeColors.Surface, RoundedCornerShape(20.dp))
+      .border(1.dp, ForgeColors.Outline, RoundedCornerShape(20.dp))
+      .padding(16.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp),
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Mark(done)
-      Spacer(Modifier.width(10.dp))
-      Text("$n. $title", color = ForgeColors.Text, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-      Text(if (done) "Done" else "Needed", color = if (done) ForgeColors.Text else ForgeColors.Accent, fontSize = 14.sp)
+      Mark(n, done)
+      Spacer(Modifier.width(12.dp))
+      Text(title, color = ForgeColors.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+      Text(
+        if (done) "Done" else "Needed",
+        color = if (done) ForgeColors.TextDim else ForgeColors.Attn, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+      )
     }
     body()
   }
 }
 
-/** Done: filled disc with a tick. Needed: hollow ring. */
+/** Done: a lime disc with a tick. Needed: a hollow ring holding the step's number. */
 @Composable
-private fun Mark(done: Boolean) {
-  Canvas(Modifier.size(22.dp)) {
-    val r = size.minDimension / 2f
-    if (done) {
-      drawCircle(ForgeColors.Text, r)
-      val tick = Path().apply {
-        moveTo(r * 0.5f, r * 1.0f)
-        lineTo(r * 0.85f, r * 1.35f)
-        lineTo(r * 1.5f, r * 0.65f)
+private fun Mark(n: Int, done: Boolean) {
+  Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
+    Canvas(Modifier.size(26.dp)) {
+      val r = size.minDimension / 2f
+      if (done) {
+        drawCircle(ForgeColors.Accent, r)
+        val tick = Path().apply {
+          moveTo(r * 0.55f, r * 1.02f)
+          lineTo(r * 0.88f, r * 1.34f)
+          lineTo(r * 1.46f, r * 0.7f)
+        }
+        drawPath(tick, ForgeColors.OnAccent, style = Stroke(width = r * 0.2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+      } else {
+        drawCircle(ForgeColors.TextFaint, r * 0.9f, Offset(r, r), style = Stroke(width = r * 0.12f))
       }
-      drawPath(tick, ForgeColors.Bg, style = Stroke(width = r * 0.25f))
-    } else {
-      drawCircle(ForgeColors.TextDim, r * 0.85f, Offset(r, r), style = Stroke(width = r * 0.18f))
     }
+    if (!done) Text("$n", color = ForgeColors.TextDim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
   }
 }

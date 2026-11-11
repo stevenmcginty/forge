@@ -1,6 +1,7 @@
 package com.forge.bubble.bubble
 
 import android.animation.ValueAnimator
+import android.app.ActivityOptions
 import android.annotation.SuppressLint
 import android.app.KeyguardManager
 import android.app.Notification
@@ -31,6 +32,7 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +51,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.ComposeView
@@ -57,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.forge.bubble.BuildConfig
 import com.forge.bubble.HomeActivity
+import com.forge.bubble.R
 import com.forge.bubble.TAG
 import com.forge.bubble.engine.Engine
 import com.forge.bubble.link.EngineState
@@ -68,6 +73,7 @@ import com.forge.bubble.talk.TalkActivity
 import com.forge.bubble.ui.BubbleFace
 import com.forge.bubble.ui.BubbleState
 import com.forge.bubble.ui.ForgeColors
+import com.forge.bubble.ui.ForgeMotion
 import com.forge.bubble.ui.ForgeTheme
 import com.forge.bubble.ui.word
 import kotlinx.coroutines.CoroutineScope
@@ -190,6 +196,8 @@ class BubbleService : Service() {
   private val idle = MutableStateFlow(false)
   private val onRight = MutableStateFlow(true)
   private val targetHot = MutableStateFlow(false)
+  /** A finger is on the bubble: it answers at once (look only). */
+  private val pressed = MutableStateFlow(false)
 
   private var bubble: View? = null
   private var bubbleParams: WindowManager.LayoutParams? = null
@@ -268,6 +276,16 @@ class BubbleService : Service() {
       face.map { it.word }.distinctUntilChanged().collect { w ->
         bubble?.contentDescription = "Forge bubble: $w"
         updateNotification()
+      }
+    }
+    // While the panel is open the bubble has become it: hidden, and taps pass through.
+    scope.launch {
+      TalkActivity.open.collect { open ->
+        val v = bubble ?: return@collect
+        val p = bubbleParams ?: return@collect
+        p.flags = if (open) p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        else p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        try { wm.updateViewLayout(v, p) } catch (_: Throwable) {}
       }
     }
     if (getSystemService(PowerManager::class.java).isInteractive) startEngine()
@@ -394,6 +412,7 @@ class BubbleService : Service() {
     if (bubble != null) return
     val size = px(WINDOW_DP)
     val p = overlayParams(size, size).apply { gravity = Gravity.TOP or Gravity.START }
+    if (TalkActivity.open.value) p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     placeFromPrefs(p)
     val root = TouchFrame(this)
     owner.attach(root)
@@ -403,14 +422,36 @@ class BubbleService : Service() {
           val ui by face.collectAsState()
           val dim by idle.collectAsState()
           val right by onRight.collectAsState()
-          val scale by animateFloatAsState(if (dim) 0.7f else 1f, label = "scale")
-          val alpha by animateFloatAsState(if (dim) 0.55f else 1f, label = "alpha")
-          Box(Modifier.size(WINDOW_DP.dp), contentAlignment = Alignment.Center) {
+          val down by pressed.collectAsState()
+          val panel by TalkActivity.open.collectAsState()
+          // Resting at the edge: smaller and dimmer, slowly. Touched: it answers at once.
+          val rest = tween<Float>(420, easing = ForgeMotion.Ease)
+          val scale by animateFloatAsState(if (dim) 0.7f else 1f, rest, label = "scale")
+          val alpha by animateFloatAsState(if (dim) 0.55f else 1f, rest, label = "alpha")
+          val press by animateFloatAsState(if (down) 1f else 0f, ForgeMotion.snap(), label = "press")
+          // The panel grew out of it: it steps aside, and comes back as the panel folds home.
+          val away by animateFloatAsState(
+            if (panel) 1f else 0f, tween(if (panel) ForgeMotion.FAST else ForgeMotion.BASE), label = "away",
+          )
+          Box(
+            Modifier.size(WINDOW_DP.dp).drawBehind {
+              // The touch ring: lime light round the orb the instant a finger lands.
+              if (press > 0f) {
+                drawCircle(
+                  ForgeColors.Accent, this.size.minDimension / 2f - 1.5.dp.toPx(),
+                  style = Stroke(width = 2.dp.toPx()), alpha = press * (1f - away),
+                )
+              }
+            },
+            contentAlignment = Alignment.Center,
+          ) {
             BubbleFace(
               ui.state, ui.level, ui.working, ui.needsYou,
               size = BUBBLE_DP.dp,
+              onRight = right,
               modifier = Modifier.graphicsLayer {
-                scaleX = scale; scaleY = scale; this.alpha = alpha
+                val s = scale * (1f - 0.08f * press) * (1f - 0.3f * away)
+                scaleX = s; scaleY = s; this.alpha = alpha * (1f - away)
                 transformOrigin = TransformOrigin(if (right) 1f else 0f, 0.5f)
               },
             )
@@ -472,6 +513,7 @@ class BubbleService : Service() {
       when (ev.actionMasked) {
         MotionEvent.ACTION_DOWN -> {
           snap?.cancel()
+          pressed.value = true
           downX = ev.rawX; downY = ev.rawY
           startX = p.x; startY = p.y
           dragging = false; longPressed = false
@@ -497,6 +539,7 @@ class BubbleService : Service() {
           }
         }
         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+          pressed.value = false
           main.removeCallbacks(longPress)
           if (dragging) {
             val drop = targetHot.value
@@ -538,7 +581,15 @@ class BubbleService : Service() {
     }
     Log.i(TAG, "bubble: tap -> talk panel")
     try {
-      startActivity(Intent(this, TalkActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+      val i = Intent(this, TalkActivity::class.java)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+      // Where the panel grows from: the bubble's centre on screen.
+      bubbleParams?.let { p ->
+        i.putExtra(TalkActivity.EXTRA_FROM_X, p.x + p.width / 2f)
+        i.putExtra(TalkActivity.EXTRA_FROM_Y, p.y + p.height / 2f)
+      }
+      // No system open animation: the panel grows out of the bubble by itself.
+      startActivity(i, ActivityOptions.makeCustomAnimation(this, 0, 0).toBundle())
     } catch (t: Throwable) {
       Log.w(TAG, "bubble: cannot open the talk panel: $t")
     }
@@ -720,7 +771,7 @@ class BubbleService : Service() {
       .setContentTitle("Forge")
       .setContentText(if (hidden) "Bubble hidden" else "Bubble on · ${face.value.word}")
       .setContentIntent(open)
-      .setSmallIcon(android.R.drawable.sym_action_chat)
+      .setSmallIcon(R.drawable.ic_stat_forge)
       .setOngoing(true)
       .setShowWhen(false)
       .addAction(toggle)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon silhouette (Android 13+): the F and its spark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M37.95,36H45.84A1.97,1.97 0,0 1,47.82,37.97V70.03A1.97,1.97 0,0 1,45.84,72H37.95A1.97,1.97 0,0 1,35.98,70.03V37.97A1.97,1.97 0,0 1,37.95,36ZM37.95,36H67.05A1.97,1.97 0,0 1,69.02,37.97V44.14A1.97,1.97 0,0 1,67.05,46.11H37.95A1.97,1.97 0,0 1,35.98,44.14V37.97A1.97,1.97 0,0 1,37.95,36ZM37.95,51.78H62.61A1.97,1.97 0,0 1,64.58,53.75V59.92A1.97,1.97 0,0 1,62.61,61.89H37.95A1.97,1.97 0,0 1,35.98,59.92V53.75A1.97,1.97 0,0 1,37.95,51.78Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M69.42,33.20L70.40,36.82L74.02,37.80L70.40,38.78L69.42,42.40L68.44,38.78L64.82,37.80L68.44,36.82Z" />
+</vector>
