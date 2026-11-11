@@ -1004,8 +1004,11 @@ async function answerAcrossProjects(name: string, args: Record<string, unknown>,
   const target = str(args['target'])
   const pane = found ?? (await paneIn(r, where, target))
   if (name === 'pane_question') {
-    if (typeof pane === 'string' || !r.term.isAttention(pane.paneId)) return 'NOT ASKING'
-    return `ASKING: ${pane.name} (${where.name}): ${r.term.attentionPrompt(pane.paneId) || 'a question on its screen'}`
+    // Named without a project and not on screen: the pane type_into_pane would reach elsewhere.
+    const off = typeof pane === 'string' && !spoken ? await paneOffScreen(r, target) : null
+    const hit = typeof pane !== 'string' ? { where, pane } : off && typeof off !== 'string' ? off : null
+    if (!hit || !r.term.isAttention(hit.pane.paneId)) return 'NOT ASKING'
+    return `ASKING: ${hit.pane.name} (${hit.where.name}): ${r.term.attentionPrompt(hit.pane.paneId) || 'a question on its screen'}`
   }
   if (typeof pane === 'string') return pane
   switch (name) {
