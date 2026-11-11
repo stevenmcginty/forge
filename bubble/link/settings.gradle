@@ -1,0 +1,18 @@
+// Forge Bubble's link module, standalone: a pure Kotlin/JVM library with no
+// Android classes, so it builds and tests on the PC. bubble/app includes it.
+//   hands\gradlew.bat -p bubble\link test
+
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'forge-bubble-link'
