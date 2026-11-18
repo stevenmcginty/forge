@@ -3,6 +3,7 @@ import { MAX_SPEECH_KEY_CHARS, WEB_FEATURE_SPEECH_KEY } from '@shared/web'
 import { Icon } from '@/components/Icon'
 import { useDeskFeature } from '../lib/features'
 import { useForge } from '../state'
+import { PhoneIcon } from './PhoneIcon'
 import './SpeechKeyCard.css'
 
 /**
@@ -121,9 +122,9 @@ export function SpeechKeyCard(): ReactNode {
           const result = await request({ kind: 'speech-key-set', key })
           if (result.kind === 'speech-key' && result.ready) return null
           if (result.kind === 'failed') return result.message
-          return 'The desktop did not keep the key. Try again.'
+          return "The desktop didn't keep the key. Try again."
         } catch (err) {
-          return err instanceof Error && err.message ? err.message : 'The desktop did not answer. Try again.'
+          return err instanceof Error && err.message ? err.message : "The desktop didn't answer. Check it's awake, then try again."
         }
       }}
       onSaved={() => {
@@ -192,15 +193,15 @@ export function SpeechKeyCardView({
           Turn on dictation
         </h2>
         <button type="button" className="speechkey__close" aria-label="Close for now" onClick={onClose}>
-          <Icon name="close" size={18} />
+          <PhoneIcon name="close" size={20} />
         </button>
       </div>
       <p className="speechkey__text">
-        The green mic turns your voice into text. It needs a free Groq key. No card needed — sign in with Google.
+        The green mic needs a free Groq key to turn your voice into text. Sign in with Google; no card needed.
       </p>
       <a className="speechkey__get" href={GROQ_KEYS_URL} target="_blank" rel="noopener noreferrer">
         Get a free key
-        <span aria-hidden="true">↗</span>
+        <PhoneIcon name="chevron-right" size={16} />
       </a>
       <form
         className="speechkey__form"
@@ -210,7 +211,7 @@ export function SpeechKeyCardView({
         }}
       >
         <label className="speechkey__label" htmlFor="speechkey-input">
-          Copy the key, come back, paste it here:
+          Then copy the key and paste it here
         </label>
         <div className="speechkey__row">
           <input
@@ -235,11 +236,18 @@ export function SpeechKeyCardView({
       </form>
       {phase.kind === 'idle' ? null : (
         <p className="speechkey__status" data-state={phase.kind} role="status" aria-live="polite">
-          {phase.kind === 'checking'
-            ? 'Checking the key…'
-            : phase.kind === 'saved'
-              ? '✓ Saved. Dictation is ready.'
-              : `× ${phase.why}`}
+          {phase.kind === 'checking' ? (
+            <span className="speechkey__status-mark pu-spinner" aria-hidden="true" />
+          ) : (
+            <PhoneIcon name={phase.kind === 'saved' ? 'done' : 'alert'} size={18} className="speechkey__status-mark" />
+          )}
+          <span>
+            {phase.kind === 'checking'
+              ? 'Checking the key…'
+              : phase.kind === 'saved'
+                ? 'Saved. Dictation is ready.'
+                : phase.why}
+          </span>
         </p>
       )}
       <button type="button" className="speechkey__never" onClick={onNeverAgain}>

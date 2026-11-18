@@ -2188,166 +2188,287 @@ body {
 }
 
 /*
- * ------------------------------------------------------ strips, on a phone
+ * ---------------------------------------- ambient notices, on a phone
  *
- * Asleep, reconnecting, restarting, Remote Yes and the deploy strip: the
- * sentence first and whole, the actions on their own line at a thumb's size.
- * Neutral surfaces with the state in words and a glyph; only Remote Yes — the
- * one strip that is waiting on you, against a clock — wears amber, and its
- * one act wears lime.
+ * Asleep, reconnecting, restarting, the admin prompt and a new build: the
+ * ambient weight of the phone's one notice family (web/PHONE-DESIGN.md,
+ * inline notice). One at a time by priority (Workspace picks), in the flow
+ * under the top bar so it pushes the app down and never covers it: a tonal
+ * card, no outline, a state shape in the mark slot, a title that says what is
+ * true and one line on what it means, and pills for what can be done. Only
+ * the admin prompt, the one that waits on you, wears the amber wash; Reload
+ * and Open RustDesk are the only primaries. Markup: `PhoneStrip`.
  */
-.app[data-mobile] .offline {
+.app[data-mobile] .pstrip {
+  flex: none;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
   column-gap: var(--p-3);
   row-gap: var(--p-2);
-  height: auto;
-  min-height: 0;
-  padding: var(--p-3) var(--p-4);
-  font-size: var(--p-t-label);
-  line-height: 1.45;
-  color: var(--p-ink-2);
+  min-height: 56px;
+  margin: 0 var(--p-2) var(--p-2);
+  padding: var(--p-2) var(--p-2) var(--p-2) var(--p-3);
+  border-radius: var(--p-r-card);
   background: var(--p-surface);
-  border-bottom: 1px solid var(--p-line);
-}
-
-.app[data-mobile] .offline > svg {
-  margin-top: 2px;
-  color: var(--p-ink-2);
-}
-
-.app[data-mobile] .offline[data-link='reconnecting'] > svg {
-  color: var(--p-attn);
-}
-
-.app[data-mobile] .offline .offline__text {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-  color: var(--p-ink-2);
-}
-
-.app[data-mobile] .offline .offline__text strong {
   color: var(--p-ink);
-  font-weight: 650;
+  font-family: var(--p-font);
+  animation: pstrip-in var(--p-dur-glide) var(--p-glide);
 }
 
-.app[data-mobile] .offline__actions {
-  grid-column: 2;
+@keyframes pstrip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app[data-mobile] .pstrip[data-tone='attn'] {
+  background: var(--p-attn-tint);
+}
+
+.app[data-mobile] .pstrip__mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--p-ink-2);
+}
+
+/* Reconnecting: the broken ring turns, as it does in the top bar. */
+.app[data-mobile] .pstrip[data-link='reconnecting'] .pstrip__mark svg {
+  animation: pstrip-turn 1.6s linear infinite;
+}
+
+@keyframes pstrip-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.app[data-mobile] .pstrip__bang {
+  width: 22px;
+  height: 22px;
+  font-size: var(--p-t-small);
+}
+
+.app[data-mobile] .pstrip__spinner {
+  width: 18px;
+  height: 18px;
+}
+
+.app[data-mobile] .pstrip__text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The whole fact, on two lines at most: a desktop's name is never cut. */
+.app[data-mobile] .pstrip__title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--p-t-chrome);
+  font-weight: var(--p-w-strong);
+  line-height: 1.3;
+  letter-spacing: var(--p-track-tight);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.app[data-mobile] .pstrip__body {
+  font-size: var(--p-t-small);
+  line-height: 1.35;
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .pstrip__actions {
   display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Two or more actions: their own row, under the words. */
+.app[data-mobile] .pstrip[data-stack] .pstrip__actions {
+  grid-column: 2 / -1;
   flex-wrap: wrap;
   gap: var(--p-2);
+  padding-bottom: 2px;
 }
 
-.app[data-mobile] .offline .offline__look {
+/* A tonal pill, 36 drawn and 44 hit. */
+.app[data-mobile] .pstrip__btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  height: var(--p-hit);
-  padding: 0 var(--p-4);
-  font-size: var(--p-t-label);
-  font-weight: 600;
-  color: var(--p-ink);
-  text-decoration: none;
-  background: var(--p-bg);
-  border: 1px solid var(--p-line-strong);
+  justify-content: center;
+  min-height: var(--p-control);
+  padding: 0 14px;
+  margin: 0;
+  border: 0;
   border-radius: var(--p-r-pill);
+  background: var(--p-fill);
+  color: var(--p-ink);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease);
 }
 
-.app[data-mobile] .offline .offline__look:active {
-  background: var(--p-press);
+.app[data-mobile] .pstrip__btn::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
 }
 
-.app[data-mobile] .offline[data-link='remote-yes'] {
-  background: var(--p-attn-soft);
-  border-bottom-color: var(--p-attn-line);
+.app[data-mobile] .pstrip__btn:active {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
 }
 
-.app[data-mobile] .offline[data-link='remote-yes'] > svg {
-  color: var(--p-attn);
-}
-
-.app[data-mobile] .offline .remote-yes__open {
+.app[data-mobile] .pstrip__btn--primary {
   color: var(--p-act-ink);
   background: var(--p-act);
-  border-color: var(--p-act);
 }
 
-.app[data-mobile] .ubanner {
-  flex-wrap: wrap;
-  align-items: flex-start;
-  height: auto;
-  gap: var(--p-2) var(--p-3);
-  padding: var(--p-3) var(--p-4);
-  font-size: var(--p-t-label);
-  line-height: 1.45;
-  background: var(--p-surface);
-  border-bottom: 1px solid var(--p-line);
+.app[data-mobile] .pstrip__btn--primary:active {
+  background: color-mix(in srgb, var(--p-act) 86%, var(--p-ink));
 }
 
-.app[data-mobile] .ubanner__mark {
-  margin-top: 2px;
-}
-
-.app[data-mobile] .ubanner__text {
-  flex: 1 1 calc(100% - 32px);
-  white-space: normal;
-  overflow: visible;
-}
-
-.app[data-mobile] .ubanner__actions {
-  flex-basis: 100%;
-  padding-left: 28px;
-  gap: var(--p-2);
-}
-
-.app[data-mobile] .ubanner__btn {
+.app[data-mobile] .pstrip__close {
+  display: grid;
+  place-items: center;
+  width: 40px;
   height: var(--p-hit);
-  padding: 0 var(--p-5);
-  font-size: var(--p-t-label);
+  padding: 0;
+  margin: 0;
+  border: 0;
   border-radius: var(--p-r-pill);
+  background: transparent;
+  color: var(--p-ink-3);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.app[data-mobile] .ubanner__close {
-  width: var(--p-hit);
-  height: var(--p-hit);
+.app[data-mobile] .pstrip__close:active {
+  color: var(--p-ink);
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .pstrip__btn:focus-visible,
+.app[data-mobile] .pstrip__close:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .pstrip,
+  .app[data-mobile] .pstrip[data-link='reconnecting'] .pstrip__mark svg {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .pstrip,
+:root[data-reduced-motion='true'] .app[data-mobile] .pstrip[data-link='reconnecting'] .pstrip__mark svg {
+  animation: none;
 }
 
 /*
- * The toast, on a phone: in the display, just above whatever is docked under
- * it (the answer card, the composer), full width less the gutters, and a tap
- * puts it away.
+ * The toast, on a phone: the "tells you" weight. A raised card with no
+ * outline, the sentence and a cross; it rises in just above whatever is docked
+ * under it (the answer card, the composer), full width less the gutters, and a
+ * tap anywhere on it puts it away.
  */
 .app[data-mobile] .app__display {
   position: relative;
 }
 
-.app[data-mobile] .app__display > .notice {
-  position: absolute;
-  right: var(--p-3);
-  bottom: var(--p-3);
-  left: var(--p-3);
-  z-index: 5;
-  max-width: none;
-  padding: var(--p-3) var(--p-4);
-  font-size: var(--p-t-label);
-  line-height: 1.4;
+.app[data-mobile] .notice[data-phone] {
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  min-height: 48px;
+  padding: 6px 4px 6px var(--p-4);
+  font: var(--p-w-medium) var(--p-t-label) / var(--p-lh) var(--p-font);
   color: var(--p-ink);
+  text-align: start;
   background: var(--p-raised);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  border: 1px solid var(--p-line-strong);
-  border-radius: var(--p-r-sheet);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
-  transform: none;
+  border: 0;
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
   cursor: pointer;
-  animation: notice-rise var(--p-dur) var(--p-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-mobile] .app__display > .notice {
+  position: absolute;
+  right: var(--p-gutter);
+  bottom: var(--p-3);
+  left: var(--p-gutter);
+  z-index: var(--p-z-float);
+  max-width: none;
+  transform: none;
+  animation: notice-rise var(--p-dur-glide) var(--p-glide);
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .app__display > .notice:active {
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .notice[data-phone]:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+.app[data-mobile] .notice__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A failure: the triangle on a danger wash leads, so the sentence is not the only cue. */
+.app[data-mobile] .notice[data-tone='danger'] {
+  padding-left: var(--p-2);
+}
+
+.app[data-mobile] .notice__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+}
+
+.app[data-mobile] .notice__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  color: var(--p-ink-3);
 }
 
 @keyframes notice-rise {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;

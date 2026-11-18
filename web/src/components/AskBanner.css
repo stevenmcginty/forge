@@ -1,41 +1,48 @@
 /*
  * The heads-up banner: another pane is asking (AskBanner.tsx).
  *
- * Sits at the top of the phone's display (position: relative there), so it is
- * under the top bar and the tabs, over the terminal, and under every sheet.
- * Amber is the "waiting on you" colour, but the "!" in its filled circle and
- * the words carry it on their own — the same rule as the waiting pill. Tokens
- * only, with fallbacks for the harness.
+ * The "needs an answer" weight of the phone's one notice family
+ * (web/PHONE-DESIGN.md, Banner): a raised card, no outline, floating on the
+ * banner shadow with the rim. It drops from under the tab strip and lifts off
+ * the top when it goes. Who is asking leads — the agent's own logo with the
+ * amber "!" disc pinned to it (a shape, so it reads without colour), then
+ * project · pane — and one line of the question under it. Tokens only.
+ *
+ * Inside the phone's display (position: relative there): under the top bar
+ * and the tabs, over the conversation, and under every sheet.
  */
 
 .askbanner {
   position: absolute;
-  top: var(--p-2, 8px);
-  right: var(--p-3, 12px);
-  left: var(--p-3, 12px);
-  z-index: 6;
-  display: flex;
-  align-items: stretch;
-  min-height: 64px;
-  color: var(--p-ink, var(--text-primary));
-  background: var(--p-raised, var(--bg-panel-raised));
-  border: 1px solid var(--p-attn-line, var(--warn-line-strong));
-  border-radius: var(--p-r-sheet, 20px);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  top: var(--p-2);
+  right: var(--p-2);
+  left: var(--p-2);
+  z-index: calc(var(--p-z-float) + 1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 68px;
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-banner);
   overflow: hidden;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  font-family: var(--p-font);
   transition:
-    transform var(--p-dur, 180ms) var(--p-ease, ease-out),
-    opacity var(--p-dur, 180ms) var(--p-ease, ease-out);
-  animation: askbanner-drop var(--p-dur-sheet, 280ms) var(--p-ease-sheet, ease-out);
+    transform var(--p-dur-sheet) var(--p-ease-sheet),
+    opacity var(--p-dur-sheet) var(--p-ease-sheet);
+  /* No fill: once it has landed, a drag's inline transform must win. */
+  animation: askbanner-drop var(--p-dur-glide) var(--p-glide);
 }
 
+/* In: from just under the tab strip, down into place. */
 @keyframes askbanner-drop {
   from {
     opacity: 0;
-    transform: translateY(calc(-100% - var(--p-2, 8px)));
+    transform: translateY(-20px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -43,15 +50,32 @@
   }
 }
 
+/* Out: up and away from where it is (or from where the finger let it go). */
+.askbanner[data-leaving] {
+  pointer-events: none;
+  animation: askbanner-lift var(--p-dur-exit) var(--p-ease-in) both;
+}
+
+@keyframes askbanner-lift {
+  from {
+    opacity: 1;
+    transform: translateY(var(--askbanner-from, 0px));
+  }
+  to {
+    opacity: 0;
+    transform: translateY(calc(var(--askbanner-from, 0px) - 56px));
+  }
+}
+
 /* The whole card but the × is one tap: go to that pane. */
 .askbanner__body {
-  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: var(--p-3, 12px);
+  gap: var(--p-3);
+  align-self: stretch;
   margin: 0;
-  padding: var(--p-3, 12px) 0 var(--p-3, 12px) var(--p-4, 16px);
+  padding: var(--p-3) 0 var(--p-3) var(--p-3);
   background: transparent;
   border: 0;
   color: inherit;
@@ -59,93 +83,144 @@
   text-align: start;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--p-dur-fast) var(--p-ease);
 }
 
 .askbanner__body:active {
-  background: var(--p-press, var(--bg-active));
+  background: var(--p-pressed);
 }
 
 .askbanner__body:focus-visible,
 .askbanner__close:focus-visible {
-  outline: 2px solid var(--p-attn, var(--warn));
-  outline-offset: -3px;
-  border-radius: var(--p-r-row, 12px);
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: -4px;
+  border-radius: var(--p-r-card);
 }
 
-/* The "!" in its filled circle — the waiting pill's shape, a size up. */
-.askbanner__bang {
+/* Who: the maker's logo on a quiet disc, the "!" pinned to its corner. */
+.askbanner__who {
+  position: relative;
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background: var(--p-attn, var(--warn));
-  color: var(--p-attn-ink, var(--bg-base));
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1;
+  background: var(--p-fill);
+}
+
+.askbanner__who .agent-badge[data-logo] {
+  width: 22px;
+  min-width: 0;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.askbanner__who .agent-badge[data-logo] .agent-badge__logo {
+  width: 100%;
+  height: 100%;
+}
+
+.askbanner__bang {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  box-shadow: 0 0 0 2px var(--p-raised);
+}
+
+/* No logo to pin it to: the "!" is the mark, a size up, in the middle. */
+.askbanner__who > .askbanner__bang:only-child {
+  position: static;
+  width: 24px;
+  height: 24px;
+  font-size: var(--p-t-label);
+  box-shadow: none;
 }
 
 .askbanner__text {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 2px;
 }
 
 .askbanner__title {
   overflow: hidden;
-  font-size: var(--p-t-chrome, 15px);
-  font-weight: 700;
+  font-size: var(--p-t-chrome);
+  font-weight: var(--p-w-strong);
   line-height: 1.3;
+  letter-spacing: var(--p-track-tight);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+.askbanner__sep {
+  color: var(--p-ink-3);
+  font-weight: var(--p-w-regular);
+}
+
+.askbanner__pane {
+  color: var(--p-ink-2);
+}
+
 .askbanner__prompt {
-  display: -webkit-box;
   overflow: hidden;
-  color: var(--p-ink-2, var(--text-secondary));
-  font-size: var(--p-t-label, 14px);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  color: var(--p-ink-2);
+  font-size: var(--p-t-label);
+  line-height: var(--p-lh);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* A 44px-wide hit area the full height of the card; the cross drawn inside. */
 .askbanner__close {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--p-hit, 44px);
-  min-height: var(--p-hit, 44px);
-  margin: 0 var(--p-1, 4px) 0 0;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  min-height: var(--p-hit);
+  margin: 0;
   padding: 0;
   background: transparent;
   border: 0;
-  color: var(--p-ink-2, var(--text-secondary));
+  color: var(--p-ink-3);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: color var(--p-dur-fast) var(--p-ease);
 }
 
 .askbanner__close:active {
-  color: var(--p-ink, var(--text-primary));
+  color: var(--p-ink);
+  background: var(--p-pressed);
+}
+
+/* The grip: says "flick me up" without a word. */
+.askbanner__grip {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  width: 28px;
+  height: 3px;
+  margin-left: -14px;
+  border-radius: var(--p-r-pill);
+  background: var(--p-ink-3);
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .askbanner {
+  .askbanner,
+  .askbanner[data-leaving] {
     animation: none;
     transition: none;
   }
 }
 
-:root[data-reduced-motion='true'] .askbanner {
+:root[data-reduced-motion='true'] .askbanner,
+:root[data-reduced-motion='true'] .askbanner[data-leaving] {
   animation: none;
   transition: none;
 }

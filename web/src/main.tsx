@@ -41,6 +41,7 @@ import { paintStoredTheme } from './deck/theme'
 import { TopBarPreview } from './deck/TopBarPreview'
 import { AskBannerPreview } from './components/AskBannerPreview'
 import { ChatPreview } from './components/ChatPreview'
+import { NoticesPreview } from './components/NoticesPreview'
 import { CloudLaunchPreview } from './components/CloudLaunchPreview'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { PhoneTopBarPreview } from './components/PhoneTopBarPreview'
@@ -111,6 +112,8 @@ createRoot(host).render(
       <SpeechKeyCardPreview />
     ) : preview === 'decktop' ? (
       <TopBarPreview />
+    ) : preview === 'notices' ? (
+      <NoticesPreview />
     ) : preview === 'shell' ? (
       <ShellPreview />
     ) : preview === 'phonetop' ? (

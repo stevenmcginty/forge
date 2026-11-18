@@ -59,7 +59,10 @@ self.addEventListener('push', (event) => {
   }
 
   let title = 'Forge needs you'
-  let body = 'A pane on your desktop wants your attention.'
+  let body = 'An agent is waiting on you. Tap to open Forge.'
+  // The phone's haptic map (web/src/lib/haptics.ts): a question is `warn`, a
+  // finished pane `confirm`. The same values as VIBRATE in notify.ts.
+  let vibrate = [30, 80, 30]
   let tag = FALLBACK_TAG
   let sessionId = ''
   let key = 'asking|'
@@ -75,6 +78,7 @@ self.addEventListener('push', (event) => {
     if (payload.state === 'done') {
       title = `${pane} finished`
       body = 'Ready for your next message.'
+      vibrate = [12, 70, 12]
       key = 'done|'
     } else {
       title = `${pane} needs you`
@@ -110,6 +114,7 @@ self.addEventListener('push', (event) => {
         renotify,
         icon: '/icons/icon-192.png',
         badge: '/icons/badge-96.png',
+        vibrate,
         timestamp: at,
         data: { sessionId, key, at }
       })

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import { useDeckTheme } from '../deck/theme'
 import { AskBannerView } from './AskBanner'
 import './ChatPreview.css'
@@ -18,9 +19,10 @@ import './ChatPreview.css'
 const LONG = {
   label: 'mercedes-xentry-slk-ecu-dumps-and-notes — Claude 2 (ECU mapping)',
   prompt:
-    'Do you want to make this edit to electron/web-host.ts? The change rewrites the push sender so each device is notified unless it is on screen. 1. Yes  2. Yes, and allow all edits this session  3. No'
+    'Do you want to make this edit to electron/web-host.ts? The change rewrites the push sender so each device is notified unless it is on screen. 1. Yes  2. Yes, and allow all edits this session  3. No',
+  profile: BUILTIN_AGENT_PROFILES.find((p) => p.id === 'claude')
 }
-const SHORT = { label: 'forge — Zeb', prompt: 'Run npm run typecheck?' }
+const SHORT = { label: 'forge — Zeb', prompt: 'Run npm run typecheck?', profile: BUILTIN_AGENT_PROFILES.find((p) => p.id === 'codex') }
 
 export function AskBannerPreview(): ReactNode {
   const { themeId: theme, setTheme } = useDeckTheme(true)
@@ -73,6 +75,7 @@ export function AskBannerPreview(): ReactNode {
               key={seq}
               label={words.label}
               prompt={words.prompt}
+              profile={words.profile}
               fuseMs={0}
               onOpen={() => {
                 setShown(false)

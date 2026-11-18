@@ -12,7 +12,8 @@ import { AskBanner } from './AskBanner'
 import { BrainConfirm } from './BrainConfirm'
 import { MobilePanes } from './MobilePanes'
 import { useTextScale } from './MoreSheet'
-import { OfflineBanner } from './OfflineBanner'
+import { OfflineBanner, PhoneStrip } from './OfflineBanner'
+import { PhoneIcon } from './PhoneIcon'
 import { PowerDraw } from './PowerDraw'
 import { ProjectSheet } from './ProjectSheet'
 import { Rail } from './Rail'
@@ -44,6 +45,9 @@ const GitHubMode = lazy(() => import('./GitHubMode').then((m) => ({ default: m.G
  * from the start, with the close cross at the end.
  */
 const NOTICE_LAYOUT: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, textAlign: 'start', cursor: 'pointer' }
+
+/** A toast sentence that says something did not happen — the phone marks it with the triangle. */
+const FAILED_WORDS = /\b(couldn'?t|can'?t|cannot|didn'?t|failed|fails|unable|error|refused|not allowed|no longer)\b/i
 
 /**
  * The deck face (desktop browser only), split off so a phone never downloads
@@ -190,19 +194,7 @@ export function Workspace(): ReactNode {
    * can put it away too, with the close cross as the shape that says so
    * (`title` never shows on a touch screen).
    */
-  const notice = state.notice ? (
-    <button
-      type="button"
-      className="notice"
-      aria-live="polite"
-      data-testid="notice"
-      onClick={actions.dismissNotice}
-      style={NOTICE_LAYOUT}
-    >
-      <span style={{ flex: '1 1 auto', minWidth: 0 }}>{state.notice}</span>
-      <Icon name="close" size={14} />
-    </button>
-  ) : null
+  const notice = state.notice ? <NoticeToast text={state.notice} onDismiss={actions.dismissNotice} /> : null
   /**
    * One strip at a time on a phone, by priority, rather than up to five
    * stacked over the terminal: admin prompt (a two-minute window), then asleep,
@@ -488,25 +480,80 @@ export function Workspace(): ReactNode {
  * connection to the full-page gate — so it is never the whole of what somebody
  * is looking at.
  */
-function ReconnectingBanner(): ReactNode {
+/**
+ * The toast: one sentence, put away by a tap anywhere on it. A real button, so
+ * a keyboard and a screen reader can put it away too, with the close cross as
+ * the shape that says so (`title` never shows on a touch screen). Exported for
+ * `?preview=notices`.
+ */
+export function NoticeToast({ text, onDismiss }: { text: string; onDismiss: () => void }): ReactNode {
+  const mobile = useMobile()
+  if (mobile) {
+    // The phone's "tells you" weight: a raised card that rises above the
+    // composer, the sentence, and the cross that says a tap puts it away. A
+    // sentence that reads as a failure leads with the triangle, so it never
+    // rests on wording alone; a confirmation stays bare.
+    const failed = FAILED_WORDS.test(text)
+    return (
+      <button
+        type="button"
+        className="notice"
+        aria-live="polite"
+        data-testid="notice"
+        data-phone="true"
+        data-tone={failed ? 'danger' : undefined}
+        onClick={onDismiss}
+      >
+        {failed ? (
+          <span className="notice__mark" aria-hidden="true">
+            <PhoneIcon name="alert" size={18} />
+          </span>
+        ) : null}
+        <span className="notice__text">{text}</span>
+        <span className="notice__close" aria-hidden="true">
+          <PhoneIcon name="close" size={18} />
+        </span>
+      </button>
+    )
+  }
+  return (
+    <button type="button" className="notice" aria-live="polite" data-testid="notice" onClick={onDismiss} style={NOTICE_LAYOUT}>
+      <span style={{ flex: '1 1 auto', minWidth: 0 }}>{text}</span>
+      <Icon name="close" size={14} />
+    </button>
+  )
+}
+
+export function ReconnectingBanner(): ReactNode {
   const { state, actions } = useForge()
   const mobile = useMobile()
   if (state.stage.kind !== 'connected' || state.connection.state === 'live') return null
   const name = state.picture?.desktopName || 'the desktop'
 
+  if (mobile) {
+    return (
+      <PhoneStrip
+        link="reconnecting"
+        testId="reconnecting-banner"
+        mark={<PhoneIcon name="link-reconnecting" size={20} />}
+        title="Reconnecting…"
+        body={`The link to ${state.picture?.desktopName || 'your desktop'} dropped. Typing is paused until it's back.`}
+        actions={
+          <button type="button" className="pstrip__btn offline__look" onClick={() => actions.retry()}>
+            Try now
+          </button>
+        }
+      />
+    )
+  }
+
   return (
     <div className="offline" data-link="reconnecting" role="status" data-testid="reconnecting-banner">
-      <Icon name="restart" size={mobile ? 16 : 13} />
-      {mobile ? (
-        <span className="offline__text">
-          <strong>The link to {name} dropped.</strong> Reconnecting. Nothing you type gets through until it is back.
-        </span>
-      ) : (
-        <span className="offline__text truncate">
-          <strong>The link to {name} dropped.</strong> This is where the terminals had got to; they repaint themselves
-          when it comes back, and nothing can be typed into them until it does.
-        </span>
-      )}
+      <Icon name="restart" size={13} />
+      <span className="offline__text truncate">
+        <strong>The link to {name} dropped.</strong> This is where the terminals had got to; they repaint themselves
+        when it comes back, and nothing can be typed into them until it does.
+      </span>
       <span className="offline__actions">
         <button type="button" className="ghost-btn offline__look" onClick={() => actions.retry()}>
           Try now
@@ -547,10 +594,30 @@ function ReconnectingBanner(): ReactNode {
  * it. Warn amber, the strip's own waiting colour, and every bit of the meaning
  * is in the words. See `WebRemoteYesFrame` in shared/web.ts.
  */
-function RemoteYesBanner(): ReactNode {
+export function RemoteYesBanner(): ReactNode {
   const { state } = useForge()
+  const mobile = useMobile()
   const ry = state.remoteYes
   if (state.stage.kind !== 'connected' || !ry.enabled || !ry.uac) return null
+
+  if (mobile) {
+    return (
+      <PhoneStrip
+        link="remote-yes"
+        testId="remote-yes-banner"
+        role="alert"
+        tone="attn"
+        mark={<span className="pu-bang pstrip__bang">!</span>}
+        title={`${state.picture?.desktopName || 'Your desktop'} is asking for admin`}
+        body="Press Yes in RustDesk. It waits about 2 minutes."
+        actions={
+          <a className="pstrip__btn pstrip__btn--primary remote-yes__open" href={rustDeskLink(ry.address)} rel="noopener">
+            Open RustDesk
+          </a>
+        }
+      />
+    )
+  }
 
   return (
     <div className="offline remote-yes" data-link="remote-yes" role="alert" data-testid="remote-yes-banner">
@@ -576,9 +643,22 @@ export function rustDeskLink(address: string): string {
   return address ? `rustdesk://connection/new/${address}` : 'https://github.com/rustdesk/rustdesk/releases/latest'
 }
 
-function RecoveringBanner(): ReactNode {
+export function RecoveringBanner(): ReactNode {
   const { state } = useForge()
+  const mobile = useMobile()
   if (state.stage.kind !== 'connected' || !state.desktopRecovering) return null
+
+  if (mobile) {
+    return (
+      <PhoneStrip
+        link="recovering"
+        testId="recovering-banner"
+        mark={<span className="pu-spinner pstrip__spinner" />}
+        title={`${state.picture?.desktopName || 'Your desktop'} is restarting Forge`}
+        body="Terminals stay live. Tabs and buttons work again in a moment."
+      />
+    )
+  }
 
   return (
     <div className="offline" data-link="recovering" role="status" data-testid="recovering-banner">

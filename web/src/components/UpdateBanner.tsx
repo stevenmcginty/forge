@@ -1,6 +1,9 @@
 import { type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
+import { useMobile } from '../lib/mobile'
 import type { WebUpdate } from '../lib/update'
+import { PhoneStrip } from './OfflineBanner'
+import { PhoneIcon } from './PhoneIcon'
 
 /**
  * "A newer Forge Web is deployed." The desktop's UpdateBanner, said in the
@@ -20,7 +23,37 @@ import type { WebUpdate } from '../lib/update'
  * version.json the same question on the same cadence.
  */
 export function UpdateBanner({ update }: { update: WebUpdate }): ReactNode | null {
+  const mobile = useMobile()
   if (!update.available) return null
+
+  if (mobile) {
+    // The phone's ambient notice: the least urgent of them, so it is the last
+    // one Workspace picks. Reload is its one primary; × is "not now".
+    return (
+      <PhoneStrip
+        link="update"
+        testId="update-banner"
+        mark={<Icon name="refresh" size={18} />}
+        title={update.version ? `Forge Web ${update.version} is ready` : 'A new Forge Web is ready'}
+        body="Reload to start using it."
+        actions={
+          <>
+            <button type="button" className="pstrip__btn pstrip__btn--primary ubanner__btn--go" onClick={update.apply}>
+              Reload
+            </button>
+            <button
+              type="button"
+              className="pstrip__close ubanner__close"
+              aria-label="Dismiss this update"
+              onClick={update.dismiss}
+            >
+              <PhoneIcon name="close" size={18} />
+            </button>
+          </>
+        }
+      />
+    )
+  }
 
   return (
     <div className="ubanner" role="status" data-testid="update-banner">

@@ -59,7 +59,14 @@ interface NoteData {
  * `NotificationOptions` as the browsers take it. `renotify` and `timestamp`
  * are real (Chrome honours both) but have dropped out of TypeScript's DOM lib.
  */
-type ShowOptions = NotificationOptions & { renotify?: boolean; timestamp?: number }
+type ShowOptions = NotificationOptions & { renotify?: boolean; timestamp?: number; vibrate?: number[] }
+
+/**
+ * The buzz each kind of notification makes, from the phone's haptic map
+ * (lib/haptics.ts): a question is `warn`, a finished pane is `confirm`.
+ * Mirrored in public/sw.js — keep the two the same.
+ */
+const VIBRATE: Record<NoteState, number[]> = { asking: [30, 80, 30], done: [12, 70, 12] }
 
 /** Title and body. Mirrored in public/sw.js — keep the two the same. */
 export function noteWords(label: string, state: NoteState, prompt = ''): { title: string; body: string } {
@@ -109,7 +116,7 @@ export async function showLocal(note: LocalNote): Promise<boolean> {
   const registration = await registerWorker()
   if (!registration) {
     try {
-      const shown = new Notification(title, { body, tag, icon: '/icons/icon-192.png' })
+      const shown = new Notification(title, { body, tag, icon: '/icons/icon-192.png', badge: '/icons/badge-96.png' })
       shown.onclick = () => {
         window.focus()
         shown.close()
@@ -138,6 +145,7 @@ export async function showLocal(note: LocalNote): Promise<boolean> {
       renotify,
       icon: '/icons/icon-192.png',
       badge: '/icons/badge-96.png',
+      vibrate: VIBRATE[note.state],
       timestamp: at,
       data: { sessionId: note.sessionId, key, at } satisfies NoteData
     }

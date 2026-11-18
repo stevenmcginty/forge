@@ -3,6 +3,7 @@ import { Icon } from '@/components/Icon'
 import { useMobile } from '../lib/mobile'
 import { useForge } from '../state'
 import { SwitchAccount } from './Connection'
+import { PhoneIcon } from './PhoneIcon'
 
 /**
  * "Forge is asleep on that machine, and this is what it last looked like."
@@ -29,9 +30,9 @@ import { SwitchAccount } from './Connection'
  *
  * ## On a phone
  *
- * Two lines, not one: the sentence first, whole, then the actions on their
- * own row at a thumb's size. The account line is not here — it lives in the
- * connection sheet the live dot opens, beside the desktop it belongs to.
+ * One of the phone's ambient notices (`PhoneStrip`, below): a title that says
+ * what is true, one line on what that means, and the actions as pills. The
+ * account line is not here — it lives in the connection sheet the link opens.
  *
  * The switch is a switch and not a link away: the rail, the titlebar and the
  * theme do not change, the terminals stay exactly as frozen as they were, and
@@ -43,20 +44,44 @@ export function OfflineBanner(): ReactNode {
   if (state.stage.kind !== 'offline') return null
 
   const when = state.cached?.at ?? 0
-  const name = state.stage.record?.name || state.cached?.desktopName || 'That desktop'
+  const name = state.stage.record?.name || state.cached?.desktopName || (mobile ? 'Your desktop' : 'That desktop')
   const github = state.offlineMode === 'github'
+
+  if (mobile) {
+    return (
+      <PhoneStrip
+        link="asleep"
+        testId="offline-banner"
+        mark={github ? <Icon name="branch" size={18} /> : <PhoneIcon name="link-asleep" size={20} />}
+        title={`${name} is asleep`}
+        body={
+          github
+            ? 'Terminals need it awake. The repo is still here.'
+            : `Showing what it last sent${when ? `, ${shortAgo(when)}` : ''}.`
+        }
+        actions={
+          <>
+            <button type="button" className="pstrip__btn offline__look" onClick={() => actions.refind()}>
+              Look again
+            </button>
+            <button
+              type="button"
+              className="pstrip__btn offline__look"
+              data-testid="offline-mode-switch"
+              onClick={() => actions.setOfflineMode(github ? 'frozen' : 'github')}
+            >
+              {github ? 'Show terminals' : 'Open GitHub repo'}
+            </button>
+          </>
+        }
+        stack
+      />
+    )
+  }
 
   return (
     <div className="offline" data-link="asleep" role="status" data-testid="offline-banner">
-      <Icon name={github ? 'branch' : 'restart'} size={mobile ? 16 : 13} />
-      {mobile ? (
-        <span className="offline__text">
-          <strong>{name} is asleep.</strong>{' '}
-          {github
-            ? 'No terminals without it, but the repository is still here.'
-            : `This is the picture it last sent${when ? `, ${ago(when)}` : ''}.`}
-        </span>
-      ) : (
+      <Icon name={github ? 'branch' : 'restart'} size={13} />
       <span className="offline__text truncate">
         {github ? (
           <>
@@ -70,7 +95,6 @@ export function OfflineBanner(): ReactNode {
           </>
         )}
       </span>
-      )}
       <span className="offline__actions">
         <button type="button" className="ghost-btn offline__look" onClick={() => actions.refind()}>
           Look again
@@ -81,12 +105,74 @@ export function OfflineBanner(): ReactNode {
           data-testid="offline-mode-switch"
           onClick={() => actions.setOfflineMode(github ? 'frozen' : 'github')}
         >
-          {github ? (mobile ? 'Frozen terminals' : 'Show the frozen terminals') : mobile ? 'Repo from GitHub' : 'Open the repo from GitHub'}
+          {github ? 'Show the frozen terminals' : 'Open the repo from GitHub'}
         </button>
-        {mobile ? null : <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} compact />}
+        <SwitchAccount email={state.session?.email ?? ''} onSignOut={actions.signOut} compact />
       </span>
     </div>
   )
+}
+
+/**
+ * The phone's ambient notice: asleep, reconnecting, restarting, admin prompt,
+ * new build. In the flow under the top bar (it pushes the app down, never
+ * covers it), one at a time by priority (Workspace picks), drawn as the
+ * contract's inline notice: a tonal card, a state shape in the mark slot, a
+ * title that says what is true and one line on what it means, and pills for
+ * what can be done. `stack` puts two or more actions on their own row.
+ * `tone="attn"` only for the one that waits on you.
+ */
+export function PhoneStrip({
+  link,
+  testId,
+  role = 'status',
+  tone,
+  mark,
+  title,
+  body,
+  actions,
+  stack = false
+}: {
+  link: string
+  testId: string
+  role?: 'status' | 'alert'
+  tone?: 'attn'
+  mark: ReactNode
+  title: string
+  body: string
+  actions?: ReactNode
+  stack?: boolean
+}): ReactNode {
+  return (
+    <div
+      className="pstrip"
+      data-link={link}
+      data-tone={tone}
+      data-stack={stack ? 'true' : undefined}
+      role={role}
+      data-testid={testId}
+    >
+      <span className="pstrip__mark" aria-hidden="true">
+        {mark}
+      </span>
+      <span className="pstrip__text">
+        <span className="pstrip__title">{title}</span>
+        <span className="pstrip__body">{body}</span>
+      </span>
+      {actions ? <span className="pstrip__actions">{actions}</span> : null}
+    </div>
+  )
+}
+
+/** "just now", "4 min ago", "2 h ago", "3 days ago": the phone's way of saying when. */
+function shortAgo(at: number): string {
+  const minutes = Math.round(Math.max(0, Date.now() - at) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'} ago`
 }
 
 function ago(at: number): string {

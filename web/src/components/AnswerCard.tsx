@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
+import type { AgentProfile } from '@shared/types'
+import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { answerKeys, isYesNo, offersYesNo, readAsk, sendAnswerKeys, type ParsedAsk } from '../lib/answer-options'
+import { useMobile } from '../lib/mobile'
+import { useForgeOptional } from '../state'
+import { findAsker } from './AskBanner'
+import { PhoneIcon } from './PhoneIcon'
 import './AnswerCard.css'
 
 /**
@@ -201,13 +208,121 @@ export function AnswerCard({
     return () => window.removeEventListener('keydown', onKey)
   }, [digitKeys])
 
-  const question = ask.question || prompt.trim() || `${agentName} needs an answer.`
+  const mobile = useMobile()
+  const forge = useForgeOptional()
+  const question = ask.question || prompt.trim() || (mobile ? `${agentName} is waiting on you.` : `${agentName} needs an answer.`)
   const disabled = sent !== null || !live
   /** Prose wants a reply in words, so the hint offers typing one as well. */
   const prose = ask.typed || (!ask.options.length && !isYesNo(question))
   /** "What should I do instead?" gets no buttons: only words answer it. */
   const replies = ask.options.length || !offersYesNo(question) ? [] : plainReplies(question)
   const buttons = ask.options.length > 0 || replies.length > 0
+
+  if (mobile) {
+    const picture = forge?.state.picture
+    const who = picture ? findAsker(picture.projects, picture.workspaces, picture.profiles, paneId) : null
+    // No picture (a preview harness): the built-in agent of that name, for its logo.
+    const profile: AgentProfile | undefined = who?.profile ?? BUILTIN_AGENT_PROFILES.find((p) => p.name === agentName)
+    const hint = !buttons ? 'Type or say your reply' : prose ? 'Tap, type or say your reply' : 'Tap or say your answer'
+    const rows = ask.options.length
+      ? ask.options.map((option, index) => ({
+          id: `n${option.n}`,
+          n: option.n as number | null,
+          label: option.label,
+          detail: option.detail,
+          keys: keysFor(index)
+        }))
+      : replies.map((reply) => ({ id: reply.label, n: null, label: reply.label, detail: '', keys: reply.keys }))
+    return (
+      <section
+        className="answer"
+        aria-label={`${agentName} is asking`}
+        data-sent={sent ? 'true' : undefined}
+        data-phone="true"
+      >
+        <header className="answer__head">
+          <span className="answer__who" aria-hidden="true">
+            {profile ? <AgentBadge profile={profile} size="sm" /> : null}
+            <span className="answer__bang pu-bang">!</span>
+          </span>
+          <span className="answer__heading">
+            <span className="answer__title">{agentName} is asking</span>
+            <span className="answer__sub">
+              {who ? `${who.project.name} · ` : ''}
+              {hint}
+            </span>
+          </span>
+          {onShowTerminal ? (
+            <button type="button" className="answer__terminal" aria-label="Show terminal" onClick={onShowTerminal}>
+              <Icon name="terminal" size={16} />
+              Terminal
+            </button>
+          ) : null}
+        </header>
+        {ask.context ? <AskContext rows={ask.context} phone /> : null}
+        <p className="answer__question">{question}</p>
+        {buttons ? (
+          <div className="answer__options" role="group" aria-label="Answers">
+            {rows.map((row) => {
+              const kind = optionKind(row.label)
+              const picked = sent?.id === row.id
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  className="answer__option"
+                  data-kind={kind}
+                  disabled={disabled}
+                  data-picked={picked ? 'true' : undefined}
+                  onClick={() => void choose(row.id, row.keys)}
+                >
+                  {row.n !== null ? (
+                    <span className="answer__digit" aria-hidden="true">
+                      {row.n}
+                    </span>
+                  ) : null}
+                  <span className="answer__text">
+                    <span className="answer__label">{row.label}</span>
+                    {row.detail ? <span className="answer__detail">{row.detail}</span> : null}
+                  </span>
+                  {picked ? (
+                    <Picked phone />
+                  ) : kind === 'always' ? (
+                    <span className="answer__flag" data-kind="always">
+                      Always
+                    </span>
+                  ) : kind === 'danger' ? (
+                    <span className="answer__flag" data-kind="danger">
+                      <PhoneIcon name="alert" size={14} />
+                      Can&apos;t undo
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+        {sent ? (
+          <div className="answer__sent">
+            {stale ? (
+              <PhoneIcon name="working" size={18} className="answer__sent-mark" />
+            ) : (
+              <span className="answer__sent-mark pu-spinner" aria-hidden="true" />
+            )}
+            <p className="answer__sent-text" role="status">
+              {stale ? `${agentName} hasn't moved on yet` : `Sent. Waiting for ${agentName}…`}
+            </p>
+            {stale ? (
+              <button type="button" className="answer__again" aria-label="Send again" disabled={!live} onClick={() => void again()}>
+                <Icon name="refresh" size={16} />
+                Send again
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+    )
+  }
 
   return (
     <section className="answer" aria-label={`${agentName} is asking`} data-sent={sent ? 'true' : undefined}>
@@ -315,12 +430,24 @@ function typesWords(target: EventTarget | null): boolean {
 }
 
 /** The tapped row's mark: a shape, so "this one went" never rests on the dimming alone. */
-function Picked(): ReactNode {
+function Picked({ phone = false }: { phone?: boolean }): ReactNode {
   return (
     <span className="answer__picked" role="img" aria-label="Sent">
-      <Icon name="check" size={18} />
+      {phone ? <PhoneIcon name="check" size={20} /> : <Icon name="check" size={18} />}
     </span>
   )
+}
+
+/**
+ * What an answer does beyond "yes, this once", read from its words, so the
+ * phone can draw it apart by shape and word (never colour alone): an answer
+ * that stops the asking for good ("always", "don't ask again", "allow all")
+ * or one that cannot be taken back (delete, force, reset…).
+ */
+export function optionKind(label: string): 'always' | 'danger' | 'plain' {
+  if (/\b(delete|remove|discard|overwrite|force|reset|drop|destroy|wipe|erase|rm -rf)\b/i.test(label)) return 'danger'
+  if (/\b(always|don'?t ask( me)? again|never ask|allow all|auto-?accept|bypass|every time)\b/i.test(label)) return 'always'
+  return 'plain'
 }
 
 /**
@@ -329,13 +456,13 @@ function Picked(): ReactNode {
  * row's +/- is repeated in a gutter at the row's start, so an added line and a
  * removed one differ by a character, and the tint is only a second cue.
  */
-function AskContext({ rows }: { rows: string[] }): ReactNode {
+function AskContext({ rows, phone = false }: { rows: string[]; phone?: boolean }): ReactNode {
   const [open, setOpen] = useState(false)
   const folds = rows.length > CONTEXT_FOLD_ROWS
   const shown = open || !folds ? rows : rows.slice(0, CONTEXT_FOLD_ROWS)
   const diff = rows.some((row) => DIFF_ROW.test(row))
   return (
-    <div className="answer__context" data-open={open ? 'true' : undefined}>
+    <div className="answer__context" data-open={open ? 'true' : undefined} data-folds={folds ? 'true' : undefined}>
       <pre className="answer__code" data-gutter={diff ? 'true' : undefined}>
         {shown.map((row, index) => {
           const sign = DIFF_ROW.exec(row)?.[1]
@@ -364,7 +491,14 @@ function AskContext({ rows }: { rows: string[] }): ReactNode {
           title={open ? 'Show less' : `Show all ${rows.length} lines`}
           onClick={() => setOpen((value) => !value)}
         >
-          <Icon name="chevronDown" size={18} />
+          {phone ? (
+            <>
+              <span>{open ? 'Show less' : `Show all ${rows.length} lines`}</span>
+              <PhoneIcon name="chevron-down" size={18} />
+            </>
+          ) : (
+            <Icon name="chevronDown" size={18} />
+          )}
         </button>
       ) : null}
     </div>

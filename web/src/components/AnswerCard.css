@@ -362,10 +362,452 @@
   }
 }
 
-/* On a phone the card lines up with the dock under it: the same 16px gutters. */
+/*
+ * ------------------------------------------------------------- on a phone
+ *
+ * The "needs an answer" weight of the phone's one notice family
+ * (web/PHONE-DESIGN.md): a sheet top, edge to edge with no outline, that
+ * rises out of the composer it docks on. Who is asking leads, in the banner's own shape — the
+ * agent's logo with the "!" disc pinned to it, "<agent> is asking", the
+ * project and how to answer under it — then what is being approved in a
+ * recessed well, the question in plain type, and one tonal row per answer,
+ * numbered. An answer that stops the asking for good, or cannot be taken
+ * back, carries a badge with its word (and a triangle for the second), never
+ * colour alone. The "!" breathes slowly while the question waits: the only
+ * loop. Every value is a phone token; the deck's rules above and below are
+ * untouched (the phone draws its own markup, `data-phone`).
+ */
 .app[data-mobile] .answer {
-  margin-left: 16px;
-  margin-right: 16px;
+  gap: 10px;
+  margin: var(--p-2) 0 0;
+  padding: var(--p-4) var(--p-gutter) var(--p-3);
+  border: 0;
+  border-radius: var(--p-r-sheet) var(--p-r-sheet) 0 0;
+  background: var(--p-raised);
+  box-shadow: var(--p-rim), var(--p-shadow-sheet);
+  font-family: var(--p-font);
+  animation: answer-rise var(--p-dur-sheet) var(--p-ease-sheet);
+}
+
+@keyframes answer-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app[data-mobile] .answer__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  min-height: 40px;
+}
+
+.app[data-mobile] .answer__who {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--p-fill);
+}
+
+.app[data-mobile] .answer__who .agent-badge[data-logo] {
+  width: 20px;
+  min-width: 0;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.app[data-mobile] .answer__who .agent-badge[data-logo] .agent-badge__logo {
+  width: 100%;
+  height: 100%;
+}
+
+.app[data-mobile] .answer__bang {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  box-shadow: 0 0 0 2px var(--p-raised);
+}
+
+.app[data-mobile] .answer__who > .answer__bang:only-child {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  width: 22px;
+  height: 22px;
+  font-size: var(--p-t-small);
+  box-shadow: none;
+}
+
+/* The waiting cue: a ring that leaves the "!" and fades, slowly, until it is answered. */
+.app[data-mobile] .answer__bang::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--p-attn);
+  opacity: 0;
+  animation: answer-wait 2.6s var(--p-ease) infinite;
+}
+
+.app[data-mobile] .answer[data-sent] .answer__bang::after {
+  animation: none;
+}
+
+@keyframes answer-wait {
+  0% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  60%,
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+.app[data-mobile] .answer__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.app[data-mobile] .answer__title {
+  overflow: hidden;
+  font-size: var(--p-t-chrome);
+  font-weight: var(--p-w-strong);
+  line-height: 1.3;
+  letter-spacing: var(--p-track-tight);
+  color: var(--p-ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.app[data-mobile] .answer__sub {
+  overflow: hidden;
+  font-size: var(--p-t-small);
+  line-height: 1.3;
+  color: var(--p-ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* "Terminal": a small tonal pill in the head, 36 drawn and 44 hit. */
+.app[data-mobile] .answer__terminal {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--p-control);
+  margin: 0;
+  padding: 0 var(--p-3);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  background: var(--p-fill);
+  font: var(--p-w-strong) var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .answer__terminal::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+
+.app[data-mobile] .answer__terminal:active {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+/* What is being approved: a recessed well, the terminal's own mono. */
+.app[data-mobile] .answer__context {
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 64px;
+  /* Visible, so the fold's 44px hit can reach past the well's edge. */
+  overflow: visible;
+  border: 0;
+  border-radius: var(--p-r-row);
+  /* Below the card on every theme: the ground, nudged toward the ink. */
+  background: color-mix(in srgb, var(--p-ink) 5%, var(--p-bg));
+}
+
+/* One source line per row (it scrolls sideways), so a folded well shows whole lines. */
+.app[data-mobile] .answer__code {
+  min-height: 0;
+  padding: var(--p-2) 0;
+  font-size: var(--p-t-small);
+  line-height: 18px;
+  color: var(--p-ink);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.app[data-mobile] .answer__row,
+.app[data-mobile] .answer__code[data-gutter] .answer__row {
+  width: max-content;
+  min-width: 100%;
+  padding: 0 var(--p-3);
+  text-indent: 0;
+}
+
+/* Folded: three whole lines, and the well keeps them while the answers give up room. */
+.app[data-mobile] .answer__context[data-folds]:not([data-open]) {
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+.app[data-mobile] .answer__context[data-folds]:not([data-open]) .answer__code {
+  max-height: calc(3 * 18px + var(--p-2));
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.app[data-mobile] .answer__row[data-diff='add'] {
+  background: var(--p-act-tint);
+}
+
+.app[data-mobile] .answer__row[data-diff='del'] {
+  background: var(--p-danger-tint);
+}
+
+.app[data-mobile] .answer__sign {
+  color: var(--p-ink-2);
+}
+
+/* The fold: a quiet full-width row under the code that says what it will do. */
+.app[data-mobile] .answer__more {
+  flex: none;
+  align-self: stretch;
+  gap: 6px;
+  width: auto;
+  height: 36px;
+  margin: 0;
+  border-radius: 0 0 var(--p-r-row) var(--p-r-row);
+  border-top: 1px solid var(--p-line);
+  background: transparent;
+  font: var(--p-w-strong) var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-ink-2);
+}
+
+/* 36 drawn, 44 hit: the extra reaches into the gap under the well. */
+.app[data-mobile] .answer__more::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 -8px;
+}
+
+.app[data-mobile] .answer__more:active {
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .answer__more svg {
+  transition: transform var(--p-dur-snap) var(--p-glide);
+}
+
+.app[data-mobile] .answer__question {
+  font-size: var(--p-t-title);
+  font-weight: var(--p-w-strong);
+  line-height: 1.35;
+  letter-spacing: var(--p-track-tight);
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .answer__options {
+  min-height: 52px;
+  gap: 6px;
+}
+
+/* One tonal row per answer: no outline, a thumb tall, the digit in a recessed disc. */
+.app[data-mobile] .answer__option {
+  /* Never squashed under its words: the list scrolls instead. */
+  flex-shrink: 0;
+  gap: var(--p-3);
+  min-height: 52px;
+  padding: var(--p-2) var(--p-3) var(--p-2) 10px;
+  border: 0;
+  border-radius: var(--p-r-row);
+  background: var(--p-fill);
+  font-family: var(--p-font);
+  font-size: var(--p-t-chrome);
+  font-weight: var(--p-w-medium);
+  line-height: 1.3;
+  color: var(--p-ink);
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease);
+}
+
+@media (hover: hover) {
+  .app[data-mobile] .answer__option:not(:disabled):hover {
+    background: color-mix(in srgb, var(--p-ink) 10%, transparent);
+    border-color: transparent;
+  }
+}
+
+.app[data-mobile] .answer__option:not(:disabled):active {
+  background: var(--p-selected);
+  border-color: transparent;
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .answer__option:focus-visible,
+.app[data-mobile] .answer__terminal:focus-visible,
+.app[data-mobile] .answer__again:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+.app[data-mobile] .answer__more:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: -3px;
+}
+
+.app[data-mobile] .answer__option:disabled {
+  opacity: var(--p-disabled);
+}
+
+/* The one that went: the chosen fill, full strength, weight and a tick. */
+.app[data-mobile] .answer__option[data-picked]:disabled {
+  opacity: 1;
+  background: var(--p-selected);
+  font-weight: var(--p-w-strong);
+}
+
+.app[data-mobile] .answer__picked {
+  color: var(--p-act);
+}
+
+.app[data-mobile] .answer__digit {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--p-bg);
+  font: var(--p-w-heavy) var(--p-t-label) / 1 var(--p-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .answer__detail {
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-regular);
+  color: var(--p-ink-2);
+}
+
+/* "Always" and "Can't undo": a badge with the word, so the row reads apart without colour. */
+.app[data-mobile] .answer__flag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 var(--p-2);
+  border-radius: var(--p-r-pill);
+  background: var(--p-selected);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-ink);
+  white-space: nowrap;
+}
+
+.app[data-mobile] .answer__option[data-kind='danger'] {
+  background: var(--p-danger-tint);
+}
+
+.app[data-mobile] .answer__flag[data-kind='danger'] {
+  background: transparent;
+  padding: 0;
+  color: var(--p-danger);
+}
+
+.app[data-mobile] .answer__sent {
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: var(--p-control);
+}
+
+.app[data-mobile] .answer__sent-mark {
+  flex: none;
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .answer__sent-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--p-t-label);
+  font-weight: var(--p-w-medium);
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .answer__again {
+  position: relative;
+  gap: 6px;
+  width: auto;
+  height: var(--p-control);
+  padding: 0 var(--p-4);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  background: var(--p-fill);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .answer__again::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+
+.app[data-mobile] .answer__again:active:not(:disabled) {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+}
+
+.app[data-mobile] .answer__again:disabled {
+  opacity: var(--p-disabled);
+}
+
+/* A short screen (landscape, the keyboard up): the question and the answers
+   first, the evidence after them, inside the card's own scroll. */
+@media (max-height: 520px) {
+  .app[data-mobile] .answer__context {
+    order: 1;
+    flex-shrink: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .answer,
+  .app[data-mobile] .answer__bang::after {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .answer,
+:root[data-reduced-motion='true'] .app[data-mobile] .answer__bang::after {
+  animation: none;
 }
 
 /*

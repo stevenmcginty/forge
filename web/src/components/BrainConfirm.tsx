@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { buzz } from '../lib/haptics'
 import { useForge } from '../state'
+import { PhoneIcon } from './PhoneIcon'
 import './BrainConfirm.css'
 
 /** The risk in words — the desktop toast's, the same three. */
@@ -16,8 +18,9 @@ const RISK_WORD: Record<string, string> = { low: 'Low risk', medium: 'Some risk'
  * Only this card: Forge Web draws no brain icon, map or chat.
  *
  *   phone   over the top of the display, full width, where AskBanner sits (and
- *           over it: this one has a clock on it). Thumb-sized buttons, and a
- *           short buzz when a new question lands.
+ *           over it: this one has a clock on it). "Forge Brain is asking",
+ *           the risk as a badge with its word, thumb-sized Yes / No pills,
+ *           and the haptic map's `warn` buzz when a new question lands.
  *   deck    a compact tile, top centre, under the bar.
  *
  * The buttons go off after a press until the desktop's `brain` push takes the
@@ -44,11 +47,8 @@ export function BrainConfirm({ face }: { face: 'phone' | 'deck' }): ReactNode {
       fresh = true
     }
     if (!fresh || face !== 'phone') return
-    try {
-      navigator.vibrate?.([40, 60, 40])
-    } catch {
-      // Not allowed here: the card is the announcement.
-    }
+    // "Something now needs you", from the phone's one haptic map.
+    buzz('warn')
   }, [list, face])
 
   if (!first) return null
@@ -67,6 +67,51 @@ export function BrainConfirm({ face }: { face: 'phone' | 'deck' }): ReactNode {
   const what = first.summary?.trim() || first.tool || 'An action'
   const more = list.length - 1
   const busy = sent === first.id
+
+  if (face === 'phone') {
+    const why = refused?.id === first.id ? refused.why : ''
+    return (
+      <div className="bconfirm" key={first.id} data-face={face} data-risk={first.risk} role="alert" data-testid="brain-confirm">
+        <div className="bconfirm__head">
+          <span className="bconfirm__mark" aria-hidden="true">
+            <PhoneIcon name="alert" size={22} />
+          </span>
+          <span className="bconfirm__text">
+            <span className="bconfirm__title">Forge Brain is asking</span>
+            <span className="bconfirm__what">{what}</span>
+          </span>
+        </div>
+        <span className="bconfirm__meta">
+          <span className="bconfirm__risk">
+            {first.risk === 'high' ? <PhoneIcon name="alert" size={14} /> : null}
+            {RISK_WORD[first.risk] ?? 'Asks first'}
+          </span>
+          {more > 0 ? <span className="bconfirm__more">{more} more waiting</span> : null}
+          {busy ? (
+            <span className="bconfirm__sending" role="status">
+              <span className="pu-spinner" aria-hidden="true" />
+              Sending
+            </span>
+          ) : null}
+        </span>
+        {why ? (
+          <span className="bconfirm__refused" role="status">
+            <PhoneIcon name="alert" size={16} />
+            {why}
+          </span>
+        ) : null}
+        <div className="bconfirm__btns">
+          <button type="button" className="bconfirm__btn bconfirm__btn--yes" disabled={busy} onClick={() => answer(true)}>
+            Yes
+          </button>
+          <button type="button" className="bconfirm__btn" disabled={busy} onClick={() => answer(false)}>
+            No
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="bconfirm" key={first.id} data-face={face} data-risk={first.risk} role="alert" data-testid="brain-confirm">
       <div className="bconfirm__head">
