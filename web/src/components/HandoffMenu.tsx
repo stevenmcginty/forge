@@ -80,8 +80,8 @@ export function HandoffMenu({
         label="Hand off to"
         subtitle={
           autoSend
-            ? 'This agent writes a handoff pack, then Forge presses Enter — auto-send is on for this tab.'
-            : 'This agent writes a handoff pack. The prompt is typed, never sent — you press Enter.'
+            ? 'This agent writes a handoff pack, then Forge presses Enter. Auto-send is on for this tab.'
+            : 'This agent writes a handoff pack. Forge types the prompt; you press Enter.'
         }
         testId="handoff-sheet"
       >
@@ -100,8 +100,8 @@ export function HandoffMenu({
           </p>
         ) : busy ? (
           <div className="psheet__busy" role="status">
+            <span className="pu-spinner" aria-hidden="true" />
             <span>Asking the desktop…</span>
-            <span className="pbar" aria-hidden="true" />
           </div>
         ) : null}
       </BottomSheet>

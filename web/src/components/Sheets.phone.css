@@ -342,9 +342,16 @@
   text-underline-offset: 4px;
 }
 
-/* ---------------------------------------------------------------- sheets */
+/* ---------------------------------------------------------------- sheets
+ *
+ * What the phone's menus need beyond BottomSheet's rows and buttons, in the
+ * same hand (web/PHONE-DESIGN.md): no outlines on pills, tags or wells — a
+ * tint or a fill instead; picks show "selected" one way (fill, weight, tick);
+ * warnings are a shape and a word.
+ */
 
-/* The desk's agent badge, grown into a tile that fills the row's icon slot. */
+/* An agent's mark in a row's icon slot: the maker's logo bare, as the tabs
+   draw it; a text badge (no logo) keeps its small tile. */
 .bsheet-layer .bsrow__icon .agent-badge {
   height: 32px;
   min-width: 36px;
@@ -353,7 +360,22 @@
   border-radius: var(--p-r-row);
 }
 
-/* A step back inside a sheet (the mode ladder, a picker's inner view). */
+.app[data-mobile] .bsheet-layer .bsrow__icon .agent-badge[data-logo] {
+  width: 24px;
+  min-width: 0;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.app[data-mobile] .bsheet-layer .bsrow__icon .agent-badge[data-logo] .agent-badge__logo {
+  height: 100%;
+}
+
+/* A step back inside a sheet, where a sheet draws its own (the BottomSheet
+   head's ‹ is the usual one). */
 .psheet__back {
   display: inline-flex;
   align-items: center;
@@ -361,26 +383,26 @@
   min-height: var(--p-hit);
   margin: 0 0 var(--p-1);
   padding: 0 var(--p-3) 0 var(--p-2);
-  font: 500 var(--p-t-chrome) / 1 var(--p-font);
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
   color: var(--p-ink-2);
   background: none;
   border: 0;
   border-radius: var(--p-r-pill);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
 }
 
 .psheet__back:active {
-  background: var(--p-press);
+  background: var(--p-pressed);
 }
 
 .psheet__back:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
-/* An agent row with its mode pill beside it — two buttons, never one inside the other. */
+/* An agent row with its mode chip beside it — two buttons, never one inside the other. */
 .psheet__line {
   display: flex;
   align-items: center;
@@ -391,26 +413,28 @@
   min-width: 0;
 }
 
+/* The mode a plain tap opens in: a tonal chip (drawn 36, hit 44), no outline. */
 .psheet__mode {
   position: relative;
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: var(--p-1);
-  height: 36px;
+  height: var(--p-control);
   margin: 0 var(--p-2) 0 var(--p-1);
   padding: 0 var(--p-2) 0 var(--p-3);
-  font: 500 var(--p-t-label) / 1 var(--p-font);
-  color: var(--p-ink);
-  background: transparent;
-  border: 1px solid var(--p-line-strong);
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  background: var(--p-fill);
+  border: 0;
   border-radius: var(--p-r-pill);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
 }
 
-/* Drawn at 36, hit at 44. */
 .psheet__mode::before {
   content: '';
   position: absolute;
@@ -421,82 +445,97 @@
   color: var(--p-ink-3);
 }
 
+.psheet__mode[data-danger='true'] {
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+}
+
 .psheet__mode:active {
-  background: var(--p-press);
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
 }
 
 .psheet__mode:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: 2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
 }
 
-/* The ladder's tick: an empty ring, or a filled disc with a check in it. */
+/* A ladder's tick, where a sheet still draws one in the icon slot. */
 .psheet__tick {
   display: grid;
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 1.5px solid var(--p-line-strong);
-  border-radius: 50%;
+  color: var(--p-ink);
 }
 
-.psheet__tick[data-on='true'] {
-  color: var(--p-raised);
-  background: var(--p-ink);
-  border-color: var(--p-ink);
-}
-
-/* "No guard" beside a rung that asks nothing: a shape and words, not a red row.
-   A tag ("hand back", "tab default") is the same outline without the shape. */
+/* "No guard" beside a rung that asks nothing: the triangle and the words on a
+   danger tint. A tag ("hand back", "tab default") is the same chip, neutral. */
 .psheet__warn,
 .psheet__tag {
   display: inline-flex;
   align-items: center;
-  gap: var(--p-1);
-  padding: 4px 10px 4px 8px;
-  font-size: var(--p-t-small);
-  font-weight: 500;
+  gap: 5px;
+  height: 24px;
+  padding: 0 var(--p-2);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
   color: var(--p-ink-2);
-  border: 1px solid var(--p-line-strong);
+  background: var(--p-fill);
   border-radius: var(--p-r-pill);
   white-space: nowrap;
 }
 
+.psheet__warn {
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+}
+
 .psheet__note {
   margin: 0;
-  padding: var(--p-3);
+  padding: var(--p-2) var(--p-3) var(--p-3);
   font-size: var(--p-t-label);
-  line-height: 1.45;
+  line-height: var(--p-lh-read);
   color: var(--p-ink-2);
 }
 
+/* A refusal, in the flow: the triangle and the sentence on a danger tint. */
 .psheet__error {
   display: flex;
   align-items: flex-start;
   gap: var(--p-3);
   flex: none;
-  margin: var(--p-2) var(--p-3);
+  margin: var(--p-2) var(--p-2);
   padding: var(--p-3) var(--p-4);
   font-size: var(--p-t-label);
-  line-height: 1.45;
+  line-height: var(--p-lh);
   color: var(--p-ink);
-  background: var(--p-danger-soft);
-  border: 1px solid color-mix(in srgb, var(--p-danger) 40%, transparent);
+  background: var(--p-danger-tint);
+  border: 0;
   border-radius: var(--p-r-row);
   overflow-wrap: anywhere;
 }
 
 .psheet__error .alert-glyph {
   flex: none;
+  margin-top: 1px;
   color: var(--p-danger);
 }
 
+/* Something in flight: a turning ring and the words for what is happening. */
 .psheet__busy {
-  display: grid;
-  gap: var(--p-2);
-  padding: var(--p-3);
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  padding: var(--p-3) var(--p-3) var(--p-3) var(--p-4);
   font-size: var(--p-t-label);
   color: var(--p-ink-2);
+}
+
+.psheet__busy > .pbar {
+  flex: 1;
+  max-width: 96px;
+  margin-left: auto;
 }
 
 .bsheet-layer .bsbtn:disabled {
@@ -504,26 +543,26 @@
   cursor: default;
 }
 
-/* A labelled field inside a sheet: the same box as the doorway's. */
+/* A labelled field inside a sheet: the contract's field. */
 .pfield {
   display: grid;
-  gap: var(--p-2);
+  gap: 6px;
   padding: var(--p-2) var(--p-3);
 }
 
 .pfield__label {
-  font: 500 var(--p-t-label) / 1.3 var(--p-font);
+  font: var(--p-w-strong) var(--p-t-small) / 1.3 var(--p-font);
   color: var(--p-ink-2);
 }
 
 .pfield__input {
   width: 100%;
-  height: 52px;
-  padding: 0 var(--p-4);
-  font: 400 var(--p-t-body) / 1.2 var(--p-font);
+  height: 48px;
+  padding: 0 14px;
+  font: var(--p-w-regular) var(--p-t-body) / 1.2 var(--p-font);
   color: var(--p-ink);
-  background: var(--p-surface);
-  border: 1px solid var(--p-line-strong);
+  background: var(--p-fill);
+  border: 1px solid var(--p-line);
   border-radius: var(--p-r-row);
   user-select: text;
   transition:
@@ -538,21 +577,17 @@
 .pfield__input:focus {
   outline: none;
   border-color: var(--p-ink-2);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 12%, transparent);
+  box-shadow: 0 0 0 1px var(--p-ink-2);
 }
 
 /* ------------------------------------------------------- add a project */
 
 .fpk__form {
   display: grid;
-  gap: var(--p-1);
+  gap: var(--p-2);
 }
 
-.fpk__form > .psheet__back {
-  justify-self: start;
-}
-
-/* Create in: three radio rows. Chosen is a ring with a disc in it — a shape, not a hue. */
+/* Create in: three picker rows — the chosen one filled, heavier, with a tick. */
 .fpk__parents {
   display: grid;
 }
@@ -561,11 +596,11 @@
   display: flex;
   align-items: center;
   gap: var(--p-3);
-  width: calc(100% + 2 * var(--p-2));
-  min-height: 52px;
-  padding: var(--p-1) var(--p-2);
-  margin: 0 calc(-1 * var(--p-2));
-  font: 400 var(--p-t-body) / 1.3 var(--p-font);
+  width: 100%;
+  min-height: var(--p-row);
+  padding: var(--p-2) var(--p-3);
+  margin: 0;
+  font: var(--p-w-medium) var(--p-t-body) / 1.3 var(--p-font);
   text-align: left;
   color: var(--p-ink);
   background: none;
@@ -573,38 +608,48 @@
   border-radius: var(--p-r-row);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
 }
 
 .fpk__parent:active:not(:disabled) {
-  background: var(--p-press);
+  background: var(--p-pressed);
 }
 
 .fpk__parent:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
+.fpk__parent[aria-checked='true'] {
+  font-weight: var(--p-w-strong);
+  background: var(--p-selected);
+}
+
+/* The tick, last in the row, shown only on the chosen one. */
 .fpk__radio {
-  position: relative;
+  order: 2;
   flex: none;
-  width: 22px;
-  height: 22px;
-  border: 1.5px solid var(--p-line-strong);
-  border-radius: 50%;
-  transition: border-color var(--p-dur-fast) var(--p-ease);
+  display: grid;
+  place-items: center;
+  width: var(--p-icon);
+  height: var(--p-icon);
+  margin-left: auto;
+  color: var(--p-ink);
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+.fpk__radio > svg {
+  width: 100%;
+  height: 100%;
 }
 
 .fpk__parent[aria-checked='true'] .fpk__radio {
-  border-color: var(--p-ink);
-}
-
-.fpk__parent[aria-checked='true'] .fpk__radio::after {
-  content: '';
-  position: absolute;
-  inset: 4px;
-  border-radius: 50%;
-  background: var(--p-ink);
+  opacity: 1;
+  transform: none;
 }
 
 .fpk__parent-text {
@@ -615,15 +660,16 @@
 }
 
 .fpk__parent-sub {
-  font-size: var(--p-t-mono);
-  color: var(--p-ink-3);
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-regular);
+  color: var(--p-ink-2);
   overflow-wrap: anywhere;
 }
 
 .fpk__actions {
   display: grid;
   gap: var(--p-2);
-  padding: var(--p-3) var(--p-3) var(--p-1);
+  padding: var(--p-3) var(--p-2) var(--p-1);
 }
 
 /* Browse: a tall sheet, the list scrolling inside it, "Use this folder" pinned at the foot. */
@@ -647,33 +693,27 @@
 .fpk__top {
   flex: none;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
 }
 
-.fpk__top > .psheet__back {
-  margin: 0;
-}
-
 .fpk__top > .pbar {
-  grid-column: 1 / -1;
   height: 2px;
   margin: var(--p-1) var(--p-3) 0;
   width: auto;
 }
 
-/* Scrolled to its end so "where am I" is in view; the left edge fades where
-   the path carries on out of sight. A mask, not a colour. */
+/* The path, scrolled to its end so "where am I" is in view; the left edge
+   fades where it carries on out of sight. A mask, not a colour. */
 .fpk__crumbs {
   display: flex;
   align-items: center;
   min-width: 0;
-  padding-left: var(--p-3);
+  padding: 0 var(--p-2);
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--p-4));
   mask-image: linear-gradient(to right, transparent 0, #000 var(--p-4));
   overflow-x: auto;
   scrollbar-width: none;
-  border-left: 1px solid var(--p-line);
 }
 
 .fpk__crumbs::-webkit-scrollbar {
@@ -693,7 +733,7 @@
   min-height: var(--p-hit);
   padding: 0 var(--p-2);
   overflow: hidden;
-  font: 500 var(--p-t-chrome) / 1 var(--p-font);
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--p-ink-2);
@@ -705,17 +745,17 @@
 }
 
 .fpk__crumb[aria-current='location'] {
-  font-weight: 650;
+  font-weight: var(--p-w-strong);
   color: var(--p-ink);
 }
 
 .fpk__crumb:active:not(:disabled) {
-  background: var(--p-press);
+  background: var(--p-pressed);
 }
 
 .fpk__crumb:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
 /* Under a finger a short step ("C:", "a") is still 44px wide; the path scrolls. */
@@ -732,7 +772,6 @@
   padding: var(--p-1) 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border-top: 1px solid var(--p-line);
 }
 
 .fpk__row {
@@ -742,7 +781,7 @@
   width: 100%;
   min-height: var(--p-row);
   padding: 0 var(--p-3);
-  font: 500 var(--p-t-body) / 1.3 var(--p-font);
+  font: var(--p-w-medium) var(--p-t-body) / 1.3 var(--p-font);
   text-align: left;
   color: var(--p-ink);
   background: none;
@@ -750,7 +789,7 @@
   border-radius: var(--p-r-row);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
 }
 
 .fpk__row > svg {
@@ -763,12 +802,12 @@
 }
 
 .fpk__row:active:not(:disabled):not([data-file]) {
-  background: var(--p-press);
+  background: var(--p-pressed);
 }
 
 .fpk__row:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
 .fpk__row:disabled {
@@ -779,7 +818,7 @@
 .fpk__row[data-file='true'] {
   min-height: var(--p-hit);
   font-size: var(--p-t-label);
-  font-weight: 400;
+  font-weight: var(--p-w-regular);
   color: var(--p-ink-3);
   cursor: default;
 }
@@ -796,25 +835,27 @@
   text-overflow: ellipsis;
 }
 
-/* "This is probably the one": a git mark and a word, not a coloured dot. */
+/* "This is probably the one": a git mark and a word on a fill, not a coloured dot. */
 .fpk__repo {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: var(--p-1);
-  padding: 3px var(--p-2);
-  font-size: 12px;
-  font-weight: 500;
+  height: 22px;
+  padding: 0 var(--p-2);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
   color: var(--p-ink-2);
-  border: 1px solid var(--p-line-strong);
+  background: var(--p-fill);
   border-radius: var(--p-r-pill);
 }
 
+/* Pinned under the list: where you are, then the one act. A hairline, because
+   the list scrolls under it. */
 .fpk__foot {
   flex: none;
   display: grid;
   gap: var(--p-2);
-  padding: var(--p-3) var(--p-3) var(--p-1);
+  padding: var(--p-3) var(--p-2) var(--p-1);
   border-top: 1px solid var(--p-line);
 }
 
@@ -831,4 +872,40 @@
    own pale wash; darken the letters toward the ink, keep the tile's colour. */
 :root[data-appearance='light'] .bsheet-layer .bsrow__icon .agent-badge {
   color: color-mix(in srgb, var(--badge-accent, var(--accent)) 45%, var(--p-ink));
+}
+/* ------------------------------------------- the phone's wells, beyond sections */
+
+/* "Create in" and the folder list sit in the same well as a section's rows. */
+.app[data-mobile] .fpk__parents,
+.app[data-mobile] .fpk__list {
+  padding: var(--p-1);
+  background: var(--p-fill);
+  border-radius: var(--p-r-card);
+}
+
+.app[data-mobile] .fpk__parents {
+  margin: 0 var(--p-3);
+}
+
+.app[data-mobile] .fpk__list {
+  margin-top: var(--p-2);
+}
+
+/* The browse foot needs no rule: the list ends in its own well. */
+.app[data-mobile] .fpk__foot {
+  border-top: 0;
+}
+
+/* The raw footer inside a well: a step deeper than the well. */
+.app[data-mobile] .bssec__rows .psheet__footer {
+  background: color-mix(in srgb, var(--p-bg) 55%, transparent);
+}
+
+/* A mode chip on a row in a well: one step up from the well's tone. */
+.app[data-mobile] .bssec__rows .psheet__mode {
+  background: var(--p-fill);
+}
+
+.app[data-mobile] .bssec__rows .psheet__mode[data-danger='true'] {
+  background: var(--p-danger-tint);
 }

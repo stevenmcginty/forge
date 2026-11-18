@@ -1,40 +1,62 @@
-/* The ⋯ sheet's one custom control: the A− / A+ stepper. Rows come from BottomSheet.css. */
+/*
+ * The ⋯ sheet's own pieces. Rows, sections and switches come from
+ * BottomSheet.css; these are the trailing controls a row holds:
+ *  - the A− / A+ stepper: the contract's segmented track, two halves;
+ *  - a state word ("On", with a tick; "Blocked") in quiet ink;
+ *  - a call to act ("Turn on"), drawn as a small tonal pill inside the row,
+ *    whose tap is the row's own.
+ */
 
 .moresheet__stepper {
   display: inline-flex;
   align-items: center;
-  padding: 2px;
   gap: 2px;
-  border: 1px solid var(--p-line-strong);
-  border-radius: var(--p-r-pill);
-  background: transparent;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--p-r-row);
+  background: var(--p-fill);
 }
 
 .moresheet__step {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: center;
   gap: 1px;
-  width: 52px;
-  height: var(--p-hit);
+  width: 48px;
+  height: 38px;
   padding: 0;
-  font: 600 var(--p-t-label) / 1 var(--p-font);
+  font: var(--p-w-strong) var(--p-t-label) / 38px var(--p-font);
   color: var(--p-ink);
   background: transparent;
   border: 0;
-  border-radius: var(--p-r-pill);
+  border-radius: 9px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+/* Each half is drawn 38px tall in its track; its hit reaches the row's 44. */
+.moresheet__step::before {
+  content: '';
+  position: absolute;
+  inset: -3px 0;
+}
+
+.moresheet__step {
+  position: relative;
 }
 
 .moresheet__step:active:not(:disabled) {
-  background: var(--p-press);
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
 }
 
 .moresheet__step:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
 }
 
 .moresheet__step:disabled {
@@ -47,5 +69,24 @@
 }
 
 .moresheet__a[data-size='large'] {
-  font-size: 19px;
+  font-size: 18px;
+}
+
+.moresheet__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: var(--p-w-strong) var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-ink-2);
+}
+
+.moresheet__cta {
+  display: inline-flex;
+  align-items: center;
+  height: var(--p-control);
+  padding: 0 var(--p-4);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border-radius: var(--p-r-pill);
 }

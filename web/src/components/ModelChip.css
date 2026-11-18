@@ -250,22 +250,6 @@
   color: var(--p-ink-2);
 }
 
-/*
- * The same control for all three picks in the top bar's context panel
- * (SetupPicks): the model and the mode as two-up grids, the effort as its row.
- * A long model name wraps inside its 44px cell rather than pushing it wider.
- */
-.mseg--grid {
-  grid-auto-flow: row;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.mseg--grid .mseg__opt {
-  padding: 0 var(--p-2);
-  white-space: normal;
-  line-height: 1.15;
-}
-
 .mseg__opt {
   display: inline-flex;
   align-items: center;
@@ -282,21 +266,78 @@
   background: transparent;
 }
 
-/* Bypass in force: filled red behind its triangle and its word, not the ink. */
-.mseg__opt[data-warn='true'][aria-checked='true'] {
-  background: var(--p-danger);
-  color: var(--p-bg);
-}
-
-.mseg__opt .mchip__warn {
-  flex: none;
-}
-
 .mseg__note[data-warn='true'] {
   font-weight: 600;
   color: var(--p-danger);
 }
 
+/*
+ * The one picker on a phone (ModelChip's PicksBody, in the model sheet and in
+ * the top bar's drop-down): the model and the mode are picker rows — selected
+ * = the selected fill, weight 600 and the tick (BottomSheet.css) — and the
+ * effort is the contract's segmented control: a quiet track, the chosen word
+ * on the selected fill. No outline, no ink slab, no red slab: Bypass in force
+ * is its triangle and its word.
+ */
+.app[data-mobile] .mpick[data-dense='true'] {
+  min-height: 48px;
+  padding-top: var(--p-1);
+  padding-bottom: var(--p-1);
+}
+
+.app[data-mobile] .mpick .bsrow__sub::first-letter {
+  text-transform: uppercase;
+}
+
+.app[data-mobile] .mpick__tick {
+  width: var(--p-icon);
+}
+
+.app[data-mobile] .mseg {
+  gap: 2px;
+  margin: 0;
+  padding: var(--p-1);
+  background: var(--p-fill);
+  border: 0;
+  border-radius: var(--p-r-card);
+}
+
+.app[data-mobile] .mseg__opt {
+  height: 44px;
+  padding: 0 2px;
+  border-radius: var(--p-r-row);
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .mseg__opt:active:not(:disabled) {
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .mseg__opt[aria-checked='true'] {
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink);
+  background: var(--p-selected);
+}
+
+.app[data-mobile] .mseg__opt:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+.app[data-mobile] .mseg__opt:disabled {
+  opacity: var(--p-disabled);
+}
+
+.app[data-mobile] .mseg__note {
+  margin: var(--p-2) var(--p-2) 0;
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
 /*
  * The side drawer's face (variant "pill"): one small glass capsule, centred —
  * a spark, the model in full ink, the effort quieter, a hairline, the mode

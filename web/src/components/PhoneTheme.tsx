@@ -38,7 +38,7 @@ export function ThemePicker({ themeId, onPick }: { themeId: string; onPick: (id:
                 <span className="bsrow__label">{core.name}</span>
                 <span className="bsrow__sub">
                   {core.appearance === 'light' ? 'Light' : 'Dark'}
-                  {here ? ' — in use' : ''}
+                  {here ? ' · in use' : ''}
                 </span>
               </span>
               <span className="bsrow__trail ptheme__tick" aria-hidden="true">

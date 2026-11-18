@@ -124,8 +124,31 @@ export function CloudLaunchSheet({
       label="Work in the cloud"
       subtitle="Claude opens with your task. Tap Send there. It works on GitHub, not your PC."
       testId="cloud-launch"
-    >
-      <SheetSection title="Project">
+      footer={
+        <div className="cloudl__go">
+          <button type="button" className="bsbtn" onClick={onClose} data-testid="cloud-close">
+            Close
+          </button>
+          <a
+            className="bsbtn cloudl__open"
+            data-tone="act"
+            href={href}
+            target="_blank"
+            rel="noopener"
+            onClick={() => {
+              if (chosen) writeLast(chosen.id)
+              speech.stop()
+              setTask('')
+              onClose()
+            }}
+            data-testid="cloud-open"
+          >
+            <SheetGlyph name="cloud" size={20} />
+            Open Claude
+          </a>
+        </div>
+      }
+    >      <SheetSection title="Project">
         <div role="radiogroup" aria-label="Project">
           {projects.map((p) => {
             const here = choice === p.id && !!p.slug
@@ -144,7 +167,7 @@ export function CloudLaunchSheet({
                 <span className="bsrow__text">
                   <span className="bsrow__label">{p.name}</span>
                   <span className="bsrow__sub">
-                    {p.slug ? <span className="mono">{p.slug}</span> : 'no GitHub link'}
+                    {p.slug ? <span className="mono">{p.slug}</span> : 'No GitHub link'}
                   </span>
                 </span>
                 <span className="bsrow__trail cloudl__tick" aria-hidden="true">
@@ -209,29 +232,8 @@ export function CloudLaunchSheet({
         </div>
       </SheetSection>
 
-      <div className="cloudl__go">
-        <button type="button" className="bsbtn" onClick={onClose} data-testid="cloud-close">
-          Close
-        </button>
-        <a
-          className="bsbtn cloudl__open"
-          data-tone="act"
-          href={href}
-          target="_blank"
-          rel="noopener"
-          onClick={() => {
-            if (chosen) writeLast(chosen.id)
-            speech.stop()
-            setTask('')
-            onClose()
-          }}
-          data-testid="cloud-open"
-        >
-          <SheetGlyph name="cloud" size={20} />
-          Open Claude
-        </a>
-      </div>
     </BottomSheet>
+
   )
 }
 

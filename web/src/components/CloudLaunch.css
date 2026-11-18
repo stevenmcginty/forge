@@ -1,10 +1,10 @@
 /*
  * The "Work in the cloud" sheet (CloudLaunch.tsx). Rows, buttons and tokens
  * are the sheet's own (BottomSheet.css, phone-tokens.css); this adds the
- * chosen-project tick, the task box and the button row.
+ * chosen-project tick, the task field and the two buttons pinned in the foot.
  */
 
-/* The chosen project: a tick and a heavier name, never the colour alone. */
+/* The chosen project: a heavier name and the tick; on a phone, the selected fill too (BottomSheet.css). */
 .cloudl__pick[data-current='true'] .bsrow__label {
   font-weight: 650;
 }
@@ -14,7 +14,7 @@
 }
 
 .cloudl__tick {
-  width: 24px;
+  width: var(--p-icon);
   justify-content: center;
   color: var(--p-ink);
 }
@@ -22,10 +22,10 @@
 .cloudl__task {
   display: grid;
   gap: var(--p-2);
-  padding: 0 var(--p-3) var(--p-2);
+  padding: var(--p-1) var(--p-3) var(--p-2);
 }
 
-/* The body size (16px), or iOS zooms the page on focus. */
+/* The body size (16px), or a phone browser zooms the page on focus. */
 .cloudl__input {
   box-sizing: border-box;
   width: 100%;
@@ -53,12 +53,29 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 12%, transparent);
 }
 
+/* On a phone the box lines up with the wells above it. */
+.app[data-mobile] .cloudl__task {
+  padding: 0;
+}
+
+/* On a phone, the contract's field: a fill and a hairline; focus draws the line in ink. */
+.app[data-mobile] .cloudl__input {
+  padding: var(--p-3) 14px;
+  line-height: var(--p-lh);
+  background: var(--p-fill);
+  border-color: var(--p-line);
+}
+
+.app[data-mobile] .cloudl__input:focus {
+  box-shadow: 0 0 0 1px var(--p-ink-2);
+}
+
 /* The words still being heard, before they land in the box. */
 .cloudl__interim {
   margin: 0;
   font-size: var(--p-t-small);
   font-style: italic;
-  line-height: 1.4;
+  line-height: var(--p-lh);
   color: var(--p-ink-2);
   overflow-wrap: anywhere;
 }
@@ -66,7 +83,7 @@
 .cloudl__note {
   margin: 0;
   font-size: var(--p-t-small);
-  line-height: 1.4;
+  line-height: var(--p-lh);
   color: var(--p-ink-2);
 }
 
@@ -78,16 +95,34 @@
   gap: var(--p-2);
 }
 
+/* Speak: a small tonal pill (drawn 36, hit 44) under the box. */
 .cloudl__mic {
   justify-self: start;
   min-height: 44px;
 }
 
-/* Listening: the stop square and the word "Stop" say it; the ink fill backs them up. */
+.app[data-mobile] .cloudl__mic {
+  min-height: var(--p-control);
+  padding: 0 var(--p-4);
+  font-size: var(--p-t-label);
+}
+
+.app[data-mobile] .cloudl__mic::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+
+/* Listening: the stop square and the word "Stop" say it; the fill backs them up. */
 .cloudl__mic[data-listening='true'] {
   color: var(--p-raised);
   background: var(--p-ink);
   border-color: var(--p-ink);
+}
+
+.app[data-mobile] .cloudl__mic[data-listening='true'] {
+  color: var(--p-ink);
+  background: var(--p-selected);
 }
 
 .cloudl__go {
@@ -95,6 +130,11 @@
   grid-template-columns: 1fr 2fr;
   gap: var(--p-2);
   padding: var(--p-3) var(--p-3) var(--p-2);
+}
+
+/* In the sheet's pinned foot, which brings its own padding. */
+.bsheet__foot > .cloudl__go {
+  padding: 0;
 }
 
 .cloudl__open {

@@ -1,71 +1,49 @@
 /*
- * The link dot and the connection sheet.
+ * The link mark and the connection sheet.
  *
- * The dot is drawn in four shapes, not four colours: filled with a halo (live),
- * a whole hollow ring (live, but quiet), a ring broken into three arcs
- * (reconnecting; it also pulses where motion is allowed, and stays broken where
- * it is not), a small grey disc (asleep). The words sit next to it in the sheet
- * and in the banners.
+ * The mark is the phone's link glyph (PhoneIcon, the same four the top bar
+ * draws): a filled core in a ring for live, the ring empty for quiet, the ring
+ * broken into three arcs for reconnecting (it turns where motion is allowed,
+ * and stays broken where it is not), a moon for asleep. All in neutral ink —
+ * the shape is the state, and the word always sits beside it.
  */
 
 .linkdot {
   position: relative;
   flex: none;
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--p-ink);
 }
 
-.linkdot[data-state='live'] {
-  background: var(--p-act);
-  box-shadow: 0 0 0 3px var(--accent-softer);
-}
-
-.linkdot[data-state='quiet'] {
-  background: transparent;
-  border: 2px solid var(--p-act);
-}
-
-.linkdot[data-state='reconnecting'] {
-  color: var(--p-attn);
-  background: transparent;
-  animation: linkdot-pulse 1.4s var(--p-ease) infinite alternate;
-}
-
-.linkdot[data-state='reconnecting'] svg {
-  display: block;
+.linkdot > svg {
   width: 100%;
   height: 100%;
-  overflow: visible;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.4;
 }
 
-.linkdot[data-state='asleep'] {
-  width: 8px;
-  height: 8px;
-  background: var(--p-ink-3);
+.linkdot:not([data-state='live']) {
+  color: var(--p-ink-2);
 }
 
-@keyframes linkdot-pulse {
-  from {
-    opacity: 0.35;
-  }
+.linkdot[data-state='reconnecting'] > svg {
+  animation: linkdot-turn 1.6s linear infinite;
+}
+
+@keyframes linkdot-turn {
   to {
-    opacity: 1;
+    transform: rotate(360deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .linkdot[data-state='reconnecting'] {
+  .linkdot[data-state='reconnecting'] > svg {
     animation: none;
   }
 }
 
-:root[data-reduced-motion='true'] .linkdot[data-state='reconnecting'] {
+:root[data-reduced-motion='true'] .linkdot[data-state='reconnecting'] > svg {
   animation: none;
 }
 
@@ -74,19 +52,11 @@
 .connsheet__title {
   display: inline-flex;
   align-items: center;
-  gap: var(--p-3);
+  gap: var(--p-2);
 }
 
-.connsheet__title .linkdot {
-  width: 12px;
-  height: 12px;
-}
-
-.connsheet__title .linkdot[data-state='asleep'] {
-  width: 10px;
-  height: 10px;
-}
-
-.connsheet__actions {
-  padding: var(--p-3) var(--p-3) var(--p-1);
+.connsheet__value {
+  font-size: var(--p-t-label);
+  font-weight: var(--p-w-medium);
+  color: var(--p-ink-2);
 }

@@ -111,6 +111,7 @@ export function MoreSheet({
       subtitle={
         step === 'voice' ? 'Tap a voice to hear it' : step === 'theme' ? 'How this phone looks. Tap one to wear it.' : undefined
       }
+      back={step === 'voice' || step === 'theme' ? { label: 'More', onClick: () => setStep('list') } : undefined}
       testId="more-sheet"
     >
       {step === 'theme' && theme ? (
@@ -157,7 +158,7 @@ export function MoreSheet({
             <SheetRow
               icon={<Icon name="foreman" size={20} />}
               label={foremanOn ? 'Stop Foreman' : 'Foreman'}
-              secondary={foreman.available ? foreman.detail : foreman.reason}
+              secondary={foreman.available ? foreman.detail : plainReason(foreman.reason)}
               disabled={!foreman.available}
               onClick={foreman.onPress}
               testId="more-foreman"
@@ -165,9 +166,10 @@ export function MoreSheet({
             <SheetRow
               icon={<SheetGlyph name="handoff" />}
               label="Hand off"
-              secondary={handoff.available ? handoff.detail : handoff.reason}
+              secondary={handoff.available ? handoff.detail : plainReason(handoff.reason)}
               disabled={!handoff.available}
               onClick={handoff.onPress}
+              chevron={handoff.available}
               testId="more-handoff"
             />
           </SheetSection>
@@ -176,9 +178,10 @@ export function MoreSheet({
             <SheetRow
               icon={<Icon name="screen" size={20} />}
               label="Screen"
-              secondary={screen.available ? screen.detail : screen.reason}
+              secondary={screen.available ? screen.detail : plainReason(screen.reason)}
               disabled={!screen.available}
               onClick={screen.onPress}
+              chevron={screen.available}
               testId="more-screen"
             />
             {state.remoteYes.enabled ? (
@@ -198,7 +201,18 @@ export function MoreSheet({
               label={alerts.label}
               secondary={alerts.detail}
               onClick={alerts.ask ? () => void actions.requestNotifyPermission() : undefined}
-              trailing={alerts.on ? <Icon name="check" size={18} /> : undefined}
+              trailing={
+                alerts.on ? (
+                  <span className="moresheet__state">
+                    <Icon name="check" size={16} />
+                    On
+                  </span>
+                ) : alerts.ask ? (
+                  <span className="moresheet__cta">Turn on</span>
+                ) : alerts.word ? (
+                  <span className="moresheet__state">{alerts.word}</span>
+                ) : undefined
+              }
               testId="more-alerts"
             />
             <SheetRow
@@ -239,15 +253,16 @@ export function MoreSheet({
               <SheetRow
                 icon={<ThemeSwatch core={themeCore} size={24} />}
                 label="Theme"
-                secondary={`${themeCore.name} — ${themeCore.appearance === 'light' ? 'light' : 'dark'}`}
+                secondary={themeCore.name}
                 onClick={() => setStep('theme')}
+                chevron
                 testId="more-theme"
               />
             ) : null}
             <SheetRow
               icon={<SheetGlyph name="autoStop" />}
               label="Stop listening after a pause"
-              secondary={autoStop ? 'On — sends after about two seconds of quiet' : 'Off — tap the mic again to finish'}
+              secondary={autoStop ? 'Sends after about 2 seconds of quiet' : 'Tap the mic again to finish'}
               role="switch"
               checked={autoStop}
               trailing={<SheetSwitch on={autoStop} />}
@@ -266,6 +281,7 @@ export function MoreSheet({
                   chosenVoice ? chosenVoice.name : voiceURI && !voices.length ? 'Loading voices…' : 'Automatic'
                 }
                 onClick={() => setStep('voice')}
+                chevron
                 testId="more-read-aloud-voice"
               />
             ) : null}
@@ -276,7 +292,14 @@ export function MoreSheet({
                 secondary={unlock.row.detail}
                 disabled={!unlock.row.onPress}
                 onClick={unlock.row.onPress === 'forget' ? () => setStep('passkey-forget') : unlock.row.onPress}
-                trailing={unlock.row.on ? <Icon name="check" size={18} /> : undefined}
+                trailing={
+                  unlock.row.on ? (
+                    <span className="moresheet__state">
+                      <Icon name="check" size={16} />
+                      On
+                    </span>
+                  ) : undefined
+                }
                 testId="more-passkey"
               />
             ) : null}
@@ -539,37 +562,52 @@ function isInstalled(): boolean {
 function alertsRow(
   permission: NotifySupport,
   pushActive: boolean
-): { label: string; detail: string; ask: boolean; on: boolean } {
+): { label: string; detail: string; ask: boolean; on: boolean; word: string } {
   if (permission === 'granted') {
     return {
-      label: 'Alerts on',
+      label: 'Alerts',
       detail: pushActive
         ? 'A pane that needs you reaches this phone, even with Forge closed'
-        : 'A pane that needs you raises an alert while Forge is in the background',
+        : 'A pane that needs you alerts this phone while Forge is in the background',
       ask: false,
-      on: true
+      on: true,
+      word: 'On'
     }
   }
   if (permission === 'default') {
-    return { label: 'Turn on alerts', detail: 'Hear about a pane that needs you', ask: true, on: false }
+    return { label: 'Alerts', detail: 'Get told when a pane needs you', ask: true, on: false, word: '' }
   }
   if (permission === 'denied') {
     return {
-      label: 'Blocked in browser settings',
-      detail: 'Allow notifications for this site in the browser to get alerts',
+      label: 'Alerts',
+      detail: 'Allow notifications for this site in the browser’s settings',
       ask: false,
-      on: false
+      on: false,
+      word: 'Blocked'
     }
   }
   if (isIPhone() && !isInstalled()) {
     return {
-      label: 'Add to Home Screen to get alerts',
+      label: 'Alerts',
       detail: 'Share, then Add to Home Screen, then open Forge from there',
       ask: false,
-      on: false
+      on: false,
+      word: 'Off'
     }
   }
-  return { label: 'Alerts not available', detail: 'This browser cannot show notifications', ask: false, on: false }
+  return { label: 'Alerts', detail: 'This browser can’t show notifications', ask: false, on: false, word: 'Off' }
+}
+
+/**
+ * A greyed row's reason, as help rather than a status code: what to wait for.
+ * The top bar words the reasons; the two that read like debug text are said
+ * plainly here, and any other passes through unchanged.
+ */
+function plainReason(reason: string): string {
+  const link = /^Needs a live link to (.+)$/.exec(reason)
+  if (link) return `Works once ${link[1]} is connected`
+  if (reason === 'This pane has no session running') return 'Start the agent in this pane first'
+  return reason
 }
 
 /* ---------------------------------------------------------- text size */

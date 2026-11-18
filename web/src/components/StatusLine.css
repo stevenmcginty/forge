@@ -757,3 +757,193 @@
 .app[data-mobile] .session-composer[data-view] .astatus.pstat {
   display: block;
 }
+
+/* ===================================================================== phone
+ *
+ * Quiet Instrument (web/PHONE-DESIGN.md), scoped to `.app[data-mobile]` so the
+ * deck's status row and sheet keep their look.
+ *
+ *  - The view switch and the keys toggle: the contract's segmented control —
+ *    a quiet track, the face on screen on the selected fill, every icon in
+ *    neutral ink (no per-view hue). The face is named in its label.
+ *  - The pane's details (the sheet and the top bar's drop-down): one ink ring
+ *    and ink bars while all is well; amber from 80%, red from 92%, each with
+ *    its word in a badge and stripes on the bar, so the level is never a hue
+ *    alone. No outlined tags, no bordered wells.
+ */
+
+.app[data-mobile] .pstat .pseg,
+.app[data-mobile] .pstat .pkeys-toggle {
+  padding: 0 3px;
+  background: var(--p-fill);
+  box-shadow: none;
+}
+
+.app[data-mobile] .pstat .pkeys-toggle {
+  padding: 0;
+}
+
+.app[data-mobile] .pstat .pseg__btn {
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .pstat .pseg__btn:first-child,
+.app[data-mobile] .pstat .pseg__btn:last-child {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.app[data-mobile] .pstat .pseg__btn[data-on='true'],
+.app[data-mobile] .pstat .pkeys-toggle[aria-pressed='true'] {
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .pstat .pseg__btn[data-on='true'] .pseg__face,
+.app[data-mobile] .pstat .pkeys-toggle[aria-pressed='true'] .pkeys-toggle__face {
+  background: var(--p-selected);
+  box-shadow: none;
+}
+
+.app[data-mobile] .pstat .pseg__btn[data-on='false']:active .pseg__face,
+.app[data-mobile] .pstat .pkeys-toggle[aria-pressed='false']:active .pkeys-toggle__face {
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .pstat .pseg__btn:focus-visible .pseg__face {
+  outline-color: var(--p-focus);
+}
+
+/* The condition word: a tint, not an outline. Waiting is the one amber. */
+.app[data-mobile] .pstat__cond {
+  color: var(--p-ink-2);
+  background-color: var(--p-fill);
+  box-shadow: none;
+}
+
+.app[data-mobile] .pstat__cond[data-condition='waiting'] {
+  color: var(--p-ink);
+  background-color: var(--p-attn-tint);
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------ the pane's details */
+
+.app[data-mobile] .pgauge {
+  gap: var(--p-4);
+  padding: var(--p-2) var(--p-3) var(--p-3);
+}
+
+.app[data-mobile] .pgauge .pring__track {
+  stroke: var(--p-line-strong);
+}
+
+.app[data-mobile] .pgauge .pring__arc {
+  stroke: var(--p-ink);
+}
+
+.app[data-mobile] .pgauge[data-level='warn'] .pring__arc {
+  stroke: var(--p-attn);
+}
+
+.app[data-mobile] .pgauge[data-level='full'] .pring__arc {
+  stroke: var(--p-danger);
+}
+
+.app[data-mobile] .pgauge__big {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--p-2);
+  font: 650 var(--p-t-title) / 1.25 var(--p-font);
+  letter-spacing: var(--p-track-tight);
+}
+
+.app[data-mobile] .pgauge[data-level='warn'] .pgauge__big,
+.app[data-mobile] .pgauge[data-level='full'] .pgauge__big {
+  color: var(--p-ink);
+}
+
+/* The level in words: the contract's badge, on its tone's tint. */
+.app[data-mobile] .pgauge__tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  margin: 0;
+  padding: 0 var(--p-2);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  letter-spacing: 0;
+  color: var(--p-ink);
+  background: var(--p-attn-tint);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  vertical-align: 0;
+}
+
+.app[data-mobile] .pgauge[data-level='full'] .pgauge__tag {
+  color: var(--p-ink);
+  background: var(--p-danger-tint);
+}
+
+.app[data-mobile] .pgauge__sub {
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .plimit {
+  gap: var(--p-2);
+  padding: var(--p-2) var(--p-3) var(--p-3);
+}
+
+.app[data-mobile] .plimit__label {
+  font-size: var(--p-t-chrome);
+  font-weight: var(--p-w-medium);
+}
+
+.app[data-mobile] .plimit__pct {
+  font-size: var(--p-t-label);
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .plimit[data-level='warn'] .plimit__pct,
+.app[data-mobile] .plimit[data-level='full'] .plimit__pct {
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .plimit__bar {
+  height: 6px;
+  background: var(--p-fill);
+}
+
+.app[data-mobile] .plimit[data-level='calm'] .plimit__bar > span {
+  background: var(--p-ink-2);
+}
+
+.app[data-mobile] .plimit[data-level='warn'] .plimit__bar {
+  background: var(--p-attn-tint);
+}
+
+.app[data-mobile] .plimit[data-level='full'] .plimit__bar {
+  background: var(--p-danger-tint);
+}
+
+.app[data-mobile] .plimit[data-level='full'] .plimit__bar > span {
+  box-shadow: none;
+}
+
+.app[data-mobile] .plimit__reset {
+  font-size: var(--p-t-small);
+  color: var(--p-ink-3);
+}
+
+/* The raw footer: an inline well (fill), no border. */
+.app[data-mobile] .psheet__footer {
+  margin: var(--p-1) var(--p-2) var(--p-3);
+  padding: var(--p-3);
+  font: 400 var(--p-t-micro) / 1.5 var(--p-mono);
+  color: var(--p-ink-2);
+  background: var(--p-fill);
+  border: 0;
+  border-radius: var(--p-r-row);
+}

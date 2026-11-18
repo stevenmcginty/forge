@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Icon } from '@/components/Icon'
 import { useForge, type ForgeState } from '../state'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection } from './BottomSheet'
+import { PhoneIcon, type PhoneIconName } from './PhoneIcon'
 import './ConnectionSheet.css'
 
 /**
@@ -41,14 +42,17 @@ export function linkWord(link: LinkState): string {
  * for asleep. Quiet and reconnecting were once the same ring in lime and amber
  * — two colours a red-green colourblind eye reads as one.
  */
+const LINK_GLYPH: Record<LinkState, PhoneIconName> = {
+  live: 'link-live',
+  quiet: 'link-quiet',
+  reconnecting: 'link-reconnecting',
+  asleep: 'link-asleep'
+}
+
 export function LinkDot({ link }: { link: LinkState }): ReactNode {
   return (
     <span className="linkdot" data-state={link} aria-hidden="true">
-      {link === 'reconnecting' ? (
-        <svg viewBox="0 0 12 12" focusable="false">
-          <circle cx="6" cy="6" r="4.8" pathLength={3} strokeDasharray="0.6 0.4" transform="rotate(-72 6 6)" />
-        </svg>
-      ) : null}
+      <PhoneIcon name={LINK_GLYPH[link]} />
     </span>
   )
 }
@@ -114,9 +118,9 @@ export function ConnectionSheet({ open, onClose }: { open: boolean; onClose: () 
 
   const sentence: Record<LinkState, string> = {
     live: `Connected to ${name}. What you see is happening now.`,
-    quiet: `Still connected to ${name}, but nothing has come back for a few seconds — a slow signal, or a busy desktop.`,
-    reconnecting: `The link to ${name} dropped. Forge is getting it back; nothing you type gets through until it does.`,
-    asleep: `${name} is not answering. What you see is the last picture it sent.`
+    quiet: `Still connected to ${name}, but nothing has come back for a few seconds. A slow signal, or a busy desktop.`,
+    reconnecting: `Lost the link to ${name}. Forge is getting it back; what you type waits until then.`,
+    asleep: `${name} isn’t answering. This is the last screen it sent.`
   }
 
   const reconnect =
@@ -138,6 +142,23 @@ export function ConnectionSheet({ open, onClose }: { open: boolean; onClose: () 
       }
       subtitle={step === 'sign-out' ? undefined : sentence[link]}
       testId="connection-sheet"
+      footer={
+        step !== 'sign-out' && reconnect ? (
+          <button
+            type="button"
+            className="bsbtn"
+            data-wide="true"
+            data-tone="act"
+            onClick={() => {
+              reconnect()
+              onClose()
+            }}
+            data-testid="connection-reconnect"
+          >
+            Reconnect now
+          </button>
+        ) : undefined
+      }
     >
       {step === 'sign-out' ? (
         <SheetConfirm
@@ -159,7 +180,12 @@ export function ConnectionSheet({ open, onClose }: { open: boolean; onClose: () 
               label={name}
               secondary={version ? `Forge ${version}` : 'Desktop'}
             />
-            <SheetRow icon={<Icon name="history" size={20} />} label={`Last heard ${heard}`} testId="connection-heard" />
+            <SheetRow
+              icon={<Icon name="history" size={20} />}
+              label="Last heard"
+              trailing={<span className="connsheet__value">{heard}</span>}
+              testId="connection-heard"
+            />
             {email ? (
               <SheetRow
                 icon={<Icon name="user" size={20} />}
@@ -174,26 +200,10 @@ export function ConnectionSheet({ open, onClose }: { open: boolean; onClose: () 
                 label="Use a different account"
                 secondary="Signs this phone out first"
                 onClick={() => setStep('sign-out')}
+                chevron
               />
             ) : null}
           </SheetSection>
-          {reconnect ? (
-            <div className="connsheet__actions">
-              <button
-                type="button"
-                className="bsbtn"
-                data-wide="true"
-                data-tone="act"
-                onClick={() => {
-                  reconnect()
-                  onClose()
-                }}
-                data-testid="connection-reconnect"
-              >
-                Reconnect now
-              </button>
-            </div>
-          ) : null}
         </>
       )}
     </BottomSheet>

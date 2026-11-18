@@ -288,22 +288,16 @@ function ChooserSheet({
         onClose={onClose}
         onBack={() => setModeFor(null)}
         label={`Open ${ladderFor.name} in`}
-        subtitle="The ticked one is what a plain tap opens. Your pick is for this tab only."
+        subtitle="A plain tap opens the ticked one. This pick is for this tab only."
+        back={{ label: 'All agents', onClick: () => setModeFor(null) }}
         testId="agent-chooser-sheet"
       >
-        <button type="button" className="psheet__back" onClick={() => setModeFor(null)}>
-          <Icon name="chevronLeft" size={16} />
-          All agents
-        </button>
         <SheetSection title="Permission mode">
           {profilePermissionModes(ladderFor).map((m) => (
             <SheetRow
               key={m.id}
-              icon={
-                <span className="psheet__tick" data-on={m.id === current ? 'true' : undefined} aria-hidden="true">
-                  {m.id === current ? <Icon name="check" size={16} /> : null}
-                </span>
-              }
+              role="radio"
+              checked={m.id === current}
               label={m.label}
               secondary={sentence(m.note)}
               trailing={
@@ -345,6 +339,7 @@ function ChooserSheet({
           <button
             type="button"
             className="psheet__mode"
+            data-danger={spec.danger ? 'true' : undefined}
             aria-label={`Permission mode for ${profile.name}: ${spec.label}. Change it`}
             onClick={() => setModeFor(profile.id)}
             data-testid={`agent-mode-open-${profile.id}`}

@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'r
 import type { ClaudePermissionMode } from '@shared/types'
 import type { AgentModelSpec, EffortLevel, EffortLevelSpec, PermissionModeSpec } from '@shared/agents'
 import { Icon } from '@/components/Icon'
+import { useMobile } from '../lib/mobile'
 import { pickEffort, pickModel, useEffortPicked, useModelPicked, type PaneSetup } from '../lib/pane-setup'
 import { BottomSheet, SheetSection } from './BottomSheet'
 import './ModelChip.css'
@@ -184,69 +185,31 @@ export function ModelChip({
           subtitle="Model, effort and permission mode for this pane"
           testId="model-sheet"
         >
-          {hasModels ? (
-            <SheetSection title="Model">
-              <div role="radiogroup" aria-label="Model">
-                {models.map((m) => (
-                  <PickRow
-                    key={m.id}
-                    label={m.label}
-                    note={m.note}
-                    current={m.id === modelId}
-                    onPick={() => {
-                      setOpen(false)
-                      pickModel(paneId, m.id, currentModelId)
-                      onModel?.(m.id)
-                    }}
-                  />
-                ))}
-              </div>
-            </SheetSection>
-          ) : null}
-          {hasEffort ? (
-            <SheetSection title="Effort">
-              {/* Five short words that read as a scale, so one row, not five. */}
-              <div className="mseg" role="radiogroup" aria-label="Effort">
-                {effortLevels.map((level) => (
-                  <button
-                    key={level.id}
-                    type="button"
-                    className="mseg__opt"
-                    role="radio"
-                    aria-checked={level.id === effortId}
-                    title={level.note}
-                    onClick={() => {
-                      setOpen(false)
-                      pickEffort(paneId, level.id)
-                      onEffort?.(level.id)
-                    }}
-                  >
-                    {level.label}
-                  </button>
-                ))}
-              </div>
-              <p className="mseg__note">{effort ? effort.note : 'Not set from this phone yet.'}</p>
-            </SheetSection>
-          ) : null}
-          {hasModes ? (
-            <SheetSection title="Permission mode">
-              <div role="radiogroup" aria-label="Permission mode">
-                {modes.map((m) => (
-                  <PickRow
-                    key={m.id}
-                    label={m.label}
-                    note={m.note}
-                    current={m.id === currentModeId}
-                    warn={m.danger === true && m.id === currentModeId}
-                    onPick={() => {
-                      setOpen(false)
-                      onMode?.(m.id)
-                    }}
-                  />
-                ))}
-              </div>
-            </SheetSection>
-          ) : null}
+          <PicksBody
+            models={hasModels ? models : []}
+            modelId={modelId}
+            offRoster={null}
+            onModel={(id) => {
+              setOpen(false)
+              pickModel(paneId, id, currentModelId)
+              onModel?.(id)
+            }}
+            levels={hasEffort ? effortLevels : []}
+            effortId={effortId}
+            onEffort={(id) => {
+              setOpen(false)
+              pickEffort(paneId, id)
+              onEffort?.(id)
+            }}
+            modes={hasModes ? modes : []}
+            modeId={currentModeId}
+            modeText={modeText ?? null}
+            onMode={(id) => {
+              setOpen(false)
+              onMode?.(id)
+            }}
+            disabled={false}
+          />
         </BottomSheet>
       </span>
     </>
@@ -254,11 +217,9 @@ export function ModelChip({
 }
 
 /**
- * The same three picks, laid out to sit in the top bar's context panel above
- * its context and limits: the sheet's segmented effort control, used for all
- * three — the model and the mode as two-up grids, the effort as its one row of
- * five. The one in force is filled with ink, `aria-checked` says it; Bypass in
- * force fills red behind its warning triangle and its word.
+ * The same three picks in the top bar's context drop-down: the one picker
+ * (`PicksBody`), drawn at the drop-down's density — 48px rows without their
+ * notes, as a menu's items are — over the context and the limits.
  *
  * A pick goes out through the pill's own senders (`usePaneSetup`) and is
  * remembered in the same store, so the chip and the pill both show it at once.
@@ -275,32 +236,97 @@ export function SetupPicks({
   onPicked: () => void
 }): ReactNode {
   const { roster, levels, ladder, modelId, currentModelId, modelText, currentModeId, modeText, effortId, canType } = setup
-  const effort = effortId ? (levels.find((l) => l.id === effortId) ?? null) : null
-  const mode = currentModeId ? (ladder.find((m) => m.id === currentModeId) ?? null) : null
-  const offRoster = !modelId && modelText ? modelText : null
 
   return (
     <div className="msetup" data-live={canType ? 'true' : 'false'}>
-      {roster.length ? (
+      <PicksBody
+        models={roster}
+        modelId={modelId}
+        offRoster={!modelId && modelText ? modelText : null}
+        onModel={(id) => {
+          onPicked()
+          pickModel(paneId, id, currentModelId)
+          void setup.sendModel(id)
+        }}
+        levels={levels}
+        effortId={effortId}
+        onEffort={(id) => {
+          onPicked()
+          pickEffort(paneId, id)
+          void setup.sendEffort(id)
+        }}
+        modes={ladder}
+        modeId={currentModeId}
+        modeText={modeText ?? null}
+        onMode={(id) => {
+          onPicked()
+          void setup.sendMode(id)
+        }}
+        disabled={!canType}
+        dense
+      />
+    </div>
+  )
+}
+
+/**
+ * The one picker for model, effort and permission mode — the model sheet and
+ * the top bar's drop-down both draw this, so the two cannot drift apart.
+ *
+ * The model and the mode are picker rows (a radio each; the one in force takes
+ * the selected fill, a heavier word and the tick). The effort is five short
+ * words that read as a scale, so one segmented row. Bypass in force carries
+ * its warning triangle beside the word; red is only a third signal. `dense`
+ * (the drop-down) drops the rows' notes and keeps them 48px tall.
+ */
+function PicksBody({
+  models,
+  modelId,
+  offRoster,
+  onModel,
+  levels,
+  effortId,
+  onEffort,
+  modes,
+  modeId,
+  modeText,
+  onMode,
+  disabled,
+  dense = false
+}: {
+  models: AgentModelSpec[]
+  modelId: string | null
+  /** A model the pane runs that the roster does not name. */
+  offRoster: string | null
+  onModel: (id: string) => void
+  levels: EffortLevelSpec[]
+  effortId: EffortLevel | null
+  onEffort: (id: EffortLevel) => void
+  modes: PermissionModeSpec[]
+  modeId: ClaudePermissionMode | null
+  modeText: string | null
+  onMode: (id: ClaudePermissionMode) => void
+  disabled: boolean
+  dense?: boolean
+}): ReactNode {
+  const effort = effortId ? (levels.find((l) => l.id === effortId) ?? null) : null
+  const mode = modeId ? (modes.find((m) => m.id === modeId) ?? null) : null
+  // The phone says it as help; the deck keeps its own words.
+  const unset = useMobile() ? 'Pick one to set it for this pane.' : 'Not set from this phone yet.'
+  return (
+    <>
+      {models.length ? (
         <SheetSection title="Model">
-          <div className="mseg mseg--grid" role="radiogroup" aria-label="Model">
-            {roster.map((m) => (
-              <button
+          <div className="mpicks" role="radiogroup" aria-label="Model">
+            {models.map((m) => (
+              <PickRow
                 key={m.id}
-                type="button"
-                className="mseg__opt"
-                role="radio"
-                aria-checked={m.id === modelId}
-                title={m.note}
-                disabled={!canType}
-                onClick={() => {
-                  onPicked()
-                  pickModel(paneId, m.id, currentModelId)
-                  void setup.sendModel(m.id)
-                }}
-              >
-                {m.label}
-              </button>
+                label={m.label}
+                note={dense ? undefined : m.note}
+                current={m.id === modelId}
+                disabled={disabled}
+                onPick={() => onModel(m.id)}
+              />
             ))}
           </div>
           {offRoster ? <p className="mseg__note">Running {offRoster}, which this list does not name.</p> : null}
@@ -317,66 +343,55 @@ export function SetupPicks({
                 role="radio"
                 aria-checked={level.id === effortId}
                 title={level.note}
-                disabled={!canType}
-                onClick={() => {
-                  onPicked()
-                  pickEffort(paneId, level.id)
-                  void setup.sendEffort(level.id)
-                }}
+                disabled={disabled}
+                onClick={() => onEffort(level.id)}
               >
                 {level.label}
               </button>
             ))}
           </div>
-          <p className="mseg__note">{effort ? effort.note : 'Not set from this phone yet.'}</p>
+          <p className="mseg__note">{effort ? effort.note : unset}</p>
         </SheetSection>
       ) : null}
-      {ladder.length ? (
+      {modes.length ? (
         <SheetSection title="Permission mode">
-          <div className="mseg mseg--grid" role="radiogroup" aria-label="Permission mode">
-            {ladder.map((m) => {
-              const current = m.id === currentModeId
-              const warn = m.danger === true && current
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  className="mseg__opt"
-                  role="radio"
-                  aria-checked={current}
-                  data-warn={warn ? 'true' : undefined}
-                  title={m.note}
-                  disabled={!canType}
-                  onClick={() => {
-                    onPicked()
-                    void setup.sendMode(m.id)
-                  }}
-                >
-                  {warn ? <WarnMark size={15} /> : null}
-                  {m.label}
-                </button>
-              )
-            })}
+          <div className="mpicks" role="radiogroup" aria-label="Permission mode">
+            {modes.map((m) => (
+              <PickRow
+                key={m.id}
+                label={m.label}
+                note={dense ? undefined : m.note}
+                current={m.id === modeId}
+                warn={m.danger === true && m.id === modeId}
+                disabled={disabled}
+                onPick={() => onMode(m.id)}
+              />
+            ))}
           </div>
-          <p className="mseg__note" data-warn={mode?.danger ? 'true' : undefined}>
-            {mode ? `${mode.label}: ${mode.note}.` : modeText ? `${modeText}: chosen on the pane.` : 'The pane has not printed its mode yet.'}
-          </p>
+          {!dense ? null : !mode ? (
+            <p className="mseg__note">{modeText ? `${modeText}: chosen on the pane.` : 'The pane has not shown its mode yet.'}</p>
+          ) : mode.danger ? (
+            <p className="mseg__note" data-warn="true">
+              {mode.label}: {mode.note}.
+            </p>
+          ) : null}
         </SheetSection>
       ) : null}
-    </div>
+    </>
   )
 }
 
 /**
- * One choice: the sheet's 56px row, a radio by role, with a tick on the one in
- * force. The tick is a shape and `aria-checked` says it to a screen reader, so
- * the choice never rests on a tint.
+ * One choice: a picker row, a radio by role, with a tick on the one in force.
+ * The tick is a shape and `aria-checked` says it to a screen reader, so the
+ * choice never rests on a tint.
  */
 function PickRow({
   label,
   note,
   current,
   warn = false,
+  disabled = false,
   onPick
 }: {
   label: string
@@ -384,6 +399,7 @@ function PickRow({
   current: boolean
   /** The dangerous rung, while it is the one in force: a warning triangle after the word. */
   warn?: boolean
+  disabled?: boolean
   onPick: () => void
 }): ReactNode {
   return (
@@ -394,6 +410,8 @@ function PickRow({
       aria-checked={current}
       data-current={current ? 'true' : undefined}
       data-warn={warn ? 'true' : undefined}
+      data-dense={note ? undefined : 'true'}
+      disabled={disabled}
       onClick={onPick}
     >
       <span className="bsrow__text">

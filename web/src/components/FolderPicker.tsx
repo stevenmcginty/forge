@@ -7,6 +7,7 @@ import { shortPath } from '../lib/paths'
 import { useForge } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
 import { AlertGlyph } from './Connection'
+import { PhoneIcon } from './PhoneIcon'
 import './Sheets.phone.css'
 
 /**
@@ -295,6 +296,7 @@ export function FolderPicker({
         onBack={view === 'choose' ? undefined : toChoice}
         label={view === 'create' ? 'New project' : view === 'browse' ? 'Choose a folder' : 'Add a project'}
         subtitle={view === 'choose' && desktop ? `On ${desktop}` : undefined}
+        back={view === 'choose' ? undefined : { label: 'Back', onClick: toChoice }}
         testId="folder-picker-sheet"
       >
         <div className="fpk" data-view={view} data-testid="folder-picker">
@@ -303,8 +305,9 @@ export function FolderPicker({
               <SheetRow
                 icon={<Icon name="folderPlus" size={20} />}
                 label="Create a new folder"
-                secondary="An empty folder, added straight to the rail"
+                secondary="An empty folder, added to your projects"
                 onClick={compose}
+                chevron
                 testId="add-project-new"
               />
               <SheetRow
@@ -312,6 +315,7 @@ export function FolderPicker({
                 label="Use an existing folder"
                 secondary={`Browse the folders on ${desktop || 'the desktop'}`}
                 onClick={browse}
+                chevron
                 testId="add-project-existing"
               />
             </SheetSection>
@@ -325,10 +329,6 @@ export function FolderPicker({
                 create()
               }}
             >
-              <button type="button" className="psheet__back" onClick={toChoice}>
-                <Icon name="chevronLeft" size={16} />
-                Back
-              </button>
               <label className="pfield">
                 <span className="pfield__label">Name</span>
                 <input
@@ -363,7 +363,9 @@ export function FolderPicker({
                       disabled={busy}
                       onClick={() => setParentDir(p.key)}
                     >
-                      <span className="fpk__radio" aria-hidden="true" />
+                      <span className="fpk__radio" aria-hidden="true">
+                        <PhoneIcon name="check" />
+                      </span>
                       <span className="fpk__parent-text">
                         <span>{p.label}</span>
                         {p.detail ? <span className="fpk__parent-sub mono">{p.detail}</span> : null}
@@ -402,10 +404,6 @@ export function FolderPicker({
           {view === 'browse' ? (
             <>
               <div className="fpk__top">
-                <button type="button" className="psheet__back" onClick={toChoice}>
-                  <Icon name="chevronLeft" size={16} />
-                  Back
-                </button>
                 <nav className="fpk__crumbs" aria-label="Folders above this one" ref={crumbBar}>
                   <button
                     type="button"
@@ -465,8 +463,7 @@ export function FolderPicker({
                 {busy && !folder ? <p className="psheet__note">Reading {desktop || 'the desktop'}…</p> : null}
                 {folder?.truncated ? (
                   <p className="psheet__note">
-                    This folder holds more than one answer can carry — these are the first {rows.length}, folders
-                    first.
+                    Showing the first {rows.length}, folders first. This folder holds more.
                   </p>
                 ) : null}
               </div>

@@ -35,9 +35,10 @@ import './ContextChip.css'
  * Claude's own two bars for Plan, the chevron pair for Accept edits, nothing
  * for Default, worn on the ring's shoulder. The model and the effort picked
  * from this phone (a five-step meter) sit small in a caption beside the ring,
- * no capsule round it. The panel opens on the three pickers that change them
- * (ModelChip's SetupPicks, through the same senders and the same pick store as
- * the drawer's pill), above the context and the limits.
+ * no capsule round it. The panel opens on what the dial reads — the context
+ * window and the plan limits — then the one picker that changes the model,
+ * effort and mode (ModelChip's SetupPicks, through the same senders and the
+ * same pick store as the drawer's pill), then Copy screen and the raw footer.
  */
 
 /** The effort's step on the chip's meter. */
@@ -473,18 +474,31 @@ export function ContextChip({ paneId, profile }: { paneId: string | null; profil
                 ) : !context ? (
                   <p className="pctx-note">No context reading yet. It shows once the agent draws its status line.</p>
                 ) : null}
-                {picks && paneId ? (
-                  <div className="pctx-setup">
-                    <SetupPicks paneId={paneId} setup={setup} onPicked={close} />
-                  </div>
-                ) : null}
-                <div className="pctx-body">
+                {/* What the dial is about first — the context and the limits —
+                    then the one picker that changes the model, effort and mode,
+                    then the pane's actions. */}
+                <div className="pctx-body" data-part="facts">
                   <PaneDetails
                     usage={shell ? { context: null, limits: null } : usage}
                     footer={status?.footer ?? []}
                     screen={onScreen}
                     onDone={close}
                     levelWord
+                    part="facts"
+                  />
+                </div>
+                {picks && paneId ? (
+                  <div className="pctx-setup">
+                    <SetupPicks paneId={paneId} setup={setup} onPicked={close} />
+                  </div>
+                ) : null}
+                <div className="pctx-body" data-part="actions">
+                  <PaneDetails
+                    usage={shell ? { context: null, limits: null } : usage}
+                    footer={status?.footer ?? []}
+                    screen={onScreen}
+                    onDone={close}
+                    part="actions"
                   />
                 </div>
               </div>

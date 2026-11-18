@@ -12,8 +12,14 @@
  * full fills the mark solid. Bypass is never colour alone either: a solid
  * warning triangle on the mark's shoulder, and a red rim round it.
  *
- * The panel is the drawer's frosted glass, hung from the bar: it grows out of
- * the chip (its transform origin is the chip's centre) and folds back into it.
+ * The panel is the phone's menu (web/PHONE-DESIGN.md): a raised card hung from
+ * the bar, popping out of the chip (its transform origin is the chip's centre)
+ * and folding back into it. No glass, no gradient.
+ *
+ * The ring is neutral ink while all is well — a healthy state is not accented —
+ * amber and heavier from 80%, red and filled from 92%. While the link is down
+ * (reconnecting, frozen, not running) it greys and its track breaks into
+ * dashes, so a stale reading never looks like a live one.
  */
 
 /* ------------------------------------------------------------------ chip */
@@ -336,6 +342,39 @@
   }
 }
 
+/* ----------------------------------------------------------- the dial's ink */
+
+/* Calm: one ink arc on the hairline track — not the four-colour fuel gauge. */
+.pctx .pring__track {
+  stroke: var(--p-line-strong);
+}
+
+.pctx .pring__arc {
+  stroke: var(--p-ink);
+}
+
+/* Stale: the reading is where the pane had got to, not where it is. The arc and
+   the figure grey, the track breaks into dashes, and the state's own shape
+   rides the arc's head. */
+.pctx:is([data-state='reconnecting'], [data-state='frozen'], [data-state='dormant']) .pring__arc {
+  stroke: var(--p-ink-3);
+}
+
+.pctx:is([data-state='reconnecting'], [data-state='frozen'], [data-state='dormant']) .pring__track {
+  stroke-dasharray: 2 2.6;
+}
+
+.pctx:is([data-state='reconnecting'], [data-state='frozen'], [data-state='dormant']) :is(.pctx__fig, .pctx__pc) {
+  color: var(--p-ink-3);
+}
+
+.pctx:is([data-state='reconnecting'], [data-state='frozen'], [data-state='dormant']) .pctx__hole {
+  background-color: transparent;
+}
+
+.pctx:is([data-state='reconnecting'], [data-state='frozen'], [data-state='dormant']) .pstat__mark-in {
+  color: var(--p-ink-2);
+}
 /* -------------------------------------------------------------- the drop */
 
 .pctx-layer {
@@ -367,13 +406,16 @@
   left: 0;
   background: var(--p-scrim);
   opacity: 0;
-  transition: opacity var(--p-dur) var(--p-ease);
+  transition: opacity var(--p-dur-exit) var(--p-ease);
 }
 
 .pctx-layer[data-state='open'] .pctx-scrim {
-  opacity: 0.55;
+  opacity: 0.5;
+  transition-duration: var(--p-dur);
 }
 
+/* The menu surface: raised, a rim and the float shadow, the card radius. It
+   pops from the chip on the glide and folds back faster on the exit curve. */
 .pctx-panel {
   position: absolute;
   top: calc(var(--pctx-bar, 52px) + 6px);
@@ -382,95 +424,27 @@
   flex-direction: column;
   box-sizing: border-box;
   width: min(360px, calc(100% - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
-  padding: 0 var(--p-1) var(--p-2);
+  padding: 6px 6px var(--p-2);
   overflow-y: auto;
   overscroll-behavior: contain;
   outline: none;
-  /* The drawer's glass (PowerDraw.css), so the two read as one material. */
-  --pdraw-glass: color-mix(in srgb, var(--p-raised) 72%, transparent);
-  --pdraw-sheen: color-mix(in srgb, var(--p-ink) 7%, transparent);
-  --pdraw-edge: color-mix(in srgb, var(--p-ink) 16%, transparent);
-  --pdraw-rim: color-mix(in srgb, var(--p-ink) 11%, transparent);
-  background:
-    linear-gradient(180deg, var(--pdraw-sheen), transparent 120px),
-    var(--pdraw-glass);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
-  backdrop-filter: blur(18px) saturate(1.6);
-  border: 1px solid var(--pdraw-rim);
-  border-radius: var(--p-r-sheet);
-  box-shadow:
-    inset 0 1px 0 var(--pdraw-edge),
-    0 18px 48px rgba(0, 0, 0, 0.34),
-    0 2px 8px rgba(0, 0, 0, 0.14);
-  /* Folded into the chip: a little up, a little small, see-through. */
+  background: var(--p-raised);
+  border: 0;
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
   opacity: 0;
-  transform: translate3d(0, -8px, 0) scale(0.94);
+  transform: translate3d(0, -4px, 0) scale(var(--p-enter-scale, 0.96));
   transition:
-    transform var(--p-dur) var(--p-ease),
-    opacity var(--p-dur) var(--p-ease);
+    transform var(--p-dur-exit) var(--p-ease-in),
+    opacity var(--p-dur-exit) var(--p-ease-in);
 }
 
 .pctx-layer[data-state='open'] .pctx-panel {
   opacity: 1;
   transform: none;
   transition:
-    transform var(--p-dur-sheet) var(--p-ease-sheet),
-    opacity var(--p-dur) var(--p-ease);
-}
-
-:root[data-appearance='light'] .pctx-panel {
-  --pdraw-glass: color-mix(in srgb, var(--p-raised) 80%, transparent);
-  --pdraw-sheen: color-mix(in srgb, var(--p-raised) 60%, transparent);
-  --pdraw-edge: var(--p-raised);
-  --pdraw-rim: color-mix(in srgb, var(--p-ink) 10%, transparent);
-  box-shadow:
-    inset 0 1px 0 var(--pdraw-edge),
-    0 18px 44px rgba(0, 0, 0, 0.16),
-    0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .pctx-panel,
-  :root[data-appearance='light'] .pctx-panel {
-    --pdraw-glass: var(--p-raised);
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  .pctx-panel,
-  :root[data-appearance='light'] .pctx-panel {
-    --pdraw-glass: var(--p-raised);
-  }
-}
-
-/* The panel's parts rise in a beat behind it, top first. */
-.pctx-layer[data-state='open'] .pctx-panel > * {
-  animation: pctx-rise var(--p-dur-sheet) var(--p-ease-sheet) both;
-}
-
-.pctx-layer[data-state='open'] .pctx-panel > :nth-child(2) {
-  animation-delay: 30ms;
-}
-
-.pctx-layer[data-state='open'] .pctx-panel > :nth-child(3) {
-  animation-delay: 60ms;
-}
-
-@keyframes pctx-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, -4px, 0);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pctx-layer[data-state='open'] .pctx-panel > * {
-    animation: none;
-  }
-}
-
-:root[data-reduced-motion='true'] .pctx-layer[data-state='open'] .pctx-panel > * {
-  animation: none;
+    transform var(--p-dur-snap) var(--p-glide),
+    opacity var(--p-dur-fast) var(--p-ease);
 }
 
 /* ------------------------------------------------------------ the head */
@@ -479,11 +453,26 @@
   display: flex;
   align-items: center;
   gap: var(--p-3);
-  padding: var(--p-4) var(--p-3) var(--p-2);
+  padding: var(--p-3) var(--p-2) var(--p-4);
 }
 
 .pctx-head .agent-badge {
   flex: none;
+}
+
+/* The maker's logo bare, as the tabs draw it; a text badge keeps its tile. */
+.pctx-head .agent-badge[data-logo] {
+  width: 24px;
+  min-width: 0;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.pctx-head .agent-badge[data-logo] .agent-badge__logo {
+  height: 100%;
 }
 
 .pctx-head__text {
@@ -491,39 +480,35 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .pctx-head__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 650 var(--p-t-title) / 1.2 var(--p-font);
-  letter-spacing: -0.01em;
+  font: 650 var(--p-t-title) / 1.25 var(--p-font);
+  letter-spacing: var(--p-track-tight);
 }
 
 .pctx-head__place {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font: 400 12px / 1.2 var(--p-mono);
-  color: var(--p-ink-3);
+  font: 400 var(--p-t-micro) / 1.3 var(--p-mono);
+  color: var(--p-ink-2);
 }
 
-/* The state, in the desktop StateChip's words, beside its shape. */
+/* The state: its shape and its word, and the clock while it works. No pill. */
 .pctx-state {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 10px 0 9px;
-  border-radius: var(--p-r-pill);
-  background: color-mix(in srgb, var(--p-bg) 40%, transparent);
-  box-shadow: inset 0 0 0 1px var(--pdraw-rim);
-  font: 650 var(--p-t-small) / 1 var(--p-font);
+  min-height: 28px;
+  font: var(--p-w-strong) var(--p-t-small) / 1 var(--p-font);
   white-space: nowrap;
-  color: var(--p-ink);
+  color: var(--p-ink-2);
 }
 
 .pctx-state .pstat__mark-in {
@@ -539,30 +524,29 @@
 }
 
 .pctx-state__clock {
-  font-weight: 600;
+  font-weight: var(--p-w-medium);
   font-variant-numeric: tabular-nums;
-  color: var(--p-ink-2);
+  color: var(--p-ink-3);
 }
 
-.pctx-state[data-state='working'] :is(.pctx-state__word, .pstat__mark-in) {
-  color: color-mix(in srgb, var(--pane-accent, var(--p-ink)) 72%, var(--p-ink));
-}
-
-.pctx-state[data-state='attention'] {
-  background: var(--p-attn-soft);
-  box-shadow: inset 0 0 0 1px var(--p-attn-line);
-}
-
-.pctx-state[data-state='attention'] :is(.pctx-state__word, .pstat__mark-in) {
-  color: var(--p-attn);
-}
-
-.pctx-state[data-state='done'] .pstat__mark-in {
+.pctx-state[data-state='working'] .pctx-state__word {
   color: var(--p-ink);
 }
 
-.pctx-state:is([data-state='dormant'], [data-state='frozen'], [data-state='reconnecting']) .pctx-state__word {
-  color: var(--p-ink-2);
+.pctx-state[data-state='working'] .pstat__mark-in {
+  color: color-mix(in srgb, var(--pane-accent, var(--p-ink)) 72%, var(--p-ink));
+}
+
+.pctx-state[data-state='attention'] :is(.pctx-state__word, .pstat__mark-in) {
+  color: var(--p-ink);
+}
+
+.pctx-state[data-state='attention'] .pstat__mark-in {
+  color: var(--p-attn);
+}
+
+.pctx-state[data-state='done'] :is(.pctx-state__word, .pstat__mark-in) {
+  color: var(--p-ink);
 }
 
 /* A sentence under the head: the condition's, or why there is no number. */
@@ -572,7 +556,7 @@
   gap: var(--p-2);
   margin: 0 var(--p-3) var(--p-2);
   font-size: var(--p-t-small);
-  line-height: 1.4;
+  line-height: var(--p-lh);
   color: var(--p-ink-2);
 }
 
@@ -588,7 +572,7 @@
 }
 
 .pctx-note[data-condition='waiting'] {
-  color: var(--p-attn);
+  color: var(--p-ink);
 }
 
 .pctx-note[data-condition='waiting'] .pctx-note__mark {
@@ -626,38 +610,29 @@
 
 /* ----------------------------------------------------------- the setup */
 
-/* The three pickers (ModelChip's SetupPicks) on the glass, above the context
-   and limits, a rim between them. */
+/* The one picker (ModelChip's PicksBody, dense), between the readouts and the
+   pane's actions, each in its own wells. */
 .pctx-setup {
-  margin-bottom: var(--p-1);
-  padding-bottom: var(--p-2);
-  border-bottom: 1px solid var(--pdraw-rim);
+  margin-top: var(--p-5);
 }
 
-.pctx-setup .bssec + .bssec {
-  border-top: 0;
-  margin-top: 0;
-  padding-top: 0;
+.pctx-body[data-part='actions'] {
+  margin-top: var(--p-5);
 }
 
-.pctx-setup .mseg {
-  border-color: var(--pdraw-rim);
-  background: color-mix(in srgb, var(--p-bg) 40%, transparent);
+/* In the menu the wells and labels take the sheet's rhythm, a little tighter. */
+.pctx-panel .bssec + .bssec {
+  margin-top: var(--p-4);
 }
 
 /* ------------------------------------------------------------ the body */
-
-/* The sheet's own sections and rows (BottomSheet.css), on glass: the dividers
-   take the glass's rim, and the footer well sits a shade deeper. */
-.pctx-body .bssec + .bssec {
-  border-top-color: var(--pdraw-rim);
-}
 
 .pctx-body .bssec:first-child {
   margin-top: 0;
 }
 
-.pctx-body .psheet__footer {
-  background: color-mix(in srgb, var(--p-bg) 55%, transparent);
-  border-color: var(--pdraw-rim);
+/* The readouts sit in their wells; space, not a rule, before the picker. */
+.pctx-panel {
+  padding-left: var(--p-2);
+  padding-right: var(--p-2);
 }

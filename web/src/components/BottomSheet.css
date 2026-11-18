@@ -336,6 +336,64 @@ a.bsrow:active {
   background: color-mix(in srgb, var(--p-act) 85%, var(--p-ink));
 }
 
+/* An inner step's ‹ back, before the heading (BottomSheet `back`). */
+.bsheet__back {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  margin: 0;
+  padding: 0;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bsheet__back > svg {
+  width: var(--p-icon);
+  height: var(--p-icon);
+}
+
+.bsheet__back:focus-visible {
+  outline: 2px solid var(--p-ink);
+  outline-offset: 2px;
+}
+
+/* The sheet's buttons, pinned under the scrolling body (BottomSheet `footer`). */
+.bsheet__foot {
+  flex: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--p-2);
+  padding: var(--p-3) var(--p-4) var(--p-1);
+}
+
+.bsrow__check,
+.bsrow__chev {
+  flex: none;
+  width: var(--p-icon);
+  height: var(--p-icon);
+}
+
+.bsrow__chev {
+  margin-left: calc(var(--p-1) * -1);
+  color: var(--p-ink-3);
+}
+
+.bsrow__check {
+  color: var(--p-ink);
+  opacity: 0;
+}
+
+.bsrow[aria-checked='true'] > .bsrow__check {
+  opacity: 1;
+}
+
 /* ------------------------------------------------------ desktop-width panel */
 
 .app:not([data-mobile]) .bsheet {
@@ -369,4 +427,475 @@ a.bsrow:active {
   padding-top: var(--p-4);
   touch-action: auto;
   cursor: default;
+}
+
+/* ===================================================================== phone
+ *
+ * Quiet Instrument (web/PHONE-DESIGN.md), the phone's sheet family. Scoped to
+ * `.app[data-mobile]`, so the deck's centred panel above is untouched.
+ *
+ *  - The sheet floats: a raised graphite card held 8px off the screen's edges,
+ *    rounded all round (as the project card is), a rim and the sheet shadow
+ *    over a deep scrim. No border.
+ *  - The head: a 20px title (the top bar's project-name voice), a 14px line
+ *    under it, a × on the right; the ‹ back before the title on inner steps.
+ *  - Sections: a quiet label, then the rows in one well (a tone, no outline),
+ *    with hairlines between rows from the text edge. Space between sections.
+ *  - Rows: a bare glyph, a 16px title over a 13px note, the control at the end.
+ *    Selected (a radio row) = the selected fill inside the well, weight 600, tick.
+ *  - The foot: full-width 52px pills.
+ *  - Rise on the sheet curve; leave faster on the exit curve, or, let go from a
+ *    drag, travel on from where the finger left it.
+ */
+
+.app[data-mobile] .bsheet-layer {
+  --bs-edge: var(--p-2);
+}
+
+.app[data-mobile] .bsheet {
+  left: var(--bs-edge);
+  right: var(--bs-edge);
+  bottom: calc(var(--bs-edge) + env(safe-area-inset-bottom, 0px));
+  max-height: calc(100% - 56px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  padding-bottom: var(--p-3);
+  border: 0;
+  border-radius: var(--p-r-sheet);
+  box-shadow: var(--p-rim), var(--p-shadow-sheet);
+  transform: translateY(calc(100% + 32px));
+}
+
+.app[data-mobile] .bsheet-layer[data-state='open'] .bsheet {
+  transform: translateY(0);
+}
+
+/* A phone on its side: the sheet keeps a reading width, centred, rather than
+   stretching its rows (and their trailing controls) across 950px. */
+@media (orientation: landscape) and (min-width: 700px) {
+  .app[data-mobile] .bsheet {
+    left: max(var(--bs-edge), calc((100% - 640px) / 2));
+    right: max(var(--bs-edge), calc((100% - 640px) / 2));
+  }
+}
+
+.app[data-mobile] .bsheet-layer[data-state='closed'] .bsheet {
+  transition: transform var(--p-dur-exit) var(--p-ease-in);
+}
+
+.app[data-mobile] .bsheet-layer[data-state='closed'][data-exit='drag'] .bsheet {
+  transition: transform var(--p-dur-exit) var(--p-ease-sheet);
+}
+
+.app[data-mobile] .bsheet__scrim {
+  background: color-mix(in srgb, var(--p-scrim) 100%, var(--p-bg) 20%);
+}
+
+.app[data-mobile] .bsheet-layer[data-state='closed'] .bsheet__scrim {
+  transition: opacity var(--p-dur-exit) var(--p-ease);
+}
+
+/* Held: no transition at all, on the sheet or on the scrim thinning under it. */
+.app[data-mobile] .bsheet-layer[data-dragging='true'] .bsheet__scrim {
+  transition: none;
+}
+
+.app[data-mobile] .bsheet__grab {
+  padding: var(--p-2) 0 0;
+}
+
+.app[data-mobile] .bsheet__handle {
+  margin: 0 auto;
+  background: color-mix(in srgb, var(--p-ink) 24%, transparent);
+}
+
+/* ------------------------------------------------------------- the head */
+
+.app[data-mobile] .bsheet__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--p-1);
+  padding: var(--p-2) var(--p-2) var(--p-4) var(--p-5);
+}
+
+.app[data-mobile] .bsheet__head[data-back='true'] {
+  padding-left: var(--p-2);
+}
+
+.app[data-mobile] .bsheet__titles {
+  flex: 1;
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.app[data-mobile] .bsheet__title {
+  font-size: 20px;
+  font-weight: var(--p-w-heavy);
+  line-height: 28px;
+  letter-spacing: -0.015em;
+}
+
+.app[data-mobile] .bsheet__sub {
+  margin-top: var(--p-1);
+  font-size: var(--p-t-label);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .bsheet__close {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  margin: 0;
+  padding: 0;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The ×'s face: a small round on the fill, the glyph inside it. */
+.app[data-mobile] .bsheet__close > svg {
+  box-sizing: content-box;
+  width: 16px;
+  height: 16px;
+  padding: 6px;
+  border-radius: 50%;
+  background: var(--p-fill);
+}
+
+.app[data-mobile] :is(.bsheet__back, .bsheet__close) {
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] :is(.bsheet__back, .bsheet__close):active:not(:disabled) {
+  color: var(--p-ink);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .bsheet__back:active:not(:disabled) {
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .bsheet__close:active > svg {
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .bsheet__close:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
+}
+
+.app[data-mobile] .bsheet__back:disabled {
+  opacity: var(--p-disabled);
+}
+
+.app[data-mobile] .bsheet__body {
+  padding: 0 var(--p-3) var(--p-1);
+}
+
+/* ------------------------------------------------------------ sections */
+
+.app[data-mobile] .bssec + .bssec {
+  margin-top: var(--p-5);
+  padding-top: 0;
+  border-top: 0;
+}
+
+.app[data-mobile] .bssec__title {
+  padding: 0 var(--p-2) var(--p-2);
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-strong);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+/* The well: the rows on one tone, rounded as a card, inset 4px so a chosen
+   row's fill sits inside it as a pill. */
+.app[data-mobile] .bssec__rows {
+  padding: var(--p-1);
+  background: var(--p-fill);
+  border-radius: var(--p-r-card);
+}
+
+/* A section that holds a control of its own (the effort track, a text box)
+   needs no well round it. */
+.app[data-mobile] .bssec__rows:has(> .mseg, > .cloudl__task) {
+  padding: 0;
+  background: none;
+  border-radius: 0;
+}
+
+/* ----------------------------------------------------------------- rows */
+
+.app[data-mobile] .bsrow {
+  position: relative;
+  min-height: var(--p-row);
+  padding: var(--p-2) var(--p-3);
+  font-family: var(--p-font);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+/* Hairlines between rows in a well, from the text edge to the well's edge. */
+.app[data-mobile] .bssec__rows .bsrow + .bsrow::after,
+.app[data-mobile] .bssec__rows .psheet__line + .psheet__line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--p-3);
+  right: var(--p-3);
+  height: 1px;
+  background: color-mix(in srgb, var(--p-ink) 9%, transparent);
+  pointer-events: none;
+}
+
+.app[data-mobile] .bssec__rows .psheet__line {
+  position: relative;
+}
+
+.app[data-mobile] .bssec__rows .bsrow:has(> .bsrow__icon) + .bsrow::after,
+.app[data-mobile] .bssec__rows .psheet__line + .psheet__line::after {
+  left: 60px;
+}
+
+/* No hairline against a chosen or pressed row: the fill is edge enough. */
+.app[data-mobile] .bssec__rows .bsrow[aria-checked='true'][role='radio']::after,
+.app[data-mobile] .bssec__rows .bsrow[aria-checked='true'][role='radio'] + .bsrow::after,
+.app[data-mobile] .bssec__rows .bsrow:active::after,
+.app[data-mobile] .bssec__rows .bsrow:active + .bsrow::after {
+  opacity: 0;
+}
+
+.app[data-mobile] button.bsrow:active:not(:disabled),
+.app[data-mobile] a.bsrow:active {
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant);
+}
+
+@media (hover: hover) {
+  .app[data-mobile] button.bsrow:hover:not(:disabled):not([aria-checked='true']),
+  .app[data-mobile] a.bsrow:hover {
+    background: var(--p-hovered);
+  }
+}
+
+.app[data-mobile] .bsrow:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
+}
+
+.app[data-mobile] .bsrow:disabled .bsrow__sub,
+.app[data-mobile] .bsrow[aria-disabled='true'] .bsrow__sub {
+  color: var(--p-ink-3);
+}
+
+.app[data-mobile] .bsrow__icon {
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .bsrow:disabled .bsrow__icon {
+  color: var(--p-ink-3);
+}
+
+.app[data-mobile] .bsrow[data-tone='danger'] .bsrow__icon {
+  color: var(--p-danger);
+}
+
+.app[data-mobile] .bsrow__icon > svg {
+  width: 22px;
+  height: 22px;
+}
+
+.app[data-mobile] .bsrow__label {
+  font-weight: var(--p-w-medium);
+  line-height: 1.3;
+}
+
+.app[data-mobile] .bsrow__sub {
+  margin-top: 1px;
+}
+
+.app[data-mobile] .bsrow__trail {
+  gap: var(--p-2);
+}
+
+/* One choice among several: the selected fill, weight 600 and the tick. */
+.app[data-mobile] .bsrow[role='radio'][aria-checked='true'] {
+  background: var(--p-selected);
+}
+
+.app[data-mobile] .bsrow[role='radio'][aria-checked='true'] .bsrow__label {
+  font-weight: var(--p-w-strong);
+}
+
+.app[data-mobile] button.bsrow[role='radio'][aria-checked='true']:active {
+  background: var(--p-selected-press);
+}
+
+.app[data-mobile] .bsrow__check {
+  transform: scale(0.6);
+  transition:
+    opacity var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .bsrow[aria-checked='true'] > .bsrow__check {
+  transform: none;
+}
+
+/* --------------------------------------------------------------- switch */
+
+/* The contract's switch: on = the accent track, knob right. Position and fill. */
+.app[data-mobile] .bsswitch {
+  width: 44px;
+  height: 26px;
+  border: 0;
+  background: color-mix(in srgb, var(--p-ink) 22%, transparent);
+}
+
+.app[data-mobile] .bsswitch__knob {
+  width: 20px;
+  height: 20px;
+  background: var(--p-ink);
+  transition:
+    transform var(--p-dur-snap) var(--p-glide),
+    background-color var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .bsswitch[data-on='true'] {
+  background: var(--p-act);
+}
+
+.app[data-mobile] .bsswitch[data-on='true'] .bsswitch__knob {
+  background: var(--p-act-ink);
+  transform: translateX(18px);
+}
+
+/* -------------------------------------------------------------- buttons */
+
+.app[data-mobile] .bsbtn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--p-2);
+  min-height: 52px;
+  padding: 0 var(--p-5);
+  font: var(--p-w-strong) var(--p-t-chrome) / var(--p-lh-tight) var(--p-font);
+  text-decoration: none;
+  color: var(--p-ink);
+  background: var(--p-fill);
+  border: 0;
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .bsbtn:active:not(:disabled) {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .bsbtn:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+.app[data-mobile] .bsbtn[data-tone='act'] {
+  color: var(--p-act-ink);
+  background: var(--p-act);
+}
+
+.app[data-mobile] .bsbtn[data-tone='act']:active:not(:disabled) {
+  background: color-mix(in srgb, var(--p-act) 86%, var(--p-ink));
+}
+
+.app[data-mobile] .bsbtn[data-tone='danger'] {
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+}
+
+.app[data-mobile] .bsbtn[data-tone='danger']:active:not(:disabled) {
+  background: color-mix(in srgb, var(--p-danger) 26%, transparent);
+}
+
+.app[data-mobile] .bsbtn:disabled {
+  opacity: var(--p-disabled);
+  cursor: default;
+}
+
+.app[data-mobile] .bsbtn > svg {
+  flex: none;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+}
+
+.app[data-mobile] .bsheet__foot {
+  padding: var(--p-4) var(--p-3) 0;
+}
+
+/* -------------------------------------------------------------- confirm */
+
+.app[data-mobile] .bsconfirm {
+  gap: var(--p-2);
+  padding: var(--p-5) var(--p-2) var(--p-1);
+}
+
+.app[data-mobile] .bsconfirm__q {
+  font-size: 20px;
+  font-weight: var(--p-w-heavy);
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+
+.app[data-mobile] .bsconfirm__detail {
+  font-size: var(--p-t-label);
+  line-height: var(--p-lh-read);
+}
+
+.app[data-mobile] .bsconfirm__actions {
+  margin-top: var(--p-5);
+}
+/* Rows a caller puts straight in the body, with no section (the Attach sheet,
+   a tab's menu): the same well, drawn on the rows themselves. */
+.app[data-mobile] .bsheet__body > .bsrow {
+  border-radius: 0;
+  background: var(--p-fill);
+}
+
+.app[data-mobile] .bsheet__body > .bsrow:first-child {
+  border-top-left-radius: var(--p-r-card);
+  border-top-right-radius: var(--p-r-card);
+}
+
+.app[data-mobile] .bsheet__body > .bsrow:last-child {
+  border-bottom-left-radius: var(--p-r-card);
+  border-bottom-right-radius: var(--p-r-card);
+}
+
+.app[data-mobile] .bsheet__body > button.bsrow:active:not(:disabled) {
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .bsheet__body > .bsrow + .bsrow::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--p-3);
+  right: var(--p-3);
+  height: 1px;
+  background: color-mix(in srgb, var(--p-ink) 9%, transparent);
+  pointer-events: none;
+}
+
+.app[data-mobile] .bsheet__body > .bsrow:has(> .bsrow__icon) + .bsrow::after {
+  left: 60px;
 }

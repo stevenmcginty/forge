@@ -560,7 +560,8 @@ export function Ring({ pct, size, stroke = 2.5 }: { pct: number; size: number; s
 
 /* ----------------------------------------------------------------- sheet */
 
-function PaneSheet({
+/** The pane's details sheet. Exported for the dev preview (`?preview=cloud&sheet=pane`). */
+export function PaneSheet({
   open,
   onClose,
   profile,
@@ -599,13 +600,16 @@ const LEVEL_WORD = { warn: 'Getting full', full: 'Nearly full' } as const
  * plan limits, Copy screen and the raw footer. Drawn by the bottom sheet here
  * and by the top bar's drop-down (ContextChip), so the two say one thing.
  * `levelWord` adds the level in words ("Getting full") beside the gauge.
+ * `part` draws only the readouts (`facts`: context and limits) or only the
+ * pane's actions (`actions`), so the drop-down can put the picks between them.
  */
 export function PaneDetails({
   usage,
   footer,
   screen,
   onDone,
-  levelWord = false
+  levelWord = false,
+  part = 'all'
 }: {
   usage: PaneUsage
   footer: string[]
@@ -613,13 +617,16 @@ export function PaneDetails({
   /** After Copy screen: whatever holds this goes. */
   onDone: () => void
   levelWord?: boolean
+  part?: 'all' | 'facts' | 'actions'
 }): ReactNode {
   const [showFooter, setShowFooter] = useState(false)
   const { context, limits } = usage
   const level = context ? usageLevel(context.usedPct) : 'calm'
+  const facts = part !== 'actions'
+  const acts = part !== 'facts'
   return (
     <>
-      {context ? (
+      {facts && context ? (
         <SheetSection title="Context window">
           <div className="pgauge" data-level={level}>
             <Ring pct={context.usedPct} size={48} stroke={4} />
@@ -639,34 +646,36 @@ export function PaneDetails({
           </div>
         </SheetSection>
       ) : null}
-      {limits && (limits.fiveHour || limits.week) ? (
+      {facts && limits && (limits.fiveHour || limits.week) ? (
         <SheetSection title="Plan limits">
           {limits.fiveHour ? <LimitRow label="5-hour limit" limit={limits.fiveHour} /> : null}
           {limits.week ? <LimitRow label="Weekly limit" limit={limits.week} /> : null}
         </SheetSection>
       ) : null}
-      <SheetSection title="This pane">
-        <SheetRow
-          icon={<Icon name="clipboard" size={20} />}
-          label="Copy screen"
-          secondary="The terminal’s visible text, as plain text"
-          disabled={!screen}
-          onClick={() => {
-            screen?.copyScreen()
-            onDone()
-          }}
-          testId="copy-screen"
-        />
-        {footer.length ? (
+      {acts ? (
+        <SheetSection title="This pane">
           <SheetRow
-            icon={<Icon name="terminal" size={20} />}
-            label={showFooter ? 'Hide the agent’s footer' : 'Show the agent’s footer'}
-            secondary="The raw lines this status is read from"
-            onClick={() => setShowFooter((v) => !v)}
+            icon={<Icon name="clipboard" size={20} />}
+            label="Copy screen"
+            secondary="The terminal’s visible text, as plain text"
+            disabled={!screen}
+            onClick={() => {
+              screen?.copyScreen()
+              onDone()
+            }}
+            testId="copy-screen"
           />
-        ) : null}
-        {showFooter && footer.length ? <pre className="psheet__footer mono">{footer.join('\n')}</pre> : null}
-      </SheetSection>
+          {footer.length ? (
+            <SheetRow
+              icon={<Icon name="terminal" size={20} />}
+              label={showFooter ? 'Hide the agent’s footer' : 'Show the agent’s footer'}
+              secondary="The raw lines this status is read from"
+              onClick={() => setShowFooter((v) => !v)}
+            />
+          ) : null}
+          {showFooter && footer.length ? <pre className="psheet__footer mono">{footer.join('\n')}</pre> : null}
+        </SheetSection>
+      ) : null}
     </>
   )
 }
