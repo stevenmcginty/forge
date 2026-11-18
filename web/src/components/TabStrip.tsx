@@ -6,6 +6,7 @@ import { CHATBOTS, type ChatBotId } from '@shared/chatbots'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { Popover } from '@/components/Popover'
+import { buzz } from '../lib/haptics'
 import { usePaneDone, usePaneStatus } from '../lib/pane-status'
 import { useDoneUnseen, useTrackDone } from '../lib/pane-state'
 import { useForge, useProfiles, useWorkspace } from '../state'
@@ -382,6 +383,7 @@ function Tab({
         style={chatPaint}
         data-pending={pending ? 'true' : undefined}
         data-working={asking ? 'true' : undefined}
+        data-signal={signal ?? undefined}
         onPointerDown={(e) => {
           pointerType.current = e.pointerType
           longFired.current = false
@@ -393,7 +395,7 @@ function Tab({
             timer: window.setTimeout(() => {
               press.current = null
               longFired.current = true
-              navigator.vibrate?.(12)
+              buzz('hold')
               onLongPress()
             }, LONG_PRESS_MS)
           }

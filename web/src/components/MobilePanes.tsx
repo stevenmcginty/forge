@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { LayoutNode } from '@shared/types'
+import type { LayoutNode, PaneLeaf } from '@shared/types'
 import { paneDisplayTitle, resolveProfile } from '@/lib/agents'
 import { collectLeaves } from '@/lib/splitTree'
 import { AgentBadge } from '@/components/AgentBadge'
@@ -42,7 +42,6 @@ export function MobilePanes({
   onScreen: boolean
 }): ReactNode {
   const { state, actions } = useForge()
-  const profiles = useProfiles()
   const leaves = collectLeaves(node)
   const live = state.stage.kind === 'connected' && state.connection.state === 'live'
 
@@ -61,36 +60,7 @@ export function MobilePanes({
 
   return (
     <div className="mpanes">
-      {leaves.length > 1 ? (
-        <div className="mpanes__chips" role="tablist" aria-label="Panes in this tab">
-          {leaves.map((leaf, i) => {
-            const profile = resolveProfile(profiles, leaf.profileId)
-            const asking = state.asking.has(leaf.id)
-            return (
-              <button
-                key={leaf.id}
-                type="button"
-                role="tab"
-                className="mpanes__chip"
-                aria-selected={leaf.id === shown}
-                data-active={leaf.id === shown}
-                data-working={asking ? 'true' : undefined}
-                onClick={() => pick(leaf.id)}
-              >
-                <AgentBadge profile={profile} size="sm" />
-                <span className="truncate">{paneDisplayTitle(profile, leaf.title) || `Pane ${i + 1}`}</span>
-                {/* The tab's own "!" disc, so a pane waiting on you reads the same
-                    here as its tab does — a shape and a label, not a glow. */}
-                {asking ? (
-                  <span className="tab__ask" role="img" aria-label="Waiting on you">
-                    !
-                  </span>
-                ) : null}
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
+      {leaves.length > 1 ? <PaneChips leaves={leaves} shown={shown} onPick={pick} /> : null}
       <div className="mpanes__body">
         {leaves.map((leaf) => (
           <div className="mpanes__slot" key={leaf.id} data-active={leaf.id === shown}>
@@ -103,6 +73,55 @@ export function MobilePanes({
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The chips over a split tab's panes: one per pane, its maker's mark and name,
+ * the "!" disc when it waits on you. The pane on screen wears the selected
+ * fill and weight (web/PHONE-DESIGN.md, "Selected"). Exported for the shell
+ * preview, which draws them without mounting a terminal.
+ */
+export function PaneChips({
+  leaves,
+  shown,
+  onPick
+}: {
+  leaves: PaneLeaf[]
+  shown: string
+  onPick: (paneId: string) => void
+}): ReactNode {
+  const { state } = useForge()
+  const profiles = useProfiles()
+  return (
+    <div className="mpanes__chips" role="tablist" aria-label="Panes in this tab">
+      {leaves.map((leaf, i) => {
+        const profile = resolveProfile(profiles, leaf.profileId)
+        const asking = state.asking.has(leaf.id)
+        return (
+          <button
+            key={leaf.id}
+            type="button"
+            role="tab"
+            className="mpanes__chip"
+            aria-selected={leaf.id === shown}
+            data-active={leaf.id === shown}
+            data-working={asking ? 'true' : undefined}
+            onClick={() => onPick(leaf.id)}
+          >
+            <AgentBadge profile={profile} size="sm" />
+            <span className="truncate">{paneDisplayTitle(profile, leaf.title) || `Pane ${i + 1}`}</span>
+            {/* The tab's own "!" disc, so a pane waiting on you reads the same
+                here as its tab does — a shape and a label, not a glow. */}
+            {asking ? (
+              <span className="tab__ask" role="img" aria-label="Waiting on you">
+                !
+              </span>
+            ) : null}
+          </button>
+        )
+      })}
     </div>
   )
 }

@@ -1891,88 +1891,36 @@ body {
 }
 
 /*
- * ------------------------------------------------------ the phone's top bar
+ * ------------------------------------------------------ the phone's head
  *
- * `.ptop` (TopBar.tsx). One 52px row that never changes with the pane: the
- * menu and the project on the left, the waiting pill, the live dot and "⋯" on
- * the right. Flat — no per-project wash, no glow; the project's colour is the
- * 8px dot and nothing more. Its bottom edge is the connection signal: a 2px
- * line that is solid lime when live, dashed when quiet, pulsing amber while
- * reconnecting and grey when asleep, so the state has a shape as well as a hue.
+ * The top bar (`.ptop`, TopBar.tsx) and the tab strip under it are one open
+ * band on the page's own ground (--p-chrome is the ground on a phone), closed
+ * by one hairline under the tabs. No slab, no boxes, no outlines: a title, a
+ * few bare glyphs, a line of tabs. Left to right it says where you are (the
+ * project, the open tab), whether anything needs you (the waiting pill, the
+ * one amber thing in the bar) and whether the link is up (a neutral shape when
+ * live; a shape and a word when not). A press is a fill.
+ * web/PHONE-DESIGN.md, "The head".
  */
 .ptop {
   position: relative;
+  z-index: var(--p-z-head);
   display: flex;
   align-items: center;
-  gap: var(--p-1);
+  gap: 2px;
   flex: none;
   height: calc(var(--p-bar) + env(safe-area-inset-top, 0px));
-  padding: env(safe-area-inset-top, 0px) var(--p-1) var(--p-signal);
-  background: var(--p-bg);
+  padding: env(safe-area-inset-top, 0px) var(--p-1) 0 var(--p-2);
+  background: var(--p-chrome);
   color: var(--p-ink);
   font-family: var(--p-font);
 }
 
-.ptop::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: var(--p-signal);
-  background: var(--p-line);
-  pointer-events: none;
-}
-
-.ptop[data-link='live']::after {
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--p-act) 70%, transparent),
-    color-mix(in srgb, var(--p-act) 16%, transparent)
-  );
-}
-
-.ptop[data-link='quiet']::after {
-  background: repeating-linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--p-act) 55%, transparent) 0 8px,
-    transparent 8px 14px
-  );
-}
-
-.ptop[data-link='reconnecting']::after {
-  background: var(--p-attn);
-  animation: ptop-signal 1.4s var(--p-ease) infinite alternate;
-}
-
-.ptop[data-link='asleep']::after {
-  background: var(--p-line-strong);
-}
-
-@keyframes ptop-signal {
-  from {
-    opacity: 0.25;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ptop[data-link='reconnecting']::after {
-    animation: none;
-  }
-}
-
-:root[data-reduced-motion='true'] .ptop[data-link='reconnecting']::after {
-  animation: none;
-}
-
 /*
- * The project switcher: one chip that opens the drawer. It is drawn as a
- * dropdown — a filled, outlined pill with a small "Project" label over the
- * name and a ⌄ at its end — so it reads as "tap here to change project" at a
- * glance, rather than asking anyone to decode a bare panel glyph.
+ * The project switcher: the project's tile, its name as the screen's title,
+ * and a ⌄ — a header title that opens the project sheet, drawn bare and
+ * filled only under the thumb or while the sheet is open. (The old "Project"
+ * kicker is gone: the tile and the ⌄ say what this is.)
  */
 .ptop__projects {
   flex: 0 1 auto;
@@ -1981,25 +1929,46 @@ body {
   align-items: center;
   gap: var(--p-2);
   height: var(--p-hit);
-  margin-left: var(--p-1);
-  padding: 0 var(--p-2) 0 var(--p-1);
+  margin-left: 2px;
+  padding: 0 2px 0 6px;
   font: inherit;
   color: var(--p-ink);
-  background: var(--p-surface);
-  border: 1px solid var(--p-line-strong);
+  background: transparent;
+  border: 0;
   border-radius: var(--p-r-row);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
 }
 
+.ptop__projects:active {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.ptop__projects[aria-expanded='true'] {
+  background: var(--p-selected);
+}
+
+/* The tile: the initial in the project's colour on a wash of it. */
 .ptop__menu {
   flex: none;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  color: var(--p-ink);
+  width: var(--p-avatar);
+  height: var(--p-avatar);
+  border-radius: 10px;
+  color: color-mix(in srgb, var(--dot, var(--p-ink-2)) 55%, var(--p-ink));
+  background: color-mix(in srgb, var(--dot, var(--p-ink-3)) 26%, transparent);
+}
+
+.ptop__initial {
+  font-size: 16px;
+  font-weight: var(--p-w-heavy);
+  line-height: 1;
 }
 
 .ptop__label {
@@ -2007,14 +1976,8 @@ body {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  gap: 1px;
   text-align: left;
-}
-
-.ptop__kicker {
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.15;
-  color: var(--p-ink-2);
 }
 
 .ptop__title {
@@ -2022,14 +1985,6 @@ body {
   max-width: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.ptop__dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
 }
 
 .ptop__name {
@@ -2037,18 +1992,26 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--p-t-chrome);
-  font-weight: 650;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
+  font-size: 20px;
+  font-weight: var(--p-w-heavy);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+/* A 360px phone: the title steps down a size so the name keeps its letters. */
+@media (max-width: 374px) {
+  .ptop__name {
+    font-size: 18px;
+  }
 }
 
 .ptop__chev {
   flex: none;
   display: grid;
   place-items: center;
+  margin-left: -6px;
   color: var(--p-ink-2);
-  transition: transform var(--p-dur-fast) var(--p-ease);
+  transition: transform var(--p-dur) var(--p-ease);
 }
 
 .ptop__projects[aria-expanded='true'] .ptop__chev {
@@ -2060,6 +2023,7 @@ body {
   margin-left: auto;
   display: flex;
   align-items: center;
+  gap: 2px;
 }
 
 .ptop__btn {
@@ -2072,22 +2036,28 @@ body {
   color: var(--p-ink);
   background: transparent;
   border: 0;
-  border-radius: var(--p-r-row);
+  border-radius: var(--p-r-pill);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
 }
 
-.ptop__projects:active,
-.ptop__btn:active,
+.ptop__btn:active {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
 .ptop__btn[aria-expanded='true'] {
-  background: var(--p-press);
+  background: var(--p-selected);
 }
 
 .ptop__projects:focus-visible,
 .ptop__btn:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
 /*
@@ -2097,6 +2067,10 @@ body {
  * pill's label still says "N waiting" to a screen reader.
  */
 @media (max-width: 430px) {
+  .ptop__right .waitpill {
+    padding: 0;
+  }
+
   .ptop__right:has(.pctx) .waitpill__word {
     display: none;
   }
@@ -2106,15 +2080,111 @@ body {
   }
 }
 
-/* The asleep dot sits a touch smaller; the other three are drawn in ConnectionSheet.css. */
-.ptop__link .linkdot {
-  width: 11px;
-  height: 11px;
+/*
+ * The link. Live is the calm state: the glyph alone, a filled core in a ring,
+ * in secondary ink. Every other state is a pill with a shape and a word — an
+ * empty ring for Quiet, a ring broken in three that turns for Reconnecting
+ * (amber, the one state that is waiting on something), a moon for Asleep —
+ * so the state never rests on colour.
+ */
+.ptop__link {
+  width: auto;
+  min-width: var(--p-hit);
+  padding: 0 2px;
 }
 
-.ptop__link .linkdot[data-state='asleep'] {
-  width: 9px;
-  height: 9px;
+.ptop__link:active {
+  background: transparent;
+}
+
+.ptop__linkface {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: var(--p-r-pill);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+.ptop__link:active .ptop__linkface,
+.ptop__link[aria-expanded='true'] .ptop__linkface {
+  background: var(--p-pressed);
+}
+
+.ptop__link:not([data-state='live']) .ptop__linkface {
+  padding: 0 11px 0 8px;
+  background: var(--p-fill);
+}
+
+.ptop__link[data-state='reconnecting'] .ptop__linkface {
+  background: var(--p-attn-tint);
+}
+
+/* Live is the normal state, so it is quiet: the shape in secondary ink, not
+   the accent (the accent is used rarely — PHONE-DESIGN.md rule 4). */
+.ptop__linkglyph {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--p-ink-2);
+}
+
+.ptop__link[data-state='reconnecting'] .ptop__linkglyph {
+  color: var(--p-attn);
+  animation: ptop-turn 1.2s linear infinite;
+}
+
+.ptop__link[data-state='asleep'] .ptop__linkglyph {
+  width: 16px;
+  height: 16px;
+  color: var(--p-ink-2);
+}
+
+/*
+ * A phone-width bar holding the waiting pill and the dial has no room for
+ * "Reconnecting" or "Quiet" as well, and the project name would pay for it:
+ * the word steps back (the reconnect strip under the bar says it in a
+ * sentence, and the button's label still does) and the shape stays in its
+ * pill — the broken ring, the empty ring — never a colour alone.
+ */
+@media (max-width: 430px) {
+  .ptop__right:has(.waitpill) .ptop__link:is([data-state='reconnecting'], [data-state='quiet']) .ptop__linkword {
+    display: none;
+  }
+
+  .ptop__right:has(.waitpill) .ptop__link:is([data-state='reconnecting'], [data-state='quiet']) .ptop__linkface {
+    padding: 0 7px;
+  }
+}
+
+.ptop__linkword {
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-strong);
+  line-height: 1;
+  color: var(--p-ink);
+  white-space: nowrap;
+}
+
+@keyframes ptop-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ptop__link[data-state='reconnecting'] .ptop__linkglyph {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .ptop__link[data-state='reconnecting'] .ptop__linkglyph {
+  animation: none;
+}
+
+.ptop__more {
+  color: var(--p-ink-2);
 }
 
 /*
@@ -2288,56 +2358,67 @@ body {
 /*
  * ------------------------------------------------------ tabs, on a phone
  *
- * Neutral pills. The agent is a dot; the active tab is lifted (raised
- * surface, heavier weight), not coloured, so "which tab am I in" and "which
- * agent is this" are two signals again. An asking tab keeps Part 1's "!" and
- * gains an amber edge. No × in the pill — a long-press opens the tab's sheet.
- * The pill is drawn 40px tall and hit 48px tall (`::before`).
+ * Navigation between agents, drawn as a line of words, not a row of boxes.
+ * The strip is the lower half of the head, on the same ground as the page,
+ * with one hairline under it. A tab is its maker's real mark, its title and
+ * its state shape; nothing else, no fill, no outline. The open tab is full
+ * ink and weight with a 3px ink bar on the hairline under it — the one place
+ * mark in the head. States are shapes: "!" asking (the only amber in a tab),
+ * a clock working, a tick done-unseen. No × in a tab; the open tab's ⌄ and a
+ * long-press open its sheet. Drawn 44px, hit 46px.
+ *
+ * Overflow is a fade, never a fragment: the scroller dissolves its last 56px
+ * into the ground at whichever edge has more, so a tab past the edge reads
+ * as "more this way", and the `+` sits outside the scroller on its own.
  */
 .app[data-mobile] .tabstrip {
   position: sticky;
   top: 0;
-  z-index: var(--z-tabbar, 10);
+  z-index: var(--p-z-head);
   flex: none;
-  align-items: center;
-  height: 56px;
-  padding: 0 var(--p-2) 0 var(--p-3);
-  gap: var(--p-2);
-  background: var(--p-bg);
-  border-bottom: 1px solid var(--p-line);
+  align-items: stretch;
+  height: var(--p-tabs);
+  padding: 0 var(--p-1) 0 0;
+  gap: 0;
+  background: var(--p-chrome);
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--p-line);
 }
 
 .app[data-mobile] .tabstrip__tabs {
   flex: 1 1 auto;
   min-width: 0;
-  align-items: center;
-  gap: var(--p-2);
+  align-self: stretch;
+  align-items: stretch;
+  gap: var(--p-1);
   overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  padding: var(--p-1) 0;
-  /* The walk that centres the active pill leaves a gutter at either end. */
-  scroll-padding-inline: var(--p-3);
+  padding: 0 var(--p-2);
+  /* The walk that centres the open tab leaves a gutter at either end. */
+  scroll-padding-inline: var(--p-6);
 }
 
 .app[data-mobile] .tabstrip__tabs::-webkit-scrollbar {
   display: none;
 }
 
-/* A fade only at an edge that has more past it. */
+/* A fade only at an edge that has more past it: wide enough that a cut tab
+   dissolves rather than ends mid-word. */
 .app[data-mobile] .tabstrip__tabs[data-fade='end'] {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 4px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 64px), transparent calc(100% - 4px));
 }
 
 .app[data-mobile] .tabstrip__tabs[data-fade='start'] {
-  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 64px), transparent calc(100% - 4px));
+  mask-image: linear-gradient(to left, #000 calc(100% - 64px), transparent calc(100% - 4px));
 }
 
 .app[data-mobile] .tabstrip__tabs[data-fade='both'] {
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent 4px, #000 64px, #000 calc(100% - 64px), transparent calc(100% - 4px));
+  mask-image: linear-gradient(to right, transparent 4px, #000 64px, #000 calc(100% - 64px), transparent calc(100% - 4px));
 }
 
 .app[data-mobile] .tab {
@@ -2345,47 +2426,77 @@ body {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: var(--p-2);
-  max-width: 220px;
-  height: 40px;
-  min-height: 40px;
-  padding: 0 var(--p-4) 0 var(--p-3);
+  gap: 7px;
+  max-width: 136px;
+  height: auto;
+  min-height: 0;
+  padding: 0 var(--p-2);
   font-size: var(--p-t-chrome);
-  font-weight: 500;
+  font-weight: var(--p-w-medium);
   color: var(--p-ink-2);
   background: transparent;
-  border: 1px solid var(--p-line);
-  border-radius: var(--p-r-pill);
+  border: 0;
+  border-radius: var(--p-r-sm);
   box-shadow: none;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  transition:
-    background var(--p-dur-fast) var(--p-ease),
-    border-color var(--p-dur-fast) var(--p-ease),
-    color var(--p-dur-fast) var(--p-ease);
+  transition: color var(--p-dur-fast) var(--p-ease);
 }
 
+/* The whole height of the strip is finger. */
 .app[data-mobile] .tab::before {
   content: '';
   position: absolute;
-  inset: -4px -2px;
+  inset: 0 -2px;
 }
 
 .app[data-mobile] .tab:active {
-  background: var(--p-hover);
-}
-
-.app[data-mobile] .tab[data-active='true'] {
   color: var(--p-ink);
-  font-weight: 650;
-  background: var(--p-press);
-  border-color: var(--p-line-strong);
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant);
 }
 
-.app[data-mobile] .tab[data-working='true'] {
-  border-color: var(--p-attn-line);
+/* Open: the full ink, the weight, and the bar under it. */
+.app[data-mobile] .tab[data-active='true'] {
+  max-width: 220px;
+  color: var(--p-ink);
+  font-weight: var(--p-w-strong);
+  background: transparent;
+}
+
+.app[data-mobile] .tab[data-active='true']:not([data-chat])::after {
+  content: '';
+  position: absolute;
+  right: var(--p-2);
+  bottom: 0;
+  left: var(--p-2);
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--p-ink);
+  pointer-events: none;
+  transform-origin: 50% 100%;
+  animation: tab-mark var(--p-dur-snap) var(--p-glide) both;
+}
+
+@keyframes tab-mark {
+  from {
+    opacity: 0;
+    transform: scaleX(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A chat tab is its bot's chip: painted, rounded, centred in the strip. */
+.app[data-mobile] .tab[data-chat] {
+  align-self: center;
+  height: 32px;
+  padding: 0 var(--p-3);
+  border-radius: var(--p-r-pill);
 }
 
 .app[data-mobile] .tab__title {
@@ -2394,26 +2505,26 @@ body {
   line-height: 1.2;
 }
 
-/* The active tab's options chevron: the long-press sheet, findable. A neutral
+/* The open tab's options chevron: the long-press sheet, findable. A bare
    glyph, not a red ×, because it opens a sheet rather than closing anything. */
 .app[data-mobile] .tab__menu {
   position: relative;
   flex: none;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  margin-right: calc(var(--p-2) * -1);
+  width: 20px;
+  height: 20px;
+  margin: 0 -4px 0 -3px;
   border-radius: var(--p-r-pill);
-  color: var(--p-ink-2);
-  background: var(--p-hover);
+  color: var(--p-ink-3);
+  background: transparent;
 }
 
-/* 44px of finger for a 24px glyph. */
+/* 44px of finger for a 20px glyph. */
 .app[data-mobile] .tab__menu::before {
   content: '';
   position: absolute;
-  inset: -10px;
+  inset: -12px;
 }
 
 .app[data-mobile] .tab__menu svg {
@@ -2428,11 +2539,11 @@ body {
 
 .app[data-mobile] .tab__menu:active {
   color: var(--p-ink);
-  background: var(--p-line-strong);
+  background: var(--p-pressed);
 }
 
 .app[data-mobile] .tab__suffix {
-  font-weight: 500;
+  font-weight: var(--p-w-medium);
   color: var(--p-ink-3);
 }
 
@@ -2449,11 +2560,33 @@ body {
   min-width: 22px;
 }
 
+/* On a phone a maker's mark is drawn bare — the logo itself, no tile round
+   it — in tabs, pane chips and the feed preview's switch. Text badges (no
+   logo) keep their tile. */
+.app[data-mobile] :is(.tab__badge, .mpanes__chip, .preview__switch button) .agent-badge[data-logo] {
+  width: 18px;
+  min-width: 0;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.app[data-mobile] :is(.tab__badge, .mpanes__chip, .preview__switch button) .agent-badge[data-logo] .agent-badge__logo {
+  height: 100%;
+}
+
 .tab__badge .tab__more {
-  font-size: var(--p-t-small, 13px);
-  font-weight: 600;
+  font-size: var(--p-t-micro, 12px);
+  font-weight: 650;
   line-height: 1;
   color: var(--p-ink-2);
+}
+
+/* A tab at rest lets its mark speak quieter than the open one's. */
+.app[data-mobile] .tab:not([data-active='true']):not([data-chat]) .tab__badge {
+  opacity: 0.7;
 }
 
 /* The tab's state as a shape (the "!" disc is WaitingPill.css's .tab__ask):
@@ -2467,7 +2600,7 @@ body {
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
-  color: var(--p-ink-2);
+  color: var(--p-ink-3);
 }
 
 .tab__signal[data-signal='done'] {
@@ -2475,16 +2608,17 @@ body {
   color: var(--p-act);
 }
 
-/* Asked for, not yet granted: the pill takes the press surface and a hairline pulses inside it. */
+/* Asked for, not yet granted: the tab takes the press fill and a hairline
+   pulses at its foot (the pulse is the base rule, "a tab, asked for"). */
 .app[data-mobile] .tab[data-pending='true'] {
   color: var(--p-ink);
-  background: var(--p-hover);
+  background: var(--p-pressed);
 }
 
 .app[data-mobile] .tab[data-pending='true']::after {
-  right: var(--p-4);
-  bottom: 5px;
-  left: var(--p-4);
+  right: var(--p-2);
+  bottom: 0;
+  left: var(--p-2);
 }
 
 /* The long-press sheet's heading: the tab's agent mark and its title. */
@@ -2525,34 +2659,40 @@ body {
   background: var(--danger, #ef4444);
 }
 
-/* `+` sits outside the scroller on a phone, so it never scrolls off. */
+/* `+` sits outside the scroller on a phone, so it never scrolls off. Bare. */
 .app[data-mobile] .tabstrip__new {
   flex: none;
+  align-self: center;
   display: grid;
   place-items: center;
   width: var(--p-hit);
   height: var(--p-hit);
   padding: 0;
-  color: var(--p-ink);
+  color: var(--p-ink-2);
   background: transparent;
-  border: 1px solid var(--p-line-strong);
+  border: 0;
   border-radius: 50%;
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
 }
 
 .app[data-mobile] .tabstrip__new:active:not(:disabled) {
-  background: var(--p-press);
+  color: var(--p-ink);
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
 }
 
 .app[data-mobile] .tabstrip__new:disabled {
   color: var(--p-ink-3);
-  border-color: var(--p-line);
+  opacity: var(--p-disabled);
 }
 
 .app[data-mobile] .tabstrip__new:focus-visible,
 .app[data-mobile] .tab:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: 2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: -2px;
 }
 
 /* The terminal is the screen. */
@@ -3016,43 +3156,44 @@ body {
 
 .mpanes__chips {
   display: flex;
-  gap: var(--s-2);
+  gap: var(--p-2, 8px);
   flex: none;
-  padding: 6px var(--s-3);
+  padding: var(--p-2, 8px) var(--p-3, 12px);
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  scroll-padding-inline: var(--s-3);
-  background: var(--bg-base);
-  border-bottom: 1px solid var(--line-hairline);
+  scroll-padding-inline: var(--p-3, 12px);
+  /* The page's own ground, under the head's hairline: a second, quieter row. */
+  background: var(--p-bg, var(--bg-base));
+  border-bottom: 0;
 }
 
 .mpanes__chips::-webkit-scrollbar {
   display: none;
 }
 
+/* A split tab's panes: chips (web/PHONE-DESIGN.md, .pu-chip). Bare fill at
+   rest, the selected fill, full ink and weight on the pane on screen. */
 .mpanes__chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-2);
+  gap: var(--p-2, 8px);
   flex: none;
   max-width: 65vw;
-  height: 34px;
-  padding: 0 12px 0 6px;
-  border-radius: var(--r-full);
-  border: 1px solid var(--line-soft);
-  background: var(--bg-panel);
-  color: var(--text-secondary);
-  font: 500 13px / 1 var(--font-ui);
+  height: var(--p-control, 36px);
+  padding: 0 14px 0 8px;
+  border-radius: var(--p-r-pill, 999px);
+  border: 0;
+  background: var(--p-fill, var(--bg-panel));
+  color: var(--p-ink-2, var(--text-secondary));
+  font: var(--p-w-medium, 500) var(--p-t-label, 14px) / 1 var(--p-font, var(--font-ui));
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    background-color var(--p-dur-fast, 120ms) var(--p-ease, ease-out),
+    color var(--p-dur-fast, 120ms) var(--p-ease, ease-out);
 }
 
-/* A 34px pill with 44px of finger: the hit reaches into the row's 6px padding
-   and half of the 4px gap, so neighbours never share a hit. */
+/* A 36px pill with 44px of finger: the hit reaches into the row's 8px padding
+   and half of the 8px gap, so neighbours never share a hit. */
 .app[data-mobile] .mpanes__chip {
   position: relative;
 }
@@ -3060,7 +3201,11 @@ body {
 .app[data-mobile] .mpanes__chip::before {
   content: '';
   position: absolute;
-  inset: -5px -2px;
+  inset: -4px -4px;
+}
+
+.app[data-mobile] .mpanes__chip:active {
+  background: var(--p-pressed);
 }
 
 .mpanes__chip .agent-badge {
@@ -3072,15 +3217,16 @@ body {
   font-weight: 700;
 }
 
-/* The pane on screen is lifted the way the active tab pill is — press surface,
-   stronger hairline, full ink, heavier weight — on the theme's own tokens, so
-   it reads on Paper as well as on the dark themes. No glow. */
 .mpanes__chip[data-active='true'] {
-  border-color: var(--p-line-strong, var(--line-strong));
-  background: var(--p-press, var(--bg-active));
+  background: var(--p-selected, var(--bg-active));
   color: var(--p-ink, var(--text-primary));
-  font-weight: 650;
+  font-weight: var(--p-w-strong, 600);
   box-shadow: none;
+}
+
+.app[data-mobile] .mpanes__chip:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
 }
 
 /* A pane waiting on you wears the tab's "!" disc (.tab__ask), a shape with a label. */
@@ -4395,76 +4541,69 @@ button.astatus__mode:not(:disabled):hover {
   padding-left: var(--s-6);
 }
 
-[data-mobile] .pane[data-kind='agent']:has(.pane__actions) .pane__title,
-[data-mobile] .pane[data-kind='agent']:has(.pane__actions) .pane__header .agent-badge {
-  display: none;
-}
-
 /*
- * An agent pane on a phone: the content is the page, in all faces. The name
- * already lives on the tab strip and the status strip, so the header collapses
- * to two floating clusters:
- * - Top-left: view flip button (Chat / Cards / Terminal) in gentle white.
- * - Top-right: live status chips and close button (X) in slightly red.
- * Both float over the page without covering text (52px top padding reserved).
+ * The feed preview's own header, on a phone. PaneView draws no header on a
+ * phone at all (the tab strip names the pane; the drawer holds the view
+ * switch), so this only ever dresses the ?preview=feed fixture: its Live
+ * toggle, view flip and close, kept in the flow as one quiet row above the
+ * page — never floating over the text being read (PHONE-DESIGN.md: nothing
+ * floats over reading text).
  */
 [data-mobile] .pane[data-kind='agent'] .pane__header,
 .app[data-mobile] .pane[data-kind='agent'] .pane__header,
 .app[data-mobile] .pane[data-kind='agent'][data-focused='true'] .pane__header {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 3;
+  position: static;
+  flex: none;
   width: 100%;
-  height: auto;
-  padding: var(--s-3) var(--s-4) 0 var(--s-4);
+  height: var(--p-hit);
+  padding: 0 var(--p-1) 0 var(--p-4);
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  pointer-events: none;
+  gap: var(--p-2);
+  pointer-events: auto;
+  background: var(--p-bg);
+  border: 0;
+  box-shadow: inset 0 -1px 0 var(--p-line);
+}
+
+[data-mobile] .pane[data-kind='agent'] .pane__header .pane__title {
+  flex: 1;
+  font-size: var(--p-t-label);
+  font-weight: var(--p-w-medium);
+  color: var(--p-ink-2);
+}
+
+[data-mobile] .pane[data-kind='agent'] .pane__trailing {
+  margin-left: auto;
+  padding: 0;
+  gap: 2px;
   background: none;
   border: 0;
   box-shadow: none;
 }
 
-[data-mobile] .pane[data-kind='agent'] .pane__leading,
-[data-mobile] .pane[data-kind='agent'] .pane__trailing {
-  pointer-events: auto;
-}
-
-[data-mobile] .pane[data-kind='agent'] .pane__leading {
-  flex: none;
-  display: flex;
-  align-items: center;
-  padding: 3px 6px 3px 3px;
-  gap: 4px;
-  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-full);
-  box-shadow: var(--shadow-key);
-}
-
-[data-mobile] .pane[data-kind='agent'] .pane__leading:not(:has(.pane__action)) {
-  display: none;
-}
-
-[data-mobile] .pane[data-kind='agent'] .pane__trailing {
-  margin-left: auto;
-  padding: 3px 3px 3px 8px;
-  gap: 4px;
-  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--r-full);
-  box-shadow: var(--shadow-key);
-}
-
 [data-mobile] .pane[data-kind='agent'] .pane__trailing:empty {
   display: none;
+}
+
+.app[data-mobile] .preview__pane .pane[data-kind='agent'] .pane__header .pane__action,
+.app[data-mobile] .preview__pane .pane[data-kind='agent'] .pane__header .pane__action[data-danger='true'] {
+  width: 40px;
+  height: 40px;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  box-shadow: none;
+}
+
+.app[data-mobile] .preview__pane .pane[data-kind='agent'] .pane__header .pane__action:active {
+  color: var(--p-ink);
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .preview__pane .pane[data-kind='agent'] .pane__header .pane__action[data-danger='true']:disabled {
+  opacity: var(--p-disabled);
 }
 
 /*
@@ -4926,6 +5065,55 @@ button.astatus__mode:not(:disabled):hover {
   color: var(--text-primary);
 }
 
+/* On a phone the fixture's pane switch wears the tab strip's look (bare
+   tabs on the ground, an ink bar under the open one, one hairline), so the
+   feed preview reads like the app it stands in for. */
+[data-mobile] .preview__switch {
+  align-items: stretch;
+  gap: var(--p-1);
+  height: var(--p-tabs);
+  padding: 0 var(--p-2);
+  background: var(--p-chrome);
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--p-line);
+}
+
+[data-mobile] .preview__switch button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: auto;
+  padding: 0 var(--p-2);
+  font: var(--p-w-medium) var(--p-t-chrome) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-sm);
+}
+
+[data-mobile] .preview__switch button[data-active='true']::after {
+  content: '';
+  position: absolute;
+  right: var(--p-2);
+  bottom: 0;
+  left: var(--p-2);
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--p-ink);
+}
+
+[data-mobile] .preview__switch button .agent-badge {
+  height: 18px;
+  min-width: 22px;
+}
+
+[data-mobile] .preview__switch button[data-active='true'] {
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink);
+  background: transparent;
+}
+
 .preview__row {
   display: flex;
   flex: 1;
@@ -4983,6 +5171,23 @@ button.astatus__mode:not(:disabled):hover {
 [data-mobile] .preview__term {
   color: var(--text-primary);
   font-size: 13.5px;
+}
+
+/* ?preview=shell: a shell tab's screen and a chat tab's stand-in. */
+.shellpv__term {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-terminal);
+}
+
+.shellpv__chat {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: var(--p-w-medium) var(--p-t-label) / 1.4 var(--p-font);
+  color: var(--p-ink-2);
+  background: var(--p-bg);
 }
 
 @media (prefers-reduced-transparency: reduce) {

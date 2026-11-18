@@ -1,26 +1,40 @@
 /*
  * Phone tokens — the one vocabulary for Forge Web on a phone (`.app[data-mobile]`).
+ * The contract that explains them, with usage, is web/PHONE-DESIGN.md. The
+ * primitives built from them are web/src/phone-ui.css (`.pu-*`).
  *
- *  1. Lime (--p-act) means "act here": Send, the mic, Start, the live dot —
- *     plus "you are here" on the open project in the project sheet. Nothing else is lime
- *     except the voice agent's own cue (--p-agent, the desk's agent lime).
- *  2. Amber (--p-attn) means "something is waiting on you"; red (--p-danger) means "this destroys".
- *  3. Never colour alone: every state also carries a shape ("!", a ring, a dash) or words.
- *  4. Three radii: --p-r-pill (999), --p-r-sheet (20, sheets and cards), --p-r-row (12, rows and inputs).
- *  5. Every tap target is at least --p-hit (44px). Draw it smaller if you like; hit it bigger.
- *  6. Spacing sits on a 4px grid (--p-1 … --p-8). Screen gutters are --p-4 (16px).
- *  7. Type: 16 body, 13–15 chrome, one 13px mono for paths and code. Sentence case, no tracked caps.
- *  8. Two surfaces (--p-bg, --p-surface) plus --p-raised, one hairline (--p-line). No glows, no
- *     gradients on chrome, no cards inside cards, no thick one-side borders on rounded shapes.
- *  9. Motion eases out and never overshoots; --p-dur-* collapse to 0 under reduced motion.
- * 10. Every value maps onto a theme token, so Volt and Paper both hold. No literal colours here.
+ *  1. Roles, not hues. --p-act is the one accent: the primary action, live/go,
+ *     sent. --p-attn means "something is waiting on you"; --p-danger means "this
+ *     destroys / this failed". --p-dict (violet) is your dictation, --p-agent
+ *     (lime) the voice agent. Everything else is neutral ink on neutral surfaces.
+ *  2. Never colour alone: every state also carries a shape ("!", a ring, a tick,
+ *     a moon) or a word.
+ *  3. Elevation is tone first: ground (--p-bg; on a phone the head's
+ *     --p-chrome is the ground too) < surface < raised (--p-raised: sheets,
+ *     menus, banners, toasts). Only a surface that floats over content wears a
+ *     shadow (--p-shadow-*) and the rim (--p-rim).
+ *  4. Hairlines (--p-line) only between rows or sections and on text fields.
+ *     Buttons, chips, pills and tabs are never outlined at rest.
+ *  5. Selected (a choice) = --p-selected fill + full ink + weight 600 + a shape
+ *     (tick, thumb). Open (where you are) = full ink + 600 + an ink bar (the open tab).
+ *     Pressed = --p-pressed, plus --p-press-scale on buttons. Focus = a 2px ink ring.
+ *  6. Radii: --p-r-sm 8, --p-r-row 12, --p-r-card 16, --p-r-sheet 20, --p-r-pill.
+ *  7. Every tap target is at least --p-hit (44px). Draw it smaller if you like.
+ *  8. Spacing sits on a 4px grid (--p-1 … --p-10). Screen gutters are --p-4.
+ *  9. Type: 16 body, 15 chrome, 14 labels, 13 notes, 12 the smallest label.
+ *     Mono only for code, paths, commands and keys. Sentence case, no tracked caps.
+ * 10. Motion eases out and never overshoots; every --p-dur-* is 0 under reduced
+ *     motion. Only transform and opacity animate.
+ * 11. Every colour maps onto a theme token, so all eight themes hold. The only
+ *     literals are the desktop's two voice colours and the shadows' black.
  */
 
 .app[data-mobile],
 .bsheet-layer {
-  /* surfaces */
+  /* surfaces, by elevation */
   --p-bg: var(--bg-base);
   --p-surface: var(--bg-panel);
+  --p-chrome: var(--bg-panel);
   --p-raised: var(--bg-panel-raised);
   --p-press: var(--bg-active);
   --p-hover: var(--bg-hover);
@@ -39,12 +53,35 @@
   --p-act: var(--accent);
   --p-act-ink: var(--text-on-accent);
   --p-act-soft: var(--accent-soft);
+  --p-act-tint: color-mix(in srgb, var(--accent) 16%, transparent);
+  --p-live: var(--accent);
   --p-attn: var(--warn);
   --p-attn-soft: color-mix(in srgb, var(--warn) 13%, var(--bg-base));
+  --p-attn-tint: color-mix(in srgb, var(--warn) 18%, transparent);
   --p-attn-line: var(--warn-line-strong);
   --p-attn-ink: var(--bg-base);
   --p-danger: var(--danger);
   --p-danger-soft: var(--danger-soft);
+  --p-danger-tint: color-mix(in srgb, var(--danger) 16%, transparent);
+  --p-danger-ink: var(--bg-base);
+
+  /* interaction states: ink over whatever surface is under it */
+  --p-fill: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --p-hovered: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  --p-pressed: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  --p-selected: color-mix(in srgb, var(--text-primary) 14%, transparent);
+  --p-selected-press: color-mix(in srgb, var(--text-primary) 19%, transparent);
+  --p-focus: var(--text-primary);
+  --p-focus-w: 2px;
+  --p-focus-gap: 2px;
+  --p-disabled: 0.45;
+  --p-press-scale: 0.97;
+
+  /* elevation: shadows for floating surfaces only */
+  --p-rim: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --p-shadow-float: 0 6px 20px rgb(0 0 0 / 0.32);
+  --p-shadow-sheet: 0 -10px 36px rgb(0 0 0 / 0.38);
+  --p-shadow-banner: 0 12px 32px rgb(0 0 0 / 0.38);
 
   /* charts / usage */
   --p-chart-plan: #6ea8ff;
@@ -55,14 +92,22 @@
   --p-ring-red: #f06a57;
 
   /* shape */
-  --p-r-pill: 999px;
-  --p-r-sheet: 20px;
+  --p-r-sm: 8px;
   --p-r-row: 12px;
+  --p-r-card: 16px;
+  --p-r-sheet: 20px;
+  --p-r-pill: 999px;
 
   /* size */
   --p-hit: 44px;
   --p-row: 56px;
-  --p-bar: 52px;
+  --p-bar: 56px;
+  --p-tabs: 44px;
+  --p-tab: 38px;
+  --p-control: 36px;
+  --p-avatar: 34px;
+  --p-icon: 20px;
+  --p-icon-sm: 16px;
   --p-signal: 2px;
 
   /* space: a 4px grid */
@@ -73,31 +118,60 @@
   --p-5: 20px;
   --p-6: 24px;
   --p-8: 32px;
+  --p-10: 40px;
+  --p-gutter: 16px;
 
   /* type */
   --p-font: var(--font-ui);
   --p-mono: var(--font-mono);
-  --p-t-body: 16px;
+  --p-t-display: 22px;
   --p-t-title: 17px;
+  --p-t-body: 16px;
   --p-t-chrome: 15px;
   --p-t-label: 14px;
   --p-t-small: 13px;
+  --p-t-micro: 12px;
   --p-t-mono: 13px;
+  --p-w-regular: 400;
+  --p-w-medium: 500;
+  --p-w-strong: 600;
+  --p-w-heavy: 700;
+  --p-lh-tight: 1.2;
+  --p-lh: 1.4;
+  --p-lh-read: 1.55;
+  --p-track-tight: -0.01em;
   /* A− / A+ in the ⋯ sheet. Set on `.app` by Workspace; a later wave applies it. */
   --p-text-scale: var(--phone-text-scale, 1);
 
+  /* layers (z-index), low to high */
+  --p-z-float: 5;
+  --p-z-head: 10;
+  --p-z-drawer: calc(var(--z-popover, 60) + 1);
+  --p-z-side: calc(var(--z-popover, 60) + 2);
+  --p-z-sheet: calc(var(--z-popover, 60) + 5);
+  --p-z-banner: calc(var(--z-popover, 60) + 6);
+  --p-z-toast: calc(var(--z-popover, 60) + 7);
+  --p-z-modal: calc(var(--z-popover, 60) + 10);
+
   /* motion: ease out, no overshoot */
   --p-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --p-ease-in: cubic-bezier(0.4, 0, 1, 1);
   --p-ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --p-dur-instant: 80ms;
   --p-dur-fast: 120ms;
   --p-dur: 180ms;
+  --p-dur-exit: 200ms;
+  --p-dur-snap: 220ms;
   --p-dur-sheet: 280ms;
+  --p-enter-y: 8px;
+  --p-enter-scale: 0.96;
   /*
    * The desktop's glide, for the feedback cues that should feel like the
    * desk's: a critically damped spring sampled into linear() (k 520 / c 44,
    * src/components/shell/deck-tokens.css `--spring-glide`). It never passes 1,
-   * so rule 9 holds. Copied, not referenced, so the phone keeps it however
-   * the deck's sheets are loaded.
+   * so rule 10 holds. Copied, not referenced, so the phone keeps it however
+   * the deck's sheets are loaded. Two presets: glide (--p-dur-glide) for
+   * things that travel, snap (--p-dur-snap, same curve) for things that pop.
    */
   --p-glide: linear(0, 0.056, 0.1775, 0.3183, 0.4545, 0.5748, 0.6753, 0.7564, 0.8198, 0.8685, 0.9051, 0.9323, 0.9522, 0.9666, 0.9769, 0.9841, 0.9892, 0.9928, 0.9952, 0.9969, 1);
   --p-dur-glide: 330ms;
@@ -106,7 +180,7 @@
    * The two voices, as on the desk (src/components/DictationCue.css): your
    * dictation is violet, the voice agent is lime. Split on the blue–yellow
    * axis Steve keeps, and by lightness; each also has its own shape and word
-   * (phone-cues.css, PhoneListen.css). The one exception to rule 10: no theme
+   * (phone-cues.css, PhoneListen.css). The one exception to rule 11: no theme
    * carries these, so they are the desktop's values, dark and light.
    */
   --p-dict: #a58bff;
@@ -116,6 +190,47 @@
   --p-agent: #b6f04a;
   --p-agent-2: #e3f36b;
   --p-agent-core: #fbffe8;
+}
+
+/*
+ * The phone's own neutrals (round 2 of the polish, 2026-11-18). On a phone the
+ * stock theme surfaces read busy: WhatsApp's panels are teal-blue slabs, its
+ * secondary ink is blue-grey, and every lifted thing is a different hue. Here
+ * every elevation and every ink level is the theme's own ground mixed with its
+ * own ink, in oklab — one graphite family over the theme's ground, so the
+ * ground keeps the theme's character (WhatsApp's deep green-black) and
+ * everything on it is calm, neutral and evenly spaced in lightness:
+ *   ground (the theme's) → surface +7% → raised +10% → pressed +14%;
+ *   hairline +12%, strong line +22%; ink-2 68%, ink-3 50% of the way to ink.
+ * The head sits on the ground itself (--p-chrome = --p-bg): no slab.
+ * Scoped to the phone (`.app[data-mobile]` and the sheets portalled inside
+ * it), so the deck's sheets keep the base values above. Light themes keep
+ * their own derived set (next block): their cards are lighter than the
+ * ground, which a mix toward ink cannot give.
+ */
+.app[data-mobile],
+.app[data-mobile] .bsheet-layer {
+  --p-chrome: var(--bg-base);
+  --p-surface: color-mix(in oklab, var(--bg-base), var(--text-primary) 7%);
+  --p-raised: color-mix(in oklab, var(--bg-base), var(--text-primary) 10%);
+  --p-press: color-mix(in oklab, var(--bg-base), var(--text-primary) 14%);
+  --p-hover: color-mix(in oklab, var(--bg-base), var(--text-primary) 6%);
+  --p-line: color-mix(in oklab, var(--bg-base), var(--text-primary) 12%);
+  --p-line-strong: color-mix(in oklab, var(--bg-base), var(--text-primary) 22%);
+  --p-ink-2: color-mix(in oklab, var(--text-primary) 68%, var(--bg-base));
+  --p-ink-3: color-mix(in oklab, var(--text-primary) 50%, var(--bg-base));
+}
+
+:root[data-appearance='light'] .app[data-mobile],
+:root[data-appearance='light'] .app[data-mobile] .bsheet-layer {
+  --p-surface: var(--bg-panel);
+  --p-raised: var(--bg-panel-raised);
+  --p-press: var(--bg-active);
+  --p-hover: var(--bg-hover);
+  --p-line: var(--line-hairline);
+  --p-line-strong: var(--line-strong);
+  --p-ink-2: var(--text-secondary);
+  --p-ink-3: var(--text-dim);
 }
 
 /*
@@ -146,22 +261,37 @@
   --p-agent: #6f9a00;
   --p-agent-2: #93a800;
   --p-agent-core: #4a6b00;
+  /* Light grounds need less ink to show a state, and a softer drop. */
+  --p-fill: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  --p-selected: color-mix(in srgb, var(--text-primary) 11%, transparent);
+  --p-rim: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 10%, transparent);
+  --p-shadow-float: 0 6px 20px rgb(0 0 0 / 0.12);
+  --p-shadow-sheet: 0 -10px 36px rgb(0 0 0 / 0.14);
+  --p-shadow-banner: 0 12px 32px rgb(0 0 0 / 0.16);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .app[data-mobile],
   .bsheet-layer {
+    --p-dur-instant: 0ms;
     --p-dur-fast: 0ms;
     --p-dur: 0ms;
+    --p-dur-exit: 0ms;
+    --p-dur-snap: 0ms;
     --p-dur-sheet: 0ms;
     --p-dur-glide: 0ms;
+    --p-press-scale: 1;
   }
 }
 
 :root[data-reduced-motion='true'] .app[data-mobile],
 :root[data-reduced-motion='true'] .bsheet-layer {
+  --p-dur-instant: 0ms;
   --p-dur-fast: 0ms;
   --p-dur: 0ms;
+  --p-dur-exit: 0ms;
+  --p-dur-snap: 0ms;
   --p-dur-sheet: 0ms;
   --p-dur-glide: 0ms;
+  --p-press-scale: 1;
 }

@@ -1,0 +1,1081 @@
+/*
+ * Phone primitives — the shared parts every phone component builds from.
+ * The contract is web/PHONE-DESIGN.md; the values are web/src/phone-tokens.css.
+ *
+ * Inert until opted into: every selector below starts with a `.pu-` class,
+ * and every keyframe is named `pu-*`. Loading this file restyles nothing.
+ * Phone only: the tokens these read live on `.app[data-mobile]` (and on
+ * `.bsheet-layer`, which BottomSheet portals inside it).
+ *
+ * Shared behaviour, said once:
+ *  - Pressed: --p-pressed under the thing; buttons also shrink to --p-press-scale.
+ *  - Selected (a choice): --p-selected fill, full ink, weight 600, and a shape.
+ *  - Focus: a 2px ink ring outside the shape (inside for full-width rows).
+ *  - Disabled: --p-disabled opacity, no press.
+ *  - Motion: transform and opacity only; reduced motion zeroes the durations.
+ */
+
+/* ===================================================================== buttons */
+
+.pu-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--p-2);
+  min-height: var(--p-hit);
+  padding: 0 var(--p-5);
+  margin: 0;
+  font: var(--p-w-strong) var(--p-t-label) / var(--p-lh-tight) var(--p-font);
+  color: var(--p-ink);
+  text-decoration: none;
+  white-space: nowrap;
+  background: var(--p-fill);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease);
+}
+
+.pu-btn > svg {
+  flex: none;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+}
+
+.pu-btn:active:not(:disabled):not([aria-disabled='true']) {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.pu-btn--primary {
+  color: var(--p-act-ink);
+  background: var(--p-act);
+}
+
+.pu-btn--primary:active:not(:disabled):not([aria-disabled='true']) {
+  background: color-mix(in srgb, var(--p-act) 86%, var(--p-ink));
+}
+
+.pu-btn--quiet {
+  background: transparent;
+}
+
+.pu-btn--danger {
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+}
+
+.pu-btn--danger:active:not(:disabled):not([aria-disabled='true']) {
+  background: color-mix(in srgb, var(--p-danger) 26%, transparent);
+}
+
+.pu-btn--wide {
+  width: 100%;
+}
+
+/* A 36px pill inside a dense row; its hit still reaches 44px. */
+.pu-btn--sm {
+  min-height: var(--p-control);
+  padding: 0 var(--p-4);
+}
+
+.pu-btn--sm::before {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+
+/* Icon-only: a 44px round, drawn bare until pressed or open. */
+.pu-icon-btn {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--p-hit);
+  height: var(--p-hit);
+  padding: 0;
+  margin: 0;
+  color: var(--p-ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease);
+}
+
+.pu-icon-btn > svg {
+  width: var(--p-icon);
+  height: var(--p-icon);
+}
+
+.pu-icon-btn:active:not(:disabled) {
+  color: var(--p-ink);
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.pu-icon-btn[aria-expanded='true'],
+.pu-icon-btn[aria-pressed='true'] {
+  color: var(--p-ink);
+  background: var(--p-selected);
+}
+
+.pu-btn:focus-visible,
+.pu-icon-btn:focus-visible,
+.pu-chip:focus-visible,
+.pu-seg__opt:focus-visible,
+.pu-switch:focus-visible,
+.pu-banner:focus-visible,
+.pu-toast:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+.pu-btn:disabled,
+.pu-btn[aria-disabled='true'],
+.pu-icon-btn:disabled,
+.pu-chip:disabled,
+.pu-seg__opt:disabled,
+.pu-switch:disabled {
+  opacity: var(--p-disabled);
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .pu-btn--quiet:hover:not(:disabled),
+  .pu-icon-btn:hover:not(:disabled),
+  .pu-row:hover:not(:disabled):not([aria-selected='true']):not([aria-checked='true']),
+  .pu-menu__item:hover:not(:disabled) {
+    background: var(--p-hovered);
+  }
+}
+
+/* ======================================================================= rows */
+
+.pu-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  width: 100%;
+  min-height: var(--p-row);
+  padding: var(--p-2) var(--p-3);
+  margin: 0;
+  font: inherit;
+  font-family: var(--p-font);
+  text-align: left;
+  text-decoration: none;
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-row);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+div.pu-row,
+span.pu-row {
+  cursor: default;
+}
+
+button.pu-row:active:not(:disabled),
+a.pu-row:active,
+label.pu-row:active {
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant);
+}
+
+.pu-row:focus-visible,
+.pu-menu__item:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
+}
+
+.pu-row:disabled,
+.pu-row[aria-disabled='true'] {
+  cursor: default;
+}
+
+.pu-row:disabled .pu-row__icon,
+.pu-row:disabled .pu-row__title,
+.pu-row[aria-disabled='true'] .pu-row__icon,
+.pu-row[aria-disabled='true'] .pu-row__title {
+  color: var(--p-ink-3);
+}
+
+.pu-row__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--p-control);
+  height: var(--p-control);
+  color: var(--p-ink-2);
+}
+
+.pu-row__icon > svg {
+  width: var(--p-icon);
+  height: var(--p-icon);
+}
+
+.pu-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pu-row__title {
+  font-size: var(--p-t-body);
+  font-weight: var(--p-w-medium);
+  line-height: 1.3;
+  color: var(--p-ink);
+  overflow-wrap: anywhere;
+}
+
+.pu-row__note {
+  font-size: var(--p-t-small);
+  line-height: 1.35;
+  color: var(--p-ink-2);
+  overflow-wrap: anywhere;
+}
+
+.pu-row__trail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  font-size: var(--p-t-label);
+  color: var(--p-ink-2);
+}
+
+.pu-row[data-tone='danger'] .pu-row__title,
+.pu-row[data-tone='danger'] .pu-row__icon {
+  color: var(--p-danger);
+}
+
+/* A picker row: the selected one takes the fill, the weight and the tick. */
+.pu-row[aria-selected='true'],
+.pu-row[aria-checked='true'] {
+  background: var(--p-selected);
+}
+
+.pu-row[aria-selected='true'] .pu-row__title,
+.pu-row[aria-checked='true'] .pu-row__title {
+  font-weight: var(--p-w-strong);
+}
+
+button.pu-row[aria-selected='true']:active,
+button.pu-row[aria-checked='true']:active {
+  background: var(--p-selected-press);
+}
+
+/* The tick: present in the markup of every option, shown only when chosen. */
+.pu-check {
+  flex: none;
+  width: var(--p-icon);
+  height: var(--p-icon);
+  color: var(--p-ink);
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+[aria-selected='true'] > .pu-check,
+[aria-checked='true'] > .pu-check,
+[aria-pressed='true'] > .pu-check,
+[aria-selected='true'] > .pu-row__trail > .pu-check,
+[aria-checked='true'] > .pu-row__trail > .pu-check {
+  opacity: 1;
+  transform: none;
+}
+
+/* ===================================================================== sheets */
+
+.pu-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 48px - env(safe-area-inset-top, 0px));
+  padding-bottom: calc(var(--p-2) + env(safe-area-inset-bottom, 0px));
+  font-family: var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border-radius: var(--p-r-sheet) var(--p-r-sheet) 0 0;
+  box-shadow: var(--p-rim), var(--p-shadow-sheet);
+  overflow: hidden;
+}
+
+.pu-sheet__handle {
+  flex: none;
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: var(--p-2) auto var(--p-1);
+  border-radius: var(--p-r-pill);
+  background: color-mix(in srgb, var(--p-ink) 28%, transparent);
+}
+
+.pu-sheet__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--p-3);
+  padding: var(--p-2) var(--p-2) var(--p-3) var(--p-5);
+}
+
+.pu-sheet__titles {
+  flex: 1;
+  min-width: 0;
+  padding-top: var(--p-2);
+}
+
+.pu-sheet__title {
+  margin: 0;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: var(--p-track-tight);
+  color: var(--p-ink);
+}
+
+.pu-sheet__sub {
+  margin: 2px 0 0;
+  font-size: var(--p-t-small);
+  line-height: 1.4;
+  color: var(--p-ink-2);
+}
+
+.pu-sheet__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--p-2);
+}
+
+.pu-sheet__foot {
+  flex: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--p-2);
+  padding: var(--p-3) var(--p-4) var(--p-1);
+}
+
+.pu-section + .pu-section {
+  margin-top: var(--p-2);
+}
+
+.pu-section__label {
+  display: block;
+  padding: var(--p-3) var(--p-3) var(--p-1);
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-strong);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.pu-divider {
+  height: 1px;
+  margin: var(--p-2) var(--p-3);
+  border: 0;
+  background: var(--p-line);
+}
+
+.pu-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--p-scrim);
+  animation: pu-fade var(--p-dur-sheet) var(--p-ease) both;
+}
+
+/* ================================================================ menu / pop-over */
+
+.pu-menu {
+  min-width: 200px;
+  max-width: calc(100vw - 2 * var(--p-gutter));
+  padding: 6px;
+  font-family: var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+  transform-origin: var(--pu-origin, top right);
+  animation: pu-pop var(--p-dur-snap) var(--p-glide) both;
+}
+
+.pu-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--p-3);
+  margin: 0;
+  font: var(--p-w-medium) var(--p-t-body) / var(--p-lh-tight) var(--p-font);
+  text-align: left;
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+.pu-menu__item > svg {
+  flex: none;
+  width: var(--p-icon);
+  height: var(--p-icon);
+  color: var(--p-ink-2);
+}
+
+.pu-menu__item:active:not(:disabled) {
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant);
+}
+
+.pu-menu__item:disabled {
+  color: var(--p-ink-3);
+  cursor: default;
+}
+
+.pu-menu__item[data-tone='danger'],
+.pu-menu__item[data-tone='danger'] > svg {
+  color: var(--p-danger);
+}
+
+.pu-menu__sep {
+  height: 1px;
+  margin: 6px var(--p-2);
+  background: var(--p-line);
+}
+
+/* ========================================================== segmented control */
+
+.pu-seg {
+  display: flex;
+  gap: 2px;
+  min-height: var(--p-hit);
+  padding: 3px;
+  background: var(--p-fill);
+  border-radius: var(--p-r-row);
+}
+
+.pu-seg__opt {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 var(--p-2);
+  margin: 0;
+  font: var(--p-w-medium) var(--p-t-label) / var(--p-lh-tight) var(--p-font);
+  color: var(--p-ink-2);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease);
+}
+
+.pu-seg__opt > svg {
+  flex: none;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+}
+
+.pu-seg__opt:active:not(:disabled) {
+  background: var(--p-pressed);
+}
+
+.pu-seg__opt[aria-pressed='true'],
+.pu-seg__opt[aria-checked='true'],
+.pu-seg__opt[aria-selected='true'] {
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink);
+  background: var(--p-selected);
+}
+
+/* ======================================================================= chips */
+
+.pu-chip {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--p-control);
+  padding: 0 14px;
+  margin: 0;
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  white-space: nowrap;
+  background: var(--p-fill);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease);
+}
+
+.pu-chip::before {
+  content: '';
+  position: absolute;
+  inset: -4px -2px;
+}
+
+.pu-chip:active:not(:disabled) {
+  background: var(--p-pressed);
+}
+
+.pu-chip[aria-pressed='true'],
+.pu-chip[aria-selected='true'],
+.pu-chip[aria-checked='true'] {
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink);
+  background: var(--p-selected);
+}
+
+.pu-chip > .pu-check {
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+  margin-left: -4px;
+}
+
+.pu-chip:not([aria-pressed='true']):not([aria-selected='true']):not([aria-checked='true']) > .pu-check {
+  display: none;
+}
+
+/* ============================================================ badges and marks */
+
+.pu-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 var(--p-2);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  white-space: nowrap;
+  background: var(--p-fill);
+  border-radius: var(--p-r-pill);
+}
+
+.pu-badge[data-tone='attn'] {
+  color: var(--p-ink);
+  background: var(--p-attn-tint);
+}
+
+.pu-badge[data-tone='danger'] {
+  color: var(--p-ink);
+  background: var(--p-danger-tint);
+}
+
+.pu-badge[data-tone='live'] {
+  color: var(--p-ink);
+  background: var(--p-act-tint);
+}
+
+/* The count on a button: a solid disc with a number, edged in the surface under it. */
+.pu-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font: var(--p-w-heavy) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-attn-ink);
+  background: var(--p-attn);
+  border-radius: var(--p-r-pill);
+  box-shadow: 0 0 0 2px var(--pu-edge, var(--p-chrome));
+}
+
+/* "!" in a filled disc: the shape that says "waiting on you" without colour. */
+.pu-bang {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font: 800 var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-attn-ink);
+  background: var(--p-attn);
+  border-radius: 50%;
+}
+
+/* The live dot: a filled core inside a ring. */
+.pu-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--p-live);
+  box-shadow: 0 0 0 3px var(--p-act-tint);
+}
+
+/* A shape and a word together: a state, as every surface names it. */
+.pu-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--p-w-strong) var(--p-t-small) / 1.2 var(--p-font);
+  color: var(--p-ink-2);
+}
+
+.pu-state > svg {
+  flex: none;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+}
+
+.pu-state[data-state='waiting'] {
+  color: var(--p-ink);
+}
+
+.pu-state[data-state='done'] > svg {
+  color: var(--p-act);
+}
+
+.pu-state[data-state='failed'] {
+  color: var(--p-danger);
+}
+
+/* ===================================================================== switch */
+
+.pu-switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  background: color-mix(in srgb, var(--p-ink) 22%, transparent);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--p-dur) var(--p-ease);
+}
+
+/* 44px of finger for a 26px track. */
+.pu-switch::before {
+  content: '';
+  position: absolute;
+  inset: -9px 0;
+}
+
+.pu-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--p-ink);
+  transition:
+    transform var(--p-dur-snap) var(--p-glide),
+    background-color var(--p-dur) var(--p-ease);
+}
+
+.pu-switch[aria-checked='true'] {
+  background: var(--p-act);
+}
+
+.pu-switch[aria-checked='true']::after {
+  background: var(--p-act-ink);
+  transform: translateX(18px);
+}
+
+/* ================================================================= text field */
+
+.pu-field {
+  display: grid;
+  gap: 6px;
+}
+
+.pu-field__label {
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink-2);
+}
+
+.pu-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  margin: 0;
+  /* 16px, or a phone browser zooms the page on focus. */
+  font: var(--p-w-regular) var(--p-t-body) / var(--p-lh) var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-fill);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+  outline: none;
+  resize: none;
+  transition:
+    border-color var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur-fast) var(--p-ease);
+}
+
+.pu-input::placeholder {
+  color: var(--p-ink-3);
+}
+
+.pu-input:focus-visible,
+.pu-input:focus {
+  border-color: var(--p-ink-2);
+  box-shadow: 0 0 0 1px var(--p-ink-2);
+}
+
+.pu-input[aria-invalid='true'] {
+  border-color: var(--p-danger);
+}
+
+.pu-field__hint {
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.pu-field__hint[data-tone='danger'] {
+  color: var(--p-danger);
+}
+
+/* ============================================= banner, toast and inline notice */
+
+.pu-banner,
+.pu-toast,
+.pu-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--p-3);
+  font-family: var(--p-font);
+  color: var(--p-ink);
+}
+
+/* Heads-up, from the top: the one floating surface that interrupts. */
+.pu-banner {
+  min-height: 60px;
+  padding: var(--p-2) var(--p-2) var(--p-2) var(--p-4);
+  background: var(--p-raised);
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-banner);
+  animation: pu-drop var(--p-dur-glide) var(--p-glide) both;
+}
+
+/* Feedback, from the bottom, above the composer. */
+.pu-toast {
+  min-height: 48px;
+  padding: 6px 6px 6px var(--p-4);
+  background: var(--p-raised);
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+  animation: pu-rise var(--p-dur-glide) var(--p-glide) both;
+}
+
+/* In the flow of a page or a sheet; never floats. */
+.pu-notice {
+  align-items: start;
+  padding: var(--p-3) var(--p-4);
+  background: var(--p-fill);
+  border-radius: var(--p-r-row);
+}
+
+.pu-notice[data-tone='attn'] {
+  background: var(--p-attn-tint);
+}
+
+.pu-notice[data-tone='danger'] {
+  background: var(--p-danger-tint);
+}
+
+.pu-banner__mark,
+.pu-toast__mark,
+.pu-notice__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--p-ink-2);
+}
+
+.pu-banner[data-tone='danger'] .pu-banner__mark,
+.pu-toast[data-tone='danger'] .pu-toast__mark,
+.pu-notice[data-tone='danger'] .pu-notice__mark {
+  color: var(--p-danger);
+}
+
+.pu-toast[data-tone='done'] .pu-toast__mark {
+  color: var(--p-act);
+}
+
+.pu-banner__mark > svg,
+.pu-toast__mark > svg,
+.pu-notice__mark > svg {
+  width: var(--p-icon);
+  height: var(--p-icon);
+}
+
+.pu-banner__text,
+.pu-toast__text,
+.pu-notice__text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.pu-banner__title {
+  font-size: var(--p-t-chrome);
+  font-weight: var(--p-w-strong);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pu-banner__body,
+.pu-notice__body {
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pu-toast__text,
+.pu-notice__title {
+  font-size: var(--p-t-label);
+  line-height: var(--p-lh);
+}
+
+.pu-notice__title {
+  font-weight: var(--p-w-strong);
+}
+
+.pu-banner__actions,
+.pu-toast__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ============================================================ loading, empty */
+
+.pu-skeleton {
+  display: block;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--p-fill);
+  animation: pu-breathe 1.4s var(--p-ease) infinite alternate;
+}
+
+.pu-skeleton--block {
+  height: 64px;
+  border-radius: var(--p-r-row);
+}
+
+.pu-spinner {
+  flex: none;
+  display: inline-block;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: pu-spin 0.8s linear infinite;
+}
+
+.pu-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--p-2);
+  padding: var(--p-8) var(--p-6);
+  text-align: center;
+  font-family: var(--p-font);
+}
+
+.pu-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--p-2);
+  color: var(--p-ink-2);
+  background: var(--p-fill);
+  border-radius: var(--p-r-card);
+}
+
+.pu-empty__icon > svg {
+  width: 26px;
+  height: 26px;
+}
+
+.pu-empty__title {
+  margin: 0;
+  font-size: var(--p-t-title);
+  font-weight: 650;
+  color: var(--p-ink);
+}
+
+.pu-empty__body {
+  max-width: 32ch;
+  margin: 0;
+  font-size: var(--p-t-label);
+  line-height: var(--p-lh-read);
+  color: var(--p-ink-2);
+}
+
+.pu-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--p-2);
+  margin-top: var(--p-3);
+}
+
+/* ===================================================================== motion */
+
+/* Enter: put the class on the element as it mounts. Exit: swap to a pu-out-*
+   class and unmount on `animationend` (or after --p-dur-exit). */
+.pu-in-rise {
+  animation: pu-rise var(--p-dur-glide) var(--p-glide) both;
+}
+
+.pu-in-drop {
+  animation: pu-drop var(--p-dur-glide) var(--p-glide) both;
+}
+
+.pu-in-pop {
+  animation: pu-pop var(--p-dur-snap) var(--p-glide) both;
+}
+
+.pu-in-fade {
+  animation: pu-fade var(--p-dur) var(--p-ease) both;
+}
+
+.pu-out-sink {
+  animation: pu-rise var(--p-dur-exit) var(--p-ease-in) reverse both;
+}
+
+.pu-out-lift {
+  animation: pu-drop var(--p-dur-exit) var(--p-ease-in) reverse both;
+}
+
+.pu-out-fade {
+  animation: pu-fade var(--p-dur-exit) var(--p-ease-in) reverse both;
+}
+
+/* Press feedback for anything that is not a .pu-btn (a card, a tile). */
+.pu-press {
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.pu-press:active {
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+@keyframes pu-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--p-enter-y, 8px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pu-drop {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--p-enter-y, 8px) * -1.5));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pu-pop {
+  from {
+    opacity: 0;
+    transform: scale(var(--p-enter-scale, 0.96));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pu-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pu-breathe {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pu-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Reduced motion: the durations are already 0 (phone-tokens.css); the loops stop too. */
+@media (prefers-reduced-motion: reduce) {
+  .pu-skeleton,
+  .pu-spinner {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .pu-skeleton,
+:root[data-reduced-motion='true'] .pu-spinner {
+  animation: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pu-scrim {
+    background: color-mix(in srgb, var(--p-bg) 88%, transparent);
+  }
+}

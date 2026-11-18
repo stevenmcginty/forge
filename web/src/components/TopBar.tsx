@@ -7,14 +7,15 @@ import { collectLeaves } from '@/lib/splitTree'
 import { handoffTargets, handoffTargetWire, paneHandoffChip, type HandoffTarget } from '@shared/handoffview'
 import type { TerminalTab } from '@shared/types'
 import { useActiveProject, useForge, useProfiles, useWorkspace } from '../state'
-import { ConnectionSheet, LinkDot, linkStateOf, linkWord, useTrackLastHeard } from './ConnectionSheet'
+import { ConnectionSheet, linkStateOf, linkWord, useTrackLastHeard, type LinkState } from './ConnectionSheet'
 import { ContextChip } from './ContextChip'
 import { HandoffMenu } from './HandoffMenu'
 import { MoreSheet } from './MoreSheet'
+import { PhoneIcon } from './PhoneIcon'
 import { DeckTopBar, type DeckMenuRow } from '../deck/DeckTopBar'
 import { useScreenPane } from '../lib/pane-screen'
 import type { BarPlace, DeckView } from '../deck/view'
-import { WaitingBadge, WaitingPill } from './WaitingPill'
+import { WaitingPill } from './WaitingPill'
 import { rustDeskLink } from './Workspace'
 
 /**
@@ -27,6 +28,22 @@ import { rustDeskLink } from './Workspace'
  * lines it scrolls in place rather than eating the terminal underneath it.
  */
 const SEED_MAX_GROW_PX = 92
+
+/**
+ * The word the phone's bar shows beside the link glyph when the link is not
+ * live — short, because it shares the row with the dial. The full sentence is
+ * in the button's label and in the connection sheet it opens.
+ */
+const BAR_LINK_WORD: Record<Exclude<LinkState, 'live'>, string> = {
+  quiet: 'Quiet',
+  reconnecting: 'Reconnecting',
+  asleep: 'Asleep'
+}
+
+/** The project tile's letter: the first letter or digit of its name. */
+function projectInitial(name: string): string {
+  return (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '·').toUpperCase()
+}
 
 /**
  * The app bar. Same tokens as the desktop, different job: identity, the
@@ -306,19 +323,26 @@ export function TopBar({
             onClick={onToggleRail}
             data-testid="phone-projects"
           >
-            <span className="ptop__menu waitbadge-host">
-              <Icon name="folder" size={20} />
-              {offline ? null : <WaitingBadge />}
+            {/* The project's tile: its initial on its own colour. Folder glyph
+                until one is picked. The waiting count is said once, by the
+                waiting pill beside it (and in this button's label), not again
+                on the tile. */}
+            <span className="ptop__menu" style={project ? ({ '--dot': project.color } as CSSProperties) : undefined}>
+              {project ? (
+                <span className="ptop__initial" aria-hidden="true">
+                  {projectInitial(project.name)}
+                </span>
+              ) : (
+                <Icon name="folder" size={18} />
+              )}
             </span>
             <span className="ptop__label" aria-hidden="true">
-              <span className="ptop__kicker">Project</span>
               <span className="ptop__title">
-                {project ? <span className="ptop__dot" style={{ background: project.color }} /> : null}
                 <span className="ptop__name">{project?.name ?? 'Pick a project'}</span>
               </span>
             </span>
             <span className="ptop__chev" aria-hidden="true">
-              <Icon name="chevronDown" size={16} />
+              <PhoneIcon name="chevron-down" size={18} />
             </span>
           </button>
 
@@ -326,6 +350,8 @@ export function TopBar({
             {offline ? null : <WaitingPill />}
             {/* The pane's context, always on show; a tap drops its details from the bar. */}
             <ContextChip paneId={shownLeaf?.id ?? null} profile={shownProfile} />
+            {/* The link: a shape per state (ring and core, empty ring, broken
+                ring, moon), and a word beside it whenever it is not live. */}
             <button
               type="button"
               className="ptop__btn ptop__link"
@@ -336,7 +362,14 @@ export function TopBar({
               onClick={() => setLinkOpen(true)}
               data-testid="phone-link"
             >
-              <LinkDot link={link} />
+              <span className="ptop__linkface">
+                <PhoneIcon name={`link-${link}`} className="ptop__linkglyph" />
+                {link === 'live' ? null : (
+                  <span className="ptop__linkword" aria-hidden="true">
+                    {BAR_LINK_WORD[link]}
+                  </span>
+                )}
+              </span>
             </button>
             <button
               ref={moreBtnRef}
@@ -348,13 +381,7 @@ export function TopBar({
               onClick={() => setMoreOpen(true)}
               data-testid="phone-more"
             >
-              {/* The phone's own dots, 4px across: the shared glyph's are under
-                  2px, and on Steve's phone the button all but vanished. */}
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-                <circle cx="5" cy="12" r="2" />
-                <circle cx="12" cy="12" r="2" />
-                <circle cx="19" cy="12" r="2" />
-              </svg>
+              <PhoneIcon name="more" size={24} />
             </button>
           </div>
         </header>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { AgentProfile, ClaudePermissionMode } from '@shared/types'
 import { agentModels, BUILTIN_AGENT_PROFILES, effortLevels, matchAgentModel, permissionModes } from '@shared/agents'
+import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { mergeBlocks, richFromText, transcriptFromLines } from '@/lib/feed'
 import { screenTurns } from '../lib/screen-turns'
@@ -37,7 +38,7 @@ function PreviewDrawer(): ReactNode {
   )
 }
 
-const PREVIEW_VOICE = {
+export const PREVIEW_VOICE = {
   start: () => undefined,
   mode: () => undefined,
   stop: () => undefined,
@@ -96,7 +97,7 @@ function usePreviewVoice(): { voice: WebVoiceState; open: boolean } {
   }
 }
 
-function PreviewListen(): ReactNode {
+export function PreviewListen(): ReactNode {
   const { voice, open } = usePreviewVoice()
   return (
     <ListenUnit
@@ -111,12 +112,12 @@ function PreviewListen(): ReactNode {
   )
 }
 
-function PreviewLine(): ReactNode {
+export function PreviewLine(): ReactNode {
   const { voice } = usePreviewVoice()
   return <ListenLine voice={{ ...voice, caption: voice.phase === 'listening' ? { role: 'assistant', text: 'Which file should I open?' } : null }} endedShown={false} onPick={() => undefined} />
 }
 
-function PreviewFan(): ReactNode {
+export function PreviewFan(): ReactNode {
   const { voice, open } = usePreviewVoice()
   return (
     <VoiceFan
@@ -466,6 +467,7 @@ export function Preview(): ReactNode {
         <div className="preview__switch">
           {PANES.map((p, i) => (
             <button key={p.key} type="button" data-active={i === which} onClick={() => setWhich(i)}>
+              <AgentBadge profile={p.profile} size="sm" />
               {p.profile.name}
             </button>
           ))}

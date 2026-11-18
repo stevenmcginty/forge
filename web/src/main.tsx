@@ -34,6 +34,7 @@ import '@/components/CommandsFlyout.css'
 import '@/components/rail/RailSection.css'
 import '@/components/rail/GitSection.css'
 import './styles.css'
+import './phone-ui.css'
 
 import { App } from './App'
 import { paintStoredTheme } from './deck/theme'
@@ -45,6 +46,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { PhoneTopBarPreview } from './components/PhoneTopBarPreview'
 import { PowerDrawPreview } from './components/PowerDrawPreview'
 import { Preview } from './components/Preview'
+import { ShellPreview } from './components/ShellPreview'
 import { SpeechKeyCardPreview } from './components/SpeechKeyCardPreview'
 import { RepoProvider } from './lib/repo'
 import { ForgeProvider } from './state'
@@ -109,6 +111,8 @@ createRoot(host).render(
       <SpeechKeyCardPreview />
     ) : preview === 'decktop' ? (
       <TopBarPreview />
+    ) : preview === 'shell' ? (
+      <ShellPreview />
     ) : preview === 'phonetop' ? (
       <PhoneTopBarPreview />
     ) : (
