@@ -24,6 +24,7 @@ The one design language for the phone face (`.app[data-mobile]`). Tokens: `web/s
 ```html
 <button class="pu-btn pu-btn--primary">Send</button> <button class="pu-btn pu-btn--quiet">Cancel</button>
 <button class="pu-icon-btn" aria-label="More"><PhoneIcon name="more"/></button>
+<button class="pu-btn pu-btn--danger pu-btn--wide">Delete project</button> <button class="pu-btn pu-btn--sm">Open</button>
 ```
 Don't: outline a button; put two primaries side by side; make a danger action primary-coloured; icon-only without `aria-label`.
 
@@ -41,6 +42,10 @@ Don't: a second header style, a bordered card inside the sheet, a title over 1 l
 Don't: grid-of-cells pickers (model / effort / mode are rows or a segmented control, never a cell grid); ticks AND fills AND outlines together; icon tiles with coloured backgrounds.
 
 **Menu / pop-over** `.pu-menu` (raised card, pops from `--pu-origin`, e.g. `style="--pu-origin: top right"`) > `.pu-menu__item` (48 tall, glyph + label, `data-tone="danger"`) · `.pu-menu__sep`. For 2–6 actions anchored to a control; more than 6 or anything with notes → a sheet.
+```html
+<div class="pu-menu" role="menu" style="--pu-origin: top right"><button class="pu-menu__item" role="menuitem"><PhoneIcon name="link-live"/>Copy link</button>
+<div class="pu-menu__sep"></div><button class="pu-menu__item" role="menuitem" data-tone="danger"><PhoneIcon name="close"/>Close tab</button></div>
+```
 Don't: invent another overlay look (fan, frosted card, bright-outlined pop-over). Every overlay is a sheet, a menu, a banner or a toast.
 
 **Segmented control** `.pu-seg` > `.pu-seg__opt` (`aria-pressed`/`aria-checked`/`aria-selected`). 2–5 short options (view switch Chat · Cards · Terminal, effort Low…Max). Icons optional.
@@ -50,19 +55,39 @@ Don't: invent another overlay look (fan, frosted card, bright-outlined pop-over)
 Don't: more than 5 options (use picker rows); labels over one word or two short ones.
 
 **Chip** `.pu-chip` (36 drawn, 44 hit, `--p-fill`; selected = fill + 600 + optional leading `.pu-check`). Filters, quick replies, pane chips. **Badge** `.pu-badge` (22 tall, 12/600; `data-tone="attn|danger|live"`, a word inside). **Count** `.pu-count` (solid amber disc with a number; `--pu-edge` = the surface it sits on). **Marks:** `.pu-bang` ("!" disc), `.pu-dot` (live), `.pu-spinner`, `.pu-state[data-state="waiting|working|done|failed"]` = shape + word.
+```html
+<button class="pu-chip" aria-pressed="true"><PhoneIcon name="check" className="pu-check"/>Claude</button>   <!-- the tick shows only when pressed/selected/checked -->
+<span class="pu-badge" data-tone="attn">Waiting</span> <span class="pu-badge" data-tone="live"><span class="pu-dot"></span>Live</span>
+<button class="pu-icon-btn" aria-label="Waiting, 2">…<span class="pu-count" style="--pu-edge: var(--p-bg)">2</span></button>
+<span class="pu-bang">!</span> <span class="pu-spinner" role="status" aria-label="Working"></span>
+<span class="pu-state" data-state="waiting"><PhoneIcon name="alert"/>Waiting</span>  <span class="pu-state" data-state="done"><PhoneIcon name="done"/>Done</span>
+```
 Don't: a badge without a word or number; colour as the only difference between two badges.
 
 **Switch** `.pu-switch` on a `button role="switch" aria-checked`. On = accent track, knob right. Put it in a `.pu-row__trail`; the row's tap toggles it. **Text field** `.pu-field` > `.pu-field__label` + `.pu-input` (16px text, hairline, `aria-invalid`) + `.pu-field__hint` (`data-tone="danger"` for the error sentence).
+```html
+<label class="pu-row"><span class="pu-row__text"><span class="pu-row__title">Sound</span></span><span class="pu-row__trail"><button class="pu-switch" role="switch" aria-checked="true" aria-label="Sound"></button></span></label>
+<div class="pu-field"><label class="pu-field__label" for="n">Name</label><input id="n" class="pu-input" aria-invalid="true"/><p class="pu-field__hint" data-tone="danger">Use at least 2 letters.</p></div>
+```
 
 **Banner** (heads-up, top, interrupts) `.pu-banner[data-tone]` > `.pu-banner__mark` (shape) · `.pu-banner__text` > `.pu-banner__title` (1 line) + `.pu-banner__body` (≤2 lines) · `.pu-banner__actions`. Position: fixed, top `calc(env(safe-area-inset-top) + 8px)`, sides 8px, `z-index: var(--p-z-banner)`. **Toast** (feedback, bottom, above the composer) `.pu-toast[data-tone="done|danger"]` > `__mark __text __actions`. **Inline notice** (in the flow, never floats) `.pu-notice[data-tone="attn|danger"]` > `__mark __text` > `__title` + `__body`.
 ```html
 <div class="pu-banner" role="status" data-tone="attn"><span class="pu-banner__mark"><span class="pu-bang">!</span></span><div class="pu-banner__text"><span class="pu-banner__title">Codex is asking</span><span class="pu-banner__body">Edit src/lib/feed.ts?</span></div><div class="pu-banner__actions"><button class="pu-btn pu-btn--sm">Open</button></div></div>
 ```
+```html
+<div class="pu-toast" role="status" data-tone="done"><span class="pu-toast__mark"><PhoneIcon name="done"/></span><span class="pu-toast__text">Sent to Codex</span><div class="pu-toast__actions"><button class="pu-btn pu-btn--sm pu-btn--quiet">Undo</button></div></div>
+<div class="pu-notice" data-tone="danger"><span class="pu-notice__mark"><PhoneIcon name="alert"/></span><div class="pu-notice__text"><span class="pu-notice__title">Couldn't reach STEVE-LAPTOP</span><span class="pu-notice__body">Check it's awake, then try again.</span></div></div>
+```
 Don't: a coloured left stripe, a full-colour background, two banners at once (one at a time by priority).
 
 **Loading / empty** `.pu-skeleton` (`--block` for a card) for content that will arrive; `.pu-spinner` inline for an action in flight; `.pu-empty` > `.pu-empty__icon` · `__title` · `__body` · `__actions`. Empty = what is missing + the one thing to do. **Divider** `.pu-divider` between sections only. **Scrim** `.pu-scrim`. **Press** `.pu-press` for tiles/cards.
+```html
+<span class="pu-skeleton" style="width: 60%"></span><div class="pu-skeleton pu-skeleton--block"></div>
+<div class="pu-empty"><span class="pu-empty__icon"><PhoneIcon name="plus"/></span><h3 class="pu-empty__title">No tabs yet</h3><p class="pu-empty__body">Open a project to start an agent.</p><div class="pu-empty__actions"><button class="pu-btn pu-btn--primary">Open project</button></div></div>
+<hr class="pu-divider"/> <div class="pu-scrim"></div> <button class="pu-press">…tile…</button>
+```
 
-**Icons** `<PhoneIcon name size? className?>`: 24 grid, 1.8 round stroke, `currentColor`. Names: more check chevron-down/right/left close plus working done alert link-live link-quiet link-reconnecting link-asleep. Need another? Append one entry to its `PATHS`. Agent identity = the maker's real logo (`AgentBadge`), drawn bare on the phone (no tile).
+**Icons** `<PhoneIcon name size? className?>`: 24 grid, 1.8 round stroke, `currentColor`. Names: more check chevron-down/right/left close plus working done alert link-live link-quiet link-reconnecting link-asleep (list in §9). Need another? Append one entry to its `PATHS`. Agent identity = the maker's real logo (`AgentBadge`), drawn bare on the phone (no tile).
 
 ## 3. The head (reference implementation)
 Top bar and tab strip are one open band on the ground, closed by ONE hairline under the tabs; no slab, no boxes. Bar (56), left to right: project button (34px tile: the project's initial on a wash of its colour; name 20/700 — 18 under 375px; ⌄) · waiting pill (bare: amber `!` disc + count in ink; the only amber in the bar; the count is NOT repeated on the tile) · the dial (ContextChip) · link (live: neutral ring-and-core glyph alone; quiet/reconnecting/asleep: a pill with shape + word; the word drops ≤430px when the waiting pill is up) · ⋯ in `--p-ink-2`. Tab strip (44): bare tabs (logo at 70%, title, state shape) in `--p-ink-2`; the open tab full ink + 600 + the ink bar (it grows in with `--p-dur-snap`). Overflow is a 64px fade into the ground at the edge that has more — never a hard-cut fragment. `+` bare at the end, outside the scroller. A split tab's panes = `.pu-chip`-style chips on the ground below.
@@ -86,3 +111,80 @@ Plain, short, calm, sentence case, verbs first on buttons. No "please", no excla
 7. Motion: enter/exit with `.pu-in-*` / `.pu-out-*` or the same tokens; `navigator.vibrate` → `buzz()`.
 8. Words: rewrite every string with §6. Keep `aria-label`, `data-testid`, `role` exactly.
 9. Look at it: 390×844 and 360×780 in whatsapp-dark, whatsapp-light, volt, paper; one landscape (956×440); reduced motion. Compare with the head at `/?preview=shell&phone` — it must look made by the same hand.
+
+## 8. Tokens (`.app[data-mobile]`, values in `whatsapp-dark`; "theme" = read from the active theme)
+`whatsapp-dark` theme inputs: ground `--bg-base` #0b141a, ink `--text-primary` #e9edef, accent #00a884, danger #f15c6d, warn #ffd279. "mix(a, b n%)" = `color-mix(in oklab, a, b n%)`; "ink n%" = ink at n% alpha over what is under it.
+
+**Surfaces and lines**
+| Token | Value | For |
+|---|---|---|
+| `--p-bg` | theme `--bg-base` | ground: pages, chat, the head |
+| `--p-chrome` | = `--p-bg` | the head (no slab) |
+| `--p-surface` | mix(bg, ink 7%) | cards, inline wells |
+| `--p-raised` | mix(bg, ink 10%) | sheets, menus, banners, toasts |
+| `--p-press` / `--p-hover` | mix(bg, ink 14%) / mix(bg, ink 6%) | opaque pressed / hover surface |
+| `--p-scrim` | theme `--bg-scrim` | behind a sheet |
+| `--p-line` / `--p-line-strong` | mix(bg, ink 12%) / mix(bg, ink 22%) | hairline between rows, on fields / stronger rule |
+| `--p-rim` | inset 1px ink 7% | edge of anything with a shadow |
+
+**Ink and interaction fills** (translucent ink, so they work on any surface)
+| Token | Value | For |
+|---|---|---|
+| `--p-ink` | theme `--text-primary` | text, icons, focus ring |
+| `--p-ink-2` / `--p-ink-3` | ink 68% / 50% of the way from bg | secondary / dim text |
+| `--p-fill` | ink 7% | tonal button, chip, segmented track, field, notice |
+| `--p-hovered` / `--p-pressed` | ink 5% / 12% | hover / pressed under a thing |
+| `--p-selected` / `--p-selected-press` | ink 14% / 19% | a chosen option |
+| `--p-focus`, `--p-focus-w`, `--p-focus-gap` | ink, 2px, 2px | focus ring |
+| `--p-disabled`, `--p-press-scale` | 0.45, 0.97 | disabled opacity, press scale (1 when motion is reduced) |
+
+**Roles**
+| Token | Value | For |
+|---|---|---|
+| `--p-act` / `--p-act-ink` / `--p-act-tint` / `--p-act-soft` | theme `--accent` #00a884 / `--text-on-accent` / accent 16% / `--accent-soft` | the one primary action, ticks, switch on / ink on it / fill / soft wash |
+| `--p-live` | theme `--accent` | the live dot |
+| `--p-attn` / `--p-attn-ink` / `--p-attn-tint` | theme `--warn` #ffd279 / bg / warn 18% | waiting on you / ink on it / fill |
+| `--p-attn-soft`, `--p-attn-line` | warn 13% over bg, theme `--warn-line-strong` | soft wash, amber rule |
+| `--p-danger` / `--p-danger-ink` / `--p-danger-tint` / `--p-danger-soft` | theme `--danger` #f15c6d / bg / danger 16% / `--danger-soft` | destroys or failed |
+| `--p-dict`, `--p-dict-2`, `--p-dict-core`, `--p-dict-ink` | #a58bff, #6d7bff, #f1edff, #b3a2ff | your dictation (violet) |
+| `--p-agent`, `--p-agent-2`, `--p-agent-core` | #b6f04a, #e3f36b, #fbffe8 | the voice agent (lime) |
+| `--p-chart-plan/-session`, `--p-ring-sky/-blue/-amber/-red` | #6ea8ff #4dd2e6 / #63b8ff #547bd8 #e6a23c #f06a57 | usage charts and the dial only |
+
+**Shape, size, space**
+| Token | Value | For |
+|---|---|---|
+| `--p-r-sm` `--p-r-row` `--p-r-card` `--p-r-sheet` `--p-r-pill` | 8 · 12 · 16 · 20 · 999px | badge/key · row/field/segmented · menu/banner/card · sheet top · pill |
+| `--p-hit` `--p-row` `--p-bar` `--p-tabs` `--p-tab` | 44 · 56 · 56 · 44 · 38 | tap target · row · top bar · tab strip · one tab |
+| `--p-control` `--p-avatar` `--p-icon` `--p-icon-sm` `--p-signal` | 36 · 34 · 20 · 16 · 2 | compact control · tile · icon · small icon · open-tab bar thickness |
+| `--p-1` `--p-2` `--p-3` `--p-4` `--p-5` `--p-6` `--p-8` `--p-10` | 4 8 12 16 20 24 32 40 | 4px space grid |
+| `--p-gutter` | 16 | screen side padding |
+
+**Type**
+| Token | Value | For |
+|---|---|---|
+| `--p-font` / `--p-mono` | theme `--font-ui` / `--font-mono` | UI font / code, paths, keys only |
+| `--p-t-display` `--p-t-title` `--p-t-body` `--p-t-chrome` | 22 · 17 · 16 · 15 | heading · sheet/empty title · body, rows, inputs · tabs, banner title |
+| `--p-t-label` `--p-t-small` `--p-t-micro` `--p-t-mono` | 14 · 13 · 12 · 13 | buttons, chips · notes, captions · counts, badges (the floor) · terminal text |
+| `--p-w-regular` `--p-w-medium` `--p-w-strong` `--p-w-heavy` | 400 · 500 · 600 · 700 | weights (650 is used for titles) |
+| `--p-lh-tight` `--p-lh` `--p-lh-read` `--p-track-tight` | 1.2 · 1.4 · 1.55 · -0.01em | line heights, title tracking |
+| `--p-text-scale` | theme `--phone-text-scale`, default 1 | A− / A+ (not yet applied) |
+
+**Elevation and layers**
+| Token | Value | For |
+|---|---|---|
+| `--p-shadow-float` / `-sheet` / `-banner` | 0 6px 20px / 0 -10px 36px / 0 12px 32px, black .32 / .38 / .38 | menus, toasts / sheets / banners (use with `--p-rim`) |
+| `--p-z-float` `-head` `-drawer` `-side` `-sheet` `-banner` `-toast` `-modal` | 5 · 10 · pop+1 · +2 · +5 · +6 · +7 · +10 | stack order, low to high (pop = `--z-popover` 60) |
+
+**Motion** (all `--p-dur-*` are 0 under reduced motion)
+| Token | Value | For |
+|---|---|---|
+| `--p-dur-instant` `-fast` `-dur` `-exit` `-snap` `-sheet` `-glide` | 80 · 120 · 180 · 200 · 220 · 280 · 330 ms | press-down · fills · press-release, check · exits · pops · sheet rise · banner/toast travel (`--p-dur` is the bare name) |
+| `--p-ease` / `--p-ease-in` / `--p-ease-sheet` | cubic-bezier(.22,.61,.36,1) / (.4,0,1,1) / (.32,.72,0,1) | default out / exit / sheet and drag settle |
+| `--p-glide` | critically damped spring as `linear()`, never passes 1 | travel and pop |
+| `--p-enter-y`, `--p-enter-scale` | 8px, 0.96 | start offset of rise/drop, start scale of pop |
+
+## 9. Shared code
+`web/src/lib/motion.ts`: `DUR` {instant 80, fast 120, base 180, exit 200, snap 220, sheet 280, glide 330} (ms, same as the tokens) · `DISMISS_PX` 96 · `FLICK_PX_PER_MS` 0.55 · `reducedMotion()` true when the page or the person asked for less motion · `exitDelay()` ms to wait before unmounting a `.pu-out-*` exit (0 if reduced) · `shouldDismiss(distance, elapsedMs)` true past 96px or a 0.55px/ms flick · `rubberband(overshoot, limit = 48)` damped follow past a hard edge.
+`web/src/lib/haptics.ts`: `buzz(kind)` with kinds `hold` 12 · `select` 6 · `confirm` 12-70-12 · `warn` 30-80-30 · `error` 70 · dictation `open` 15 · `stop` 10 · `sent` 12-70-12 · `failed` 70 (ms). No-op without a motor.
+`web/src/components/PhoneIcon.tsx`: `<PhoneIcon name size? className? />`. Names: `more` (three dots) · `check` (tick, list/chip selection) · `chevron-down` `chevron-right` `chevron-left` (open, go in, back) · `close` · `plus` · `working` (clock) · `done` (tick) · `alert` (triangle, failed/asks) · `link-live` (core in ring) · `link-quiet` (empty ring) · `link-reconnecting` (broken ring) · `link-asleep` (moon).
+Enter classes: `.pu-in-rise` `.pu-in-drop` `.pu-in-pop` `.pu-in-fade`; exit: `.pu-out-sink` `.pu-out-lift` `.pu-out-fade`. `.pu-menu`, `.pu-banner`, `.pu-toast` and `.pu-scrim` already run their own enter animation.
