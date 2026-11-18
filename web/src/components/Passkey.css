@@ -38,33 +38,52 @@
 
 /* ------------------------------------------------------------- on a phone */
 
+/* On a phone the fingerprint is the big one: the accent pill, its glyph a
+   size up so the shape reads before the word. */
 .app[data-shell='gate'] .gate__passkey {
-  gap: var(--p-2);
+  gap: var(--p-3);
+  height: 56px;
 }
 
+.app[data-shell='gate'] .gate__passkey .fingerprint-glyph {
+  width: 22px;
+  height: 22px;
+}
+
+/* "or enter the PIN" — a hairline either side, the words in the middle. */
 .app[data-shell='gate'] .gate__or {
-  margin: var(--p-1) 0 calc(-1 * var(--p-1));
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  margin: var(--p-2) 0;
   font-size: var(--p-t-small);
+  line-height: 1;
   color: var(--p-ink-3);
 }
 
+.app[data-shell='gate'] .gate__or::before,
+.app[data-shell='gate'] .gate__or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--p-line);
+}
+
+/* The step-back button is tonal: the same pill, a fill of ink, no outline. */
 .app[data-shell='gate'] .gate__go[data-tone='quiet'],
 .app[data-shell='gate'] .gate__go[data-tone='quiet']:hover:not(:disabled) {
   color: var(--p-ink);
-  background: transparent;
-  border-color: var(--p-line-strong);
+  background: var(--p-fill);
 }
 
 .app[data-shell='gate'] .gate__go[data-tone='quiet']:active:not(:disabled) {
-  background: var(--p-press);
+  background: var(--p-pressed);
 }
 
-/* Disabled and quiet: still an outline, plainly a button, plainly not ready. */
 .app[data-shell='gate'] .gate__go[data-tone='quiet']:disabled {
-  opacity: 0.45;
-  color: var(--p-ink-2);
-  background: transparent;
-  border-color: var(--p-line-strong);
+  opacity: var(--p-disabled);
+  color: var(--p-ink);
+  background: var(--p-fill);
 }
 
 /* ------------------------------------------------------ the offer sheet */
@@ -102,8 +121,8 @@
   font-size: var(--p-t-label);
   line-height: 1.45;
   color: var(--p-ink);
-  background: var(--p-danger-soft);
-  border: 1px solid color-mix(in srgb, var(--p-danger) 40%, transparent);
+  background: var(--p-danger-tint);
+  border: 0;
   border-radius: var(--p-r-row);
 }
 

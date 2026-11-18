@@ -302,6 +302,219 @@
   border-radius: 9px;
 }
 
+/* -------------------------------------------------------------- on a phone
+ *
+ * The phone's tab strip draws a chat tab like every other tab: the bot's mark
+ * bare in the ink, the name, and the open tab's ink bar under it — not a
+ * painted chip with a ring (web/PHONE-DESIGN.md §3, rule 6). The inline paint
+ * TabStrip sets is the desk's, so it is overruled here, on a phone only.
+ */
+
+.app[data-mobile][data-shell='app'] .tab[data-chat] {
+  align-self: stretch;
+  height: auto;
+  padding: 0 var(--p-2);
+  color: var(--p-ink-2) !important;
+  background: transparent !important;
+  border-radius: var(--p-r-sm);
+  box-shadow: none;
+}
+
+.app[data-mobile][data-shell='app'] .tab[data-chat][data-active='true'] {
+  color: var(--p-ink) !important;
+  font-weight: var(--p-w-strong);
+  box-shadow: none;
+}
+
+.app[data-mobile][data-shell='app'] .tab[data-chat]:active {
+  background: var(--p-pressed) !important;
+}
+
+.app[data-mobile][data-shell='app'] .tab[data-chat][data-active='true']::after {
+  content: '';
+  position: absolute;
+  right: var(--p-2);
+  bottom: 0;
+  left: var(--p-2);
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--p-ink);
+  pointer-events: none;
+  transform-origin: 50% 100%;
+  animation: tab-mark var(--p-dur-snap) var(--p-glide) both;
+}
+
+.app[data-mobile][data-shell='app'] .tab[data-chat] .chat-mark {
+  opacity: 0.85;
+}
+
+.app[data-mobile] .tab__chatkind {
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-medium);
+  color: var(--p-ink-3);
+  opacity: 1;
+}
+
+/* The live chat: a slim bar on the ground (mark, name, state as shape + word),
+   the picture, and a composer like the app's own. */
+.app[data-mobile] .chat-mirror {
+  background: var(--p-bg);
+}
+
+.app[data-mobile] .chat-mirror__bar {
+  gap: var(--p-2);
+  min-height: var(--p-tabs);
+  padding: 0 var(--p-2) 0 var(--p-gutter);
+  color: var(--p-ink);
+  background: var(--p-bg);
+  box-shadow: inset 0 -1px 0 var(--p-line);
+}
+
+.app[data-mobile] .chat-mirror__name {
+  font: var(--p-w-strong) var(--p-t-chrome) / 1.2 var(--p-font);
+}
+
+.app[data-mobile] .chat-mirror__kind {
+  font: var(--p-w-medium) var(--p-t-small) / 1.2 var(--p-font);
+  color: var(--p-ink-3);
+  opacity: 1;
+}
+
+.app[data-mobile] .chat-mirror__state {
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 var(--p-3) 0 10px;
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  background: var(--p-fill);
+  border: 0;
+  border-radius: var(--p-r-pill);
+}
+
+.app[data-mobile] .chat-mirror__state[data-state='live'] {
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .chat-mirror__state[data-state='error'] {
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+}
+
+.app[data-mobile] .chat-mirror__state[data-state='update'] {
+  color: var(--p-attn);
+  background: var(--p-attn-tint);
+}
+
+.app[data-mobile] .chat-mirror__stage {
+  background: var(--p-bg);
+}
+
+/* What it has to say, over the empty picture: the app's raised card. */
+.app[data-mobile] .chat-mirror__notice {
+  left: var(--p-gutter);
+  right: var(--p-gutter);
+  display: grid;
+  justify-items: center;
+  gap: var(--p-3);
+  padding: var(--p-5);
+  font: var(--p-t-label) / var(--p-lh-read) var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border: 0;
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+}
+
+.app[data-mobile] .chat-mirror[data-state='error'] .chat-mirror__notice {
+  border-color: transparent;
+}
+
+.app[data-mobile] .chat-mirror__retry {
+  gap: var(--p-2);
+  min-height: var(--p-hit);
+  margin-top: 0;
+  padding: 0 var(--p-5);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-fill);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .chat-mirror__retry:active {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .chat-mirror__hint {
+  padding: var(--p-2) var(--p-gutter);
+  font-size: var(--p-t-small);
+  color: var(--p-ink-2);
+  border-top: 1px solid var(--p-line);
+}
+
+.app[data-mobile] .chat-mirror__compose {
+  align-items: flex-end;
+  gap: var(--p-2);
+  padding: var(--p-2) var(--p-3) calc(var(--p-2) + env(safe-area-inset-bottom, 0px));
+  background: var(--p-bg);
+  border-top: 1px solid var(--p-line);
+}
+
+.app[data-mobile] .chat-mirror__input {
+  min-height: 48px;
+  padding: 13px var(--p-4);
+  font: var(--p-t-body) / 1.35 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-fill);
+  border: 0;
+  border-radius: 24px;
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .chat-mirror__input::placeholder {
+  color: var(--p-ink-3);
+}
+
+.app[data-mobile] .chat-mirror__input:focus,
+.app[data-mobile] .chat-mirror__input:focus-visible {
+  outline: none;
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .chat-mirror__send {
+  min-width: 72px;
+  min-height: 48px;
+  padding: 0 var(--p-5);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  transition:
+    transform var(--p-dur) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .chat-mirror__send:active:not(:disabled) {
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .chat-mirror__send:disabled {
+  color: var(--p-act-ink);
+  background: var(--p-act);
+  opacity: var(--p-disabled);
+}
+
+.app[data-mobile] .chat-mirror__send:focus-visible,
+.app[data-mobile] .chat-mirror__retry:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
 /* ---------------------------------------------------- on the deck's stage */
 
 .app[data-face='deck'] .dk-slot > :is(.chat-mirror, .chat-tile) {

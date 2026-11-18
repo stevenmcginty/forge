@@ -44,6 +44,7 @@ import { ChatPreview } from './components/ChatPreview'
 import { NoticesPreview } from './components/NoticesPreview'
 import { CloudLaunchPreview } from './components/CloudLaunchPreview'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { GatesPreview } from './components/GatesPreview'
 import { PhoneTopBarPreview } from './components/PhoneTopBarPreview'
 import { PowerDrawPreview } from './components/PowerDrawPreview'
 import { Preview } from './components/Preview'
@@ -118,6 +119,8 @@ createRoot(host).render(
       <ShellPreview />
     ) : preview === 'phonetop' ? (
       <PhoneTopBarPreview />
+    ) : preview === 'gates' ? (
+      <GatesPreview />
     ) : (
       <ForgeProvider>
         <RepoProvider>

@@ -19,6 +19,7 @@ import { useForge } from '../state'
 import { useMobile } from '../lib/mobile'
 import { useBackClose } from '../lib/back-stack'
 import { FingerprintGlyph } from './Connection'
+import { PhoneIcon } from './PhoneIcon'
 import './Mirror.css'
 import './Sheets.phone.css'
 
@@ -146,6 +147,14 @@ type Phase =
 type InputMode = 'direct' | 'trackpad'
 
 type FitMode = 'fit' | 'fill' | '1.5x' | '2x'
+
+/** The phone bar's word for each phase, when this page is not driving. */
+const PHASE_WORD: Record<Phase['kind'], string> = {
+  asking: 'Connecting',
+  pin: 'Locked',
+  live: 'Watching',
+  over: 'Stopped'
+}
 
 function fitLabel(mode: FitMode): string {
   switch (mode) {
@@ -1167,10 +1176,13 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
                 </span>
               </button>
             ) : (
-              <span className="mirror__status">
-                <span className="mirror__dot" />
+              // The watch's own state, as a shape and a word: a turning ring
+              // while it asks, a hollow ring while watching, a triangle once it
+              // has stopped, a filled square while it waits for the PIN.
+              <span className="mirror__status" data-phase={phase.kind} role="status">
+                <span className="mirror__dot" data-phase={phase.kind} />
                 <span className="mirror__status-text">
-                  <span className="mirror__status-mode">Watching</span>
+                  <span className="mirror__status-mode">{PHASE_WORD[phase.kind]}</span>
                   <span className="mirror__status-name">{desktopName}</span>
                 </span>
               </span>
@@ -1416,8 +1428,9 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
         */}
         {phase.kind === 'asking' ? (
           <div className="mirror__status-note" role="status">
+            {mobile ? <span className="pu-spinner mirror__spinner" aria-hidden="true" /> : null}
             <p className="mirror__note">Asking {desktopName} for its screen…</p>
-            <span className="pbar" data-on="true" aria-hidden="true" />
+            {mobile ? null : <span className="pbar" data-on="true" aria-hidden="true" />}
           </div>
         ) : null}
         {phase.kind === 'live' && trouble ? (
@@ -1434,6 +1447,11 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
               submitPin()
             }}
           >
+            {mobile ? (
+              <span className="mirror__card-mark">
+                <PhoneIcon name="lock" />
+              </span>
+            ) : null}
             <p className="mirror__note">{phase.message}</p>
             {phase.passkey ? (
               <button
@@ -1476,6 +1494,11 @@ export function Mirror({ onClose }: { onClose: () => void }): ReactNode {
 
         {phase.kind === 'over' ? (
           <div className="mirror__card">
+            {mobile ? (
+              <span className="mirror__card-mark">
+                <PhoneIcon name="alert" />
+              </span>
+            ) : null}
             <p className="mirror__note">{phase.message}</p>
             <button
               type="button"

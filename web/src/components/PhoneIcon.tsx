@@ -23,6 +23,7 @@ export type PhoneIconName =
   | 'link-quiet'
   | 'link-reconnecting'
   | 'link-asleep'
+  | 'lock'
 
 /** Filled shapes are listed with `fill`; everything else is stroked. */
 const PATHS: Record<PhoneIconName, { d: string; fill?: true }[]> = {
@@ -54,7 +55,9 @@ const PATHS: Record<PhoneIconName, { d: string; fill?: true }[]> = {
     { d: 'M9.6 18.1a6.5 6.5 0 0 1-3.9-7.4' }
   ],
   /** Asleep: a crescent moon. */
-  'link-asleep': [{ d: 'M15.5 4.8a7.6 7.6 0 1 0 3.7 11.6A6.2 6.2 0 0 1 15.5 4.8Z', fill: true }]
+  'link-asleep': [{ d: 'M15.5 4.8a7.6 7.6 0 1 0 3.7 11.6A6.2 6.2 0 0 1 15.5 4.8Z', fill: true }],
+  /** A closed padlock: the desktop's PIN (the unlock screens). */
+  lock: [{ d: 'M7.5 10.5h9a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z' }, { d: 'M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5M12 14.5v2' }]
 }
 
 export function PhoneIcon({

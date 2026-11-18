@@ -30,6 +30,7 @@ import {
 import { useForge } from '../state'
 import { BottomSheet, SheetGlyph } from './BottomSheet'
 import { CloudLaunch } from './CloudLaunch'
+import { PhoneIcon, type PhoneIconName } from './PhoneIcon'
 import './Sheets.phone.css'
 import './Passkey.css'
 
@@ -183,21 +184,39 @@ function recovery(reason: WebRefusal, email: string, desktop: DesktopSide = {}):
 export function GateFrame({
   reason,
   onSubmit,
+  brand = true,
+  testId,
   children
 }: {
   /** Stamped on the element so a screen is identifiable as itself, not as "an error". */
   reason: string
   /** Makes the card a form. */
   onSubmit?: (event: FormEvent) => void
+  /**
+   * Phone only: the app's mark and name at the top, the same place on every
+   * one of these screens, so going from one to the next reads as one flow.
+   * Sign-in turns it off: its heading *is* the mark.
+   */
+  brand?: boolean
+  testId?: string
   children: ReactNode
 }): ReactNode {
   const mobile = useMobile()
+  const head =
+    mobile && brand ? (
+      <div className="gate__brand" aria-hidden="true">
+        <img className="gate__brand-icon" src="/icons/icon-192.png" alt="" width={28} height={28} />
+        <span className="gate__brand-name">Forge</span>
+      </div>
+    ) : null
   const card = onSubmit ? (
-    <form className="gate__card" data-reason={reason} onSubmit={onSubmit}>
+    <form className="gate__card" data-reason={reason} data-testid={testId} onSubmit={onSubmit}>
+      {head}
       {children}
     </form>
   ) : (
-    <div className="gate__card" data-reason={reason}>
+    <div className="gate__card" data-reason={reason} data-testid={testId}>
+      {head}
       {children}
     </div>
   )
@@ -214,16 +233,71 @@ export function GateFrame({
  * The heading block: mark, title, and the lines under it. A pass-through at a
  * desk (`display: contents`), the upper half of the screen on a phone.
  */
-export function GateLead({ icon, title, children }: { icon: IconName; title: string; children?: ReactNode }): ReactNode {
+export function GateLead({
+  icon,
+  title,
+  glyph,
+  busy,
+  tone,
+  children
+}: {
+  /** The desk's mark (the 16px icon family). */
+  icon: IconName
+  title: string
+  /** Phone only: the state's glyph in the round mark, or the app's own icon. Falls back from `icon`. */
+  glyph?: GateGlyph
+  /** Phone only: a slow ring turns round the mark while the page is trying by itself. */
+  busy?: boolean
+  /** Phone only: the mark's tint when the screen is a failure the person can fix. */
+  tone?: 'danger'
+  children?: ReactNode
+}): ReactNode {
+  const mobile = useMobile()
+  if (!mobile) {
+    return (
+      <div className="gate__lead">
+        <div className="gate__mark">
+          <Icon name={icon} size={22} />
+        </div>
+        <h1 className="gate__title">{title}</h1>
+        {children}
+      </div>
+    )
+  }
+  const shown = glyph ?? DESK_TO_PHONE[icon] ?? 'link-quiet'
   return (
     <div className="gate__lead">
-      <div className="gate__mark">
-        <Icon name={icon} size={22} />
-      </div>
+      {shown === 'app' ? (
+        <img className="gate__app" src="/icons/icon-192.png" alt="" width={72} height={72} />
+      ) : (
+        <div className="gate__mark" data-glyph={shown} data-tone={tone} data-busy={busy ? 'true' : undefined}>
+          <PhoneIcon name={shown} size={30} />
+          {busy ? <span className="gate__orbit" role="progressbar" aria-label="Trying to connect" /> : null}
+        </div>
+      )}
       <h1 className="gate__title">{title}</h1>
       {children}
     </div>
   )
+}
+
+/** What a phone gate draws in its round mark: one of the phone's own glyphs, or the app icon. */
+export type GateGlyph = PhoneIconName | 'app'
+
+/** The desk's 16px marks, read as the phone's glyphs. The link family says where the desktop is. */
+const DESK_TO_PHONE: Partial<Record<IconName, GateGlyph>> = {
+  forge: 'link-reconnecting',
+  key: 'lock',
+  gear: 'alert',
+  restart: 'alert',
+  globe: 'link-quiet'
+}
+
+/** Each refusal's glyph on a phone: a clock for "not yet", a lock for the PIN, a triangle for the rest. */
+function refusalGlyph(reason: WebRefusal): GateGlyph {
+  if (reason === 'busy') return 'working'
+  if (reason === 'pin-required' || reason === 'pin-invalid') return 'lock'
+  return 'alert'
 }
 
 /** A circled "!" — the shape that goes with every error line, so red is never the only thing saying it. */
@@ -279,6 +353,7 @@ const SLOW_MS = 5000
 
 export function Connecting({ note }: { attempt: number; note?: string }): ReactNode {
   const { state, actions } = useForge()
+  const mobile = useMobile()
   const desktop = state.picture?.desktopName || state.cached?.desktopName || ''
   const [slow, setSlow] = useState(false)
   const [cloud, setCloud] = useState(false)
@@ -311,13 +386,20 @@ export function Connecting({ note }: { attempt: number; note?: string }): ReactN
     else window.location.reload()
   }
 
+  // A phone says the slow turn in its title and shows the moon, so "maybe
+  // asleep" is the headline rather than the small print; the ring keeps
+  // turning because the page is still trying by itself.
+  const asleep = mobile && slow && stage !== 'loading'
+  const title = asleep ? 'Still trying' : 'Connecting'
+  const phoneLine = asleep ? `${name} may be asleep, or Forge may be closed on it. This page keeps trying.` : line
+
   return (
     <GateFrame reason="connecting">
-      <GateLead icon="forge" title="Connecting">
+      <GateLead icon="forge" title={title} glyph={asleep ? 'link-asleep' : 'link-reconnecting'} busy>
         <p className="gate__body" aria-live="polite">
-          {line}
+          {mobile ? phoneLine : line}
         </p>
-        <span className="pbar gate__progress" data-on="true" role="progressbar" aria-label="Connecting" />
+        {mobile ? null : <span className="pbar gate__progress" data-on="true" role="progressbar" aria-label="Connecting" />}
       </GateLead>
       {slow ? (
         <>
@@ -409,7 +491,7 @@ export function Refused({
 
   return (
     <GateFrame reason={reason}>
-      <GateLead icon={plan.icon} title={plan.title}>
+      <GateLead icon={plan.icon} title={plan.title} glyph={refusalGlyph(reason)} busy={reason === 'busy'}>
         {/* The desktop's own sentence, first and verbatim. It knows which of the
             eight refusals this is and why; this page only knows what to do next. */}
         {message ? <p className="gate__body">{message}</p> : null}
@@ -509,6 +591,7 @@ export function PinPrompt({
   afterPasskey?: boolean
 }): ReactNode {
   const { state, actions } = useForge()
+  const mobile = useMobile()
   const [pin, setPin] = useState('')
   const pinRef = useRef<HTMLInputElement | null>(null)
   // The biometric is the first answer when there is one; after a cancel the PIN
@@ -586,9 +669,22 @@ export function PinPrompt({
     setPin('')
   }
 
+  // The phone's drawing of the box: one dot per digit typed, never fewer than
+  // the shortest PIN the desktop takes, filled the instant a digit lands. The
+  // real input stays on top of them, full size, so a tap, the password
+  // manager and the number pad all reach it exactly as before.
+  const desktop = state.picture?.desktopName || state.cached?.desktopName || ''
+  const slots = Math.max(PIN_MIN_DIGITS, pin.length)
+  const pinState = waiting ? 'locked' : invalid ? 'wrong' : undefined
+
   return (
     <GateFrame reason="pin" onSubmit={submit}>
-      <GateLead icon="key" title="Enter the desktop’s PIN">
+      <GateLead
+        icon="key"
+        title={mobile ? (desktop ? `Unlock ${desktop}` : 'Unlock your PC') : 'Enter the desktop’s PIN'}
+        glyph={waiting ? 'working' : 'lock'}
+        tone={invalid && !waiting ? 'danger' : undefined}
+      >
         {/* The desktop's own sentence, verbatim, exactly as `Refused` shows it:
             it is the half that knows whether this is the first ask or a wrong
             answer, and this page only knows what the box is for. */}
@@ -632,13 +728,26 @@ export function PinPrompt({
             {asking ? 'Waiting for the phone…' : biometricButtonLabel()}
           </button>
           <p className="gate__or" aria-hidden="true">
-            or the PIN
+            {mobile ? 'or enter the PIN' : 'or the PIN'}
           </p>
         </>
       ) : null}
 
       <label className="gate__field">
         <span className="eyebrow gate__label">Unlock PIN</span>
+        <span className="gate__pin" data-state={pinState}>
+          {mobile ? (
+            <span className="gate__dots" aria-hidden="true">
+              {Array.from({ length: slots }, (_, at) => (
+                <span
+                  key={at}
+                  className="gate__dot"
+                  data-on={at < pin.length ? 'true' : undefined}
+                  data-next={at === pin.length ? 'true' : undefined}
+                />
+              ))}
+            </span>
+          ) : null}
         <input
           className="gate__input gate__input--pin mono"
           /* Masked, because this one is typed in a coffee shop as often as at
@@ -665,12 +774,25 @@ export function PinPrompt({
              keystroke rather than on a wrong PIN. */
           onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_MAX_DIGITS))}
         />
+        </span>
       </label>
 
       {/* The lockout the desktop itself imposed — every strike against it was
           a wrong PIN sent from here, so this page closes the till while it
           runs rather than posting digits it knows will be refused. */}
-      {waiting ? <p className="gate__hint">Too many tries — the desktop has locked the door for another {wait}s.</p> : null}
+      {waiting && mobile ? (
+        <div className="pu-notice gate__wait" data-tone="attn">
+          <span className="pu-notice__mark">
+            <PhoneIcon name="working" />
+          </span>
+          <span className="pu-notice__text">
+            <span className="pu-notice__title">Too many tries</span>
+            <span className="pu-notice__body">The desktop is locked for {wait} s. Try again then.</span>
+          </span>
+        </div>
+      ) : waiting ? (
+        <p className="gate__hint">Too many tries — the desktop has locked the door for another {wait}s.</p>
+      ) : null}
 
       <button
         type="submit"
@@ -681,8 +803,9 @@ export function PinPrompt({
         Unlock
       </button>
       <p className="gate__hint">
-        The PIN set in Forge’s settings on that PC. It is asked for on every connection, so a phone that closed the tab
-        asks again.
+        {mobile
+          ? 'The PIN set in Forge on your PC. It is asked for each time you connect.'
+          : 'The PIN set in Forge’s settings on that PC. It is asked for on every connection, so a phone that closed the tab asks again.'}
       </p>
       {/* The one screen a wrong account is guaranteed to reach and cannot get
           past: the PIN being asked for is the *desktop's* PIN, so no digits

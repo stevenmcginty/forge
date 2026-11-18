@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
+import { useMobile } from '../lib/mobile'
 import { useForge } from '../state'
 import { GateError, GateFrame, GateLead } from './Connection'
 
@@ -9,6 +10,7 @@ import { GateError, GateFrame, GateLead } from './Connection'
  */
 export function SignIn({ error }: { error: string }): ReactNode {
   const { actions } = useForge()
+  const mobile = useMobile()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -26,14 +28,19 @@ export function SignIn({ error }: { error: string }): ReactNode {
   }
 
   return (
-    <GateFrame reason="sign-in" onSubmit={submit}>
-      <GateLead icon="forge" title="Forge">
+    // On a phone the heading carries the app's own icon, so the brand row
+    // above it would say "Forge" twice.
+    <GateFrame reason="sign-in" onSubmit={submit} brand={false}>
+      <GateLead icon="forge" title={mobile ? 'Sign in to Forge' : 'Forge'} glyph="app">
         {/* One line. The account *is* the machine — a different email finds a
             different PC — and that is the only thing worth saying before the
             fields. */}
         <p className="gate__body">Sign in with the email saved on your PC.</p>
       </GateLead>
 
+      {/* Phone: the two fields as one grouped card, the way the app's sheets
+          group their rows. A pass-through at a desk. */}
+      <div className="gate__group">
       <label className="gate__field">
         <span className="eyebrow gate__label">Email</span>
         <input
@@ -61,6 +68,7 @@ export function SignIn({ error }: { error: string }): ReactNode {
           onChange={(e) => setPassword(e.target.value)}
         />
       </label>
+      </div>
 
       {failure || error ? <GateError>{failure || error}</GateError> : null}
 

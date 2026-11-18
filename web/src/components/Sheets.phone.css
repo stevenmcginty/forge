@@ -109,16 +109,26 @@
 
 /* ----------------------------------------------------------- the doorway
  *
- * One column for a thumb. The heading block sits in the calm upper part of the
- * screen; the fields and the one button sit at the bottom, where the thumb
- * already is. No card, no glow, no gradient: the page is the surface.
+ * Every screen before the workspace, in one frame (web/PHONE-DESIGN.md, Quiet
+ * Instrument): the app's mark and name at the top, always in the same place;
+ * the state as one round glyph, a title and a line, centred in the calm upper
+ * part of the screen; the fields and the one button at the bottom, where the
+ * thumb already is. No card, no outline, no glow: the ground is the surface.
+ * Moving from one screen to the next only the middle changes — the ground and
+ * the brand row stand still, so there is no flash.
  */
+
+/* Phone-only pieces are pass-throughs at a desk (they are only rendered on a
+   phone, but a wrapper that is must not change the desk's layout either). */
+.gate__group,
+.gate__pin {
+  display: contents;
+}
 
 .app[data-shell='gate'] .gate {
   display: block;
   height: 100%;
-  padding: calc(var(--p-4) + env(safe-area-inset-top, 0px)) var(--p-5)
-    calc(var(--p-4) + env(safe-area-inset-bottom, 0px));
+  padding: env(safe-area-inset-top, 0px) var(--p-6) calc(var(--p-4) + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   overscroll-behavior: contain;
   background: var(--p-bg);
@@ -130,7 +140,7 @@
   align-items: stretch;
   gap: var(--p-3);
   width: 100%;
-  max-width: 440px;
+  max-width: 420px;
   min-height: 100%;
   margin: 0 auto;
   padding: 0;
@@ -141,13 +151,49 @@
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  animation: gate-rise var(--p-dur-sheet) var(--p-ease-sheet) both;
+  animation: none;
 }
 
-@keyframes gate-rise {
+/* The brand row: the bar's height, the app icon and its name. Never moves. */
+.app[data-shell='gate'] .gate__brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: var(--p-bar);
+}
+
+.app[data-shell='gate'] .gate__brand-icon {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--p-r-sm);
+}
+
+.app[data-shell='gate'] .gate__brand-name {
+  font: 650 var(--p-t-title) / 1 var(--p-font);
+  letter-spacing: var(--p-track-tight);
+  color: var(--p-ink);
+}
+
+/* The heading block: centred, and the only part that arrives — a short rise
+   and fade. The fields below it do not animate, so nothing waits on motion. */
+.app[data-shell='gate'] .gate__lead {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--p-2);
+  padding: var(--p-8) 0;
+  text-align: center;
+  animation: gate-arrive var(--p-dur-glide) var(--p-glide) both;
+}
+
+@keyframes gate-arrive {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(var(--p-enter-y));
   }
   to {
     opacity: 1;
@@ -155,90 +201,271 @@
   }
 }
 
-.app[data-shell='gate'] .gate__lead {
-  display: flex;
-  flex: 1 0 auto;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: var(--p-3);
-  padding: var(--p-8) 0 var(--p-6);
-}
-
+/* The state, as one round glyph on the surface tone. */
 .app[data-shell='gate'] .gate__mark {
-  width: 52px;
-  height: 52px;
-  margin-bottom: var(--p-2);
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  margin-bottom: var(--p-4);
   color: var(--p-ink);
   background: var(--p-surface);
-  border: 1px solid var(--p-line);
-  border-radius: var(--p-r-row);
+  border: 0;
+  border-radius: 50%;
   box-shadow: none;
 }
 
+.app[data-shell='gate'] .gate__mark[data-tone='danger'] {
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+}
+
+/* Trying by itself: a faint track round the mark and an arc that travels it. */
+.app[data-shell='gate'] .gate__orbit {
+  position: absolute;
+  inset: -7px;
+  border: 2px solid var(--p-line);
+  border-top-color: var(--p-ink-2);
+  border-radius: 50%;
+  animation: gate-orbit 1.4s linear infinite;
+}
+
+@keyframes gate-orbit {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* The app's own icon, on sign-in only: the thing he tapped on his home screen. */
+.app[data-shell='gate'] .gate__app {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin-bottom: var(--p-4);
+  border-radius: 18px;
+}
+
 .app[data-shell='gate'] .gate__title {
+  max-width: 20ch;
   margin: 0;
-  font: 650 28px / 1.15 var(--p-font);
-  letter-spacing: -0.02em;
+  font: 650 var(--p-t-display) / var(--p-lh-tight) var(--p-font);
+  letter-spacing: var(--p-track-tight);
   color: var(--p-ink);
   overflow-wrap: anywhere;
 }
 
 .app[data-shell='gate'] .gate__body {
+  max-width: 32ch;
   margin: 0;
   font-size: var(--p-t-body);
-  line-height: 1.45;
+  line-height: var(--p-lh-read);
   color: var(--p-ink-2);
   overflow-wrap: anywhere;
 }
 
+.app[data-shell='gate'] .gate__body .mono {
+  font-family: var(--p-font);
+  color: var(--p-ink);
+}
+
+.app[data-shell='gate'] .gate__body svg {
+  vertical-align: -2px;
+}
+
 .app[data-shell='gate'] .gate__hint {
+  max-width: 34ch;
   margin: 0;
   font-size: var(--p-t-small);
-  line-height: 1.45;
+  line-height: var(--p-lh);
   color: var(--p-ink-3);
 }
 
-.app[data-shell='gate'] .gate__progress {
-  max-width: 240px;
-  margin-top: var(--p-2);
+/* In the heading block a hint is part of the explanation: a step brighter. */
+.app[data-shell='gate'] .gate__lead .gate__hint {
+  color: var(--p-ink-2);
 }
 
-/* Fields: the label in the body face, a 52px box, 16px text (iOS zooms below it). */
+/* In the foot, small print sits centred under the button. */
+.app[data-shell='gate'] .gate__card > .gate__hint {
+  align-self: center;
+  text-align: center;
+}
+
+/* Numbered steps (no PC found): one thing per line, the number in its own column. */
+.app[data-shell='gate'] .gate__steps {
+  display: grid;
+  gap: var(--p-2);
+  width: 100%;
+  max-width: 320px;
+  margin: var(--p-3) 0 0;
+  padding: var(--p-4);
+  list-style: none;
+  counter-reset: gate-step;
+  font-size: var(--p-t-label);
+  line-height: var(--p-lh);
+  text-align: left;
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border-radius: var(--p-r-card);
+}
+
+.app[data-shell='gate'] .gate__steps li {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: baseline;
+  counter-increment: gate-step;
+}
+
+.app[data-shell='gate'] .gate__steps li::before {
+  content: counter(gate-step);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-ink-3);
+}
+
+/* Details: a quiet pill that opens on the technical why, in a well. */
+.app[data-shell='gate'] .gate__details {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin-top: var(--p-1);
+}
+
+.app[data-shell='gate'] .gate__details > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--p-1);
+  min-height: var(--p-hit);
+  padding: 0 var(--p-3);
+  font: var(--p-w-medium) var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-ink-2);
+  list-style: none;
+  border-radius: var(--p-r-pill);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-shell='gate'] .gate__details > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The chevron: down when shut, up when open — a shape, not just a word. */
+.app[data-shell='gate'] .gate__details > summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 var(--p-1);
+  border-right: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-shell='gate'] .gate__details[open] > summary::after {
+  margin-top: 3px;
+  transform: rotate(-135deg);
+}
+
+.app[data-shell='gate'] .gate__details > summary:active {
+  background: var(--p-pressed);
+}
+
+.app[data-shell='gate'] .gate__details > summary:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+.app[data-shell='gate'] .gate__details > .mono {
+  display: block;
+  width: 100%;
+  margin-top: var(--p-1);
+  padding: var(--p-3) var(--p-4);
+  font: var(--p-t-small) / var(--p-lh) var(--p-mono);
+  text-align: left;
+  color: var(--p-ink-2);
+  background: var(--p-surface);
+  border-radius: var(--p-r-row);
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------ fields */
+
 .app[data-shell='gate'] .gate__field {
   gap: var(--p-2);
 }
 
 .app[data-shell='gate'] .gate__label {
-  font: 500 var(--p-t-label) / 1.3 var(--p-font);
+  font: var(--p-w-medium) var(--p-t-small) / 1.2 var(--p-font);
   letter-spacing: 0;
   text-transform: none;
-  color: var(--p-ink-2);
-}
-
-.app[data-shell='gate'] .gate__input {
-  height: 52px;
-  padding: 0 var(--p-4);
-  font-family: var(--p-font);
-  font-size: var(--p-t-body);
-  color: var(--p-ink);
-  background: var(--p-surface);
-  border: 1px solid var(--p-line-strong);
-  border-radius: var(--p-r-row);
-  box-shadow: none;
-  transition:
-    border-color var(--p-dur-fast) var(--p-ease),
-    box-shadow var(--p-dur-fast) var(--p-ease);
-}
-
-.app[data-shell='gate'] .gate__input:focus {
-  outline: none;
-  border-color: var(--p-ink-2);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-ink) 12%, transparent);
-}
-
-.app[data-shell='gate'] .gate__input:disabled {
   color: var(--p-ink-3);
+}
+
+/* Email and password as one grouped card: each row a label over its value,
+   one hairline between them, no box round either field. */
+.app[data-shell='gate'] .gate__group {
+  display: flex;
+  flex-direction: column;
+  background: var(--p-surface);
+  border-radius: var(--p-r-card);
+}
+
+.app[data-shell='gate'] .gate__group > .gate__field {
+  position: relative;
+  gap: 2px;
+  padding: var(--p-3) var(--p-4) var(--p-2);
+  cursor: text;
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-shell='gate'] .gate__group > .gate__field:first-child {
+  border-radius: var(--p-r-card) var(--p-r-card) 0 0;
+}
+
+.app[data-shell='gate'] .gate__group > .gate__field:last-child {
+  border-radius: 0 0 var(--p-r-card) var(--p-r-card);
+}
+
+.app[data-shell='gate'] .gate__group > .gate__field + .gate__field::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: var(--p-4);
+  height: 1px;
+  background: var(--p-line);
+}
+
+/* Focus lifts the row a tone and brightens its label: the caret is in it.
+   No ring round a text row (a ring here read as the old outlined box). */
+.app[data-shell='gate'] .gate__group > .gate__field:focus-within {
+  background: var(--p-press);
+}
+
+.app[data-shell='gate'] .gate__group > .gate__field:focus-within .gate__label {
+  color: var(--p-ink);
+}
+
+.app[data-shell='gate'] .gate__group > .gate__field:focus-within::before,
+.app[data-shell='gate'] .gate__group > .gate__field:focus-within + .gate__field::before {
+  opacity: 0;
+}
+
+.app[data-shell='gate'] .gate__group .gate__input {
+  height: 28px;
+  padding: 0;
+  font: var(--p-t-body) var(--p-font);
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app[data-shell='gate'] .gate__group .gate__input:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 /* A filled-in field keeps this page's surface, not the browser's yellow. */
@@ -248,33 +475,207 @@
   caret-color: var(--p-ink);
 }
 
-.app[data-shell='gate'] .gate__input--pin {
-  font-family: var(--p-mono);
-  font-size: 22px;
-  letter-spacing: 0.3em;
+/* Any other field (the GitHub token box, the screen's PIN): a plain well. */
+.app[data-shell='gate'] .gate__input {
+  height: 52px;
+  padding: 0 var(--p-4);
+  font: var(--p-t-body) var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  border-radius: var(--p-r-row);
+  box-shadow: none;
+  transition: border-color var(--p-dur-fast) var(--p-ease);
 }
 
-/* The one button: solid lime, because signing in is the act on this screen.
-   Disabled, it stays a lime pill at 40% — still plainly a button, plainly not ready. */
+.app[data-shell='gate'] .gate__input:focus {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(-1 * var(--p-focus-w));
+  border-color: transparent;
+}
+
+.app[data-shell='gate'] .gate__input:disabled {
+  color: var(--p-ink-3);
+}
+
+/* ------------------------------------------------------------ the PIN
+ *
+ * A well of dots, one per digit, filled the instant it lands. The real input
+ * lies over the dots at full size with its text made clear, so a tap, the
+ * number pad and the password manager reach it exactly as before; only what it
+ * draws has changed.
+ */
+
+.app[data-shell='gate'] .gate__field:has(.gate__pin) .gate__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.app[data-shell='gate'] .gate__pin {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 72px;
+  background: var(--p-surface);
+  border-radius: var(--p-r-card);
+}
+
+/* Focus lifts the well a tone and rings the next dot in full ink: the place
+   the next digit will land, where a caret would be. */
+.app[data-shell='gate'] .gate__pin {
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-shell='gate'] .gate__pin:focus-within {
+  background: var(--p-press);
+}
+
+.app[data-shell='gate'] .gate__pin:focus-within .gate__dot[data-next='true'] {
+  border-color: var(--p-ink);
+  transform: none;
+}
+
+.app[data-shell='gate'] .gate__dots {
+  display: flex;
+  gap: var(--p-4);
+  pointer-events: none;
+}
+
+.app[data-shell='gate'] .gate__dot {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--p-ink-3);
+  border-radius: 50%;
+  transform: scale(0.8);
+  transition:
+    transform var(--p-dur) var(--p-glide),
+    background-color var(--p-dur-fast) var(--p-ease),
+    border-color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-shell='gate'] .gate__dot[data-on='true'] {
+  background: var(--p-ink);
+  border-color: var(--p-ink);
+  transform: none;
+}
+
+/* Wrong: the empty dots in the danger colour, and one short shake — beside the
+   desktop's sentence and the red mark, never on their own. */
+.app[data-shell='gate'] .gate__pin[data-state='wrong'] .gate__dot {
+  border-color: var(--p-danger);
+}
+
+.app[data-shell='gate'] .gate__pin[data-state='wrong'] .gate__dot[data-on='true'] {
+  background: var(--p-ink);
+  border-color: var(--p-ink);
+}
+
+.app[data-shell='gate'] .gate__pin[data-state='wrong'] .gate__dots {
+  animation: gate-shake calc(var(--p-dur-sheet) + var(--p-dur-fast)) var(--p-ease) both;
+}
+
+@keyframes gate-shake {
+  0%,
+  100% {
+    transform: none;
+  }
+  20% {
+    transform: translateX(-8px);
+  }
+  40% {
+    transform: translateX(7px);
+  }
+  60% {
+    transform: translateX(-5px);
+  }
+  80% {
+    transform: translateX(3px);
+  }
+}
+
+/* Locked: the well stands down while the desktop's count runs. */
+.app[data-shell='gate'] .gate__pin[data-state='locked'] {
+  opacity: var(--p-disabled);
+}
+
+.app[data-shell='gate'] .gate__input--pin {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  font-size: var(--p-t-body);
+  letter-spacing: 0;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-card);
+  box-shadow: none;
+  outline: none;
+  cursor: pointer;
+}
+
+.app[data-shell='gate'] .gate__input--pin:focus {
+  outline: none;
+}
+
+.app[data-shell='gate'] .gate__input--pin::selection {
+  background: transparent;
+}
+
+/* The password manager's fill must not paint over the dots either. */
+.app[data-shell='gate'] .gate__input--pin:-webkit-autofill,
+.app[data-shell='gate'] .gate__input--pin:-webkit-autofill:focus {
+  -webkit-text-fill-color: transparent;
+  box-shadow: none;
+  transition: background-color 600000s 0s;
+}
+
+.app[data-shell='gate'] .gate__wait {
+  text-align: left;
+}
+
+.app[data-shell='gate'] .gate__wait .pu-notice__mark {
+  color: var(--p-ink);
+}
+
+.app[data-shell='gate'] .gate__wait .pu-notice__body {
+  -webkit-line-clamp: 3;
+  color: var(--p-ink);
+}
+
+/* ------------------------------------------------------------ buttons */
+
+/* The one button: the accent pill, because getting in is the act here.
+   Disabled, it keeps its shape at the contract's opacity. */
 .app[data-shell='gate'] .gate__go {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--p-2);
   width: 100%;
   height: 52px;
-  margin-top: var(--p-2);
+  margin-top: var(--p-1);
   padding: 0 var(--p-5);
-  font: 600 var(--p-t-body) / 1 var(--p-font);
+  font: var(--p-w-strong) var(--p-t-body) / 1 var(--p-font);
   color: var(--p-act-ink);
   background: var(--p-act);
-  border: 1px solid var(--p-act);
+  border: 0;
   border-radius: var(--p-r-pill);
   box-shadow: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition:
-    opacity var(--p-dur) var(--p-ease),
-    background var(--p-dur-fast) var(--p-ease);
+    transform var(--p-dur) var(--p-ease),
+    opacity var(--p-dur-fast) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease);
 }
 
 .app[data-shell='gate'] .gate__go:hover:not(:disabled) {
@@ -283,31 +684,58 @@
 }
 
 .app[data-shell='gate'] .gate__go:active:not(:disabled) {
-  background: color-mix(in srgb, var(--p-act) 85%, var(--p-ink));
+  background: color-mix(in srgb, var(--p-act) 86%, var(--p-ink));
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
 }
 
 .app[data-shell='gate'] .gate__go:disabled {
-  opacity: 0.4;
+  opacity: var(--p-disabled);
   color: var(--p-act-ink);
   background: var(--p-act);
-  border-color: var(--p-act);
   cursor: default;
 }
 
-.app[data-shell='gate'] .gate__go:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: 2px;
+.app[data-shell='gate'] .gate__go:focus-visible,
+.app[data-shell='gate'] .gate__copy.gate__cloud:focus-visible,
+.app[data-shell='gate'] .gate__switch:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
 }
 
+/* The second way on (Work in the cloud): text and glyph, no box. */
+.app[data-shell='gate'] .gate__copy.gate__cloud {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--p-2);
+  width: 100%;
+  height: 48px;
+  padding: 0 var(--p-4);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  box-shadow: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-shell='gate'] .gate__copy.gate__cloud:active {
+  background: var(--p-pressed);
+}
+
+/* An error line: a tinted notice with the shape and the sentence. */
 .app[data-shell='gate'] .gate__error {
   width: 100%;
   margin: 0;
   padding: var(--p-3) var(--p-4);
   font-size: var(--p-t-label);
-  line-height: 1.45;
+  line-height: var(--p-lh);
+  text-align: left;
   color: var(--p-ink);
-  background: var(--p-danger-soft);
-  border: 1px solid color-mix(in srgb, var(--p-danger) 40%, transparent);
+  background: var(--p-danger-tint);
+  border: 0;
   border-radius: var(--p-r-row);
   box-shadow: none;
 }
@@ -316,14 +744,22 @@
   color: var(--p-danger);
 }
 
-/* "Signed in as …" and the way out, on a line of their own. */
+/* Under a centred heading the error is a line of its own width. */
+.app[data-shell='gate'] .gate__lead .gate__error {
+  width: auto;
+  max-width: 100%;
+  margin-top: var(--p-1);
+}
+
+/* "Signed in as …" and the way out: one centred line of small print. */
 .app[data-shell='gate'] .gate__account {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  padding-top: var(--p-2);
+  align-items: center;
+  padding-top: var(--p-1);
   font-size: var(--p-t-small);
-  line-height: 1.4;
+  line-height: var(--p-lh);
+  text-align: center;
   color: var(--p-ink-3);
 }
 
@@ -334,12 +770,48 @@
 
 .app[data-shell='gate'] .gate__switch {
   min-height: var(--p-hit);
-  padding: 0;
-  font: 500 var(--p-t-chrome) / 1.2 var(--p-font);
+  padding: 0 var(--p-3);
+  font: var(--p-w-strong) var(--p-t-label) / 1.2 var(--p-font);
   color: var(--p-ink);
-  text-decoration: underline;
-  text-decoration-color: var(--p-line-strong);
-  text-underline-offset: 4px;
+  text-decoration: none;
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-pill);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app[data-shell='gate'] .gate__switch:active {
+  background: var(--p-pressed);
+}
+
+/* Less motion: the heading lands at once, the ring and the shake hold still
+   (the ring parks as a quarter arc — the words carry the wait). */
+@media (prefers-reduced-motion: reduce) {
+  .app[data-shell='gate'] .gate__lead,
+  .app[data-shell='gate'] .gate__orbit,
+  .app[data-shell='gate'] .gate__pin[data-state] .gate__dots {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-shell='gate'] .gate__lead,
+:root[data-reduced-motion='true'] .app[data-shell='gate'] .gate__orbit,
+:root[data-reduced-motion='true'] .app[data-shell='gate'] .gate__pin[data-state] .gate__dots {
+  animation: none;
+}
+
+/* A short screen (the keyboard is up): less air round the heading. */
+@media (max-height: 560px) {
+  .app[data-shell='gate'] .gate__lead {
+    padding: var(--p-4) 0;
+  }
+
+  .app[data-shell='gate'] .gate__mark,
+  .app[data-shell='gate'] .gate__app {
+    width: 56px;
+    height: 56px;
+    margin-bottom: var(--p-2);
+  }
 }
 
 /* ---------------------------------------------------------------- sheets
