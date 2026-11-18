@@ -15,7 +15,7 @@ The one design language for the phone face (`.app[data-mobile]`). Tokens: `web/s
 8. **Size.** Hit ≥ `--p-hit` 44px (draw smaller, extend with `::before`). Rows `--p-row` 56. Bar `--p-bar` 56, tab strip `--p-tabs` 44, avatar/tile `--p-avatar` 34, compact control `--p-control` 36, icons `--p-icon` 20 / `--p-icon-sm` 16.
 9. **Radius:** `--p-r-sm` 8 (badges, keys) · `--p-r-row` 12 (rows, fields, segmented) · `--p-r-card` 16 (menus, banners, toasts, cards) · `--p-r-sheet` 20 (sheet tops) · `--p-r-pill` (buttons, chips, pills). Nothing else.
 10. **Space:** 4px grid `--p-1`…`--p-10` (4 8 12 16 20 24 32 40). Screen gutter `--p-gutter` 16. Sheet side padding 20 for headings, 8 + row padding 12 for rows. Group with space first; divide with a line only when space is not enough.
-11. **Type (system font `--p-font`):** display 22/650 · title `--p-t-title` 17/650 · body `--p-t-body` 16/400 (row titles 500) · chrome 15/500–600 (tabs) · label `--p-t-label` 14/500–600 (buttons, chips, notices) · small `--p-t-small` 13 (notes, captions) · micro `--p-t-micro` 12/600 (counts, badges — the floor). Line-height `--p-lh` 1.4, reading `--p-lh-read` 1.55, tight 1.2. Sentence case. No letter-spaced caps. **Mono (`--p-mono`) only** for code, paths, commands, terminal text and keyboard keys — never labels or badges.
+11. **Type (system font `--p-font`):** display 22/650 · title `--p-t-title` 17/650 (empty states, confirm questions; a sheet's own title is 20/700, §10) · body `--p-t-body` 16/400 (row titles 500) · chrome 15/500–600 (tabs) · label `--p-t-label` 14/500–600 (buttons, chips, notices) · small `--p-t-small` 13 (notes, captions) · micro `--p-t-micro` 12/600 (counts, badges — the floor). Line-height `--p-lh` 1.4, reading `--p-lh-read` 1.55, tight 1.2. Sentence case. No letter-spaced caps. **Mono (`--p-mono`) only** for code, paths, commands, terminal text and keyboard keys — never labels or badges.
 12. **Layers:** `--p-z-float` (pills/toasts inside the display) < `--p-z-head` < `--p-z-drawer` < `--p-z-side` < `--p-z-sheet` < `--p-z-banner` < `--p-z-toast` < `--p-z-modal`. Nothing floats over text Steve is reading: if it must float, it sits in a margin or the bar.
 13. **Themes:** never a raw hex outside token files. Check every screen in `whatsapp-dark` (default), `whatsapp-light`, `volt`, `paper`.
 
@@ -163,7 +163,7 @@ Plain, short, calm, sentence case, verbs first on buttons. No "please", no excla
 | Token | Value | For |
 |---|---|---|
 | `--p-font` / `--p-mono` | theme `--font-ui` / `--font-mono` | UI font / code, paths, keys only |
-| `--p-t-display` `--p-t-title` `--p-t-body` `--p-t-chrome` | 22 · 17 · 16 · 15 | heading · sheet/empty title · body, rows, inputs · tabs, banner title |
+| `--p-t-display` `--p-t-title` `--p-t-body` `--p-t-chrome` | 22 · 17 · 16 · 15 | heading · empty / confirm title (sheet titles are 20/700) · body, rows, inputs · tabs, banner title |
 | `--p-t-label` `--p-t-small` `--p-t-micro` `--p-t-mono` | 14 · 13 · 12 · 13 | buttons, chips · notes, captions · counts, badges (the floor) · terminal text |
 | `--p-w-regular` `--p-w-medium` `--p-w-strong` `--p-w-heavy` | 400 · 500 · 600 · 700 | weights (650 is used for titles) |
 | `--p-lh-tight` `--p-lh` `--p-lh-read` `--p-track-tight` | 1.2 · 1.4 · 1.55 · -0.01em | line heights, title tracking |
@@ -188,3 +188,22 @@ Plain, short, calm, sentence case, verbs first on buttons. No "please", no excla
 `web/src/lib/haptics.ts`: `buzz(kind)` with kinds `hold` 12 · `select` 6 · `confirm` 12-70-12 · `warn` 30-80-30 · `error` 70 · dictation `open` 15 · `stop` 10 · `sent` 12-70-12 · `failed` 70 (ms). No-op without a motor.
 `web/src/components/PhoneIcon.tsx`: `<PhoneIcon name size? className? />`. Names: `more` (three dots) · `check` (tick, list/chip selection) · `chevron-down` `chevron-right` `chevron-left` (open, go in, back) · `close` · `plus` · `working` (clock) · `done` (tick) · `alert` (triangle, failed/asks) · `link-live` (core in ring) · `link-quiet` (empty ring) · `link-reconnecting` (broken ring) · `link-asleep` (moon).
 Enter classes: `.pu-in-rise` `.pu-in-drop` `.pu-in-pop` `.pu-in-fade`; exit: `.pu-out-sink` `.pu-out-lift` `.pu-out-fade`. `.pu-menu`, `.pu-banner`, `.pu-toast` and `.pu-scrim` already run their own enter animation.
+
+## 10. The phone sheet as built (`BottomSheet.tsx` + `BottomSheet.css`)
+Every phone menu is `<BottomSheet>`; rows are `SheetRow`, groups `SheetSection`, a destructive step `SheetConfirm`. It draws the markup in §2 under its own `bsheet*` / `bsrow*` / `bssec*` classes.
+- **Form.** On a phone (`.app[data-mobile]`) the sheet is a floating card, not docked: 8px (`--p-2`) in from the left, right and bottom edge (plus the bottom safe inset), radius `--p-r-sheet` 20 on all four corners, `--p-raised` with `--p-rim` and `--p-shadow-sheet`, no border. It never grows past the screen minus 56px and the insets; the body scrolls. Landscape (>= 700px wide) centres it at 640px. At desktop width it is a centred 440px panel.
+- **Grab handle.** A 36px bar at the top (24% ink). The handle and the head are one drag zone (`.bsheet__grab`); a button in the head keeps its own tap.
+- **Title block.** `title` (defaults to `label`, which is also the accessible name; `title={null}` draws none) at 20px / 700, `subtitle` under it at 14px `--p-ink-2`, then a round `×` (44px hit, glyph 16px, `aria-label="Close"`) on the right. The `×` shows only when a heading is drawn.
+- **Wells.** `SheetSection` = a quiet 13px/600 label, then its rows in one well: `--p-fill`, radius `--p-r-card` 16, 4px inner padding, hairlines between rows from the text edge. A chosen `role="radio"` row = `--p-selected` fill inside the well + weight 600 + tick. A section holding its own control (`.mseg`, a text box) drops the well.
+- **`back`** `{ label, onClick, disabled? }`: a `‹` round before the title for an inner step; `label` is its accessible name ("More"). **`footer`**: pinned under the scrolling body, equal-width full-width pills in a column grid (use `.bsbtn`, `data-tone="act"` for the one primary). **`onBack`**: what Esc and Android Back do (default `onClose`); a multi-step sheet passes "step back to the list".
+- **Closing.** Outside tap (a press that also started on the scrim), Esc, Android Back (one history entry per open sheet; `closeTopSheet()` pops the newest), swipe down (follows the finger 1:1; closes past 96px or a flick of 0.55px/ms, else settles back), and the `×`. Esc and Back go through `onBack` when given, the rest through `onClose`. Focus moves in on open and returns to the opener.
+```tsx
+<BottomSheet open={open} onClose={onClose} onBack={step !== 'list' ? () => setStep('list') : undefined}
+  label="More" back={step === 'theme' ? { label: 'More', onClick: () => setStep('list') } : undefined} testId="more-sheet">
+  <SheetSection title="This phone">
+    <SheetRow icon={<SheetGlyph name="bell" />} label="Alerts" secondary="Off" onClick={askPermission} />
+    <SheetRow icon={<SheetGlyph name="signOut" />} label="Sign out" tone="danger" onClick={() => setStep('sign-out')} />
+  </SheetSection>
+</BottomSheet>
+{/* footer: <BottomSheet … footer={<><button className="bsbtn" onClick={onClose}>Close</button><a className="bsbtn" data-tone="act" href={href}>Open</a></>}> */}
+```

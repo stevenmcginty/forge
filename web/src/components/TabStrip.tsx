@@ -800,7 +800,7 @@ function TabSheet({
           <SheetRow
             icon={<Icon name="plus" size={20} />}
             label="New agent here"
-            secondary={live ? `Open another agent in ${projectName}` : 'Needs a live link to the desktop'}
+            secondary={live ? `Open another agent in ${projectName}` : 'Works once the desktop is connected'}
             disabled={!live}
             onClick={onNewAgent}
             testId="tab-sheet-new"
@@ -823,8 +823,8 @@ function TabSheet({
                   : !isAgent
                   ? 'Shells cannot hand off'
                   : !live
-                    ? 'Needs a live link to the desktop'
-                    : 'This pane has no session running'
+                    ? 'Works once the desktop is connected'
+                    : 'Start the agent in this pane first'
             }
             disabled={!canHandoff}
             onClick={() => onHandoff(shown.tab.id)}

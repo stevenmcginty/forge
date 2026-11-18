@@ -188,7 +188,7 @@ export function CloudLaunchPreview(): ReactNode {
         foremanOn={false}
         foreman={{ available: true, reason: '', detail: 'Let Foreman drive this pane from one line', onPress: () => undefined }}
         handoff={{ available: true, reason: '', detail: 'Ask this agent to write a handoff pack for another', onPress: () => undefined }}
-        screen={{ available: false, reason: 'Needs a live link to STEVE-LAPTOP', detail: '', onPress: () => undefined }}
+        screen={{ available: false, reason: 'Works once STEVE-LAPTOP is connected', detail: '', onPress: () => undefined }}
       />
     ) : sheet === 'pane' ? (
       <PaneSheet

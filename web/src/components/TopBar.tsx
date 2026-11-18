@@ -717,8 +717,8 @@ export function TopBar({
                   : offline
                     ? `${name} is asleep`
                     : !live
-                      ? `Needs a live link to ${name}`
-                      : 'This pane has no session running',
+                      ? `Works once ${name} is connected`
+                      : 'Start the agent in this pane first',
               detail: foremanOn
                 ? foreman?.line
                   ? `Driving: ${foreman.line}`
@@ -739,8 +739,8 @@ export function TopBar({
                   : offline
                     ? `${name} is asleep`
                     : !live
-                      ? `Needs a live link to ${name}`
-                      : 'This pane has no session running',
+                      ? `Works once ${name} is connected`
+                      : 'Start the agent in this pane first',
               detail: handoffChip ? handoffChip.label : 'Ask this agent to write a handoff pack for another',
               onPress: () => {
                 setMoreOpen(false)
@@ -749,7 +749,7 @@ export function TopBar({
             }}
             screen={{
               available: !!onWatchScreen,
-              reason: offline ? `${name} is asleep` : `Needs a live link to ${name}`,
+              reason: offline ? `${name} is asleep` : `Works once ${name} is connected`,
               detail: `Watch ${name}’s screen`,
               onPress: () => {
                 setMoreOpen(false)

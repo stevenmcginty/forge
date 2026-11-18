@@ -4,6 +4,7 @@ import type { AgentProfile } from '@shared/types'
 import { AgentBadge } from '@/components/AgentBadge'
 import { Icon } from '@/components/Icon'
 import { answerKeys, isYesNo, offersYesNo, readAsk, sendAnswerKeys, type ParsedAsk } from '../lib/answer-options'
+import { buzz } from '../lib/haptics'
 import { useMobile } from '../lib/mobile'
 import { useForgeOptional } from '../state'
 import { findAsker } from './AskBanner'
@@ -161,11 +162,8 @@ export function AnswerCard({
   useEffect(() => () => window.clearTimeout(retry.current), [])
 
   const send = async (keys: string[]): Promise<void> => {
-    try {
-      navigator.vibrate?.(10)
-    } catch {
-      // A browser that refuses to buzz still sends the answer.
-    }
+    // `buzz` is a no-op where there is no motor, so the answer is sent regardless.
+    buzz('confirm')
     setStale(false)
     window.clearTimeout(retry.current)
     // Still asking after this long may mean the keys did not land — or only

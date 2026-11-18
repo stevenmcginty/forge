@@ -462,6 +462,7 @@ export function Preview(): ReactNode {
       className={mobile ? "preview app" : "preview"}
       data-mobile={mobile ? "true" : undefined}
       data-ready={mobile ? "true" : undefined}
+      data-shell={mobile ? "app" : undefined}
     >
       {mobile ? (
         <div className="preview__switch">

@@ -158,7 +158,7 @@ export function MoreSheet({
             <SheetRow
               icon={<Icon name="foreman" size={20} />}
               label={foremanOn ? 'Stop Foreman' : 'Foreman'}
-              secondary={foreman.available ? foreman.detail : plainReason(foreman.reason)}
+              secondary={foreman.available ? foreman.detail : foreman.reason}
               disabled={!foreman.available}
               onClick={foreman.onPress}
               testId="more-foreman"
@@ -166,7 +166,7 @@ export function MoreSheet({
             <SheetRow
               icon={<SheetGlyph name="handoff" />}
               label="Hand off"
-              secondary={handoff.available ? handoff.detail : plainReason(handoff.reason)}
+              secondary={handoff.available ? handoff.detail : handoff.reason}
               disabled={!handoff.available}
               onClick={handoff.onPress}
               chevron={handoff.available}
@@ -178,7 +178,7 @@ export function MoreSheet({
             <SheetRow
               icon={<Icon name="screen" size={20} />}
               label="Screen"
-              secondary={screen.available ? screen.detail : plainReason(screen.reason)}
+              secondary={screen.available ? screen.detail : screen.reason}
               disabled={!screen.available}
               onClick={screen.onPress}
               chevron={screen.available}
@@ -596,18 +596,6 @@ function alertsRow(
     }
   }
   return { label: 'Alerts', detail: 'This browser can’t show notifications', ask: false, on: false, word: 'Off' }
-}
-
-/**
- * A greyed row's reason, as help rather than a status code: what to wait for.
- * The top bar words the reasons; the two that read like debug text are said
- * plainly here, and any other passes through unchanged.
- */
-function plainReason(reason: string): string {
-  const link = /^Needs a live link to (.+)$/.exec(reason)
-  if (link) return `Works once ${link[1]} is connected`
-  if (reason === 'This pane has no session running') return 'Start the agent in this pane first'
-  return reason
 }
 
 /* ---------------------------------------------------------- text size */
