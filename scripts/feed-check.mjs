@@ -26,6 +26,7 @@ registerHooks({
 
 const { stripBoxDrawing, stripLiveComposer, blocksFromCapture, transcriptFromLines, richFromText, mergeBlocks } =
   await import('../src/lib/feed.ts')
+const { agentModels, effortLevels, effortSlash, matchAgentModel, modelSlash } = await import('../shared/agents.ts')
 
 /** A whole screen, the way the terminal would hand one over. */
 const screen = (text) => transcriptFromLines(richFromText(text))
@@ -625,6 +626,32 @@ steady('antigravity', (n) =>
     '❯ '
   ].join('\n')
 )
+const agyModels = agentModels('agy')
+ok(agyModels.length === 9, `agy roster is clean (${agyModels.length} base models)`)
+ok(
+  effortLevels('agy').map((l) => l.id).join(',') === 'low,medium,high,xhigh',
+  'agy exposes the four effort rungs (low..xhigh)'
+)
+is(effortSlash('agy')?.('xhigh'), '/effort xhigh', 'agy effort slash writes /effort <level>')
+is(modelSlash('agy')?.('gemini-4-neon'), '/model gemini-4-neon', 'agy model slash writes /model <id>')
+ok(agentModels('gemini').some((m) => m.id === 'gemini-4-neon'), 'gemini roster includes gemini-4-neon')
+for (const [footer, printed, id] of [
+  ['? for shortcuts   auto · Gemini 4 Neon · xhigh', 'Gemini 4 Neon', 'gemini-4-neon'],
+  ['Antigravity · Gemini 4 Neon (High)', 'Gemini 4 Neon (High)', 'gemini-4-neon'],
+  ['Antigravity · Gemini 4 Carbon (High)', 'Gemini 4 Carbon (High)', 'gemini-4-carbon'],
+  ['? for shortcuts   auto · Gemini 4 Argon · medium', 'Gemini 4 Argon', 'gemini-4-argon'],
+  ['? for shortcuts   auto · Gemini 4 Hydrogen · xhigh', 'Gemini 4 Hydrogen', 'gemini-4-hydrogen'],
+  ['Antigravity · Gemini 4 Hydrogen (Low)', 'Gemini 4 Hydrogen (Low)', 'gemini-4-hydrogen'],
+  ['? for shortcuts   auto · Gemini 3.8 Flash · medium', 'Gemini 3.8 Flash', 'gemini-3.8-flash'],
+  ['? for shortcuts   auto · Orchestrator (Neon)', 'Orchestrator (Neon)', 'gemini-pro-orchestrator-neon'],
+  ['? for shortcuts   auto · Claude Opus 5.5 · medium', 'Claude Opus 5.5', 'claude-opus-5-5'],
+  ['? for shortcuts   auto · Claude Sonnet 5.5 · medium', 'Claude Sonnet 5.5', 'claude-sonnet-5-5'],
+  ['? for shortcuts   auto · GPT-OSS 120B (Medium)', 'GPT-OSS 120B (Medium)', 'gpt-oss-120b-medium']
+]) {
+  const agyScreen = screen(`> hi\n\nHello.\n\n❯ \n${footer}`)
+  is(agyScreen.status.model, printed, `antigravity screen reads ${printed}`)
+  is(matchAgentModel(agyModels, agyScreen.status.model)?.id, id, `and matches ${id} in the agy roster`)
+}
 
 // Grok drops the `[stop]` tail the moment the response starts streaming, and
 // what is left is an ASCII spinner, a word, and a clock.

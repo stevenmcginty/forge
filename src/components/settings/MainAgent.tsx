@@ -220,6 +220,10 @@ function LiveSeg<T extends string>({
 }
 
 const GEMINI_MODELS = [
+  { id: 'gemini-4-neon', label: 'Gemini 4 Neon — newest balanced model, frontier quality at fast speed' },
+  { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen — newest fast model' },
+  { id: 'gemini-4-carbon', label: 'Gemini 4 Carbon — deepest reasoning, rolling out' },
+  { id: 'gemini-4-argon', label: 'Gemini 4 Argon — frontier reasoning' },
   { id: 'gemini-3.8-flash', label: 'Flash 3.8 — newest Flash' },
   { id: 'gemini-3.6-flash', label: 'Flash 3.6 — fastest, recommended' },
   { id: DEFAULT_GEMINI_MODEL, label: 'Flash 2.5 — fast, cheap, the old default' },

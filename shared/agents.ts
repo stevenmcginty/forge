@@ -649,12 +649,15 @@ export function effortLevelSpec(level: string): EffortLevelSpec | null {
  *  - **Grok Build**: the same ladder minus `max`, which Grok treats as an
  *    alias of `xhigh` rather than a fifth rung (grok `--help` / `/effort`,
  *    2026-08-23).
+ *  - **Antigravity (`agy`)**: the same four rungs (`low|medium|high|xhigh`;
+ *    verified against `agy` 1.5.11, where `/effort max` reports
+ *    `available: low, medium, high, xhigh`).
  *  - **Codex, OpenCode, Kimi, Qwen, Gemini, a shell**: empty.
  */
 export function effortLevels(command: string): EffortLevelSpec[] {
   const exe = commandExe(command)
   if (exe === 'claude') return EFFORT_LEVELS
-  if (exe === 'grok') return EFFORT_LEVELS.filter((l) => l.id !== 'max')
+  if (exe === 'grok' || exe === 'agy' || exe === 'antigravity') return EFFORT_LEVELS.filter((l) => l.id !== 'max')
   return []
 }
 
@@ -670,6 +673,8 @@ export function effortLevels(command: string): EffortLevelSpec[] {
  *    claude-exe profile by construction, which is most of the roster.
  *  - **Grok Build** takes the same `/effort <level>` spelling (verified
  *    against grok `--help` 2026-08-23).
+ *  - **Antigravity (`agy`)** takes `/effort <level>` too (verified against
+ *    `agy` 1.5.11, 2026-11-18).
  *  - **Codex** keeps reasoning effort behind its interactive `/model` picker
  *    (developers.openai.com/codex/cli, 2026-08-23): there is no slash command
  *    a helper can type blind, so this answers null and the caller says so
@@ -682,7 +687,7 @@ export function effortLevels(command: string): EffortLevelSpec[] {
  */
 export function effortSlash(command: string): ((level: EffortLevel) => string) | null {
   const exe = commandExe(command)
-  if (exe !== 'claude' && exe !== 'grok') return null
+  if (exe !== 'claude' && exe !== 'grok' && exe !== 'agy' && exe !== 'antigravity') return null
   return (level) => `/effort ${level}`
 }
 
@@ -733,7 +738,8 @@ function modelFamily(command: string): string | null {
  * Haiku 5.5 (2026-10-07, Claude Code 2.1.293) is native 1M with an effort dial;
  * Grok versions from `grok models` plus the older ids the TUI still takes;
  * Codex from the visible rows of `codex debug models` (0.157.1);
- * Antigravity from `agy models`; Kimi from kimi.com/code/docs models;
+ * Antigravity from `agy models` (1.5.11, base models — effort lives under
+ * `/effort`); Kimi from kimi.com/code/docs models;
  * Qwen from qwen-code `/model <id>` + QwenCloud text-generation models;
  * Gemini CLI from geminicli.com/docs/cli/model; GLM from docs.z.ai Coding Plan;
  * OpenCode from `opencode models` (Zen free + the Gemini coding ids on this
@@ -777,30 +783,27 @@ const MODEL_FAMILIES: Record<string, AgentModelSpec[]> = {
     { id: 'kimi-for-coding-highspeed', label: 'K2.7 HighSpeed', note: 'same coding model, ~6× faster' }
   ],
   agy: [
-    // Gemini 4 Argon reached Antigravity 2026-10-13 (AI Ultra only). Not yet in
-    // `agy models` on this machine; ids follow the Pro high/low pattern.
-    { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)', note: 'newest frontier model, deepest effort' },
-    { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)', note: 'newest frontier model, faster' },
-    { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)', note: 'newest Flash, deepest effort' },
-    { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)', note: 'newest Flash, balanced' },
-    { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)', note: 'newest Flash, fastest' },
-    { id: 'gemini-3.7-flash-high', label: 'Gemini 3.7 Flash (High)', note: 'previous Flash, deepest effort' },
-    { id: 'gemini-3.7-flash-medium', label: 'Gemini 3.7 Flash (Medium)', note: 'previous Flash, balanced' },
-    { id: 'gemini-3.7-flash-low', label: 'Gemini 3.7 Flash (Low)', note: 'previous Flash, fastest' },
-    { id: 'gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)', note: 'older Flash, deepest effort' },
-    { id: 'gemini-3.6-flash-medium', label: 'Gemini 3.6 Flash (Medium)', note: 'older Flash, balanced' },
-    { id: 'gemini-3.6-flash-low', label: 'Gemini 3.6 Flash (Low)', note: 'older Flash, fastest' },
-    { id: 'gemini-3.5-flash-high', label: 'Gemini 3.5 Flash (High)', note: 'older Flash, deepest effort' },
-    { id: 'gemini-3.5-flash-medium', label: 'Gemini 3.5 Flash (Medium)', note: 'older Flash, balanced' },
-    { id: 'gemini-3.5-flash-low', label: 'Gemini 3.5 Flash (Low)', note: 'older Flash, fastest' },
-    { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)', note: 'Pro reasoning, deep' },
-    { id: 'gemini-3.1-pro-low', label: 'Gemini 3.1 Pro (Low)', note: 'Pro reasoning, faster' },
-    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', note: 'thinking — all-round coding' },
-    { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6', note: 'thinking — the hard jobs' },
+    // Verified against `agy models` and `agy`'s `/model` menu (1.5.11, 2026-11-18):
+    // agy groups models by base family and adjusts reasoning depth via `/effort`
+    // (`low|medium|high|xhigh`), so each model sits on one clean row instead of
+    // repeating effort tiers. `gemini-4-carbon` is Ultra / API-key only on this
+    // machine; the rest come straight from `agy models`.
+    { id: 'gemini-4-neon', label: 'Gemini 4 Neon', note: 'newest balanced model — frontier quality at fast speed' },
+    { id: 'gemini-4-carbon', label: 'Gemini 4 Carbon', note: 'deepest frontier model — Ultra / API key' },
+    { id: 'gemini-4-argon', label: 'Gemini 4 Argon', note: 'frontier reasoning' },
+    { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen', note: 'fast model — everyday coding' },
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'lightweight Flash' },
+    { id: 'gemini-pro-orchestrator-neon', label: 'Orchestrator (Neon)', note: 'plans with Neon, runs with Hydrogen' },
+    { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', note: 'Anthropic — the hard jobs' },
+    { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: 'Anthropic — daily coding' },
     { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B', note: 'open-weights option' }
   ],
   gemini: [
     { id: 'auto', label: 'Auto', note: 'let Gemini pick Pro or Flash' },
+    { id: 'gemini-4-neon', label: 'Gemini 4 Neon', note: 'newest balanced model — frontier quality at fast speed' },
+    { id: 'gemini-4-carbon', label: 'Gemini 4 Carbon', note: 'newest frontier model, rolling out' },
+    { id: 'gemini-4-argon', label: 'Gemini 4 Argon', note: 'frontier reasoning' },
+    { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen', note: 'newest fast model' },
     { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', note: 'newest Flash' },
     { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', note: 'previous Flash' },
     { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', note: 'older Flash' },

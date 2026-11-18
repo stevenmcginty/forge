@@ -393,9 +393,14 @@ export function stripLiveComposer(text: string): string {
 const MODEL_PATTERNS: RegExp[] = [
   /\bmodel\s*:\s*([\w.-]+)/i,
   /\b(claude-(?:fable|opus|sonnet|haiku)-[\w.-]+)/i,
+  /\b(claude\s+(?:fable|opus|sonnet|haiku)\s+\d+(?:\.\d+)?)\b/i,
   /\b((?:fable|opus|sonnet|haiku)\s+\d*(?:\.\d+)?)\b/i,
   /\b(fable)\b/i,
   /\b(gemini-[\w.-]+)/i,
+  // Antigravity spells its model out in the footer/banner: `Gemini 4 Neon · xhigh` or `Gemini 4 Hydrogen (XHigh)`.
+  /\b(gemini\s+\d+(?:\.\d+)?\s+(?:neon|carbon|argon|hydrogen|flash|pro)(?:\s*\((?:xhigh|high|medium|low)\)|\b))/i,
+  /\b(orchestrator\s*\((?:neon|argon)\))/i,
+  /\b(gpt-oss\s+\d+[a-z]*(?:\s*\((?:xhigh|high|medium|low)\)|\b))/i,
   /\b(gpt-[\w.-]+)/i,
   /\b(grok-[\w.-]+)/i,
   // Grok's footer spells it out rather than using the slug: `Grok 4.6 (high)`.

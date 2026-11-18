@@ -157,13 +157,18 @@ function ModeBadge({ mark, pct }: { mark: ModeMark; pct: number }): ReactNode {
   )
 }
 
-/** The model's name in its parts: "Claude Sonnet 4.6" is family "Sonnet", version "4.6". */
+/**
+ * The model's name in its parts: "Claude Sonnet 4.6" is family "Sonnet", version "4.6";
+ * "Gemini 4 Neon" is family "Neon", version "4"; "GPT-6.1 Terra" is family "Terra", version "6.1".
+ */
 function modelParts(name: string | null): { family: string; version: string } | null {
   if (!name) return null
-  const plain = name.replace(/^claude[\s-]+/i, '').trim()
+  const plain = name.replace(/\s*\(.*\)\s*$/, '').replace(/^claude[\s-]+/i, '').trim()
+  const after = /^(?:gemini|gpt)[\s-]+(\d+(?:\.\d+)*)[\s-]+(.+)$/i.exec(plain)
+  if (after?.[1] && after[2]) return { family: after[2].trim(), version: after[1] }
   const match = /^(.*?)[\s-]*(\d+(?:\.\d+)*)/.exec(plain)
   const family = (match?.[1] ? match[1] : plain).trim() || plain
-  return { family, version: match?.[1] ? match[2] : '' }
+  return { family, version: match?.[1] ? (match[2] ?? '') : '' }
 }
 
 /**
