@@ -28,6 +28,7 @@ import { BottomSheet, openSheetCount, SheetGlyph, SheetRow, SheetSection } from 
 import { CloudLaunch } from './CloudLaunch'
 import { AlertGlyph } from './Connection'
 import { FolderPicker, type AddedProject } from './FolderPicker'
+import { PhoneIcon } from './PhoneIcon'
 import './Sheets.phone.css'
 import './ProjectSheet.css'
 
@@ -37,9 +38,10 @@ import './ProjectSheet.css'
  * It replaces the desk's rail on a phone, which was a 300px column with a hole
  * in the middle and three tracked-caps toggles at the bottom. Top to bottom:
  *
- *   1. Projects — 56px rows: dot, name, short path, "2 panes" only when there
- *      are some, an amber "!" when a pane there is asking. The current one sits
- *      on a raised row with a ringed dot. A tap selects and closes; the "⋯" at
+ *   1. Projects — 56px rows: the project's tile (as on the top bar), the name,
+ *      and one line under it ("Working", "2 panes", the short path); "! Asking"
+ *      at the end when a pane there is asking. The current one takes the
+ *      selected fill and "✓ Open". A tap selects and closes; the "⋯" at
  *      the end of each row holds New agent here, Files and Remove from Forge.
  *      A filter appears past eight projects.
  *   2. Add a project… — a full row, the Wave B choice sheet behind it, and the
@@ -76,6 +78,11 @@ const FOCUSABLE =
 
 /** Said wherever a newer desktop feature is missing. */
 const RESTART = 'Restart Forge on the desktop to use this'
+
+/** The project's tile letter, as the top bar draws it (TopBar.tsx `projectInitial`). */
+function initialOf(name: string): string {
+  return (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '·').toUpperCase()
+}
 
 export function ProjectSheet({
   open,
@@ -345,11 +352,11 @@ export function ProjectSheet({
               {page !== 'main' ? (
                 <button
                   type="button"
-                  className="pjs__icon-btn"
+                  className="pjs__icon-btn pu-icon-btn"
                   aria-label="Back to projects"
                   onClick={() => setPage('main')}
                 >
-                  <Icon name="chevronLeft" size={20} />
+                  <PhoneIcon name="chevron-left" />
                 </button>
               ) : null}
               <h2 id={headingId} className="pjs__title">
@@ -358,12 +365,12 @@ export function ProjectSheet({
               </h2>
               <button
                 type="button"
-                className="pjs__icon-btn"
+                className="pjs__icon-btn pu-icon-btn"
                 aria-label="Close"
                 onClick={onClose}
                 data-testid="project-sheet-close"
               >
-                <Icon name="close" size={18} />
+                <PhoneIcon name="close" />
               </button>
             </header>
 
@@ -417,28 +424,42 @@ export function ProjectSheet({
                             aria-current={isCurrent ? 'true' : undefined}
                             onClick={() => select(project.id)}
                           >
-                            <span className="pjrow__dot" aria-hidden="true" />
+                            {/* The project's tile, as on the top bar and in the drum. */}
+                            <span className="pjrow__tile" aria-hidden="true">
+                              {initialOf(project.name)}
+                            </span>
                             <span className="pjrow__text">
                               <span className="pjrow__title">
                                 <span className="pjrow__name">{project.name}</span>
-                                {project.pinned ? <Icon name="pin" size={11} className="pjrow__pin" /> : null}
+                                {project.pinned ? <Icon name="pin" size={12} className="pjrow__pin" /> : null}
                               </span>
-                              <span className="pjrow__path">{shortPath(project.path)}</span>
+                              <span className="pjrow__sub">
+                                {working && !waits ? (
+                                  <span className="pjrow__work">
+                                    <PhoneIcon name="working" size={14} />
+                                    Working
+                                  </span>
+                                ) : null}
+                                {panes > 0 ? (
+                                  <span className="pjrow__panes">
+                                    {panes} {panes === 1 ? 'pane' : 'panes'}
+                                  </span>
+                                ) : null}
+                                <span className="pjrow__path">{shortPath(project.path)}</span>
+                              </span>
                             </span>
-                            {panes > 0 ? (
-                              <span className="pjrow__panes">
-                                {panes} {panes === 1 ? 'pane' : 'panes'}
-                              </span>
-                            ) : null}
                             {waits ? (
                               <span className="pjrow__ask" title="A pane here is waiting for you">
-                                <span aria-hidden="true">!</span>
+                                <span className="pu-bang" aria-hidden="true">
+                                  !
+                                </span>
+                                <span>Asking</span>
                                 <span className="pjs__sr">, a pane here is waiting for you</span>
                               </span>
                             ) : null}
                             {isCurrent ? (
                               <span className="pjrow__here">
-                                <Icon name="check" size={13} />
+                                <PhoneIcon name="check" size={16} />
                                 <span>Open</span>
                                 <span className="pjs__sr"> now</span>
                               </span>
@@ -446,12 +467,12 @@ export function ProjectSheet({
                           </button>
                           <button
                             type="button"
-                            className="pjrow__more"
+                            className="pjrow__more pu-icon-btn"
                             aria-label={`Options for ${project.name}`}
                             onClick={() => setMenuFor(project.id)}
                             data-testid="project-more"
                           >
-                            <Icon name="dots" size={18} />
+                            <PhoneIcon name="more" />
                           </button>
                         </div>
                       )
@@ -472,7 +493,7 @@ export function ProjectSheet({
                     <SheetRow
                       icon={
                         <span className="pjs__add-ring">
-                          <Icon name="plus" size={16} />
+                          <PhoneIcon name="plus" size={18} />
                         </span>
                       }
                       label="Add a project…"

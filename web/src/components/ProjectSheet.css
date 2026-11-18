@@ -1,20 +1,21 @@
 /*
- * The phone's project sheet (ProjectSheet.tsx). Tokens from phone-tokens.css,
- * which `.app[data-mobile]` carries and this layer sits inside.
+ * The phone's project sheet (ProjectSheet.tsx), in the Quiet Instrument
+ * language (web/PHONE-DESIGN.md). Tokens from phone-tokens.css, which
+ * `.app[data-mobile]` carries and this layer sits inside.
  *
- * A full-height panel from the left edge — the side the ☰ is on — on the same
- * raised surface, curve and scrim as the bottom sheets, so the two read as one
- * family. Rows are the sheets' 56px rows; the one project on screen is a
- * pressed row with a ringed dot (a shape and a weight, not a hue). Nothing in
- * here is lime: nothing in a list of projects is "act here". Amber is only the
- * "!" of a waiting pane and a conflicted file, and both carry the mark as well.
+ * A full-height panel from the left edge on the sheets' raised surface, with
+ * the sheets' head, rows and words, so the two read as one family. No
+ * outlines, no lime, no washes: the project on screen takes the selected
+ * fill, the weight and "✓ Open"; a project with a pane asking says "! Asking"
+ * — the only amber in the list. Each row leads with the project's tile, the
+ * same tile as the top bar and the drum.
  */
 
 .pjs-layer {
   position: fixed;
   inset: 0;
-  /* Under the bottom sheets (+5), which open on top of it. */
-  z-index: calc(var(--z-popover) + 2);
+  /* Under the bottom sheets, which open on top of it. */
+  z-index: var(--p-z-side);
   font-family: var(--p-font);
   color: var(--p-ink);
 }
@@ -28,11 +29,12 @@
   inset: 0;
   background: var(--p-scrim);
   opacity: 0;
-  transition: opacity var(--p-dur-sheet) var(--p-ease);
+  transition: opacity var(--p-dur-exit) var(--p-ease-in);
 }
 
 .pjs-layer[data-state='open'] .pjs__scrim {
   opacity: 1;
+  transition: opacity var(--p-dur-sheet) var(--p-ease);
 }
 
 .pjs {
@@ -42,15 +44,15 @@
   left: 0;
   display: flex;
   flex-direction: column;
-  /* A 44px strip of the app stays in view: context, and somewhere to tap out. */
+  /* A strip of the app stays in view: context, and somewhere to tap out. */
   width: min(360px, calc(100% - 44px));
   padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
   background: var(--p-raised);
-  border-right: 1px solid var(--p-line);
+  border: 0;
   border-radius: 0 var(--p-r-sheet) var(--p-r-sheet) 0;
-  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--p-shadow-float);
   transform: translateX(-100%);
-  transition: transform var(--p-dur-sheet) var(--p-ease-sheet);
+  transition: transform var(--p-dur-exit) var(--p-ease-in);
   outline: none;
   overflow: hidden;
   /* Vertical scrolling stays the browser's; a sideways pull is the close gesture. */
@@ -59,6 +61,7 @@
 
 .pjs-layer[data-state='open'] .pjs {
   transform: translateX(0);
+  transition: transform var(--p-dur-sheet) var(--p-ease-sheet);
 }
 
 .pjs-layer[data-dragging='true'] .pjs {
@@ -72,7 +75,7 @@
   display: flex;
   align-items: center;
   gap: var(--p-1);
-  min-height: 60px;
+  min-height: 64px;
   padding: var(--p-2) var(--p-2) var(--p-1) var(--p-5);
 }
 
@@ -89,42 +92,26 @@
   margin: 0;
   font-size: var(--p-t-title);
   font-weight: 650;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
+  line-height: var(--p-lh-tight);
+  letter-spacing: var(--p-track-tight);
   color: var(--p-ink);
 }
 
 .pjs__count {
   font-size: var(--p-t-chrome);
-  font-weight: 500;
+  font-weight: var(--p-w-medium);
   letter-spacing: 0;
   color: var(--p-ink-3);
   font-variant-numeric: tabular-nums;
 }
 
+/* The head's round buttons (back, close) are `.pu-icon-btn`; this keeps their place. */
 .pjs__icon-btn {
   flex: none;
-  display: grid;
-  place-items: center;
-  width: var(--p-hit);
-  height: var(--p-hit);
-  padding: 0;
-  color: var(--p-ink-2);
-  background: transparent;
-  border: 0;
-  border-radius: var(--p-r-pill);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
-}
-
-.pjs__icon-btn:active {
-  background: var(--p-press);
 }
 
 .pjs__icon-btn:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
 /* ------------------------------------------------------------------ body */
@@ -157,35 +144,40 @@
   }
 }
 
+/* "In forge": a new section, after space and one hairline. */
 .pjs__body > .bssec {
-  margin-top: var(--p-3);
-  padding-top: var(--p-1);
+  margin-top: var(--p-4);
+  padding-top: var(--p-2);
   border-top: 1px solid var(--p-line);
 }
 
 .pjs .bsbtn:disabled {
-  opacity: 0.4;
+  opacity: var(--p-disabled);
   cursor: default;
 }
 
 /* ---------------------------------------------------------------- filter */
 
+/* The contract's text field: a tonal well with a hairline, 16px text. */
 .pjs__filter {
   display: flex;
   align-items: center;
   gap: var(--p-2);
   height: var(--p-hit);
-  margin: var(--p-1) var(--p-2) var(--p-2);
+  margin: 0 var(--p-2) var(--p-3);
   padding: 0 var(--p-3);
   color: var(--p-ink-3);
-  background: var(--p-surface);
-  border: 1px solid var(--p-line-strong);
+  background: var(--p-fill);
+  border: 1px solid var(--p-line);
   border-radius: var(--p-r-row);
-  transition: border-color var(--p-dur-fast) var(--p-ease);
+  transition:
+    border-color var(--p-dur-fast) var(--p-ease),
+    box-shadow var(--p-dur-fast) var(--p-ease);
 }
 
 .pjs__filter:focus-within {
   border-color: var(--p-ink-2);
+  box-shadow: 0 0 0 1px var(--p-ink-2);
 }
 
 .pjs__filter-icon {
@@ -198,7 +190,7 @@
   height: 100%;
   padding: 0;
   /* 16px, so a phone does not zoom the page to type in it. */
-  font: 400 var(--p-t-body) / 1.2 var(--p-font);
+  font: var(--p-w-regular) var(--p-t-body) / var(--p-lh-tight) var(--p-font);
   color: var(--p-ink);
   background: transparent;
   border: 0;
@@ -223,22 +215,16 @@
   align-items: center;
   min-height: var(--p-row);
   border-radius: var(--p-r-row);
-  transition: background var(--p-dur-fast) var(--p-ease);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
 }
 
 .pjrow + .pjrow {
   margin-top: 2px;
 }
 
-/*
- * The project on screen. Steve asked for it to stand out at a glance, in the
- * app's lime: a lime-washed row inside a lime ring, a ringed dot, a heavier
- * name, and a lime "✓ Open" tag. The tag carries a word and a tick, so the row
- * never relies on the colour alone.
- */
+/* The project on screen: the selected fill, the weight, and "✓ Open" (rule 6). */
 .pjrow[data-current='true'] {
-  background: color-mix(in srgb, var(--p-act) 14%, var(--p-bg));
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--p-act) 70%, transparent);
+  background: var(--p-selected);
 }
 
 .pjrow__main {
@@ -248,8 +234,10 @@
   align-items: center;
   gap: var(--p-3);
   min-height: var(--p-row);
-  padding: var(--p-2) var(--p-1) var(--p-2) var(--p-4);
+  padding: var(--p-2) var(--p-1) var(--p-2) var(--p-3);
+  margin: 0;
   font: inherit;
+  font-family: var(--p-font);
   text-align: left;
   color: inherit;
   background: transparent;
@@ -260,125 +248,32 @@
 }
 
 .pjrow:has(> .pjrow__main:active) {
-  background: var(--p-hover);
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant);
 }
 
 .pjrow[data-current='true']:has(> .pjrow__main:active) {
-  background: color-mix(in srgb, var(--p-act) 22%, var(--p-bg));
+  background: var(--p-selected-press);
 }
 
 .pjrow__main:focus-visible,
 .pjrow__more:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
-.pjrow__dot {
+/* The project's tile, as on the top bar: its initial on a wash of its colour. */
+.pjrow__tile {
   flex: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--pj-color, var(--p-ink-3));
-}
-
-.pjrow[data-current='true'] .pjrow__dot {
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--p-act) 14%, var(--p-bg)),
-    0 0 0 4.5px var(--pj-color, var(--p-ink-3));
-}
-
-/*
- * Working: a halo breathes round the dot and never goes out, so the ring is
- * the shape that says "working" even when it holds still. It is a
- * pseudo-element on transform and opacity — one per row, so a paint-free
- * pulse matters here. Drawn over the dot in the dot's own colour, it only
- * shows where it spills past the edge.
- */
-.pjrow[data-working='true'] .pjrow__dot {
-  position: relative;
-}
-
-.pjrow[data-working='true'] .pjrow__dot::after {
-  content: '';
-  position: absolute;
-  inset: -5px;
-  border-radius: 50%;
-  background: var(--pj-color, var(--p-ink-3));
-  opacity: 0.2;
-  transform: scale(0.7);
-  pointer-events: none;
-  animation: pjrow-pulse 1400ms ease-in-out infinite;
-}
-
-/* 10px dot: 0.7 of the 20px halo is a 2px spill, 1 is 5px. */
-@keyframes pjrow-pulse {
-  0%,
-  100% {
-    opacity: 0.2;
-    transform: scale(0.7);
-  }
-  50% {
-    opacity: 0.5;
-    transform: none;
-  }
-}
-
-/* The open project's dot already wears a ring; working, its outer band thickens. */
-.pjrow[data-current='true'][data-working='true'] .pjrow__dot::after {
-  inset: -7px;
-  background: none;
-  border: 2.5px solid var(--pj-color, var(--p-act));
-  opacity: 0;
-  transform: scale(0.9);
-  animation-name: pjrow-pulse-current;
-}
-
-@keyframes pjrow-pulse-current {
-  0%,
-  100% {
-    opacity: 0;
-    transform: scale(0.9);
-  }
-  50% {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Motion off: the halo holds still, so "working" keeps its ring. */
-@media (prefers-reduced-motion: reduce) {
-  .pjrow[data-working='true'] .pjrow__dot::after {
-    animation: none;
-    opacity: 0.35;
-    transform: none;
-  }
-
-  .pjrow[data-current='true'][data-working='true'] .pjrow__dot::after {
-    animation: none;
-    opacity: 1;
-    transform: none;
-  }
-}
-
-:root[data-reduced-motion='true'] .pjrow[data-working='true'] .pjrow__dot::after {
-  animation: none;
-  opacity: 0.35;
-  transform: none;
-}
-
-:root[data-reduced-motion='true'] .pjrow[data-current='true'][data-working='true'] .pjrow__dot::after {
-  animation: none;
-  opacity: 1;
-  transform: none;
-}
-
-.pjrow[data-attention='true'] {
-  background: color-mix(in srgb, var(--p-attn) 8%, transparent);
-}
-
-.pjrow[data-current='true'][data-attention='true'] {
-  background: color-mix(in srgb, var(--p-attn) 14%, var(--p-bg));
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--p-attn) 70%, transparent);
+  display: grid;
+  place-items: center;
+  width: var(--p-avatar);
+  height: var(--p-avatar);
+  margin: 0 1px;
+  border-radius: 10px;
+  font: var(--p-w-heavy) 15px / 1 var(--p-font);
+  color: color-mix(in srgb, var(--pj-color, var(--p-ink-2)) 55%, var(--p-ink));
+  background: color-mix(in srgb, var(--pj-color, var(--p-ink-3)) 26%, transparent);
 }
 
 .pjrow__text {
@@ -392,107 +287,96 @@
 .pjrow__title {
   display: flex;
   align-items: center;
-  gap: var(--p-1);
+  gap: 6px;
   min-width: 0;
 }
 
 .pjrow__pin {
   flex: none;
   color: var(--p-ink-3);
-  opacity: 0.8;
 }
 
-.pjrow__name,
-.pjrow__path {
+.pjrow__name {
+  min-width: 0;
   overflow: hidden;
+  font-size: var(--p-t-body);
+  font-weight: var(--p-w-medium);
+  line-height: 1.3;
+  color: var(--p-ink);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pjrow__name {
-  font-size: var(--p-t-body);
-  font-weight: 500;
-  line-height: 1.3;
-  color: var(--p-ink);
-}
-
 .pjrow[data-current='true'] .pjrow__name {
-  font-weight: 650;
+  font-weight: var(--p-w-strong);
 }
 
-.pjrow__path {
-  font: 400 var(--p-t-mono) / 1.35 var(--p-mono);
+/* The one line under the name: "Working · 2 panes · …\Desktop\forge". */
+.pjrow__sub {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  font-size: var(--p-t-small);
+  line-height: 1.35;
+  color: var(--p-ink-2);
+  white-space: nowrap;
+}
+
+.pjrow__sub > * + *::before {
+  content: '·';
+  margin: 0 6px;
+  font-family: var(--p-font);
   color: var(--p-ink-3);
 }
 
-.pjrow__panes {
-  flex: none;
-  font-size: var(--p-t-small);
-  color: var(--p-ink-2);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.pjrow__here {
+.pjrow__work {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
-  padding: 0 9px 0 7px;
-  font-size: var(--p-t-small);
-  font-weight: 650;
-  color: var(--p-act-ink);
-  background: var(--p-act);
-  border-radius: var(--p-r-pill);
+  font-weight: var(--p-w-strong);
+}
+
+.pjrow__panes {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.pjrow__path {
+  min-width: 0;
+  overflow: hidden;
+  font: var(--p-w-regular) var(--p-t-mono) / 1.35 var(--p-mono);
+  color: var(--p-ink-3);
+  text-overflow: ellipsis;
+}
+
+/* At the end: "! Asking" and "✓ Open", a shape and a word each. */
+.pjrow__ask,
+.pjrow__here {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: var(--p-w-strong) var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-ink);
   white-space: nowrap;
 }
 
 .pjrow__here svg {
-  stroke-width: 2;
-}
-
-/* A pane here is waiting: an amber disc with the mark in it. */
-.pjrow__ask {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  font: 800 var(--p-t-small) / 1 var(--p-font);
-  color: var(--p-attn-ink);
-  background: var(--p-attn);
-  border-radius: 50%;
+  stroke-width: 2.2;
 }
 
 .pjrow__more {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: var(--p-hit);
-  height: var(--p-hit);
   margin-right: var(--p-1);
-  padding: 0;
-  color: var(--p-ink-2);
-  background: transparent;
-  border: 0;
-  border-radius: var(--p-r-pill);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
 }
 
-.pjrow__more:active {
-  background: var(--p-hover);
+.pjrow__more:active:not(:disabled) {
+  background: var(--p-pressed);
 }
 
 @media (hover: hover) {
-  .pjrow:hover {
-    background: var(--p-hover);
-  }
-
-  .pjrow[data-current='true']:hover {
-    background: color-mix(in srgb, var(--p-act) 18%, var(--p-bg));
+  .pjrow:not([data-current='true']):hover {
+    background: var(--p-hovered);
   }
 }
 
@@ -502,13 +386,15 @@
   margin-top: var(--p-1);
 }
 
+/* A tile like the projects', with a plus: the next project's place in the list. */
 .pjs__add-ring {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--p-line-strong);
-  border-radius: 50%;
+  width: var(--p-avatar);
+  height: var(--p-avatar);
+  color: var(--p-ink-2);
+  background: var(--p-fill);
+  border-radius: 10px;
 }
 
 /* ------------------------------------------------------------------ git */
@@ -529,36 +415,31 @@
   padding: var(--p-1) var(--p-3) var(--p-2);
 }
 
-/* Fetch / Pull / Push: one control, three equal 44px segments. */
+/* Fetch / Pull / Push: the contract's segmented track, three equal buttons. */
 .pjseg {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  height: var(--p-hit);
-  background: var(--p-surface);
-  border: 1px solid var(--p-line-strong);
+  gap: 2px;
+  min-height: 50px;
+  padding: 3px;
+  background: var(--p-fill);
+  border: 0;
   border-radius: var(--p-r-row);
-  overflow: hidden;
-}
-
-/* The track's 1px border sits inside its height; the segments get the full 44. */
-.app[data-mobile] .pjseg {
-  height: calc(var(--p-hit) + 2px);
 }
 
 .pjseg__btn {
   min-width: 0;
+  min-height: var(--p-hit);
   padding: 0 var(--p-1);
-  font: 500 var(--p-t-chrome) / 1 var(--p-font);
+  margin: 0;
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
   color: var(--p-ink);
   background: transparent;
   border: 0;
+  border-radius: 9px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--p-dur-fast) var(--p-ease);
-}
-
-.pjseg__btn + .pjseg__btn {
-  border-left: 1px solid var(--p-line-strong);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
 }
 
 .pjseg__btn:disabled {
@@ -568,19 +449,20 @@
 
 .pjseg__btn:active:not(:disabled),
 .pjseg__btn[aria-busy='true'] {
-  background: var(--p-press);
+  background: var(--p-selected);
+  transition-duration: var(--p-dur-instant);
 }
 
 .pjseg__btn:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
 .pjgit__hint {
   margin: var(--p-2) var(--p-1) 0;
   font-size: var(--p-t-small);
   line-height: 1.35;
-  color: var(--p-ink-3);
+  color: var(--p-ink-2);
 }
 
 /* -------------------------------------------------------- changes page */
@@ -588,7 +470,7 @@
 .pjs__lede {
   margin: 0 var(--p-3) var(--p-2);
   font-size: var(--p-t-label);
-  line-height: 1.4;
+  line-height: var(--p-lh);
   color: var(--p-ink-2);
 }
 
@@ -604,8 +486,8 @@
 
 .pjchg__dir {
   padding: var(--p-3) var(--p-3) var(--p-1);
-  font: 400 var(--p-t-mono) / 1.35 var(--p-mono);
-  color: var(--p-ink-3);
+  font: var(--p-w-regular) var(--p-t-mono) / 1.35 var(--p-mono);
+  color: var(--p-ink-2);
   overflow-wrap: anywhere;
 }
 
@@ -625,15 +507,14 @@
   margin: 0 var(--p-1);
   font: 650 var(--p-t-mono) / 1 var(--p-mono);
   color: var(--p-ink-2);
-  background: var(--p-surface);
-  border: 1px solid var(--p-line-strong);
-  border-radius: 8px;
+  background: var(--p-fill);
+  border: 0;
+  border-radius: var(--p-r-sm);
 }
 
 .pjchg__letter[data-letter='U'] {
   color: var(--p-attn-ink);
   background: var(--p-attn);
-  border-color: var(--p-attn);
 }
 
 .pjcommit {
@@ -662,7 +543,7 @@
 
 .pjs__args {
   margin-left: var(--p-2);
-  font: 400 var(--p-t-mono) / 1.3 var(--p-mono);
+  font: var(--p-w-regular) var(--p-t-mono) / 1.3 var(--p-mono);
   color: var(--p-ink-3);
 }
 
@@ -679,7 +560,7 @@
 .pjs__consequence {
   display: block;
   margin-top: var(--p-2);
-  font-weight: 600;
+  font-weight: var(--p-w-strong);
   color: var(--p-ink);
 }
 

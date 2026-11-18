@@ -1,12 +1,14 @@
-import { useState, type ReactNode } from 'react'
+import { useState, type ComponentProps, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { agentModels, BUILTIN_AGENT_PROFILES, effortLevels, permissionModes } from '@shared/agents'
 import type { ClaudePermissionMode } from '@shared/types'
 import { useDeckTheme } from '../deck/theme'
 import { useDrawerSlot } from '../lib/drawer-slot'
 import type { PaneFace } from '../lib/pane-status'
+import { ForgeContext } from '../state'
 import { ModelChip } from './ModelChip'
 import { PowerDrawView, type DrumProject } from './PowerDraw'
+import { ProjectSheet } from './ProjectSheet'
 import { StatusLine } from './StatusLine'
 import './ChatPreview.css'
 
@@ -25,7 +27,9 @@ import './ChatPreview.css'
  * project; "remove" takes the last project away, even while the drum is open.
  * URL: `&n=<count>` trims the list, `&current=<index>` picks the open project,
  * `&open=1` starts with the drum out, `&ask=0` has nobody asking, `&view=`
- * (chat, feed, term) the face the demo pane in the drawer shows.
+ * (chat, feed, term) the face the demo pane in the drawer shows, `&bg=chat`
+ * puts chat bubbles under it instead of terminal lines, and `&sheet=1` shows
+ * the projects drawer (ProjectSheet) on a stand-in Forge state.
  */
 
 /** The open pane's controls, as the session composer portals them into the drawer. */
@@ -47,6 +51,7 @@ function DemoPane(): ReactNode {
       view={view}
       onFlipView={() => {}}
       onPickView={setView}
+      onPicked={slot.close}
       keysShown={keys}
       onToggleKeys={() => setKeys((k) => !k)}
       chip={
@@ -70,11 +75,158 @@ function DemoPane(): ReactNode {
   )
 }
 
+/** `&bg=chat`: a few chat bubbles, so the drum can be judged over bright bubbles as well as terminal text. */
+function DemoChat(): ReactNode {
+  const lines = [
+    'The feed loses the terminal colour. Can you build a real chat view from the session transcript?',
+    'Yes. I will parse each record into a turn: words, tools by name, thinking folded.',
+    'ship it',
+    'Committed. The wiring job connects it to the transcript watcher next.',
+    'and the drawer?',
+    'The drum keeps its engine; only the look changes. Shots are in after-W2b.'
+  ]
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 16px 120px' }}>
+      {lines.map((text, i) => {
+        const mine = i % 2 === 0
+        return (
+          <p
+            key={text}
+            style={{
+              alignSelf: mine ? 'flex-end' : 'flex-start',
+              maxWidth: '82%',
+              margin: 0,
+              padding: '10px 14px',
+              borderRadius: 14,
+              font: '400 16px/1.45 var(--p-font)',
+              color: 'var(--p-ink)',
+              background: mine ? 'color-mix(in srgb, var(--p-act) 38%, var(--p-bg))' : 'var(--p-surface)'
+            }}
+          >
+            {text}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+type ForgeValue = NonNullable<ComponentProps<typeof ForgeContext.Provider>['value']>
+
+/** `&sheet=1`: the projects drawer on a stand-in Forge, fed the same fixtures as the drum. */
+function DemoSheet({ projects, current }: { projects: DrumProject[]; current: string | null }): ReactNode {
+  const [open, setOpen] = useState(true)
+  const [value] = useState<ForgeValue>(() => {
+    const leaves = (p: DrumProject): string[] => Array.from({ length: p.panes }, (_, k) => `${p.id}-pane-${k}`)
+    const workspaces = Object.fromEntries(
+      projects.map((p) => [
+        p.id,
+        {
+          activeTabId: null,
+          tabs: leaves(p).map((id) => ({
+            id: `${id}-tab`,
+            title: id,
+            activePaneId: id,
+            root: { type: 'leaf', id, profileId: 'claude', title: '' }
+          }))
+        }
+      ])
+    )
+    const snapshot = {
+      projectId: current ?? 'forge',
+      seq: 1,
+      at: Date.now(),
+      presence: 'ok',
+      repoRoot: null,
+      branch: 'phone-polish',
+      detached: false,
+      unborn: false,
+      head: '25d2d7b',
+      upstream: 'origin/phone-polish',
+      ahead: 2,
+      behind: 0,
+      state: 'ahead',
+      remoteUrl: 'https://github.com/example/forge.git',
+      slug: null,
+      files: [],
+      filesTruncated: false,
+      changed: 3,
+      staged: 0,
+      conflicted: 0,
+      branches: [],
+      fetchedAt: Date.now() - 6 * 60_000,
+      slow: false
+    }
+    const state = {
+      picture: {
+        projects: projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          path: p.path,
+          color: p.color,
+          defaultProfileId: 'claude',
+          createdAt: 0,
+          pinned: p.id === 'chat'
+        })),
+        workspaces,
+        sessions: projects.flatMap((p) => leaves(p).map((id) => ({ id }))),
+        desktopName: 'STEVE-LAPTOP',
+        foreman: {}
+      },
+      cached: null,
+      stage: { kind: 'connected' },
+      connection: { state: 'live' },
+      projectId: current,
+      asking: new Set(projects.filter((p) => p.asking).flatMap(leaves)),
+      busy: new Set(projects.filter((p) => p.working).flatMap(leaves)),
+      git: { [snapshot.projectId]: snapshot }
+    }
+    const actions = new Proxy(
+      {},
+      {
+        get: (_target, key) =>
+          key === 'request'
+            ? (req: { kind: string }) =>
+                Promise.resolve(
+                  req.kind === 'git-status'
+                    ? { kind: 'git', snapshot }
+                    : { kind: 'failed', code: 'unsupported', message: 'Not in the preview' }
+                )
+            : () => undefined
+      }
+    )
+    return { state, actions } as unknown as ForgeValue
+  })
+  return (
+    <ForgeContext.Provider value={value}>
+      <ProjectSheet open={open} onClose={() => setOpen(false)} onNewAgent={() => setOpen(false)} />
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          style={{ position: 'fixed', left: 16, bottom: 24, zIndex: 1 }}
+          className="pu-btn"
+        >
+          Open the drawer
+        </button>
+      ) : null}
+    </ForgeContext.Provider>
+  )
+}
+
 const FIXTURES: DrumProject[] = [
   { id: 'chat', name: 'Chat', path: 'C:\\Users\\steve\\Desktop\\chat', color: '#8a94a6', panes: 1, asking: false },
   { id: 'forge', name: 'forge', path: 'C:\\Users\\steve\\Desktop\\forge', color: '#ff5f6d', panes: 1, asking: false },
   { id: 'car', name: 'car-harness', path: 'C:\\Users\\steve\\Desktop\\car-harness', color: '#5ab0ff', panes: 2, asking: true },
-  { id: 'ac', name: 'ac sprayers', path: 'C:\\Users\\steve\\Documents\\ac sprayers', color: '#c9b458', panes: 1, asking: false },
+  {
+    id: 'ac',
+    name: 'ac sprayers',
+    path: 'C:\\Users\\steve\\Documents\\ac sprayers',
+    color: '#c9b458',
+    panes: 1,
+    asking: false,
+    working: true
+  },
   { id: 'kora', name: 'koraos', path: 'C:\\Users\\steve\\Desktop\\koraos', color: '#3ad0b5', panes: 0, asking: false },
   {
     id: 'roma',
@@ -166,16 +318,21 @@ export function PowerDrawPreview(): ReactNode {
         </div>
       </div>
       <div className="app" data-mobile="true" data-ready="true" data-shell="app" style={{ flex: 1, minHeight: 0 }}>
-        <div style={{ padding: 16, fontFamily: 'var(--p-mono)', fontSize: 13, color: 'var(--p-ink-2)' }}>
-          <p style={{ margin: '0 0 8px', color: 'var(--p-ink)' }}>
-            In {projects.find((p) => p.id === current)?.name ?? 'no project'}
-          </p>
-          {Array.from({ length: 30 }, (_, i) => (
-            <p key={i} style={{ margin: '0 0 6px', opacity: 0.6 }}>
-              $ terminal line {i + 1}, text under the handle to show it sits over the pane
+        {params.get('bg') === 'chat' ? (
+          <DemoChat />
+        ) : (
+          <div style={{ padding: 16, fontFamily: 'var(--p-mono)', fontSize: 13, color: 'var(--p-ink-2)' }}>
+            <p style={{ margin: '0 0 8px', color: 'var(--p-ink)' }}>
+              In {projects.find((p) => p.id === current)?.name ?? 'no project'}
             </p>
-          ))}
-        </div>
+            {Array.from({ length: 30 }, (_, i) => (
+              <p key={i} style={{ margin: '0 0 6px', opacity: 0.6 }}>
+                $ terminal line {i + 1}, text under the handle to show it sits over the pane
+              </p>
+            ))}
+          </div>
+        )}
+        {params.get('sheet') === '1' ? <DemoSheet projects={projects} current={current} /> : null}
         <DemoPane />
         <PowerDrawView
           projects={projects}

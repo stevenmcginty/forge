@@ -13,25 +13,28 @@ import {
 import { sortProjectsForPicker } from '@shared/project-order'
 import type { Project } from '@shared/types'
 import { collectLeaves } from '@/lib/splitTree'
-import { Icon } from '@/components/Icon'
 import { useBackClose } from '../lib/back-stack'
 import { setDrawerSlot } from '../lib/drawer-slot'
+import { buzz } from '../lib/haptics'
 import { shortPath } from '../lib/paths'
 import { useForge } from '../state'
 import { openSheetCount } from './BottomSheet'
+import { PhoneIcon } from './PhoneIcon'
 import './PowerDraw.css'
 
 /**
  * PowerDraw: the phone's one-hand project switcher.
  *
- * A slim pill on the right edge, halfway up. A tap on it, or a pull to the
- * left, slides in a card from the right, low on the screen where the thumb
- * already is: a heading, and under it a drum of projects that turns. The slot
- * in the middle of the drum is "this one": the row there stands upright and
- * full, with its panes and path. The rows above and below tip away round the
- * drum and dim a little, but every name stays readable. A tap on the middle
- * row opens that project and puts the card away; a tap on any other row turns
- * it to the middle.
+ * A slim grip in the right margin, halfway up (it turns into an amber "!"
+ * when another project is asking). A tap on it, or a pull to the left, slides
+ * in a card from the right, in the middle of the screen: a heading, and under
+ * it a drum of projects that turns. The slot in the middle of the drum is
+ * "this one": the row there stands upright and full, with its panes and path.
+ * The rows above and below tip away round the drum and dim a little, but
+ * every name stays readable. A tap on the middle row opens that project and
+ * puts the card away; a tap on any other row turns it to the middle. With
+ * one or two projects there is nothing to turn: they show as a plain list,
+ * and a tap on a row opens it.
  *
  * With three projects or more the drum goes all the way round, as a real one
  * does: the last project sits above the first. The picker order puts the open
@@ -54,7 +57,17 @@ export interface DrumProject {
   panes: number
   /** A pane here is waiting on an answer. */
   asking: boolean
+  /** A pane here is busy (or driven by the foreman). Optional: older fixtures leave it out. */
+  working?: boolean
 }
+
+/** The project's tile letter, as the phone's top bar draws it (TopBar.tsx `projectInitial`). */
+function projectInitial(name: string): string {
+  return (name.match(/[\p{L}\p{N}]/u)?.[0] ?? '·').toUpperCase()
+}
+
+/** Up to two rows show as a plain list: a drum needs three to go round. */
+const LIST_MAX = 2
 
 /** Rows stand this far apart at the middle of the drum, measured round it. */
 const ROW_PX = 56
@@ -165,29 +178,34 @@ export function PowerDraw({
   const leavesOf = (project: Project): string[] =>
     (workspaces[project.id]?.tabs ?? []).flatMap((tab) => collectLeaves(tab.root).map((leaf) => leaf.id))
 
+  const workingIn = (leaves: string[]): boolean =>
+    leaves.some((id) => {
+      if (state.asking.has(id) || state.busy.has(id)) return true
+      const fm = state.picture?.foreman?.[id]
+      return Boolean(fm && (fm.status === 'starting' || fm.status === 'driving' || fm.status === 'waiting'))
+    })
+
   const ordered = sortProjectsForPicker(projects, (project) => {
     const leaves = leavesOf(project)
     return {
       active: project.id === state.projectId,
-      working: leaves.some((id) => {
-        if (state.asking.has(id) || state.busy.has(id)) return true
-        const fm = state.picture?.foreman?.[id]
-        return Boolean(fm && (fm.status === 'starting' || fm.status === 'driving' || fm.status === 'waiting'))
-      }),
+      working: workingIn(leaves),
       open: leaves.length > 0,
       pinned: Boolean(project.pinned)
     }
   })
 
   const drum: DrumProject[] = ordered.map((project) => {
-    const leaves = new Set(leavesOf(project))
+    const list = leavesOf(project)
+    const leaves = new Set(list)
     return {
       id: project.id,
       name: project.name,
       path: project.path,
       color: project.color,
       panes: sessions.filter((s) => leaves.has(s.id)).length,
-      asking: [...leaves].some((id) => state.asking.has(id))
+      asking: list.some((id) => state.asking.has(id)),
+      working: workingIn(list)
     }
   })
 
@@ -314,6 +332,9 @@ export function PowerDrawView({
 
   const count = projects.length
   const geo = geometryFor(count)
+  /** One or two projects: a plain list, every row in full, a tap opens. */
+  const list = count <= LIST_MAX
+  const askingCount = projects.filter((p) => p.asking).length
   const geoRef = useRef(geo)
   useLayoutEffect(() => {
     geoRef.current = geo
@@ -479,9 +500,25 @@ export function PowerDrawView({
     if (!shown) return
     const start = startRef.current
     if (geoRef.current.count > 0 && Math.abs(posRef.current - start) > 0.001) runTo(start, 0, RATE_OPEN)
-    const row = rowsRef.current[start]?.querySelector<HTMLButtonElement>('.pdrow')
+    const row =
+      rowsRef.current[start]?.querySelector<HTMLButtonElement>('.pdrow') ??
+      panelRef.current?.querySelector<HTMLButtonElement>('.pdraw__list .pdrow[aria-current="true"]')
     ;(row ?? panelRef.current)?.focus({ preventScroll: true })
   }, [shown, runTo])
+
+  /** The head's "N asking": turn the next asking project into the middle. */
+  const jumpToAsking = (): void => {
+    const g = geoRef.current
+    const from = centreRef.current < 0 ? 0 : centreRef.current
+    for (let k = 1; k <= g.count; k += 1) {
+      const i = wrapIndex(from + k, g.count)
+      if (projects[i]?.asking) {
+        quiet.current = false
+        glideTo(i)
+        return
+      }
+    }
+  }
 
   /** The middle row opens its project; any other row turns to the middle. */
   const onRow = (index: number): void => {
@@ -674,7 +711,8 @@ export function PowerDrawView({
       return
     }
     const g = geoRef.current
-    if (g.count === 0) return
+    // The short list is plain buttons: Tab moves between them.
+    if (g.count === 0 || g.count <= LIST_MAX) return
     const base = motion.current?.target ?? Math.round(posRef.current)
     let next: number
     if (e.key === 'ArrowDown') next = base + 1
@@ -737,17 +775,13 @@ export function PowerDrawView({
         onPointerCancel={onHandleEnd}
         data-testid="powerdraw-handle"
       >
+        {/* A slim grip in the screen's own margin, never over the words. When
+            another project is asking, the grip itself becomes a "!": the bar
+            shortens and a dot appears under it, in amber. */}
         <span className="pdraw-handle__pill" aria-hidden="true">
-          {/* A drum in little: a long rib in the middle, short ones round it. */}
-          <span className="pdraw-handle__rib" />
-          <span className="pdraw-handle__rib" data-mid="true" />
-          <span className="pdraw-handle__rib" />
+          <span className="pdraw-handle__bar" />
+          <span className="pdraw-handle__ask" />
         </span>
-        {othersAsking ? (
-          <span className="pdraw-handle__ask" aria-hidden="true">
-            !
-          </span>
-        ) : null}
       </button>
 
       {mounted ? (
@@ -777,19 +811,59 @@ export function PowerDrawView({
                 Projects
                 {count ? <span className="pdraw__count">{count}</span> : null}
               </span>
+              {askingCount > 0 && !list ? (
+                <button
+                  type="button"
+                  className="pdraw__jump"
+                  aria-label={askingCount === 1 ? 'Go to the project that is asking' : `Go to the next of ${askingCount} asking projects`}
+                  onClick={jumpToAsking}
+                  data-testid="powerdraw-jump"
+                >
+                  <span className="pu-bang" aria-hidden="true">
+                    !
+                  </span>
+                  {askingCount} asking
+                </button>
+              ) : null}
               <button
                 type="button"
-                className="pdraw__close"
+                className="pdraw__close pu-icon-btn"
                 aria-label="Close projects"
                 onClick={onClose}
                 data-testid="powerdraw-close"
               >
-                <Icon name="close" size={16} />
+                <PhoneIcon name="close" />
               </button>
             </div>
 
             {count === 0 ? (
               <p className="pdraw__empty">No projects yet</p>
+            ) : list ? (
+              <div className="pdraw__list" role="list" aria-label="Projects" data-testid="powerdraw-wheel">
+                {projects.map((project) => {
+                  const isCurrent = project.id === currentId
+                  return (
+                    <div key={project.id} role="listitem" className="pdraw__item">
+                      <button
+                        type="button"
+                        className="pdrow"
+                        data-current={isCurrent ? 'true' : undefined}
+                        data-attention={project.asking ? 'true' : undefined}
+                        aria-current={isCurrent ? 'true' : undefined}
+                        onClick={() => {
+                          stop()
+                          onSelect(project.id)
+                        }}
+                        style={{ '--pj-color': project.color } as CSSProperties}
+                        data-testid="powerdraw-row"
+                        data-project={project.id}
+                      >
+                        <DrumRow project={project} isCurrent={isCurrent} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
             ) : (
               <div
                 ref={wheelRef}
@@ -797,14 +871,9 @@ export function PowerDrawView({
                 role="list"
                 aria-label="Projects"
                 onWheel={onWheel}
-                style={{ height: wheelHeight(geo.half) }}
+                style={{ height: wheelHeight(geo.half), '--pdraw-fade': geo.half >= 2 ? '20%' : '8%' } as CSSProperties}
                 data-testid="powerdraw-wheel"
               >
-                <div
-                  className="pdraw__glow"
-                  aria-hidden="true"
-                  style={{ '--pdraw-tint': projects[centre]?.color } as CSSProperties}
-                />
                 <div className="pdraw__band" aria-hidden="true" />
                 {projects.map((project, index) => {
                   const focused = index === centre
@@ -831,39 +900,7 @@ export function PowerDrawView({
                         data-testid="powerdraw-row"
                         data-project={project.id}
                       >
-                        <span className="pdrow__text">
-                          <span className="pdrow__title">
-                            <span className="pdrow__dot" aria-hidden="true" />
-                            <span className="pdrow__name">{project.name}</span>
-                            {project.asking ? (
-                              <span className="pdrow__ask">
-                                <span className="pdrow__ask-mark" aria-hidden="true">
-                                  !
-                                </span>
-                                Asking
-                              </span>
-                            ) : null}
-                            {isCurrent ? (
-                              <span className="pdrow__here">
-                                <Icon name="check" size={12} />
-                                Open
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="pdrow__sub">
-                            {project.panes > 0 ? (
-                              <>
-                                <span className="pdrow__panes">
-                                  {project.panes} {project.panes === 1 ? 'pane' : 'panes'}
-                                </span>
-                                <span className="pdrow__sep" aria-hidden="true">
-                                  ·
-                                </span>
-                              </>
-                            ) : null}
-                            <span className="pdrow__path">{shortPath(project.path)}</span>
-                          </span>
-                        </span>
+                        <DrumRow project={project} isCurrent={isCurrent} />
                         <span className="pdraw__sr">{focused ? ', tap to open' : ', tap to bring to the middle'}</span>
                       </button>
                     </div>
@@ -881,15 +918,71 @@ export function PowerDrawView({
   )
 }
 
+/* ------------------------------------------------------------ one row */
+
+/**
+ * A project as the drum and the short list draw it: its tile (the top bar's,
+ * so the open one matches the bar at a glance), the name, and under it the
+ * panes and the path. At the end, its state as a shape and a word: "! Asking",
+ * or the clock and "Working"; and "✓ Open" on the project on screen. The lens
+ * is only a place; "Open" is only ever this word and tick.
+ */
+function DrumRow({ project, isCurrent }: { project: DrumProject; isCurrent: boolean }): ReactNode {
+  return (
+    <>
+      <span className="pdrow__tile" aria-hidden="true">
+        {projectInitial(project.name)}
+      </span>
+      <span className="pdrow__text">
+        <span className="pdrow__title">
+          <span className="pdrow__name">{project.name}</span>
+        </span>
+        <span className="pdrow__sub">
+          {project.panes > 0 ? (
+            <>
+              <span className="pdrow__panes">
+                {project.panes} {project.panes === 1 ? 'pane' : 'panes'}
+              </span>
+              <span className="pdrow__sep" aria-hidden="true">
+                ·
+              </span>
+            </>
+          ) : null}
+          <span className="pdrow__path">{shortPath(project.path)}</span>
+        </span>
+      </span>
+      {project.asking || project.working || isCurrent ? (
+        <span className="pdrow__marks">
+          {project.asking ? (
+            <span className="pdrow__ask">
+              <span className="pu-bang" aria-hidden="true">
+                !
+              </span>
+              Asking
+            </span>
+          ) : project.working ? (
+            <span className="pdrow__work">
+              <PhoneIcon name="working" size={16} />
+              Working
+            </span>
+          ) : null}
+          {isCurrent ? (
+            <span className="pdrow__here">
+              <PhoneIcon name="check" size={16} />
+              Open
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </>
+  )
+}
+
 /* ------------------------------------------------------------ helpers */
 
-/** A light tick as the middle row changes. Not every browser has it, and some throw. */
+/** A light tick as the middle row changes: the haptic map's `select`. */
 function tick(): void {
-  try {
-    navigator.vibrate?.(6)
-  } catch {
-    /* no vibration here */
-  }
+  buzz('select')
 }
 
 function reducedMotion(): boolean {
