@@ -89,6 +89,9 @@ export default defineConfig(({ command }) => ({
     __DEV_SERVER__: JSON.stringify(command === 'serve')
   },
   root: resolve(import.meta.dirname),
+  // A private cache folder on request, so a worktree whose node_modules is a
+  // junction into another checkout does not write that checkout's .vite cache.
+  ...(process.env.FORGE_VITE_CACHE_DIR ? { cacheDir: process.env.FORGE_VITE_CACHE_DIR } : {}),
   // Absolute, unlike mobile's './'. Firebase Hosting serves this from the root
   // of a domain and rewrites every unknown path to index.html, so a relative
   // base would break the moment somebody deep-linked.
