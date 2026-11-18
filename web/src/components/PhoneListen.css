@@ -80,7 +80,16 @@
 }
 
 .app[data-mobile] .plisten__btn:active:not([aria-disabled='true']) {
-  transform: scale(0.95);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+/* The round is drawn 40px; its touch reaches the contract's 44 (the chevron's reach still sits on top). */
+.app[data-mobile] .plisten__btn::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
 }
 
 .app[data-mobile] .plisten__btn:focus-visible {
@@ -358,16 +367,17 @@
  * steps aside; while the agent thinks or speaks the bar holds still and the
  * halo ripples. Held (muted), it is dimmer and still.
  */
+/* Dictation's twin (phone-cues.css): the box fills with the agent's lime — no rim, no glow. */
 .app[data-mobile] .composer__field:has(> .plisten-line[data-tone='live']) {
-  border-color: var(--p-agent);
-}
-
-.app[data-mobile] .composer__field:has(> .plisten-line[data-tone='live'][data-lead='muted']) {
-  border-color: color-mix(in srgb, var(--p-agent) 45%, var(--p-line-strong));
+  border-color: transparent;
 }
 
 .app[data-mobile] .plisten-line[data-tone='live'] {
-  background: color-mix(in srgb, var(--p-agent) 7%, var(--p-raised));
+  background: color-mix(in srgb, var(--p-agent) 12%, var(--p-surface));
+}
+
+.app[data-mobile] .plisten-line[data-tone='live'][data-lead='muted'] {
+  background: color-mix(in srgb, var(--p-agent) 6%, var(--p-surface));
 }
 
 .app[data-mobile] .plisten-line[data-tone='live']::before {
@@ -377,14 +387,8 @@
   z-index: -1;
   border-radius: inherit;
   pointer-events: none;
-  background: radial-gradient(
-    120px 64px at 28px 50%,
-    color-mix(in srgb, var(--p-agent) 24%, transparent),
-    transparent 75%
-  );
-  box-shadow:
-    inset 0 0 0 1px var(--p-agent),
-    inset 0 0 18px color-mix(in srgb, var(--p-agent-2) 30%, transparent);
+  /* A second wash of lime that breathes on his turn. */
+  background: color-mix(in srgb, var(--p-agent) 10%, transparent);
   opacity: 0.6;
 }
 
@@ -411,22 +415,15 @@
   opacity: 0;
 }
 
+/* "Agent": the word that tells this line from dictation's, set as a quiet label, not a boxed tag. */
 .app[data-mobile] .plisten-line__tag {
   flex: none;
   display: inline-flex;
   align-items: center;
-  box-sizing: border-box;
   height: 16px;
-  padding: 0 6px;
-  border-radius: var(--p-r-pill);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-agent) 70%, var(--p-line-strong));
-  font: 650 11px / 1 var(--p-font);
-  color: var(--p-ink);
-}
-
-.app[data-mobile] .plisten-line[data-tone='failed'] .plisten-line__tag,
-.app[data-mobile] .plisten-line[data-tone='ended'] .plisten-line__tag {
-  box-shadow: inset 0 0 0 1px var(--p-line-strong);
+  padding: 0;
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-ink-2);
 }
 
 .app[data-mobile] .plisten-line__body {
@@ -652,52 +649,32 @@
 /* ------------------------------------------------------------- the fan */
 
 /*
- * The agents, slid out above the agent disc (PhoneListen.tsx VoiceFan): a
- * small glass panel rising from the disc's corner, its rows following one
- * after another. It sits over the dock, above the keys when they show.
+ * The agents, out of the Listen round (PhoneListen.tsx VoiceFan): the
+ * contract's menu (.pu-menu) — a raised card with a rim and a float shadow, no
+ * glass — that grows from the round's corner on the contract's glide, its rows
+ * following one after another. The one in use is "selected" the contract's
+ * way: the selected fill, full weight, and a tick. It sits over the dock,
+ * above the keys when they show.
  */
 .app[data-mobile] .plisten-fan {
   position: absolute;
   z-index: 3;
   left: var(--p-4);
   bottom: calc(100% + var(--p-2));
-  width: min(260px, calc(100vw - 32px));
-  padding: var(--p-2);
-  border-radius: var(--p-r-sheet);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--p-ink) 7%, transparent), transparent 90px),
-    color-mix(in srgb, var(--p-raised) 72%, transparent);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
-  backdrop-filter: blur(18px) saturate(1.6);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--p-ink) 11%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--p-ink) 16%, transparent),
-    0 20px 50px rgba(0, 0, 0, 0.35);
-  transform-origin: 24px calc(100% + 28px);
-  transform: translateY(10px) scale(0.92);
+  width: min(272px, calc(100vw - 2 * var(--p-gutter)));
+  padding: 6px;
+  border-radius: var(--p-r-card);
+  background: var(--p-raised);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+  transform-origin: 20px calc(100% + 36px);
+  transform: translateY(var(--p-enter-y)) scale(var(--p-enter-scale));
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transition:
-    transform var(--p-dur-sheet) var(--p-ease-sheet),
-    opacity var(--p-dur) var(--p-ease),
-    visibility 0s linear var(--p-dur-sheet);
-}
-
-:root[data-appearance='light'] .app[data-mobile] .plisten-fan {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--p-raised) 60%, transparent), transparent 90px),
-    color-mix(in srgb, var(--p-raised) 78%, transparent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--p-ink) 9%, transparent),
-    inset 0 1px 0 var(--p-raised),
-    0 20px 50px rgba(0, 0, 0, 0.16);
-}
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .app[data-mobile] .plisten-fan {
-    background: var(--p-raised);
-  }
+    transform var(--p-dur-exit) var(--p-ease-in),
+    opacity var(--p-dur-exit) var(--p-ease-in),
+    visibility 0s linear var(--p-dur-exit);
 }
 
 .app[data-mobile] .plisten-fan[data-open='true'] {
@@ -706,15 +683,15 @@
   visibility: visible;
   pointer-events: auto;
   transition:
-    transform var(--p-dur-sheet) var(--p-ease-sheet),
+    transform var(--p-dur-glide) var(--p-glide),
     opacity var(--p-dur) var(--p-ease),
     visibility 0s;
 }
 
 .app[data-mobile] .plisten-fan__head {
-  padding: var(--p-1) var(--p-3) var(--p-2);
-  font: 600 var(--p-t-small) / 1.2 var(--p-font);
-  color: var(--p-ink-3);
+  padding: var(--p-2) var(--p-3) var(--p-1);
+  font: var(--p-w-strong) var(--p-t-small) / 1.3 var(--p-font);
+  color: var(--p-ink-2);
 }
 
 .app[data-mobile] .plisten-fan__row {
@@ -724,9 +701,9 @@
   width: 100%;
   min-height: 52px;
   margin: 0;
-  padding: var(--p-1) var(--p-3) var(--p-1) var(--p-2);
+  padding: var(--p-1) var(--p-3);
   border: 0;
-  border-radius: var(--p-r-row);
+  border-radius: 10px;
   background: transparent;
   color: var(--p-ink);
   font: inherit;
@@ -734,41 +711,49 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(6px);
   transition:
-    background var(--p-dur-fast) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease),
     opacity var(--p-dur) var(--p-ease),
-    transform var(--p-dur-sheet) var(--p-ease-sheet);
+    transform var(--p-dur-glide) var(--p-glide);
 }
 
 .app[data-mobile] .plisten-fan[data-open='true'] .plisten-fan__row {
   opacity: 1;
   transform: none;
-  transition-delay: 0s, calc(40ms + var(--i, 0) * 35ms), calc(40ms + var(--i, 0) * 35ms);
+  transition-delay: 0s, calc(30ms + var(--i, 0) * 30ms), calc(30ms + var(--i, 0) * 30ms);
 }
 
 .app[data-mobile] .plisten-fan__row:active {
-  background: color-mix(in srgb, var(--p-ink) 7%, transparent);
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant), var(--p-dur), var(--p-dur-glide);
 }
 
 .app[data-mobile] .plisten-fan__row:focus-visible {
-  outline: 2px solid var(--p-ink);
-  outline-offset: -2px;
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
 }
 
 .app[data-mobile] .plisten-fan__row[data-current='true'] {
-  background: color-mix(in srgb, #3b8cff 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #4a9bff 40%, transparent);
+  background: var(--p-selected);
 }
 
+.app[data-mobile] .plisten-fan__row[data-current='true']:active {
+  background: var(--p-selected-press);
+}
+
+/* The agent's mark, bare: no tile behind it. */
 .app[data-mobile] .plisten-fan__mark {
   flex: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--p-ink) 8%, transparent);
+  width: 28px;
+  height: 28px;
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .plisten-fan__row[data-current='true'] .plisten-fan__mark {
+  color: var(--p-ink);
 }
 
 .app[data-mobile] .plisten-fan__text {
@@ -780,26 +765,52 @@
 }
 
 .app[data-mobile] .plisten-fan__name {
-  font-size: var(--p-t-chrome);
-  font-weight: 600;
-  line-height: 1.25;
+  font: var(--p-w-medium) var(--p-t-body) / 1.25 var(--p-font);
+}
+
+.app[data-mobile] .plisten-fan__row[data-current='true'] .plisten-fan__name {
+  font-weight: var(--p-w-strong);
 }
 
 .app[data-mobile] .plisten-fan__sub {
   font-size: var(--p-t-small);
   line-height: 1.3;
-  color: var(--p-ink-3);
+  color: var(--p-ink-2);
 }
 
 .app[data-mobile] .plisten-fan__tick {
   flex: none;
   display: grid;
   place-items: center;
-  width: 20px;
-  color: #4a9bff;
+  width: var(--p-icon);
+  color: var(--p-ink);
 }
 
+/* Turn Listen off: after a hairline, the way a menu sets apart its last, different action. */
 .app[data-mobile] .plisten-fan__row[data-kind='off'] {
-  margin-top: var(--p-1);
-  color: var(--p-ink-2);
+  position: relative;
+  margin-top: 13px;
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .plisten-fan__row[data-kind='off']::before {
+  content: '';
+  position: absolute;
+  left: var(--p-2);
+  right: var(--p-2);
+  top: -7px;
+  height: 1px;
+  background: var(--p-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .plisten-fan,
+  .app[data-mobile] .plisten-fan__row {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten-fan,
+:root[data-reduced-motion='true'] .app[data-mobile] .plisten-fan__row {
+  transition: none;
 }

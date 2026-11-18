@@ -24,6 +24,7 @@ import {
 } from '../deck/voiceAgent'
 import { isClaudeVoiceAgent, voiceAgentWord, voiceHint, voicePhaseWord, WEB_VOICE_AGENTS, type WebVoiceAgent } from '../deck/voice-words'
 import { useBackClose } from '../lib/back-stack'
+import { buzz } from '../lib/haptics'
 import { withAgentSends } from '../lib/pane-sent'
 import { useForge, useWorkspace } from '../state'
 import { BottomSheet, SheetRow, SheetSection } from './BottomSheet'
@@ -222,11 +223,8 @@ function useYourTurnBuzz(look: HubLook): void {
     const was = last.current
     last.current = look
     if (look !== 'listening' || !AGENT_TURN.has(was)) return
-    try {
-      navigator.vibrate?.(15)
-    } catch {
-      /* no motor, or not allowed: the glyph still says it */
-    }
+    // The haptic map's "open" (15ms): the mic is open, talk. A no-op without a motor; the glyph still says it.
+    buzz('open')
   }, [look])
 }
 

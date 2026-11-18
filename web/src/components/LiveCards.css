@@ -194,3 +194,58 @@
     animation: none;
   }
 }
+
+/*
+ * The phone: the contract's floating card (web/PHONE-DESIGN.md) — raised,
+ * a rim and the float shadow, no glass and no coloured side stripe. The state
+ * stays a shape and a word at the card's head; its colour rides on the mark.
+ */
+.app[data-mobile] .lcards[data-face='phone'] :is(.lcards__head, .lcard, .lcards__more) {
+  background: var(--p-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcards__head,
+.app[data-mobile] .lcards[data-face='phone'] .lcards__more {
+  border-radius: var(--p-r-pill);
+  font-size: var(--p-t-small);
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcard {
+  padding: var(--p-3) var(--p-3) var(--p-3) var(--p-4);
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcard__word {
+  font-size: var(--p-t-small);
+  letter-spacing: 0;
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcard__title {
+  font-size: var(--p-t-label);
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcard__btn {
+  border-radius: var(--p-r-pill);
+  background: var(--p-fill);
+  box-shadow: none;
+  font-size: var(--p-t-label);
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcard__btn[data-kind='open'] {
+  background: var(--p-selected);
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcard__btn[data-kind='stop'] {
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+  box-shadow: none;
+}
+
+.app[data-mobile] .lcards[data-face='phone'] .lcard__btn:active {
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}

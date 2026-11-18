@@ -668,6 +668,18 @@ export function Composer({
     const lead = live || (reviewing && voiceControls !== undefined) || (onVoiceRetry !== undefined && phase === 'idle') || phoneStop
     /** The paperclip at the box's right end, unless a dictation has the box. */
     const clip = !live && !reviewing
+    /*
+     * The phone's box is ~140px of words between Listen and the paperclip, so
+     * "Message Claude Code · forge" was cut mid-word. The tab already names the
+     * agent and the bar the project: the box says just enough — "Message Claude",
+     * or just "Message" while Stop takes the box's front and ~100px is left.
+     */
+    const phonePlaceholder =
+      !disabled && phase === 'idle' && !placeholderOverride && to
+        ? phoneStop
+          ? 'Message'
+          : `Message ${(to.split(' · ')[0] ?? to).split(' ')[0] ?? to}`
+        : placeholder
     return (
       <form
         className="composer"
@@ -825,8 +837,8 @@ export function Composer({
               // Open while the link is down (`typeable`): a field disabled
               // mid-sentence loses its focus, and the phone's keyboard with it.
               disabled={disabled && !held}
-              placeholder={tintedPlaceholder && !held ? '' : placeholder}
-              aria-label={tintedPlaceholder && !held ? placeholder : undefined}
+              placeholder={tintedPlaceholder && !held ? '' : phonePlaceholder}
+              aria-label={tintedPlaceholder && !held ? placeholder : to && !disabled ? `Message ${to}` : undefined}
               enterKeyHint="enter"
               autoCapitalize="sentences"
               autoCorrect="on"

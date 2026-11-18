@@ -1606,3 +1606,679 @@
     transition: none;
   }
 }
+
+/* ========================================================= the phone, redrawn
+ *
+ * "Quiet Instrument" (web/PHONE-DESIGN.md) for the conversation: the theme's
+ * ground, the agent's bubble one graphite step up from it (the contract's
+ * surface), Steve's own bubble in the theme's WhatsApp green with its ticks.
+ * No tails and no names — a one-to-one chat, the tab already says who — so
+ * each bubble's speaking corner is drawn tight instead (8px against 16px),
+ * where WhatsApp's tail would be. Code, tables and tool calls sit in one kind
+ * of well inside the bubble: the ground showing through, no outlines. Every
+ * rule is under `.app[data-mobile]`, so the deck (`data-desk`) is untouched.
+ */
+
+.app[data-mobile] .chatview {
+  --chat-read: var(--p-t-body);
+  /* the well code, tables and tool rows sit in: the ground, seen through the bubble */
+  --chat-well: var(--p-bg);
+  --chat-well-ink: color-mix(in srgb, var(--bubble-ink) 9%, transparent);
+  background: var(--p-bg);
+}
+
+/* Dark themes: the agent's bubble moves onto the graphite ladder, off the theme's teal panel. */
+:root:not([data-appearance='light']) .app[data-mobile] .chatview {
+  --bubble-in: var(--p-surface);
+}
+
+/* Light themes: white bubbles keep their hairline lift; the well is a shade under the page. */
+:root[data-appearance='light'] .app[data-mobile] .chatview {
+  --chat-well: color-mix(in oklab, var(--p-bg), var(--p-ink) 4%);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__column {
+  /* the agent's bubble may run the row (long answers are the norm); a short one still fits its words */
+  --bubble-side: 12px;
+  --bubble-far: 12px;
+  --bubble-tail: 0px;
+  --chat-row-gap: var(--p-5);
+  --chat-piece-gap: var(--p-3);
+  padding: var(--p-4) 0 var(--p-6);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__turn {
+  padding: 2px var(--bubble-far) 2px var(--bubble-side);
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+  animation: chatview-phone-in var(--p-dur-glide) var(--p-glide) both;
+  transform-origin: left bottom;
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__turn[data-role='user'] {
+  padding: 2px var(--bubble-side) 2px max(var(--p-10), 14%);
+  transform-origin: right bottom;
+}
+
+/* The same speaker again: 4px apart, as one run. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__turn:not([data-tail]) {
+  margin-top: calc(var(--p-1) - var(--chat-row-gap));
+}
+
+/* Held for its menu: the row, under a pressed wash — the open menu says which. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__turn[data-held] {
+  background: var(--p-pressed);
+}
+
+/* --- the bubble */
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__msg {
+  padding: var(--p-4) var(--p-5) var(--p-2);
+  border-radius: var(--p-r-sheet);
+  box-shadow: none;
+}
+
+:root[data-appearance='light'] .app[data-mobile] .chatview[data-bubbles] .chatview__msg {
+  box-shadow: 0 1px 0.5px var(--bubble-edge);
+}
+
+/* The speaking corner, tight, where the tail used to hang: top left on the agent's, top right on yours. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__turn[data-tail] > .chatview__msg {
+  border-radius: var(--p-r-sm) var(--p-r-sheet) var(--p-r-sheet) var(--p-r-sheet);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__turn[data-role='user'][data-tail] > .chatview__msg {
+  border-radius: var(--p-r-sheet) var(--p-r-sm) var(--p-r-sheet) var(--p-r-sheet);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__turn[data-tail] > .chatview__msg::before,
+.app[data-mobile] .chatview[data-bubbles] .chatview__busy-turn[data-tail] > .chatview__busy-bubble::before {
+  content: none;
+}
+
+/* Your words, in your bubble: short ones stay a neat capsule. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__bubble {
+  padding: var(--p-3) var(--p-3) var(--p-3) var(--p-4);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__bubble .chatview__meta {
+  right: var(--p-3);
+  bottom: 14px;
+}
+
+/* One-to-one: the tab already names the agent, so the bubble does not. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__speaker {
+  display: none;
+}
+
+/* Selecting text in a bubble: a dashed ring round that one bubble, in its own ink. */
+@media (pointer: coarse) {
+  .app[data-mobile] .chatview[data-bubbles] .chatview__msg[data-select] {
+    outline: 2px dashed color-mix(in srgb, var(--bubble-ink) 55%, transparent);
+    outline-offset: 3px;
+  }
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__msg:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+/* --- reading: one rhythm for prose, lists, quotes and headings */
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__prompt,
+.app[data-mobile] .chatview[data-bubbles] .chatview__prose {
+  font-family: var(--p-font);
+  font-size: var(--chat-read);
+  line-height: var(--p-lh-read);
+  letter-spacing: 0;
+}
+
+.app[data-mobile] .chatview__prose .md__p {
+  margin: 0 0 var(--p-4);
+}
+
+.app[data-mobile] .chatview__prose .md__h {
+  margin: var(--p-5) 0 var(--p-2);
+  font-weight: 650;
+  letter-spacing: var(--p-track-tight);
+}
+
+.app[data-mobile] .chatview__prose h3.md__h {
+  font-size: var(--p-t-title);
+  line-height: 1.3;
+}
+
+.app[data-mobile] .chatview__prose h4.md__h,
+.app[data-mobile] .chatview__prose h5.md__h {
+  font-size: var(--chat-read);
+  line-height: 1.4;
+}
+
+.app[data-mobile] .chatview__prose .md__list {
+  margin: 0 0 var(--p-4);
+  padding-left: var(--p-5);
+  gap: var(--p-2);
+}
+
+.app[data-mobile] .chatview__prose .md__list .md__list {
+  margin-top: var(--p-2);
+}
+
+.app[data-mobile] .chatview__prose .md__list li {
+  padding-left: 2px;
+}
+
+.app[data-mobile] .chatview__prose .md__list li::marker {
+  color: var(--bubble-meta);
+}
+
+.app[data-mobile] .chatview__prose .md__quote {
+  margin: 0 0 var(--p-3);
+  padding: 0 0 0 var(--p-3);
+  border-left: 2px solid color-mix(in srgb, var(--bubble-ink) 22%, transparent);
+  color: color-mix(in srgb, var(--bubble-ink) 72%, transparent);
+}
+
+.app[data-mobile] .chatview__prose .md__hr {
+  margin: var(--p-4) 0;
+  border-top-color: color-mix(in srgb, var(--bubble-ink) 12%, transparent);
+}
+
+/* Links: ink and an underline — the line says "link", not a colour. */
+.app[data-mobile] .chatview__prose .md__link,
+:root[data-appearance='light'] .app[data-mobile] .chatview__prose .md__link {
+  color: inherit;
+  border-bottom: 0;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--bubble-ink) 45%, transparent);
+  text-underline-offset: 3px;
+}
+
+/* Inline code: no chip at all — the mono face says "code", in the bubble's full ink. */
+.app[data-mobile] .chatview__prose .md__inline-code {
+  padding: 0;
+  font-family: var(--p-mono);
+  font-size: 0.875em;
+  font-weight: var(--p-w-medium);
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+/* The last piece of a paragraph run ends flush, so the time sits close under the words. */
+.app[data-mobile] .chatview__prose > :last-child,
+.app[data-mobile] .chatview__prose .md__p:last-child,
+.app[data-mobile] .chatview__prose .md__list:last-child {
+  margin-bottom: 0;
+}
+
+/* --- the well: code blocks, tables and tool calls, the ground showing through */
+
+.app[data-mobile] .chatview__prose .md__codeblock {
+  margin: var(--p-1) calc(-1 * var(--p-3)) var(--p-4);
+  background: var(--chat-well);
+  border: 0;
+  border-radius: var(--p-r-row);
+}
+
+.app[data-mobile] .chatview__prose .md__code-header {
+  min-height: 36px;
+  padding: 0 var(--p-1) 0 var(--p-4);
+  border-bottom: 0;
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__prose .md__lang {
+  font: var(--p-w-medium) var(--p-t-small) / 1 var(--p-font);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--bubble-meta);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__prose .md__copy-btn {
+  padding: 0 var(--p-3);
+  font: var(--p-w-strong) var(--p-t-small) / 1 var(--p-font);
+  color: color-mix(in srgb, var(--bubble-ink) 72%, transparent);
+  border-radius: var(--p-r-pill);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .chatview__prose .md__copy-btn:active {
+  color: var(--bubble-ink);
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .chatview__prose .md__code {
+  padding: var(--p-2) var(--p-4) var(--p-4);
+  font-family: var(--p-mono);
+  font-size: var(--p-t-mono);
+  line-height: 1.55;
+  color: var(--bubble-ink);
+}
+
+.app[data-mobile] .chatview__prose .md__tablewrap {
+  margin: var(--p-1) calc(-1 * var(--p-3)) var(--p-4);
+  background: var(--chat-well);
+  border: 0;
+  border-radius: var(--p-r-row);
+}
+
+.app[data-mobile] .chatview__prose .md__codeblock:last-child,
+.app[data-mobile] .chatview__prose .md__tablewrap:last-child {
+  margin-bottom: 0;
+}
+
+.app[data-mobile] .chatview__prose .md__table {
+  font-size: var(--p-t-label);
+}
+
+.app[data-mobile] .chatview__prose .md__table th,
+.app[data-mobile] .chatview__prose .md__table td {
+  padding: var(--p-2) var(--p-3);
+  border-bottom: 1px solid color-mix(in srgb, var(--bubble-ink) 9%, transparent);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__prose .md__table th {
+  font-size: var(--p-t-small);
+  font-weight: var(--p-w-strong);
+  color: var(--bubble-meta);
+  background: transparent;
+}
+
+/* Tool calls and thinking: a chip that fits its words (as in Cards), which opens in place. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__fold {
+  margin: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--p-r-row);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__fold + .chatview__fold {
+  margin-top: calc(var(--p-2) - var(--chat-piece-gap));
+}
+
+.app[data-mobile] .chatview__fold-head {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  min-height: var(--p-control);
+  gap: var(--p-2);
+  margin: var(--p-1) 0;
+  padding: 0 var(--p-3) 0 var(--p-4);
+  background: var(--chat-well-ink);
+  border-radius: var(--p-r-pill);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+/* Drawn 36, touched 44. */
+.app[data-mobile] .chatview__fold-head::after {
+  content: '';
+  position: absolute;
+  inset: -4px 0;
+}
+
+.app[data-mobile] .chatview__fold-head:active:not(:disabled) {
+  transform: scale(var(--p-press-scale));
+}
+
+.app[data-mobile] .chatview__fold-head:active:not(:disabled),
+.app[data-mobile] .chatview__tool-head:active:not(:disabled) {
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__fold-label {
+  font: var(--p-w-medium) var(--p-t-label) / 1.3 var(--p-font);
+  color: color-mix(in srgb, var(--bubble-ink) 72%, transparent);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__fold-label[data-mono='true'] {
+  font-family: var(--p-mono);
+  font-size: var(--p-t-mono);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__fold[data-kind='thought'] .chatview__fold-label {
+  font-style: normal;
+  font-weight: var(--p-w-medium);
+  color: color-mix(in srgb, var(--bubble-ink) 72%, transparent);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__fold-gist,
+.app[data-mobile] .chatview[data-bubbles] .chatview__tool-gist {
+  font-family: var(--p-mono);
+  font-size: var(--p-t-mono);
+  color: var(--bubble-meta);
+}
+
+.app[data-mobile] .chatview__chev {
+  color: var(--bubble-meta);
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .chatview__fold-head:hover:not(:disabled) .chatview__fold-label,
+.app[data-mobile] .chatview__tool-head:hover:not(:disabled) .chatview__tool-name {
+  text-decoration: none;
+}
+
+/* "failed": a badge with the word in it, the danger tint behind. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__tool-flag {
+  height: 22px;
+  padding: 0 var(--p-2);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-danger);
+  background: var(--p-danger-tint);
+  border: 0;
+}
+
+.app[data-mobile] .chatview__tool-list {
+  margin: var(--p-1) 0 var(--p-2) var(--p-4);
+  padding: 0 0 0 var(--p-2);
+  border-left: 1px solid color-mix(in srgb, var(--bubble-ink) 14%, transparent);
+}
+
+.app[data-mobile] .chatview__tool-head {
+  gap: var(--p-2);
+  padding: 0 var(--p-2);
+  border-radius: var(--p-r-sm);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__tool-name {
+  font: var(--p-w-strong) var(--p-t-mono) / 1.3 var(--p-mono);
+  color: var(--bubble-ink);
+}
+
+.app[data-mobile] .chatview__tool-body,
+.app[data-mobile] .chatview__tool-list .chatview__tool-body {
+  padding: 0 var(--p-3) var(--p-3);
+}
+
+/* A lone call's detail hangs on the same hairline as a group's list. */
+.app[data-mobile] .chatview__fold > .chatview__tool-body {
+  margin: var(--p-1) 0 var(--p-2) var(--p-4);
+  padding: 0 var(--p-3) var(--p-1);
+  border-left: 1px solid color-mix(in srgb, var(--bubble-ink) 14%, transparent);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__tool-gist-full,
+.app[data-mobile] .chatview[data-bubbles] .chatview__tool-note {
+  font: var(--p-t-mono) / 1.55 var(--p-mono);
+  color: color-mix(in srgb, var(--bubble-ink) 72%, transparent);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__tool-note {
+  color: var(--bubble-meta);
+}
+
+.app[data-mobile] .chatview__thought-body {
+  margin: var(--p-1) 0 var(--p-2) var(--p-4);
+  padding: 0 var(--p-3) 0 var(--p-3);
+  border-left: 1px solid color-mix(in srgb, var(--bubble-ink) 14%, transparent);
+  font: var(--p-t-label) / 1.55 var(--p-font);
+  font-style: italic;
+  color: color-mix(in srgb, var(--bubble-ink) 68%, transparent);
+}
+
+/* --- the time, the ticks, and the speaker: one 20px line, right-aligned */
+
+.app[data-mobile] .chatview__meta {
+  gap: var(--p-1);
+  font: var(--p-w-regular) var(--p-t-micro) / 1 var(--p-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__meta-line {
+  align-items: center;
+  gap: var(--p-1);
+  /* 24, not 20: the speaker's 44px reach then fits inside the row's paint box below it. */
+  min-height: 24px;
+  margin: calc(-1 * var(--chat-piece-gap) + var(--p-1)) calc(-1 * var(--p-1)) 0 0;
+}
+
+.app[data-mobile] .chatview__read {
+  width: 32px;
+  height: 24px;
+  margin: -2px 0;
+  border-radius: var(--p-r-pill);
+  color: var(--bubble-meta);
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .chatview__read > svg {
+  width: var(--p-icon);
+  height: var(--p-icon);
+}
+
+.app[data-mobile] .chatview__read:active {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .chatview__read:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: 0;
+}
+
+.app[data-mobile] .chatview__meta-room {
+  width: calc(var(--meta-ch, 5) * 0.52em + var(--meta-ticks, 0) * 22px + 10px);
+}
+
+/* --- working: three dots and the word, bare on the ground; waiting: an amber "!" and the words */
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__busy-turn {
+  margin-top: 0;
+  padding: 0 var(--bubble-far) 0 var(--bubble-side);
+  animation: chatview-phone-in var(--p-dur-glide) var(--p-glide) both;
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__busy-turn:not([data-waiting]) > .chatview__busy-bubble,
+:root[data-appearance='light'] .app[data-mobile] .chatview[data-bubbles] .chatview__busy-turn:not([data-waiting]) > .chatview__busy-bubble {
+  flex-direction: row;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--p-4);
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Dots first, then the word: the shape leads, as the ring does in Cards. */
+.app[data-mobile] .chatview[data-bubbles] .chatview__busy-turn:not([data-waiting]) .chatview__busy-line {
+  flex-direction: row-reverse;
+}
+
+.app[data-mobile] .chatview__busy-line {
+  gap: var(--p-3);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__busy-label {
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .chatview__busy-dots {
+  gap: var(--p-1);
+}
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__busy-dots span {
+  width: 6px;
+  height: 6px;
+  background: var(--p-ink);
+}
+
+.app[data-mobile] .chatview__busy-bubble[data-asking='true'] {
+  min-height: 44px;
+  gap: var(--p-2);
+  padding: 0 var(--p-4) 0 var(--p-3);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  background: var(--p-attn-tint);
+}
+
+.app[data-mobile] .chatview__wait-bang {
+  background: var(--p-attn);
+  color: var(--p-attn-ink);
+}
+
+/* --- system notes: the cut and the quota, small and centred, on the ground */
+
+.app[data-mobile] .chatview[data-bubbles] .chatview__cut-text,
+.app[data-mobile] .chatview[data-bubbles] .chatview__quota-text {
+  padding: 6px var(--p-3);
+  font: var(--p-w-medium) var(--p-t-small) / 1.3 var(--p-font);
+  color: var(--p-ink-2);
+  background: var(--p-fill);
+  border-radius: var(--p-r-pill);
+  box-shadow: none;
+}
+
+/* --- the jump pill: a raised capsule, no glass */
+
+.app[data-mobile] .chatview__jump {
+  bottom: var(--p-8);
+  gap: var(--p-2);
+  padding: 0 var(--p-4) 0 var(--p-3);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border: 0;
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition:
+    opacity var(--p-dur) var(--p-ease),
+    transform var(--p-dur-glide) var(--p-glide);
+}
+
+.app[data-mobile] .chatview__jump[data-show='true']:active {
+  transform: translate(-50%, 0) scale(var(--p-press-scale));
+}
+
+.app[data-mobile] .chatview__jump svg {
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .chatview__fold-head:focus-visible,
+.app[data-mobile] .chatview__tool-head:focus-visible,
+.app[data-mobile] .chatview__jump:focus-visible,
+.app[data-mobile] .chatview__prose .md__copy-btn:focus-visible,
+.app[data-mobile] .chatview__prose .md__link:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+/* --- the hold menu: the contract's menu (.pu-menu), popping from the bubble */
+
+.app[data-mobile] .chatview__menu {
+  min-width: 212px;
+  padding: 6px;
+  background: var(--p-raised);
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+  animation: pu-pop var(--p-dur-snap) var(--p-glide) both;
+}
+
+.app[data-mobile] .chatview__menu-item {
+  gap: var(--p-3);
+  min-height: 48px;
+  padding: 0 var(--p-4) 0 var(--p-3);
+  font: var(--p-w-medium) var(--p-t-body) / var(--p-lh-tight) var(--p-font);
+  color: var(--p-ink);
+  border-radius: 10px;
+  transition: background-color var(--p-dur-fast) var(--p-ease);
+}
+
+.app[data-mobile] .chatview__menu-item svg {
+  width: var(--p-icon);
+  height: var(--p-icon);
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .chatview__menu-item:hover {
+  background: transparent;
+}
+
+.app[data-mobile] .chatview__menu-item:active {
+  background: var(--p-pressed);
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .chatview__menu-item:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
+}
+
+/*
+ * The menu hands its first item the focus as it opens (for a key). Under a
+ * thumb that drew a bright ring round "Copy" as if it were chosen; on a touch
+ * screen the focus is a quiet fill instead — still seen, never a ring.
+ */
+@media (pointer: coarse) {
+  .app[data-mobile] .chatview__menu-item:focus-visible {
+    outline: none;
+    background: var(--p-hovered);
+  }
+}
+
+/* --- "Copied": the contract's toast — raised, a tick, the word */
+
+.app[data-mobile] .chatview__toast {
+  bottom: var(--p-4);
+  gap: var(--p-2);
+  min-height: 44px;
+  padding: 0 var(--p-4) 0 var(--p-3);
+  font: var(--p-w-strong) var(--p-t-label) / 1.2 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border-radius: var(--p-r-card);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+  transition:
+    opacity var(--p-dur) var(--p-ease),
+    transform var(--p-dur-glide) var(--p-glide);
+}
+
+.app[data-mobile] .chatview__toast:empty {
+  box-shadow: none;
+}
+
+.app[data-mobile] .chatview__toast svg {
+  color: var(--p-act);
+}
+
+/* --- motion: a new bubble rises a little from its own corner, and settles */
+
+@keyframes chatview-phone-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--p-enter-y)) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Motion off: every --p-dur is 0 already; the loops stop too. */
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .chatview[data-bubbles] .chatview__turn,
+  .app[data-mobile] .chatview[data-bubbles] .chatview__busy-turn,
+  .app[data-mobile] .chatview__menu {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .chatview[data-bubbles] .chatview__turn,
+:root[data-reduced-motion='true'] .app[data-mobile] .chatview[data-bubbles] .chatview__busy-turn,
+:root[data-reduced-motion='true'] .app[data-mobile] .chatview__menu {
+  animation: none;
+}

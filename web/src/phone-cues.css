@@ -207,43 +207,68 @@
 
 /* ----------------------------------------------------- dictation's box
  *
- * The box the words are going into, while you dictate: a violet ring with a
- * soft inner light that breathes (a pseudo-element's opacity, nothing else),
- * the live dot violet beside "Listening", and the disc's outgoing ring violet.
- * The disc itself stays lime: it is still the thing to press to send.
- * Working out the words: the ring holds still and dims.
+ * The box the words are going into, while you dictate: it fills with violet —
+ * a tint that grows out from the box's front (where Cancel sits) to its end,
+ * then breathes while it listens (transform once, then opacity, nothing
+ * else). No rim, no glow: the fill, the word "Listening", the violet dot and
+ * the violet wave say it together. The disc stays green: it is still the thing
+ * to press to send, and its outgoing ring turns violet. Working out the words:
+ * the fill holds still and dims.
  */
 
-.app[data-mobile] .composer .composer__field:is([data-phase='recording'], [data-phase='transcribing']) {
-  border-color: var(--p-dict);
-  background: color-mix(in srgb, var(--p-dict) 7%, var(--p-raised));
+.app[data-mobile] .composer .composer__field:is([data-phase='recording'], [data-phase='transcribing']),
+.app[data-mobile] .composer .composer__field:is([data-phase='recording'], [data-phase='transcribing']):focus-within {
+  border-color: transparent;
+  background: var(--p-surface);
 }
 
 .app[data-mobile] .composer .composer__field:is([data-phase='recording'], [data-phase='transcribing'])::before {
   content: '';
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 0;
   border-radius: inherit;
   pointer-events: none;
-  box-shadow:
-    inset 0 0 0 1px var(--p-dict),
-    inset 0 0 18px color-mix(in srgb, var(--p-dict-2) 34%, transparent);
-  opacity: 0.55;
-  animation: pcue-breathe 1.4s var(--p-glide) infinite alternate;
+  background: color-mix(in srgb, var(--p-dict) 30%, transparent);
+  transform-origin: left center;
+  animation:
+    pcue-grow var(--p-dur-sheet) var(--p-ease-sheet) both,
+    pcue-breathe 1.4s var(--p-glide) var(--p-dur-sheet) infinite alternate;
 }
 
 .app[data-mobile] .composer .composer__field[data-phase='transcribing']::before {
-  opacity: 0.4;
+  opacity: 0.6;
   animation: none;
+}
+
+/* The strip and Cancel sit over the fill. */
+.app[data-mobile] .composer__field:is([data-phase='recording'], [data-phase='transcribing']) > .composer__lead,
+.app[data-mobile] .composer__field:is([data-phase='recording'], [data-phase='transcribing']) > .composer__strip {
+  position: relative;
+  z-index: 1;
+}
+
+.app[data-mobile] .composer__field:is([data-phase='recording'], [data-phase='transcribing']) > .composer__lead[data-kind='cancel'] {
+  background: color-mix(in srgb, var(--p-ink) 12%, transparent);
+}
+
+@keyframes pcue-grow {
+  from {
+    opacity: 0;
+    transform: scaleX(0.2);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes pcue-breathe {
   from {
-    opacity: 0.45;
+    opacity: 1;
   }
   to {
-    opacity: 1;
+    opacity: 0.7;
   }
 }
 
@@ -251,10 +276,19 @@
   background: var(--p-dict);
 }
 
+.app[data-mobile] .composer__field[data-phase='recording'] .composer__strip-label {
+  color: var(--p-dict-ink);
+}
+
+.app[data-mobile] .composer__field[data-phase='recording'] .voicewave {
+  color: var(--p-dict-ink);
+}
+
 /* "Listening" is the cue's word, so it gets the room to be read whole: the
    Cancel button before it already spaces it from the rim. */
 .app[data-mobile] .composer__field[data-phase='recording'] .composer__strip {
   padding-left: var(--p-1);
+  animation: pu-rise var(--p-dur-snap) var(--p-glide) both;
 }
 
 .app[data-mobile] .composer .composer__disc[data-phase='recording']::after {

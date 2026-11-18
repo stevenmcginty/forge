@@ -22,7 +22,8 @@ import './ChatPreview.css'
  * its own a few seconds after load, the way a live transcript would.
  *
  * `&sheet=listen` shows the phone's Listen capsule in every phase instead,
- * side by side, so its states can be compared at a glance.
+ * side by side, so its states can be compared at a glance. `&phone` draws the
+ * chat inside `.app[data-mobile]`, on the phone's tokens, as the app does.
  */
 
 const CLAUDE = BUILTIN_AGENT_PROFILES.find((p) => p.id === 'claude')!
@@ -32,6 +33,7 @@ export function ChatPreview(): ReactNode {
   const [busy, setBusy] = useState(true)
   const { themeId: theme, setTheme } = useDeckTheme(true)
   const sheet = new URLSearchParams(location.search).get('sheet')
+  const phone = new URLSearchParams(location.search).has('phone')
   const appended = useRef(0)
 
   const append = (): void => {
@@ -83,6 +85,11 @@ export function ChatPreview(): ReactNode {
       </div>
       {sheet === 'listen' ? (
         <ListenSheet />
+      ) : phone ? (
+        // `&phone`: the chat on the phone's own tokens (`.app[data-mobile]`), as the app draws it.
+        <div className="app chatpreview__stage" data-mobile="true" data-ready="true">
+          <ChatView turns={turns} truncated busy={busy} agentName={CLAUDE.name} paneId="preview" />
+        </div>
       ) : (
         <div className="chatpreview__stage">
           <ChatView turns={turns} truncated busy={busy} agentName={CLAUDE.name} paneId="preview" />

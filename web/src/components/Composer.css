@@ -951,3 +951,259 @@
 :root[data-reduced-motion='true'] .app[data-mobile] .composer__shimmer::after {
   animation: none;
 }
+
+/* ===================================================== the dock, redrawn
+ *
+ * "Quiet Instrument" for the row he plays all day. Same geometry to the pixel
+ * (every border keeps its 1px, only its colour goes), same places, same
+ * icons: the box is a filled pill on the ground with no outline — a field
+ * says so by its fill — the hairline before the words and the one over the
+ * dock go clear, the discs press to 0.97 like every button in the contract,
+ * and the Terminal keys are tonal caps with no outlines, in mono, as keys are.
+ */
+
+/* The dock sits on the ground; the line over it goes clear (it keeps its pixel) and the
+   conversation fades into it instead — drawn above the dock, so no box moves. */
+.app[data-mobile] .session-composer {
+  border-top-color: transparent;
+}
+
+.app[data-mobile] .session-composer:not([data-view='term'])::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: var(--p-6);
+  background: linear-gradient(to bottom, transparent, var(--p-bg));
+  pointer-events: none;
+}
+
+/* The box: a calm capsule one step off the ground, lit from above by its rim, floating a little. */
+.app[data-mobile] .composer__field {
+  background: var(--p-surface);
+  border-color: transparent;
+  box-shadow: var(--p-rim), 0 4px 14px rgb(0 0 0 / 0.18);
+  transition:
+    border-color var(--p-dur-fast) var(--p-ease),
+    background-color var(--p-dur-fast) var(--p-ease);
+}
+
+/* Light themes: a pale fill on a pale page needs its edge — the text field's hairline. */
+:root[data-appearance='light'] .app[data-mobile] .composer__field {
+  border-color: var(--p-line);
+}
+
+/* Typing: the box lifts a step and takes the field's hairline (the contract's text-field edge). */
+.app[data-mobile] .composer__field:focus-within {
+  background: var(--p-raised);
+  border-color: var(--p-line-strong);
+}
+
+.app[data-mobile] .composer[data-disabled='true'] .composer__field {
+  background: var(--p-fill);
+  border-color: transparent;
+}
+
+.app[data-mobile] .composer__seam {
+  background: transparent;
+}
+
+.app[data-mobile] .composer .composer__input::placeholder,
+.app[data-mobile] .composer__hint {
+  color: var(--p-ink-3);
+}
+
+/* The box's own buttons: bare until pressed; pressed = the contract's pressed fill and 0.97. */
+.app[data-mobile] .composer__lead {
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .composer__lead:active:not(:disabled) {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .composer__lead[aria-expanded='true'] {
+  background: var(--p-selected);
+  color: var(--p-ink);
+}
+
+/* Cancel (a dictation) and Retry (the desktop missed it): a tonal round, its glyph in full ink. */
+.app[data-mobile] .composer__lead[data-kind='cancel'],
+.app[data-mobile] .composer__lead[data-kind='retry']:not(:disabled) {
+  background: var(--p-fill);
+  color: var(--p-ink);
+}
+
+/* Undo: the one solid thing in the box while the words wait — ink, with its draining line. */
+.app[data-mobile] .composer__lead[data-kind='undo'] {
+  min-width: 72px;
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+}
+
+.app[data-mobile] .composer__drain {
+  bottom: 9px;
+  opacity: 0.6;
+}
+
+/* The dictation strip's live dot is a shape before the word, never the only signal. */
+.app[data-mobile] .composer__strip-label {
+  font: var(--p-w-strong) var(--p-t-label) / 20px var(--p-font);
+}
+
+/* --- the discs: the contract's press */
+
+.app[data-mobile] .composer .composer__disc,
+.app[data-mobile] .composer .composer__send {
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+/* The disc floats like the box: the same soft drop, lit from above; pressed, it sinks. */
+.app[data-mobile] .composer .composer__disc:not(:disabled):not([data-phase='transcribing']):not([data-cancel-armed='true']),
+.app[data-mobile] .composer .composer__send:not(:disabled):not([data-held='true']):not([data-draft='false']) {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 4px 14px color-mix(in srgb, var(--p-act) 30%, transparent);
+}
+
+.app[data-mobile] .composer .composer__disc:active:not(:disabled),
+.app[data-mobile] .composer .composer__send:active:not(:disabled) {
+  transform: scale(var(--p-press-scale));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
+  transition-duration: var(--p-dur-instant);
+}
+
+/* Nothing to press (armed to cancel, working out the words, held, unlit): a tonal disc, no outline. */
+.app[data-mobile] .composer .composer__disc[data-cancel-armed='true'],
+.app[data-mobile] .composer .composer__disc[data-phase='transcribing'],
+.app[data-mobile] .composer .composer__disc:disabled,
+.app[data-mobile] .composer .composer__send:disabled,
+.app[data-mobile] .composer .composer__send[data-held='true'],
+.app[data-mobile] .composer .composer__send[data-draft='false']:not([data-stop]):not(:disabled) {
+  background: var(--p-raised);
+  box-shadow: none;
+}
+
+.app[data-mobile] .composer .composer__stop {
+  background: var(--p-raised);
+  box-shadow: none;
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+/* Stop at the box's front: the same tonal round as Cancel and Retry, its square in full ink —
+   one family of front buttons; the square (and "Stop" to a screen reader) says what it does. */
+.app[data-mobile] .composer .composer__lead[data-kind='stop'] {
+  background: color-mix(in srgb, var(--p-ink) 16%, transparent);
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .composer .composer__lead[data-kind='stop'] .composer__stop-square {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.app[data-mobile] .composer .composer__lead[data-kind='stop'] .composer__stop-ring {
+  border-color: var(--p-line-strong);
+  border-top-color: var(--p-ink);
+}
+
+.app[data-mobile] .composer .composer__stop:active:not(:disabled),
+.app[data-mobile] .composer .composer__lead[data-kind='stop']:active:not(:disabled) {
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .composer__face {
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+.app[data-mobile] .composer__face:active {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+}
+
+/* --- the Terminal keys: tonal caps on the ground, mono, no outlines; the arrows one pad split by air */
+
+.app[data-mobile] .session-composer .composer__keys {
+  box-shadow: none;
+}
+
+.app[data-mobile] .composer .composer__key {
+  font: var(--p-w-strong) var(--p-t-mono) / 1 var(--p-mono);
+}
+
+.app[data-mobile] .composer__cap,
+.app[data-mobile] .composer__key[data-cap] .composer__cap,
+.app[data-mobile] .composer__key[data-cap='start'] .composer__cap,
+.app[data-mobile] .composer__key[data-cap='end'] .composer__cap {
+  background: var(--p-fill);
+  box-shadow: none;
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
+}
+
+/* Keys are pills drawn 36px inside their 44px hit, Esc/Tab/Ctrl/Enter apart and the arrows one capsule. */
+.app[data-mobile] .composer__cap {
+  height: var(--p-control);
+  border-radius: var(--p-r-pill);
+}
+
+.app[data-mobile] .composer .composer__key {
+  padding: 4px 3px;
+}
+
+.app[data-mobile] .composer .composer__key[data-cap] {
+  padding-inline: 0;
+}
+
+.app[data-mobile] .composer .composer__key[data-cap='start'] {
+  padding-left: 3px;
+}
+
+.app[data-mobile] .composer .composer__key[data-cap='end'] {
+  padding-right: 3px;
+}
+
+.app[data-mobile] .composer__key[data-cap='start'] .composer__cap {
+  border-radius: var(--p-r-pill) 0 0 var(--p-r-pill);
+}
+
+.app[data-mobile] .composer__key[data-cap='mid'] .composer__cap {
+  border-radius: 0;
+}
+
+.app[data-mobile] .composer__key[data-cap='end'] .composer__cap {
+  border-radius: 0 var(--p-r-pill) var(--p-r-pill) 0;
+}
+
+.app[data-mobile] .composer__key:active:not(:disabled) .composer__cap {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .composer__key[data-active='true'] .composer__cap {
+  background: var(--p-ink);
+  color: var(--p-bg);
+}
+
+.app[data-mobile] .composer__cap-stack small {
+  font: var(--p-w-heavy) var(--p-t-micro) / 1 var(--p-font);
+}
+
+.app[data-mobile] .composer .composer__key:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: -2px;
+}

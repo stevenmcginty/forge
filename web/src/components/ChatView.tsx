@@ -15,6 +15,7 @@ import {
 } from 'react'
 import type { ChatBlock, ChatTurn } from '@shared/chat'
 import { Icon } from '@/components/Icon'
+import { buzz } from '../lib/haptics'
 import { renderMarkdown } from '../lib/markdown'
 import { useMobile } from '../lib/mobile'
 import { settlePendingSend, usePendingSends, type PendingSend } from '../lib/pane-sent'
@@ -260,12 +261,8 @@ export const ChatView = memo(function ChatView({
       side: mine ? 'right' : 'left',
       above: from ? r.top - box.top : undefined
     })
-    // A tick under the thumb, as a phone's own long-press gives.
-    try {
-      navigator.vibrate?.(12)
-    } catch {
-      /* no vibration motor, or not allowed: the menu is the feedback */
-    }
+    // A tick under the thumb, as a phone's own long-press gives (the haptic map's "hold").
+    buzz('hold')
   }, [endSelect])
 
   const closeMenu = useCallback((refocus: boolean) => {

@@ -1,26 +1,30 @@
 /* ------------------------------------------------------ Cards view, phone
  *
  * The desktop's Feed (src/components/Feed.tsx + Feed.css) is Forge Web's Cards
- * view. It is imported, not copied, so it is calmed here — every rule scoped
+ * view. It is imported, not copied, so it is redrawn here — every rule scoped
  * to `.app[data-mobile]` so the desktop app and desktop-width Forge Web keep
  * the Feed exactly as it is. Loaded after the Feed's own sheet (main.tsx).
+ *
+ * "Quiet Instrument" (web/PHONE-DESIGN.md), as Chat's sibling: the same 16px
+ * gutters, the agent's words on the ground at Chat's reading size, your words
+ * in the same WhatsApp-green bubble with the same tight speaking corner, and
+ * tool output in the same kind of well — one graphite step up, no outlines,
+ * no side stripe. Working is a turning ring and its word, as everywhere.
  *
  * - One marker per paragraph. The CLI prints its own ⏺ at the head of every
  *   reply and every tool call, so the timeline's dot and rail beside it were a
  *   second bullet for the same paragraph. The CLI's stays; the rail goes.
- * - Tool cards: one hairline box, no thick side edge, a 44px head, and the
- *   "N lines" meta gone — it squeezed the tool name onto two lines, and the
- *   open card shows the lines themselves. Result lines fade out at the right
- *   edge instead of stopping mid-word.
+ * - The "N lines" meta is gone — it squeezed the tool name onto two lines, and
+ *   the open card shows the lines themselves. Result lines fade out at the
+ *   right edge instead of stopping mid-word.
  * - The Feed's own "Waiting on you" card is hidden: on the phone the answer
  *   card over the composer (AnswerCard.tsx) asks the question with buttons,
  *   and "use Tab / Esc below" points at keys this face does not show.
  */
 
-/* The first card clears whatever floats over the top of the pane. */
 .app[data-mobile] .feed__column {
-  gap: var(--s-7);
-  padding: var(--s-6) var(--s-7) var(--s-8);
+  gap: var(--p-6);
+  padding: var(--p-5) var(--p-gutter) var(--p-8);
 }
 
 /* ------------------------------------------------------------ the agent */
@@ -35,28 +39,131 @@
 }
 
 .app[data-mobile] .feed__block[data-role='agent'] .feed__text {
-  font-size: 16px;
+  font-family: var(--p-font);
+  font-size: var(--p-t-body);
   line-height: 1.55;
+  letter-spacing: 0;
 }
 
-/* ------------------------------------------------------------ tool cards */
+/* ------------------------------------------------------------- the person */
+
+.app[data-mobile] .feed__block[data-role='user'] {
+  padding-left: max(var(--p-10), 14%);
+}
+
+.app[data-mobile] .feed__bubble {
+  padding: var(--p-2) var(--p-4);
+  color: var(--theme-bubble-ink, var(--p-ink));
+  background: var(--theme-bubble-out, color-mix(in srgb, var(--p-act) 18%, var(--p-surface)));
+  border: 0;
+  border-radius: var(--p-r-card) var(--p-r-sm) var(--p-r-card) var(--p-r-card);
+  box-shadow: none;
+}
+
+:root[data-appearance='light'] .app[data-mobile] .feed__bubble {
+  box-shadow: 0 1px 0.5px var(--theme-bubble-edge, var(--p-line));
+}
+
+.app[data-mobile] .feed__bubble .feed__text {
+  font-family: var(--p-font);
+  font-size: var(--p-t-body);
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.app[data-mobile] .feed__clock {
+  padding-right: var(--p-1);
+  font: var(--p-w-regular) var(--p-t-micro) / 1 var(--p-font);
+  letter-spacing: 0;
+  color: var(--p-ink-3);
+}
+
+/* ---------------------------------------------- the TUI's notes, the cut */
+
+.app[data-mobile] .feed__system,
+.app[data-mobile] .feed__cut {
+  justify-content: center;
+}
+
+.app[data-mobile] .feed__system::before,
+.app[data-mobile] .feed__system::after,
+.app[data-mobile] .feed__cut::before,
+.app[data-mobile] .feed__cut::after {
+  content: none;
+}
+
+.app[data-mobile] .feed__system-text,
+.app[data-mobile] .feed__cut-text {
+  max-width: 100%;
+  padding: 6px var(--p-3);
+  font: var(--p-w-medium) var(--p-t-small) / 1.3 var(--p-font);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--p-ink-2);
+  background: var(--p-fill);
+  border-radius: var(--p-r-pill);
+}
+
+.app[data-mobile] .feed__cut-text::first-letter {
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------- tool calls: a chip, then the output
+ *
+ * No card. The call is a tonal chip that fits its words (caret, the CLI's own
+ * mark, the call); its output hangs under it, indented on one hairline, in the
+ * secondary ink, fading at the right edge. "Show more" is a quiet line, not a
+ * footer bar. The chip is the button: 44px tall, pressed = the pressed fill.
+ */
 
 .app[data-mobile] .feed__tool {
   margin-left: 0;
-  background: var(--bg-panel);
-  border: 1px solid var(--line-hairline);
-  border-radius: 12px;
+  overflow: visible;
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
 
 .app[data-mobile] .feed__tool-head {
-  min-height: 44px;
-  gap: var(--s-4);
-  padding: var(--s-4) var(--s-5) var(--s-4) var(--s-5);
+  width: fit-content;
+  max-width: 100%;
+  min-height: var(--p-hit);
+  gap: var(--p-2);
+  padding: var(--p-2) var(--p-4) var(--p-2) var(--p-3);
+  background: var(--p-fill);
+  border-radius: 22px;
+  transition:
+    background-color var(--p-dur-fast) var(--p-ease),
+    transform var(--p-dur) var(--p-ease);
 }
 
+.app[data-mobile] .feed__tool-head:hover:not(:disabled) {
+  background: var(--p-fill);
+}
+
+.app[data-mobile] .feed__tool-head:active:not(:disabled) {
+  background: var(--p-pressed);
+  transform: scale(var(--p-press-scale));
+  transition-duration: var(--p-dur-instant);
+}
+
+.app[data-mobile] .feed__tool-head:disabled {
+  background: transparent;
+  padding-left: 0;
+}
+
+.app[data-mobile] .feed__tool-caret {
+  color: var(--p-ink-3);
+  transition: transform var(--p-dur) var(--p-ease);
+}
+
+/* A long call wraps the way a terminal does — at the edge — so the CLI's ⏺ never sits alone on a line. */
 .app[data-mobile] .feed__tool-title {
-  font-size: 12.5px;
+  flex: 0 1 auto;
+  font-family: var(--p-mono);
+  font-size: var(--p-t-mono);
   line-height: 1.45;
+  word-break: break-all;
 }
 
 .app[data-mobile] .feed__tool-count {
@@ -64,21 +171,38 @@
 }
 
 .app[data-mobile] .feed__tool-body {
-  border-top-color: var(--line-soft);
+  margin: var(--p-2) 0 0 var(--p-5);
+  padding-left: var(--p-3);
+  border-top: 0;
+  border-left: 1px solid var(--p-line);
 }
 
 .app[data-mobile] .feed__tool-lines {
-  padding: var(--s-4) var(--s-5) var(--s-5) var(--s-7);
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent calc(100% - 6px));
-  mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent calc(100% - 6px));
+  padding: var(--p-1) 0;
+  font-family: var(--p-mono);
+  font-size: var(--p-t-mono);
+  line-height: 1.6;
+  color: var(--p-ink-2);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent calc(100% - 4px));
+  mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent calc(100% - 4px));
 }
 
 .app[data-mobile] .feed__tool-more {
-  min-height: 44px;
-  padding: 0 var(--s-7);
-  color: var(--text-secondary);
+  width: auto;
+  min-height: var(--p-hit);
+  padding: 0;
+  font: var(--p-w-strong) var(--p-t-small) / 1 var(--p-font);
+  color: var(--p-ink-2);
   background: none;
-  border-top-color: var(--line-soft);
+  border-top: 0;
+}
+
+.app[data-mobile] .feed__tool-more:hover {
+  background: none;
+}
+
+.app[data-mobile] .feed__tool-more:active {
+  color: var(--p-ink);
 }
 
 /* ------------------------------------------------------------- thinking */
@@ -88,17 +212,80 @@
 }
 
 .app[data-mobile] .feed__think-head {
-  min-height: 44px;
-  margin-left: calc(-1 * var(--s-5));
-  padding: 0 var(--s-5);
-  font-size: 14px;
+  min-height: var(--p-hit);
+  margin-left: calc(-1 * var(--p-3));
+  padding: 0 var(--p-3);
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
+  font-style: normal;
+  color: var(--p-ink-2);
 }
 
-/* ------------------------------------------------------------- busy, ask */
+.app[data-mobile] .feed__think-head:hover:not(:disabled) {
+  color: var(--p-ink-2);
+  background: none;
+}
+
+.app[data-mobile] .feed__think-head:active:not(:disabled) {
+  background: var(--p-pressed);
+}
+
+.app[data-mobile] .feed__think-body {
+  padding-left: var(--p-3);
+  border-left: 2px solid var(--p-line);
+  font: var(--p-t-label) / 1.55 var(--p-font);
+  font-style: italic;
+  color: var(--p-ink-2);
+}
+
+/* ------------------------------------------------------------- copy */
+
+.app[data-mobile] .feed__copy {
+  height: 32px;
+  padding: 0 var(--p-3);
+  font: var(--p-w-strong) var(--p-t-micro) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border: 0;
+  border-radius: var(--p-r-pill);
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+}
+
+.app[data-mobile] .feed__copy[data-done='true'] {
+  color: var(--p-ink);
+}
+
+/* ------------------------------------------- working: a turning ring + its word */
 
 .app[data-mobile] .feed__busy {
+  gap: var(--p-2);
+  min-height: var(--p-hit);
   padding-left: 0;
-  font-size: 14.5px;
+  font: var(--p-w-medium) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink-2);
+}
+
+.app[data-mobile] .feed__busy-orb {
+  width: 16px;
+  height: 16px;
+  margin-left: 0;
+}
+
+.app[data-mobile] .feed__busy-orb span:first-child {
+  inset: 0;
+  border-radius: 50%;
+  background: none;
+  border: 2px solid var(--p-line-strong);
+  border-top-color: var(--p-ink);
+  opacity: 1;
+  animation: pu-spin 0.9s linear infinite;
+}
+
+.app[data-mobile] .feed__busy-orb span:last-child {
+  display: none;
+}
+
+.app[data-mobile] .feed__busy-time {
+  color: var(--p-ink-3);
 }
 
 .app[data-mobile] .feed__ask {
@@ -108,12 +295,41 @@
 /* ------------------------------------------------------------------ jump */
 
 .app[data-mobile] .feed__jump {
-  height: 44px;
-  padding: 0 var(--s-7) 0 var(--s-6);
-  font-size: 14px;
-  border-color: var(--line-strong);
+  bottom: var(--p-8);
+  gap: var(--p-2);
+  height: var(--p-hit);
+  padding: 0 var(--p-4) 0 var(--p-3);
+  font: var(--p-w-strong) var(--p-t-label) / 1 var(--p-font);
+  color: var(--p-ink);
+  background: var(--p-raised);
+  border: 0;
+  box-shadow: var(--p-rim), var(--p-shadow-float);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .app[data-mobile] .feed__jump svg {
-  color: var(--text-secondary);
+  color: var(--p-ink-2);
+}
+
+/* ---------------------------------------------------------------- focus */
+
+.app[data-mobile] .feed__tool-head:focus-visible,
+.app[data-mobile] .feed__tool-more:focus-visible,
+.app[data-mobile] .feed__think-head:focus-visible,
+.app[data-mobile] .feed__copy:focus-visible,
+.app[data-mobile] .feed__jump:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: calc(var(--p-focus-w) * -1);
+}
+
+/* Motion off: the ring holds still — still a ring, still beside its word. */
+@media (prefers-reduced-motion: reduce) {
+  .app[data-mobile] .feed__busy-orb span:first-child {
+    animation: none;
+  }
+}
+
+:root[data-reduced-motion='true'] .app[data-mobile] .feed__busy-orb span:first-child {
+  animation: none;
 }
