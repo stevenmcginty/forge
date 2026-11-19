@@ -73,6 +73,7 @@ import {
 import { registerRealtimeHandlers } from './realtime/ipc'
 import { disposeLive, initLive } from './live'
 import { disposeHub, keymapOverride, postToBoard, registerHubHandlers } from './hub-ipc'
+import { disposeDates, initDates } from './dates-ipc'
 import { browserKeyCombo } from '@shared/browser'
 import { guardArtifactFrames, installArtifactScheme } from './artifact-scheme'
 import {
@@ -1608,6 +1609,9 @@ void app
       })
       registerShotsHandlers()
       registerHubHandlers()
+      // Dates: handlers, and the alert pass (first a minute from now, then
+      // every 15 minutes). See electron/dates-ipc.ts.
+      initDates()
       registerBrowserPanes()
       registerChatPanes()
       // The browser's screenshots land on the canvas board. A tab's owner is
@@ -1822,6 +1826,7 @@ app.on('before-quit', () => {
   safely('disposePtyHost', disposePtyHost)
   safely('disposeShotsWatcher', disposeShotsWatcher)
   safely('disposeHub', disposeHub)
+  safely('disposeDates', disposeDates)
   safely('disposePlannerWatchers', disposePlannerWatchers)
   safely('disposeGitWatchers', disposeGitWatchers)
   safely('disposeActivityWatchers', disposeActivityWatchers)

@@ -8,6 +8,7 @@ import type { Shot } from '@shared/types'
 import type { MiniBarState } from '@shared/minibar'
 import type { LiveCardOffer } from '@shared/live-card'
 import { hubPreloadApi } from './hub-preload'
+import { datesPreloadApi } from './dates-preload'
 import { browserApi } from './browser-panes/preload-api'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -632,6 +633,7 @@ const api: ForgeApi = {
 
 contextBridge.exposeInMainWorld('forge', api)
 contextBridge.exposeInMainWorld('forgeHub', hubPreloadApi(ipcRenderer))
+contextBridge.exposeInMainWorld('forgeDates', datesPreloadApi(ipcRenderer))
 contextBridge.exposeInMainWorld('forgeBrowser', browserApi)
 
 /**
