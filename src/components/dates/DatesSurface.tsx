@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   agentPrompt,
   attentionCount,
-  bucketsOf,
   DATE_KINDS,
   dayLabel,
   daysLeft,
   humanWhen,
+  monthBlocksOf,
   sortItems,
   statusOf,
+  urgencyOf,
   type DateItem,
   type DateKind
 } from '@shared/dates'
@@ -20,8 +21,9 @@ import { Icon } from '../Icon'
 import { DateForm } from './DateForm'
 import { DateLine, type DateLineActions } from './DateLine'
 import { CalendarIcon } from './DatesGlyph'
-import { useDates, useToday } from './datesStore'
-import { nearnessOf, plainError, whenWords } from './dateWords'
+import { takeReveal, useDates, useRevealRequest, useToday } from './datesStore'
+import { monthHeading, plainError, whenWords } from './dateWords'
+import { WeeklyCheck } from './WeeklyCheck'
 import './dates.css'
 
 /**
@@ -31,14 +33,20 @@ import './dates.css'
  * can wait. The left column answers that in one sentence (how many need him
  * this week, or "All clear" and what is next), then lets him narrow the list by
  * business and by kind. The right side is a strip of the next six months with
- * every date on it as a dot, and under it the list itself, cut by time
- * (`bucketsOf`). A line is one glance; a click opens its facts and the rest of
- * its actions. The one thing to do about a line is always on it: "Get an agent
- * on it".
+ * every date on it as a dot, and under it the list itself, in calendar-month
+ * blocks (`monthBlocksOf`): Overdue first, then each month, then Done. A line
+ * is one glance; a click opens its facts and the rest of its actions. The one
+ * thing to do about a line is always on it: "Get an agent on it".
  *
- * Calm by default: muted ink, no colour, until a line is this week (amber
- * words), today (the accent) or late (red). The colour is the alarm; nothing
- * moves or blinks.
+ * Two colours with two jobs. Each month wears its own quiet colour (`tone`,
+ * the same on the phone): a rail down the block, its name, the day stubs, its
+ * stretch of the strip — so December and January read as two blocks before a
+ * word is read. Nearness is the other colour: a line's "when" words warm from
+ * quiet ink to amber, to orange today, to red when late (`urgencyOf`), and
+ * only they do. Nothing moves or blinks; the words always say it too.
+ *
+ * The weekly check sits at the foot of the left column: one line of status,
+ * Check now, and Change for its day and hour.
  */
 
 const RIBBON_DAYS = 183
@@ -86,7 +94,7 @@ export function DatesSurface({ active }: SurfaceProps): ReactNode {
     () => all.filter((i) => (kind === null || i.kind === kind) && (group === null || (i.group || NO_GROUP) === group)),
     [all, kind, group]
   )
-  const buckets = useMemo(() => bucketsOf(shown, today), [shown, today])
+  const blocks = useMemo(() => monthBlocksOf(shown, today), [shown, today])
   const filtered = kind !== null || group !== null
 
   /* ------------------------------------------------------------ notices */
@@ -166,6 +174,7 @@ export function DatesSurface({ active }: SurfaceProps): ReactNode {
   const reveal = (id: string, expand = true): void => {
     setKind(null)
     setGroup(null)
+    if (all.find((i) => i.id === id)?.done) setShowDone(true)
     if (expand) setOpenId(id)
     requestAnimationFrame(() => {
       const el = scrollRef.current?.querySelector<HTMLElement>(`#date-${CSS.escape(id)}`)
@@ -173,6 +182,15 @@ export function DatesSurface({ active }: SurfaceProps): ReactNode {
       el?.querySelector<HTMLElement>('.dline__hit')?.focus({ preventScroll: true })
     })
   }
+
+  // A click on an alert's notice asked for one line: open it once the list is here.
+  const wanted = useRevealRequest()
+  useEffect(() => {
+    if (!wanted || items === null) return
+    takeReveal(wanted.seq)
+    if (items.some((i) => i.id === wanted.id)) reveal(wanted.id)
+    // `reveal` is a fresh closure each render; the trigger is the request, or the list arriving.
+  }, [wanted, items]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* -------------------------------------------------------------- render */
 
@@ -224,6 +242,7 @@ export function DatesSurface({ active }: SurfaceProps): ReactNode {
             />
           ) : null}
         </div>
+        {loading ? null : <WeeklyCheck say={say} />}
       </aside>
 
       <section className="dates__page" aria-label="Dates">
@@ -264,28 +283,40 @@ export function DatesSurface({ active }: SurfaceProps): ReactNode {
                   </button>
                 </div>
               ) : null}
-              {!loading && buckets.length === 0 ? <p className="dates__none">Nothing here with these filters.</p> : null}
-              {buckets.map((b) => {
+              {!loading && blocks.length === 0 ? <p className="dates__none">Nothing here with these filters.</p> : null}
+              {blocks.map((b) => {
                 const isDone = b.key === 'done'
                 const folded = isDone && !showDone
+                const head = b.tone !== undefined ? monthHeading(b, today) : null
                 return (
-                  <section key={b.key} className="dbucket" data-bucket={b.key} aria-label={b.label}>
-                    <h3 className="dbucket__head">
+                  <section
+                    key={b.key}
+                    className="dblock"
+                    data-block={head ? 'month' : b.key}
+                    data-tone={b.tone}
+                    data-now={b.key === today.slice(0, 7) ? 'true' : undefined}
+                    aria-label={`${b.label}, ${b.items.length}`}
+                  >
+                    <h3 className="dblock__head">
                       {isDone ? (
-                        <button type="button" className="dbucket__fold" aria-expanded={!folded} onClick={() => setShowDone((v) => !v)}>
+                        <button type="button" className="dblock__fold" aria-expanded={!folded} onClick={() => setShowDone((v) => !v)}>
                           <Icon name={folded ? 'chevronRight' : 'chevronDown'} size={12} />
-                          {b.label}
-                          <span className="dbucket__count">{b.items.length}</span>
+                          <span className="dblock__name">{b.label}</span>
+                          <span className="dblock__count">{b.items.length}</span>
                         </button>
                       ) : (
                         <>
-                          <span>{b.label}</span>
-                          <span className="dbucket__count">{b.items.length}</span>
+                          <span className="dblock__mark" aria-hidden="true">
+                            {b.key === 'overdue' ? '!' : null}
+                          </span>
+                          <span className="dblock__name">{head ? head.month : b.label}</span>
+                          {head?.year ? <span className="dblock__year">{head.year}</span> : null}
+                          <span className="dblock__count">{b.items.length}</span>
                         </>
                       )}
                     </h3>
                     {folded ? null : (
-                      <ul className="dbucket__lines">
+                      <ul className="dblock__lines">
                         {b.items.map((item) => (
                           <DateLine
                             key={item.id}
@@ -362,10 +393,14 @@ function Summary({
     )
   }
   const count = attentionCount(items, today)
-  const late = open.filter((i) => nearnessOf(i, today) === 'late').length
-  const now = open.filter((i) => nearnessOf(i, today) === 'today').length
+  const late = open.filter((i) => urgencyOf(i, today) === 'late').length
+  const now = open.filter((i) => urgencyOf(i, today) === 'today').length
   const week = count - late - now
-  const next = sortItems(open, today).find((i) => nearnessOf(i, today) === 'calm') ?? null
+  const next =
+    sortItems(open, today).find((i) => {
+      const u = urgencyOf(i, today)
+      return u === 'month' || u === 'calm'
+    }) ?? null
   const done = items.length - open.length
 
   return (
@@ -377,9 +412,9 @@ function Summary({
             <span className="dsum__words">{count === 1 ? 'needs you' : 'need you'} this week</span>
           </p>
           <ul className="dsum__break">
-            {late > 0 ? <li data-near="late">{late} overdue</li> : null}
-            {now > 0 ? <li data-near="today">{now} today</li> : null}
-            {week > 0 ? <li data-near="week">{week} in the next 7 days</li> : null}
+            {late > 0 ? <li data-urgency="late">{late} overdue</li> : null}
+            {now > 0 ? <li data-urgency="today">{now} today</li> : null}
+            {week > 0 ? <li data-urgency="week">{week} in the next 7 days</li> : null}
           </ul>
         </>
       ) : (
@@ -444,11 +479,15 @@ function FilterList({
  * in a small red pen left of today; the ones past six months are a count at the
  * right end. It is a picture for the eye — the list below is the way in for the
  * keyboard — so a click on a dot simply opens that line.
+ *
+ * The roles hold here too: each month's stretch of the line, and its name,
+ * wear the month's colour; a dot is quiet ink until its line is close, then
+ * it warms like the line's words do.
  */
 function Ribbon({ items, today, onPick }: { items: DateItem[]; today: string; onPick: (id: string) => void }): ReactNode {
   const open = items.filter((i) => statusOf(i, today) !== 'done')
-  const late = open.filter((i) => nearnessOf(i, today) === 'late')
-  const later = open.filter((i) => daysLeft(i, today) > RIBBON_DAYS && nearnessOf(i, today) !== 'today')
+  const late = open.filter((i) => urgencyOf(i, today) === 'late')
+  const later = open.filter((i) => daysLeft(i, today) > RIBBON_DAYS && urgencyOf(i, today) !== 'today')
   const inside = sortItems(
     open.filter((i) => !late.includes(i) && !later.includes(i)),
     today
@@ -465,7 +504,7 @@ function Ribbon({ items, today, onPick }: { items: DateItem[]; today: string; on
   })
 
   // The first of each month inside the window, as a tick and a short name.
-  const months: { x: number; label: string }[] = []
+  const months: { x: number; label: string; tone: number }[] = []
   const [y0, m0] = today.split('-').map(Number) as [number, number]
   for (let k = 1; k <= 7; k++) {
     const index = y0 * 12 + (m0 - 1) + k
@@ -473,14 +512,16 @@ function Ribbon({ items, today, onPick }: { items: DateItem[]; today: string; on
     const d = daysLeft({ date: first }, today)
     if (d > RIBBON_DAYS) break
     const [, , mon = ''] = dayLabel(first).split(' ')
-    months.push({ x: (d / RIBBON_DAYS) * 100, label: index % 12 === 0 ? `${mon} ${Math.floor(index / 12)}` : mon })
+    months.push({ x: (d / RIBBON_DAYS) * 100, label: index % 12 === 0 ? `${mon} ${Math.floor(index / 12)}` : mon, tone: index % 12 })
   }
+  // Each month's stretch of the line: this month from today, every other from its first day.
+  const bands = [{ x: 0, tone: m0 - 1 }, ...months].map((m, i, all) => ({ ...m, end: all[i + 1]?.x ?? 100 }))
 
   return (
     <div className="dribbon" aria-hidden="true">
       <div className="dribbon__pen" data-count={late.length}>
         {late.slice(0, 6).map((item, i) => (
-          <span key={item.id} className="dribbon__dot" data-near="late" style={{ left: `${28 + (i % 3) * 22}%`, bottom: `calc(var(--rib-base) + ${4 + Math.floor(i / 3) * 9}px)` }} title={`${item.title} — ${whenWords(item, today)}`} onClick={() => onPick(item.id)} />
+          <span key={item.id} className="dribbon__dot" data-urgency="late" style={{ left: `${28 + (i % 3) * 22}%`, bottom: `calc(var(--rib-base) + ${4 + Math.floor(i / 3) * 9}px)` }} title={`${item.title} — ${whenWords(item, today)}`} onClick={() => onPick(item.id)} />
         ))}
         <span className="dribbon__penlabel">{late.length > 0 ? 'Late' : ''}</span>
       </div>
@@ -488,8 +529,11 @@ function Ribbon({ items, today, onPick }: { items: DateItem[]; today: string; on
         <span className="dribbon__today">
           <span>Today</span>
         </span>
+        {bands.map((b) => (
+          <span key={`band-${b.tone}`} className="dribbon__band" data-tone={b.tone} style={{ left: `${b.x}%`, width: `${b.end - b.x}%` }} />
+        ))}
         {months.map((m) => (
-          <span key={m.label} className="dribbon__month" style={{ left: `${m.x}%` }}>
+          <span key={m.label} className="dribbon__month" data-tone={m.tone} style={{ left: `${m.x}%` }}>
             {/* A month that starts in the next few days would sit on "Today": tick only. */}
             {m.x > 4 ? <span>{m.label}</span> : null}
           </span>
@@ -498,7 +542,7 @@ function Ribbon({ items, today, onPick }: { items: DateItem[]; today: string; on
           <span
             key={item.id}
             className="dribbon__dot"
-            data-near={nearnessOf(item, today)}
+            data-urgency={urgencyOf(item, today)}
             style={{ left: `${x}%`, bottom: `calc(var(--rib-base) + ${4 + lane * 9}px)` }}
             title={`${item.title} — ${whenWords(item, today)}`}
             onClick={() => onPick(item.id)}

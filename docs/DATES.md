@@ -257,8 +257,7 @@ Wire, in `shared/web.ts`:
   (`DatesWeeklyView | null`), `dateNotice` (`{ id?, title, body, summary?, at }
   | null`, `at` in epoch ms). Actions under `dates`: `refresh`, `add`,
   `update`, `startAgent`, `open`, `close`, `runWeekly()`, `setWeekly(patch)`,
-  `dismissNotice()`. The last three are typed optional only so the preview
-  stub compiles; the provider always gives them.
+  `dismissNotice()`.
 
 Entry: a "Dates" row in the More sheet, with `attentionCount` when it is not 0.
 

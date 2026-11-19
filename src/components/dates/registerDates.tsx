@@ -1,6 +1,7 @@
 import { datesApi } from '@/lib/datesApi'
 import { registerSurface } from '@/lib/shellSlots'
 import { uiCommands } from '@/lib/uiCommands'
+import { DateAlertNotice } from './DateAlertNotice'
 import { DatesGlyph } from './DatesGlyph'
 import { DatesSurface } from './DatesSurface'
 
@@ -18,7 +19,13 @@ export function registerDates(): () => void {
     title: 'Dates',
     placement: 'full',
     order: 40,
-    glyph: <DatesGlyph />,
+    // The glyph is drawn once, in the switcher, whatever mode is up: the alert notice rides with it.
+    glyph: (
+      <>
+        <DatesGlyph />
+        <DateAlertNotice />
+      </>
+    ),
     render: DatesSurface
   })
   const offOpen = datesApi()?.onOpen(() => uiCommands.run('set-mode', 'dates'))

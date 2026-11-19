@@ -4,20 +4,23 @@ import {
   addDays,
   addMonths,
   attentionCount,
-  bucketsOf,
   completeItem,
   dayLabel,
-  daysLeft,
   humanWhen,
+  monthBlocksOf,
   statusOf,
   todayOf,
-  type DateBucket,
+  urgencyOf,
   type DateItem,
   type DateKind,
-  type DateRepeat
+  type DateMonthBlock,
+  type DateRepeat,
+  type DateUrgency
 } from '@shared/dates'
+import { monthHeading, weeklyWords } from '@/components/dates/dateWords'
 import { buzz } from '../lib/haptics'
-import { useForge } from '../state'
+import { exitDelay } from '../lib/motion'
+import { useForge, type DateNoticeState } from '../state'
 import { BottomSheet, SheetConfirm, SheetRow, SheetSection } from './BottomSheet'
 import { DatesFormBody } from './DatesForm'
 import { PhoneIcon } from './PhoneIcon'
@@ -28,10 +31,21 @@ import './DatesSheet.css'
  * deadlines in one sheet, so a glance says what is late, what is close and
  * what can wait.
  *
- * One sheet, several steps, like the More sheet: the list (grouped by
- * `bucketsOf`, narrowed by chips), one line's facts and actions, snooze, the
- * delete question, and the add / edit form. Back (Esc, Android Back, the ‹)
- * steps back towards the list; the × and a drag close it.
+ * One sheet, several steps, like the More sheet: the list (in calendar-month
+ * blocks by `monthBlocksOf`, narrowed by chips), one line's facts and actions,
+ * snooze, the delete question, and the add / edit form. Back (Esc, Android
+ * Back, the ‹) steps back towards the list; the × and a drag close it.
+ *
+ * Two colours, two jobs (as on the desktop). Each month has its own quiet
+ * tint — its well, its day tiles, the small square by its name — so the months
+ * read as blocks before a word is read; the same month is the same hue on the
+ * desktop. Nearness is the other colour, and only the "when" carries it: quiet,
+ * then full ink inside 30 days, an amber pill inside a week, orange on the
+ * day, red when late (`urgencyOf`). The words are always there.
+ *
+ * Also here, because they are about this list: the heads-up banner when a
+ * date alert arrives while Forge is open (`state.dateNotice`; a tap opens the
+ * line), and the weekly check's status line with Check now (`state.datesWeekly`).
  *
  * Data and writes only through `state.dates` and `actions.dates`. A write
  * resolves null or with a sentence to show; the new list arrives by itself.
@@ -76,11 +90,8 @@ function reminderWords(days: readonly number[]): string {
   return `${list} ${unit} before${onDay ? ', and on the day' : ''}`
 }
 
-/** Open lines that need Steve now: overdue, today, or within a week. */
-function needsYou(item: DateItem, today: string): boolean {
-  const status = statusOf(item, today)
-  return status === 'overdue' || status === 'today' || (status === 'soon' && daysLeft(item, today) <= 7)
-}
+/** How long the alert banner stays when nobody touches it. */
+const NOTICE_MS = 12_000
 
 export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
   const { state, actions } = useForge()
@@ -102,12 +113,26 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
   const [agent, setAgent] = useState<{ id: string; phase: 'busy' | 'ok' | 'failed'; text: string } | null>(null)
   const [flash, setFlash] = useState<{ text: string; undoId?: string; seq: number } | null>(null)
   const [pickDay, setPickDay] = useState('')
+  const [weeklyRun, setWeeklyRun] = useState<{ phase: 'busy' | 'ok' | 'failed'; text: string } | null>(null)
+  /** A line to open on: set by a tap on the alert banner, taken by the next opening. */
+  const wantLine = useRef<string | null>(null)
   const formId = useId()
 
-  // Every opening starts on the list (or the preview's step), with nothing left over.
+  // Every opening starts on the list (or the preview's step, or the banner's line), with nothing left over.
   useEffect(() => {
     if (!open) return
-    setStep(!start ? { name: 'list' } : start.step === 'add' ? { name: 'add' } : ({ name: start.step, id: start.id ?? '' } as Step))
+    const wanted = wantLine.current
+    wantLine.current = null
+    setStep(
+      wanted
+        ? { name: 'detail', id: wanted }
+        : !start
+          ? { name: 'list' }
+          : start.step === 'add'
+            ? { name: 'add' }
+            : ({ name: start.step, id: start.id ?? '' } as Step)
+    )
+    setWeeklyRun(null)
     setStepError(null)
     setAgent(null)
     setFlash(null)
@@ -207,7 +232,7 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
       ),
     [items, filter]
   )
-  const buckets = useMemo(() => bucketsOf(shown, today), [shown, today])
+  const blocks = useMemo(() => monthBlocksOf(shown, today), [shown, today])
   const attention = items ? attentionCount(items, today) : 0
   const openCount = items ? items.filter((i) => statusOf(i, today) !== 'done').length : 0
   const filtered = filter.group !== null || filter.kind !== null
@@ -224,6 +249,23 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
         : attention > 0
           ? `${attention} ${attention === 1 ? 'needs' : 'need'} you this week · ${openCount} open`
           : `Nothing needs you this week · ${openCount} open`
+
+  // The weekly check: a quiet line at the foot of the list, or, when the last run failed, a notice at its top.
+  const weekly = items && state.datesWeekly ? weeklyWords(state.datesWeekly, new Date()) : null
+  const weeklyNode = weekly ? (
+    <WeeklyStatus
+      words={weekly}
+      run={weeklyRun}
+      disabled={!live}
+      onRun={() => {
+        setWeeklyRun({ phase: 'busy', text: '' })
+        void actions.dates.runWeekly().then((error) => {
+          if (error) buzz('error')
+          setWeeklyRun(error ? { phase: 'failed', text: error } : { phase: 'ok', text: `It is working in a new tab on ${desktop}.` })
+        })
+      }}
+    />
+  ) : null
 
   let body: ReactNode
   let footer: ReactNode = null
@@ -299,6 +341,8 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
           </div>
         ) : null}
 
+        {weekly?.tone === 'failed' ? weeklyNode : null}
+
         {items && items.length === 0 ? (
           <div className="pu-empty dates-empty">
             <span className="pu-empty__icon">
@@ -353,16 +397,18 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
           </div>
         ) : null}
 
-        {buckets.map((bucket) => (
-          <Bucket
-            key={bucket.key}
-            bucket={bucket}
+        {blocks.map((block) => (
+          <Block
+            key={block.key}
+            block={block}
             today={today}
-            folded={bucket.key === 'done' && !showDone}
+            folded={block.key === 'done' && !showDone}
             onUnfold={() => setShowDone(true)}
             onPick={(line) => go({ name: 'detail', id: line.id })}
           />
         ))}
+
+        {weekly && weekly.tone !== 'failed' ? weeklyNode : null}
       </div>
     )
   } else if (step.name === 'detail' && item) {
@@ -405,8 +451,9 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
       <div className="dates dates-detail" data-testid="dates-detail">
         <div className="dates-hero">
           <h3 className="dates-hero__title">{item.title}</h3>
-          <p className="dates-hero__when" data-status={status} data-near={needsYou(item, today) ? 'true' : undefined}>
-            {status === 'overdue' || status === 'today' ? <span className="pu-bang" aria-hidden="true">!</span> : null}
+          <p className="dates-hero__when" data-status={status} data-urgency={urgencyOf(item, today)}>
+            {status === 'overdue' ? <PhoneIcon name="alert" className="dates-hero__late" /> : null}
+            {status === 'today' ? <span className="pu-bang" aria-hidden="true">!</span> : null}
             {status === 'done' ? <PhoneIcon name="done" className="dates-ok" /> : null}
             <span className="dates-hero__word">{status === 'done' ? 'Done' : whenWords(item, today)}</span>
             <span className="dates-hero__day">
@@ -602,7 +649,28 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
     )
   }
 
+  const noticeLine = state.dateNotice?.id ? (items?.find((i) => i.id === state.dateNotice?.id) ?? null) : null
+  const openNotice = (notice: DateNoticeState): void => {
+    actions.dates.dismissNotice()
+    const id = notice.id && items?.some((i) => i.id === notice.id) ? notice.id : null
+    if (open) go(id ? { name: 'detail', id } : { name: 'list' })
+    else {
+      wantLine.current = id
+      actions.dates.open()
+    }
+  }
+
   return (
+    <>
+      {state.dateNotice ? (
+        <DateBanner
+          key={state.dateNotice.at}
+          notice={state.dateNotice}
+          urgency={noticeLine ? urgencyOf(noticeLine, today) : null}
+          onOpen={openNotice}
+          onDismiss={actions.dates.dismissNotice}
+        />
+      ) : null}
     <BottomSheet
       open={open}
       onClose={actions.dates.close}
@@ -618,6 +686,7 @@ export function DatesSheet({ start }: { start?: DatesStart } = {}): ReactNode {
         {body}
       </div>
     </BottomSheet>
+    </>
   )
 }
 
@@ -636,53 +705,72 @@ function Chip({ label, on, onClick }: { label: string; on: boolean; onClick: () 
   )
 }
 
-/** One time bucket: a quiet label (with the "!" disc when it needs Steve), then its lines in one well. */
-function Bucket({
-  bucket,
+/**
+ * One block of the list: Overdue, a calendar month, or Done. A quiet label —
+ * the month's small square and its name (with the year when it is not this
+ * year's), or Overdue's red triangle — then its lines in one well, tinted the
+ * month's colour.
+ */
+function Block({
+  block,
   today,
   folded,
   onUnfold,
   onPick
 }: {
-  bucket: DateBucket
+  block: DateMonthBlock
   today: string
   folded: boolean
   onUnfold: () => void
   onPick: (item: DateItem) => void
 }): ReactNode {
-  const urgent = bucket.key === 'overdue' || bucket.key === 'today'
+  const head = block.tone !== undefined ? monthHeading(block, today) : null
+  const kind = head ? 'month' : block.key
   return (
-    <section className="bssec dates-bucket" data-bucket={bucket.key} aria-label={`${bucket.label}, ${bucket.items.length}`}>
-      <div className="bssec__title dates-bucket__title">
-        {urgent ? <span className="pu-bang" aria-hidden="true">!</span> : null}
-        <span>{bucket.label}</span>
-        <span className="dates-bucket__count">{bucket.items.length}</span>
+    <section
+      className="bssec dates-block"
+      data-block={kind}
+      data-tone={block.tone}
+      aria-label={`${block.label}, ${block.items.length}`}
+    >
+      <div className="bssec__title dates-block__title">
+        {kind === 'overdue' ? <PhoneIcon name="alert" className="dates-block__late" /> : null}
+        {kind === 'month' ? <span className="dates-block__swatch" aria-hidden="true" /> : null}
+        <span className="dates-block__name">{head ? head.month : block.label}</span>
+        {head?.year ? <span className="dates-block__year">{head.year}</span> : null}
+        <span className="dates-block__count">{block.items.length}</span>
       </div>
       <div className="bssec__rows">
         {folded ? (
           <SheetRow
-            label={`Show ${bucket.items.length} done`}
+            label={`Show ${block.items.length} done`}
             secondary="Finished lines, newest first"
             onClick={onUnfold}
             chevron
             testId="dates-show-done"
           />
         ) : (
-          bucket.items.map((line) => <Line key={line.id} item={line} today={today} onPick={() => onPick(line)} />)
+          block.items.map((line) => <Line key={line.id} item={line} today={today} onPick={() => onPick(line)} />)
         )}
       </div>
     </section>
   )
 }
 
-/** One line: the day as a calendar leaf, what and whose, and when on the right where the eye runs down. */
+/**
+ * One line: the day on a small tile in its month's tint, what and whose, and
+ * when on the right where the eye runs down. Inside a week the when stands on
+ * a pill that warms with it — amber, orange today, red when late.
+ */
 function Line({ item, today, onPick }: { item: DateItem; today: string; onPick: () => void }): ReactNode {
   const status = statusOf(item, today)
+  const urgency = urgencyOf(item, today)
   const [, day, month] = dayLabel(item.date).split(' ')
   const meta = [item.group, item.amount].filter(Boolean).join(' · ') || kindLabel(item.kind)
   const ongoing = item.endDate && status === 'today'
+  const pill = urgency === 'week' || urgency === 'today' || urgency === 'late'
   return (
-    <button type="button" className="bsrow dates-line" data-status={status} data-near={needsYou(item, today) ? 'true' : undefined} onClick={onPick}>
+    <button type="button" className="bsrow dates-line" data-status={status} data-urgency={urgency} onClick={onPick}>
       <span className="dates-leaf" aria-hidden="true">
         <span className="dates-leaf__day">{day}</span>
         <span className="dates-leaf__month">{month}</span>
@@ -693,15 +781,136 @@ function Line({ item, today, onPick }: { item: DateItem; today: string; onPick: 
       </span>
       <span className="dates-line__when">
         {status === 'done' ? <PhoneIcon name="done" className="dates-ok" /> : null}
-        {status === 'done' ? 'Done' : whenWords(item, today)}
+        {status === 'done' ? 'Done' : pill ? <span className="dates-heat">{whenWords(item, today)}</span> : whenWords(item, today)}
       </span>
     </button>
   )
 }
 
+/**
+ * A date alert while Forge is open: the phone's heads-up banner
+ * (PHONE-DESIGN.md, Banner), from the top. The mark warms with the line — red
+ * triangle when late, the "!" disc today, the calendar otherwise — and the
+ * words are the alert's own. A tap opens Dates (on the line, for one line);
+ * the × puts it away, and so does its own fuse. A new alert is a new banner.
+ */
+function DateBanner({
+  notice,
+  urgency,
+  onOpen,
+  onDismiss
+}: {
+  notice: DateNoticeState
+  urgency: DateUrgency | null
+  onOpen: (notice: DateNoticeState) => void
+  onDismiss: () => void
+}): ReactNode {
+  const [leaving, setLeaving] = useState(false)
+  const dismiss = useRef(onDismiss)
+  dismiss.current = onDismiss
+  const leave = useRef<() => void>(() => undefined)
+  leave.current = () => {
+    if (leaving) return
+    setLeaving(true)
+    window.setTimeout(() => dismiss.current(), exitDelay())
+  }
+
+  useEffect(() => {
+    buzz('warn')
+    const timer = window.setTimeout(() => leave.current(), NOTICE_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  const tone = urgency === 'late' ? 'danger' : urgency === 'today' || urgency === 'week' ? 'attn' : undefined
+  return (
+    <div
+      className={`pu-banner dates-banner${leaving ? ' pu-out-lift' : ''}`}
+      role="status"
+      aria-live="polite"
+      data-tone={tone}
+      data-testid="dates-banner"
+    >
+      <span className="pu-banner__mark">
+        {urgency === 'late' ? (
+          <PhoneIcon name="alert" />
+        ) : urgency === 'today' ? (
+          <span className="pu-bang" aria-hidden="true">
+            !
+          </span>
+        ) : (
+          <DatesGlyph name="calendar" />
+        )}
+      </span>
+      <button type="button" className="dates-banner__body" onClick={() => onOpen(notice)} disabled={leaving}>
+        <span className="pu-banner__title">{notice.title}</span>
+        <span className="pu-banner__body dates-banner__words">{notice.body}</span>
+      </button>
+      <div className="pu-banner__actions">
+        <button type="button" className="pu-icon-btn" aria-label="Dismiss" onClick={() => leave.current()} disabled={leaving}>
+          <PhoneIcon name="close" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The weekly check, as one quiet line at the foot of the list: when it last
+ * ran and when it runs next, and Check now. A failed last run is a danger
+ * notice instead, with the reason. Its day and hour are set on the desktop.
+ */
+function WeeklyStatus({
+  words,
+  run,
+  disabled,
+  onRun
+}: {
+  words: ReturnType<typeof weeklyWords>
+  run: { phase: 'busy' | 'ok' | 'failed'; text: string } | null
+  disabled: boolean
+  onRun: () => void
+}): ReactNode {
+  const check = (
+    <button type="button" className="pu-btn pu-btn--sm" onClick={onRun} disabled={disabled || run?.phase === 'busy'} data-testid="dates-weekly-run">
+      {run?.phase === 'busy' ? <span className="pu-spinner" aria-hidden="true" /> : null}
+      {run?.phase === 'busy' ? 'Starting…' : 'Check now'}
+    </button>
+  )
+  return (
+    <section className="dates-weekly" aria-label="Weekly check" data-tone={words.tone}>
+      {words.tone === 'failed' ? (
+        <div className="pu-notice dates-note" data-tone="danger" role="status">
+          <span className="pu-notice__mark">
+            <PhoneIcon name="alert" />
+          </span>
+          <div className="pu-notice__text">
+            <span className="pu-notice__title">The weekly check failed</span>
+            <span className="pu-notice__body dates-note__whole">{[words.text, words.error, words.next].filter(Boolean).join(' ')}</span>
+            <span className="dates-note__act">{check}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="dates-weekly__line">
+          <p className="dates-weekly__text">
+            <span className="dates-weekly__label">Weekly check</span>
+            {words.tone === 'off' ? ' is off. Turn it on from Dates on the desktop.' : ` · ${words.text}${words.next ? ` ${words.next}` : ''}`}
+          </p>
+          {check}
+        </div>
+      )}
+      {run && run.phase !== 'busy' ? (
+        <p className="dates-weekly__said" data-tone={run.phase === 'failed' ? 'danger' : undefined} role="status">
+          {run.phase === 'ok' ? <PhoneIcon name="done" className="dates-ok" /> : <PhoneIcon name="alert" />}
+          <span>{run.phase === 'ok' ? `Weekly check started. ${run.text}` : run.text}</span>
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
 function DatesSkeleton(): ReactNode {
   return (
-    <section className="bssec dates-bucket" aria-label="Loading" aria-busy="true">
+    <section className="bssec dates-block" aria-label="Loading" aria-busy="true">
       <div className="bssec__title">
         <span className="pu-skeleton" style={{ width: 96 }} />
       </div>

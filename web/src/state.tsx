@@ -382,16 +382,12 @@ export interface DatesActions {
   /** Put the Dates screen up, or away. */
   open: () => void
   close: () => void
-  /*
-   * The three below are always there in ForgeProvider. They are optional only
-   * so a stub (components/DatesPreview.tsx) that predates them still compiles.
-   */
   /** Open the weekly check's agent pane on the desktop now. Null when it started, else the sentence. */
-  runWeekly?: () => Promise<string | null>
+  runWeekly: () => Promise<string | null>
   /** Turn the weekly check on or off, or move its day (0 = Sunday) or hour (0 to 23). */
-  setWeekly?: (patch: DatesWeeklyPatch) => Promise<string | null>
+  setWeekly: (patch: DatesWeeklyPatch) => Promise<string | null>
   /** Clear `dateNotice`. */
-  dismissNotice?: () => void
+  dismissNotice: () => void
 }
 
 interface ForgeContextValue {

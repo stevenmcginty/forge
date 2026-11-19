@@ -2,10 +2,14 @@
  * Dates on the phone (DatesSheet.tsx, DatesForm.tsx). Built from the sheet
  * (BottomSheet.css) and the primitives (phone-ui.css); these rules only lay
  * out what those do not have:
- *  - a line: the day as a calendar leaf, what and whose, and "when" set right
- *    so the eye runs down one column;
- *  - a time bucket's label, with the "!" disc on Overdue and Today, and their
- *    well washed amber — the one place the list asks for Steve;
+ *  - a line: the day on a small tile, what and whose, and "when" set right so
+ *    the eye runs down one column;
+ *  - the month blocks: each calendar month's own quiet tint on its well, its
+ *    day tiles and the small square by its name; Overdue's well in the danger
+ *    tint under a red triangle (PHONE-DESIGN.md, "Month tones");
+ *  - the heat on "when": quiet, full ink inside 30 days, then a pill — amber
+ *    inside a week, orange on the day, red when late;
+ *  - the alert banner and the weekly check's status line;
  *  - the chips that narrow the list, one scroller under the head;
  *  - a line's hero, its three actions, its facts and its prose;
  *  - the add / edit form's spacing.
@@ -94,22 +98,99 @@
   color: var(--p-ink-2);
 }
 
-/* --------------------------------------------------------------- buckets */
+/* ---------------------------------------------------------- month tones */
 
-.dates-bucket__title {
+/*
+ * A month's colour, made from the theme: its ink a quarter of the way to the
+ * ground, turned to the month's hue (oklch relative colour), so it reads like
+ * secondary ink in every theme, dark or light. The twelve angles skip red,
+ * orange and amber (the heat's, and --p-attn's) and step five places round
+ * the wheel from one month to the next, so neighbours always differ. The same
+ * angles as the desktop (src/components/dates/dates.css), so a month is the
+ * same hue on both faces.
+ */
+.dates {
+  --dm-from: color-mix(in oklab, var(--p-ink) 74%, var(--p-bg));
+  --dm-c: 0.12;
+  --dm-tint-pct: 16%;
+  --dm-well-pct: 8%;
+}
+
+:root[data-appearance='light'] .dates {
+  --dm-c: 0.11;
+  --dm-tint-pct: 14%;
+  --dm-well-pct: 7%;
+}
+
+.dates [data-tone] {
+  --dm: oklch(from var(--dm-from) l var(--dm-c) var(--dm-h, 250));
+  --dm-tint: color-mix(in oklab, var(--dm) var(--dm-tint-pct), transparent);
+  --dm-well: color-mix(in oklab, var(--dm) var(--dm-well-pct), transparent);
+}
+
+.dates [data-tone='0'] { --dm-h: 110; }
+.dates [data-tone='1'] { --dm-h: 206; }
+.dates [data-tone='2'] { --dm-h: 303; }
+.dates [data-tone='3'] { --dm-h: 168; }
+.dates [data-tone='4'] { --dm-h: 264; }
+.dates [data-tone='5'] { --dm-h: 129; }
+.dates [data-tone='6'] { --dm-h: 226; }
+.dates [data-tone='7'] { --dm-h: 322; }
+.dates [data-tone='8'] { --dm-h: 187; }
+.dates [data-tone='9'] { --dm-h: 284; }
+.dates [data-tone='10'] { --dm-h: 148; }
+.dates [data-tone='11'] { --dm-h: 245; }
+
+/* ----------------------------------------------------------------- blocks */
+
+.dates-block__title {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.dates-bucket__count {
+/* The month's mark: a small rounded square in its colour, beside its name. */
+.dates-block__swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-right: 2px;
+  border-radius: 3px;
+  background: var(--dm);
+}
+
+.dates-block[data-block='month'] .dates-block__name {
+  color: color-mix(in oklab, var(--dm) 50%, var(--p-ink));
+}
+
+.dates-block__year {
+  font-weight: var(--p-w-medium);
+  color: var(--p-ink-2);
+}
+
+.dates-block__count {
   font-weight: var(--p-w-medium);
   color: var(--p-ink-3);
 }
 
-/* Overdue and Today: the well takes the amber wash, under the "!" in its label. */
-.app[data-mobile] .dates-bucket:is([data-bucket='overdue'], [data-bucket='today']) > .bssec__rows {
-  background: var(--p-attn-tint);
+.dates-block__late {
+  flex: none;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+  color: var(--p-danger);
+}
+
+.dates-block[data-block='overdue'] .dates-block__name {
+  color: var(--p-ink);
+}
+
+/* Each month's well takes the month's tint; Overdue's takes the danger tint. */
+.app[data-mobile] .dates-block[data-tone] > .bssec__rows {
+  background: var(--dm-well);
+}
+
+.app[data-mobile] .dates-block[data-block='overdue'] > .bssec__rows {
+  background: var(--p-danger-tint);
 }
 
 /* ----------------------------------------------------------------- lines */
@@ -121,7 +202,7 @@
 
 /* The hairline starts at the text, past the leaf. */
 .app[data-mobile] .bssec__rows .bsrow.dates-line + .bsrow.dates-line::after {
-  left: 60px;
+  left: 64px;
 }
 
 .dates-leaf {
@@ -130,13 +211,32 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 36px;
+  width: 40px;
+  height: 44px;
+  border-radius: var(--p-r-sm);
   font-family: var(--p-font);
   font-variant-numeric: tabular-nums;
 }
 
+/* In a month block the tile wears the month: a tint, and the month's name in its colour. */
+.dates-block[data-tone] .dates-leaf {
+  background: var(--dm-tint);
+}
+
+.dates-block[data-tone] .dates-leaf__month {
+  color: var(--dm);
+}
+
+.dates-line[data-urgency='late'] .dates-leaf {
+  background: var(--p-danger-tint);
+}
+
+.dates-line[data-urgency='late'] .dates-leaf__month {
+  color: var(--p-danger);
+}
+
 .dates-leaf__day {
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 650;
   line-height: 1;
   letter-spacing: -0.02em;
@@ -198,10 +298,34 @@
   height: var(--p-icon-sm);
 }
 
-/* Within a week, today, or late: the when is in full ink, heavier. */
-.dates-line[data-near='true'] .dates-line__when {
+/* The heat. Inside 30 days the when is in full ink, heavier; inside a week it
+   stands on a pill (the badge's shape, PHONE-DESIGN.md) that warms with it. */
+.dates-line:is([data-urgency='month'], [data-urgency='week'], [data-urgency='today'], [data-urgency='late']) .dates-line__when {
   font-weight: var(--p-w-strong);
   color: var(--p-ink);
+}
+
+.dates-heat {
+  --dates-heat: var(--p-attn);
+
+  display: inline-block;
+  padding: 3px var(--p-2);
+  border-radius: var(--p-r-pill);
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh-tight);
+  background: color-mix(in srgb, var(--dates-heat) 22%, transparent);
+}
+
+.dates-line[data-urgency='today'] .dates-heat {
+  --dates-heat: color-mix(in oklab, var(--p-attn), var(--p-danger) 60%);
+}
+
+.dates-line[data-urgency='late'] .dates-heat {
+  --dates-heat: var(--p-danger);
+}
+
+.dates-hero__late {
+  color: var(--p-danger);
 }
 
 .app[data-mobile] .dates-line[data-status='done'] .dates-line__title,
@@ -375,6 +499,105 @@
 .dates-foot--two {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--p-2);
+}
+
+/* ---------------------------------------------------------- alert banner */
+
+/* Where the contract puts a banner: fixed at the top, 8px in, over the head and any sheet. */
+.dates-banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--p-2));
+  right: var(--p-2);
+  left: var(--p-2);
+  z-index: var(--p-z-banner);
+  padding-right: var(--p-1);
+}
+
+/* The words are one tap: open the line. */
+.dates-banner__body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  align-self: stretch;
+  align-content: center;
+  margin: 0;
+  padding: var(--p-1) 0;
+  border: 0;
+  border-radius: var(--p-r-row);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dates-banner__body:active {
+  background: var(--p-pressed);
+}
+
+.dates-banner__body:focus-visible {
+  outline: var(--p-focus-w) solid var(--p-focus);
+  outline-offset: var(--p-focus-gap);
+}
+
+/* A summary's lines stay lines. */
+.dates-banner__words {
+  white-space: pre-line;
+}
+
+/* --------------------------------------------------------- weekly check */
+
+.dates-weekly {
+  display: grid;
+  gap: var(--p-2);
+}
+
+.dates-weekly__line {
+  display: flex;
+  align-items: center;
+  gap: var(--p-3);
+  padding: 0 var(--p-1) 0 var(--p-2);
+}
+
+.dates-weekly__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.dates-weekly__label {
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink);
+}
+
+.dates-weekly__line > .pu-btn {
+  flex: none;
+}
+
+.dates-weekly__said {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--p-2);
+  margin: 0;
+  padding: 0 var(--p-2);
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.dates-weekly__said > svg {
+  flex: none;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+  margin-top: 1px;
+}
+
+.dates-weekly__said[data-tone='danger'] > svg {
+  color: var(--p-danger);
 }
 
 /* ----------------------------------------------------------------- form */

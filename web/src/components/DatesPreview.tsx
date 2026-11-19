@@ -2,18 +2,20 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { BUILTIN_AGENT_PROFILES } from '@shared/agents'
 import {
   addDays,
+  alertText,
   applyPatch,
   completeItem,
   normaliseItem,
   todayOf,
   type DateItem,
   type DateKind,
-  type DatePatch
+  type DatePatch,
+  type DatesWeeklyView
 } from '@shared/dates'
 import type { Project } from '@shared/types'
 import type { WebDateChange, WebDateFields } from '@shared/web'
 import { useDeckTheme } from '../deck/theme'
-import { ForgeContext, type ForgeActions, type ForgeState, type Picture } from '../state'
+import { ForgeContext, type DateNoticeState, type ForgeActions, type ForgeState, type Picture } from '../state'
 import { DatesSheet, type DatesStart } from './DatesSheet'
 import { MoreSheet } from './MoreSheet'
 import { TabStrip } from './TabStrip'
@@ -26,11 +28,14 @@ import { TopBar } from './TopBar'
  * Every line is made up.
  *
  * URL params:
- *  `show=<id>`   `three` (default) · `forty` · `urgent` (one overdue, one today)
+ *  `show=<id>`   `three` (default) · `forty` · `sixty` (60 open lines over 14
+ *                months, one in each heat) · `urgent` (one overdue, one today)
  *                · `empty` · `loading` · `error` (the desktop did not answer)
  *                · `offline` (the last list, desktop asleep) · `detail` · `add`
  *                · `edit` · `snooze` · `delete` · `more` (the More sheet's row)
  *  `agent=fail`  "Get an agent on it" answers with the PC-did-not-answer sentence
+ *  `notice=<id>` a date alert banner: `line` (5 days out) · `late` · `summary`
+ *  `weekly=<id>` the weekly check: `ran` (default) · `never` · `failed` · `off` · `none` (an older desktop)
  *  `theme=<id>`  one of the eight themes
  *
  * Writes go to the fixture list (through the shared pure helpers), so Done,
@@ -107,6 +112,36 @@ function forty(): Seed[] {
   return seeds
 }
 
+/** 60 open lines over 14 months: one late, one today, one this week, one this month, then a line a week. */
+function sixty(): Seed[] {
+  const offsets = [-9, -3, 0, 2, 5, 12, 25]
+  for (let d = 31; offsets.length < 60; d += 7) offsets.push(d)
+  const seeds: Seed[] = offsets.map((n, i) => {
+    const [title, kind, group, amount] = POOL[i % POOL.length]
+    return { title: i >= POOL.length ? `${title} (${Math.floor(i / POOL.length) + 1})` : title, in: n, kind, group, amount, estimated: i % 11 === 4 }
+  })
+  for (let i = 0; i < 4; i++) {
+    const [title, kind, group] = POOL[i]
+    seeds.push({ title: `${title}, last time`, in: -40 - i * 20, kind, group, done: true })
+  }
+  return seeds
+}
+
+/** The weekly check in each of its states, with times relative to now. */
+function weeklyFixture(which: string): DatesWeeklyView | null {
+  if (which === 'none') return null
+  const at = (days: number, hour: number): string => {
+    const d = new Date()
+    d.setDate(d.getDate() + days)
+    d.setHours(hour, 0, 0, 0)
+    return d.toISOString()
+  }
+  const base = { enabled: which !== 'off', weekday: 1, hour: 7, since: at(-30, 9), nextRunAt: which === 'off' ? null : at(4, 7) }
+  if (which === 'never') return base
+  if (which === 'failed') return { ...base, lastRunAt: at(-3, 7), lastResult: 'failed', lastError: 'No window was ready for the agent pane.' }
+  return { ...base, lastRunAt: at(-3, 7), lastResult: 'started' }
+}
+
 function build(seeds: Seed[], today: string): DateItem[] {
   return seeds.map((s, i) => {
     const item = normaliseItem({
@@ -165,10 +200,26 @@ export function DatesPreview(): ReactNode {
     if (show === 'loading' || show === 'error') return null
     if (show === 'empty') return []
     if (show === 'forty') return build(forty(), today)
+    if (show === 'sixty') return build(sixty(), today)
     if (show === 'three' || show === 'offline') return build(THREE, today)
     return build(URGENT, today)
   })
-  const [open, setOpen] = useState(show !== 'more')
+  const [open, setOpen] = useState(show !== 'more' && !param('notice'))
+  const [weekly, setWeekly] = useState(() => weeklyFixture(param('weekly') ?? 'ran'))
+  const [notice, setNotice] = useState<DateNoticeState | null>(() => {
+    const which = param('notice')
+    const list = items ?? []
+    if (which === 'summary') {
+      return {
+        title: '5 dates are coming up',
+        body: ['Gas safety check: 9 days overdue', 'Trade plates renew: today', 'Phone plan finishes: in 5 days', 'and 2 more'].join('\n'),
+        summary: true,
+        at: Date.now()
+      }
+    }
+    const line = which === 'late' ? list.find((i) => i.date < today && !i.done) : which ? list.find((i) => i.date > addDays(today, 3)) : null
+    return line ? { id: line.id, ...alertText(line, today), at: Date.now() } : null
+  })
   const [moreOpen, setMoreOpen] = useState(show === 'more')
   const agentFails = param('agent') === 'fail'
 
@@ -215,7 +266,19 @@ export function DatesPreview(): ReactNode {
         return agentFails ? NO_ANSWER : null
       },
       open: () => setOpen(true),
-      close: () => setOpen(false)
+      close: () => setOpen(false),
+      runWeekly: async () => {
+        await wait(600)
+        if (agentFails) return NO_ANSWER
+        setWeekly((w) => (w ? { ...w, lastRunAt: new Date().toISOString(), lastResult: 'started', lastError: undefined } : w))
+        return null
+      },
+      setWeekly: async (patch) => {
+        await wait(200)
+        setWeekly((w) => (w ? { ...w, ...patch } : w))
+        return null
+      },
+      dismissNotice: () => setNotice(null)
     }
     return new Proxy({} as ForgeActions, {
       get: (_target, key) => {
@@ -266,9 +329,11 @@ export function DatesPreview(): ReactNode {
       askBanner: null,
       brainConfirms: [],
       dates: items,
-      datesOpen: open
+      datesOpen: open,
+      datesWeekly: weekly,
+      dateNotice: notice
     } as unknown as ForgeState
-  }, [show, items, open])
+  }, [show, items, open, weekly, notice])
 
   const value = useMemo(() => ({ state, actions }), [state, actions])
   const off = { available: false, reason: 'Not in the preview', detail: '', onPress: () => undefined }

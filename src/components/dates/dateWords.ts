@@ -1,4 +1,17 @@
-import { addDays, addMonths, DATE_KINDS, dayLabel, daysLeft, humanWhen, statusOf, type DateItem, type DateRepeat } from '@shared/dates'
+import {
+  addDays,
+  addMonths,
+  DATE_KINDS,
+  dayLabel,
+  daysLeft,
+  humanWhen,
+  statusOf,
+  todayOf,
+  type DateItem,
+  type DateMonthBlock,
+  type DateRepeat,
+  type DatesWeeklyView
+} from '@shared/dates'
 
 /**
  * Small pieces of wording for the Dates page. All the date maths is in
@@ -29,16 +42,51 @@ export function stubOf(day: string): { weekday: string; day: string; month: stri
   return { weekday, day: d, month, year }
 }
 
-/** How close a line is, for its colour: late, today, this week, or neither. */
-export type Nearness = 'late' | 'today' | 'week' | 'calm' | 'done'
+/** A month block's heading: "December", or "January 2027" when it is not this year's. */
+export function monthHeading(block: DateMonthBlock, today: string): { month: string; year: string | null } {
+  const [month = block.label, year = ''] = block.label.split(' ')
+  return { month, year: year && year !== today.slice(0, 4) ? year : null }
+}
 
-export function nearnessOf(item: DateItem, today: string): Nearness {
-  const status = statusOf(item, today)
-  if (status === 'done') return 'done'
-  if (status === 'overdue') return 'late'
-  if (status === 'today') return 'today'
-  if (status === 'soon' && daysLeft(item, today) <= 7) return 'week'
-  return 'calm'
+/* ---------------------------------------------------------- weekly check */
+
+export const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+
+/** An hour of the day as the page writes it: "7:00", "19:00". */
+export function hourWords(hour: number): string {
+  return `${hour}:00`
+}
+
+/** An ISO time as its local day, "Mon 23 Nov" (with the year when it is not this year). */
+export function shortDay(iso: string, today: string): string {
+  const day = todayOf(new Date(iso))
+  const label = dayLabel(day)
+  return day.slice(0, 4) === today.slice(0, 4) ? label.slice(0, label.lastIndexOf(' ')) : label
+}
+
+/**
+ * The weekly check in plain words, for the small status line on both faces:
+ * "Checked Mon 23 Nov. Next check Mon 30 Nov at 7:00." `tone` says which of
+ * the four states it is; `error` is the reason a failed run gave, when it gave one.
+ */
+export function weeklyWords(
+  weekly: DatesWeeklyView,
+  now: Date
+): { tone: 'off' | 'never' | 'ran' | 'failed'; text: string; next: string | null; error?: string } {
+  const today = todayOf(now)
+  if (!weekly.enabled) return { tone: 'off', text: 'Off. Forge does not check your accounts each week.', next: null }
+  const at = weekly.nextRunAt
+  const next = !at
+    ? null
+    : Date.parse(at) <= now.getTime()
+      ? 'Due now: it starts within 15 minutes.'
+      : `${weekly.lastRunAt ? 'Next check' : 'First check'} ${shortDay(at, today)} at ${hourWords(new Date(at).getHours())}.`
+  if (!weekly.lastRunAt) return { tone: 'never', text: 'Not run yet.', next }
+  const when = shortDay(weekly.lastRunAt, today)
+  if (weekly.lastResult === 'failed') {
+    return { tone: 'failed', text: `Last check failed on ${when}.`, next, ...(weekly.lastError ? { error: weekly.lastError } : {}) }
+  }
+  return { tone: 'ran', text: `Checked ${when}.`, next }
 }
 
 /** The "when" words on a line: "in 12 days", "about in 5 months" reads badly, so "in about 5 months". */

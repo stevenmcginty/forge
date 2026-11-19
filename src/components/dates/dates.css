@@ -4,15 +4,26 @@
  * Forge round the edges, like Read: the deck's sheet, hairlines, Bahnschrift
  * on everything that is chrome and on every number. A left column that
  * answers "what needs me?" in one sentence, a six-month strip of dots, and the
- * list cut by time.
+ * list in calendar-month blocks.
  *
- * Colour is the alarm and nothing else. A calm line is ink and hairline only.
- * A line inside a week turns its words amber; today wears the accent; late is
- * red, on its words and on its day stub. Nothing pulses or blinks: a tired eye
- * should land on the one red line, not be chased by it.
+ * Two colours, and each has one job:
+ *  - The month says WHEN. Each calendar month has its own quiet colour: a thin
+ *    rail down its block, its name in the block's head, a tint on every day
+ *    stub in it, and its stretch of the strip. Tints and edges only, never a
+ *    filled card. Hues skip the red-to-amber sector, so no month can be
+ *    mistaken for the alarm.
+ *  - The heat says ACT. Only a line's "when" words carry it: quiet ink, then
+ *    full ink inside 30 days, amber inside a week, orange on the day, red when
+ *    late — the last three on a soft pill of their own colour. Late lines also
+ *    sit first, in the Overdue block, with a red stub. Nothing pulses or
+ *    blinks; the words say it all without the colour.
  *
- * Every colour is a theme token (or a color-mix of tokens), so every theme —
- * the dark ones and Paper / WhatsApp light — paints it correctly.
+ * The month colours are made from the theme, not written in: each is the
+ * theme's own text colour, three quarters of the way from the sheet, turned to
+ * the month's hue (oklch relative colour). So a month is as readable as
+ * secondary text in every theme, dark or light, and the same month is the same
+ * hue as on the phone (web/src/components/DatesSheet.css lists the same twelve
+ * angles). Every other colour is a theme token or a color-mix of tokens.
  */
 
 .dates {
@@ -22,6 +33,18 @@
   --dates-warn-ink: var(--warn);
   --dates-tint: color-mix(in srgb, var(--text-primary) 4%, transparent);
   --dates-tint-strong: color-mix(in srgb, var(--text-primary) 7%, transparent);
+
+  /* The heat ramp: amber, orange, red. Inks for words, soft fills for the pill. */
+  --dates-heat-week: var(--dates-warn-ink);
+  --dates-heat-today: color-mix(in oklab, var(--dates-warn-ink), var(--danger-ink) 60%);
+  --dates-heat-late: var(--danger-ink);
+
+  /* Where every month colour starts: the theme's ink, a quarter of the way to the sheet. */
+  --dm-from: color-mix(in oklab, var(--text-primary) 74%, var(--sheet-bg));
+  --dm-c: 0.12;
+  /* How strong the tint and the edge are: a dark sheet needs a little more to show. */
+  --dm-tint-pct: 18%;
+  --dm-edge-pct: 62%;
 
   position: relative;
   display: grid;
@@ -37,7 +60,36 @@
 
 :root[data-appearance='light'] .dates {
   --dates-warn-ink: color-mix(in srgb, var(--warn) 62%, var(--text-primary));
+  --dm-c: 0.11;
+  --dm-tint-pct: 12%;
+  --dm-edge-pct: 50%;
 }
+
+/*
+ * The twelve month hues (oklch angles), by `tone` (0 = January). They skip
+ * 350°–100° (red, orange, amber: the heat's) and step five places round the
+ * remaining wheel from one month to the next, so neighbours always differ:
+ * November green, December blue, January olive, February azure…
+ * Same angles on the phone (DatesSheet.css).
+ */
+.dates [data-tone] {
+  --dm: oklch(from var(--dm-from) l var(--dm-c) var(--dm-h, 250));
+  --dm-tint: color-mix(in oklab, var(--dm) var(--dm-tint-pct), transparent);
+  --dm-edge: color-mix(in oklab, var(--dm) var(--dm-edge-pct), transparent);
+}
+
+.dates [data-tone='0'] { --dm-h: 110; }
+.dates [data-tone='1'] { --dm-h: 206; }
+.dates [data-tone='2'] { --dm-h: 303; }
+.dates [data-tone='3'] { --dm-h: 168; }
+.dates [data-tone='4'] { --dm-h: 264; }
+.dates [data-tone='5'] { --dm-h: 129; }
+.dates [data-tone='6'] { --dm-h: 226; }
+.dates [data-tone='7'] { --dm-h: 322; }
+.dates [data-tone='8'] { --dm-h: 187; }
+.dates [data-tone='9'] { --dm-h: 284; }
+.dates [data-tone='10'] { --dm-h: 148; }
+.dates [data-tone='11'] { --dm-h: 245; }
 
 .dates-sr {
   position: absolute;
@@ -165,17 +217,17 @@
   background: var(--dates-dot, var(--text-muted));
 }
 
-.dsum__break li[data-near='late'] {
-  --dates-dot: var(--danger);
+.dsum__break li[data-urgency='late'] {
+  --dates-dot: var(--dates-heat-late);
   color: var(--danger-ink);
 }
 
-.dsum__break li[data-near='today'] {
-  --dates-dot: var(--accent);
+.dsum__break li[data-urgency='today'] {
+  --dates-dot: var(--dates-heat-today);
 }
 
-.dsum__break li[data-near='week'] {
-  --dates-dot: var(--warn);
+.dsum__break li[data-urgency='week'] {
+  --dates-dot: var(--dates-heat-week);
 }
 
 .dsum__next {
@@ -310,6 +362,134 @@
   font-family: var(--font-display);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------- the weekly check */
+
+/* Furniture at the foot of the column, outside its scroll so it is always in
+   view: one line of status, two small buttons. */
+.dweekly {
+  flex: none;
+  padding: 12px 20px 12px;
+  border-top: 1px solid var(--glass-line);
+}
+
+.dweekly__head {
+  margin-bottom: 6px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dweekly__line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.dweekly__state {
+  color: var(--text-secondary);
+}
+
+.dweekly[data-tone='failed'] .dweekly__state {
+  font-weight: 500;
+  color: var(--danger-ink);
+}
+
+.dweekly__warn {
+  margin: 0 5px -1px 0;
+  color: var(--danger-ink);
+}
+
+.dweekly__error {
+  margin: 4px 0 0;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--danger-soft);
+  overflow-wrap: anywhere;
+}
+
+.dweekly__acts {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 0 -8px;
+}
+
+.dweekly__btn {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.dweekly__btn[data-tone='quiet'] {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.dweekly__btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.dweekly__btn:disabled {
+  opacity: 0.55;
+}
+
+.dweekly__btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.dweekly__edit {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+  animation: dates-unfold var(--dur-glide) var(--spring-glide) both;
+}
+
+.dweekly__edit .dtoggle {
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.dweekly__when {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dweekly .dweekly__select {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dweekly .dweekly__select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dweekly__at {
+  flex: none;
+  font-size: 11.5px;
   color: var(--text-dim);
 }
 
@@ -480,6 +660,20 @@
   transform: translateX(-50%);
 }
 
+.dribbon__month[data-tone] > span {
+  color: var(--dm);
+}
+
+/* Each month's stretch of the line, in its colour, with a hair of air between months. */
+.dribbon__band {
+  position: absolute;
+  bottom: calc(var(--rib-base) - 1px);
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--dm-edge);
+  box-shadow: inset 2px 0 0 var(--sheet-bg);
+}
+
 /* Today: a lit tick at the left end, its word beside the top of it. */
 .dribbon__today {
   position: absolute;
@@ -525,58 +719,112 @@
   transform: scale(1.5);
 }
 
-.dribbon__dot[data-near='week'] {
-  background: var(--warn);
+.dribbon__dot[data-urgency='month'] {
+  background: var(--text-secondary);
 }
 
-.dribbon__dot[data-near='today'] {
-  background: var(--accent);
+.dribbon__dot[data-urgency='week'] {
+  background: var(--dates-heat-week);
 }
 
-.dribbon__dot[data-near='late'] {
-  background: var(--danger);
+.dribbon__dot[data-urgency='today'] {
+  background: var(--dates-heat-today);
 }
 
-/* ------------------------------------------------------------ the buckets */
-
-.dbucket + .dbucket {
-  margin-top: 8px;
+.dribbon__dot[data-urgency='late'] {
+  background: var(--dates-heat-late);
 }
 
-.dbucket__head {
+/* ------------------------------------------------------- the month blocks */
+
+.dblock {
+  --dblock-rail: var(--dm-edge, var(--glass-line));
+}
+
+.dblock + .dblock {
+  margin-top: 10px;
+}
+
+.dblock[data-block='overdue'] {
+  --dblock-rail: var(--danger-line);
+}
+
+.dblock[data-block='done'] {
+  --dblock-rail: var(--glass-line);
+}
+
+.dblock__head {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   margin: 0;
-  padding: 18px 10px 8px;
+  padding: 18px 10px 8px 8px;
   font-family: var(--font-display);
-  font-size: 10.5px;
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  letter-spacing: -0.005em;
+  color: var(--text-primary);
   background: var(--sheet-bg);
 }
 
-.dbucket[data-bucket='overdue'] .dbucket__head {
+/* The month's mark: a short bar in its colour, standing where the rail starts. */
+.dblock__mark {
+  flex: none;
+  align-self: center;
+  width: 4px;
+  height: 14px;
+  margin-right: 2px;
+  border-radius: var(--r-full);
+  background: var(--dm, var(--text-dim));
+}
+
+/* Overdue's mark is a word-sized "!" in a red disc: a shape, not only a colour. */
+.dblock[data-block='overdue'] .dblock__mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 0;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--bg-base);
+  background: var(--danger);
+}
+
+.dblock[data-block='month'] .dblock__name {
+  color: color-mix(in oklab, var(--dm) 55%, var(--text-primary));
+}
+
+.dblock[data-block='overdue'] .dblock__name {
   color: var(--danger-ink);
 }
 
-.dbucket[data-bucket='today'] .dbucket__head {
-  color: var(--accent-ink);
+.dblock__year {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
-.dbucket__count {
-  font-size: 10.5px;
-  font-weight: 400;
-  letter-spacing: 0.04em;
+.dblock__count {
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
   color: var(--text-dim);
 }
 
-.dbucket__fold {
+.dblock[data-block='done'] .dblock__head {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dblock__fold {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -589,19 +837,34 @@
   color: inherit;
 }
 
-.dbucket__fold:hover {
+.dblock__fold:hover {
   color: var(--text-primary);
 }
 
-.dbucket__fold:focus-visible {
+.dblock__fold:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 1px;
 }
 
-.dbucket__lines {
+/* The rail: a hairline of the month's colour down the block's left edge. */
+.dblock__lines {
+  position: relative;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 0;
   list-style: none;
+}
+
+.dblock__lines::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 6px;
+  left: 9px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--dblock-rail);
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* -------------------------------------------------------------- the line */
@@ -616,19 +879,28 @@
   border-top-color: transparent;
 }
 
-.dline[data-near='late'] {
-  --dline-ink: var(--danger-ink);
+/* The heat, on the "when" words: quiet → full ink → amber → orange → red. */
+.dline[data-urgency='month'] {
+  --dline-ink: var(--text-primary);
 }
 
-.dline[data-near='today'] {
-  --dline-ink: var(--accent-ink);
+.dline[data-urgency='month'] .dline__when {
+  font-weight: 600;
 }
 
-.dline[data-near='week'] {
-  --dline-ink: var(--dates-warn-ink);
+.dline[data-urgency='week'] {
+  --dline-ink: var(--dates-heat-week);
 }
 
-.dline[data-near='done'] {
+.dline[data-urgency='today'] {
+  --dline-ink: var(--dates-heat-today);
+}
+
+.dline[data-urgency='late'] {
+  --dline-ink: var(--dates-heat-late);
+}
+
+.dline[data-urgency='done'] {
   --dline-ink: var(--text-dim);
 }
 
@@ -639,7 +911,8 @@
   align-items: center;
   column-gap: 14px;
   min-height: 60px;
-  padding: 0 10px 0 8px;
+  /* The left gutter holds the month's rail. */
+  padding: 0 10px 0 24px;
   border-radius: 10px;
   transition: background var(--dur-fast) var(--ease-out);
 }
@@ -716,25 +989,32 @@
   color: var(--text-primary);
 }
 
-.dline[data-near='late'] .dline__stub {
+/* In a month block the stub wears the month: a tint, an edge, the month's name in its colour. */
+.dblock[data-tone] .dline__stub {
+  border-color: color-mix(in oklab, var(--dm) 34%, transparent);
+  background: var(--dm-tint);
+}
+
+.dblock[data-tone] .dline__mon {
+  color: var(--dm);
+}
+
+.dblock[data-tone] .dline[data-estimated='true'] .dline__stub {
+  border-color: var(--dm-edge);
+}
+
+/* Late is the one stub that turns: red, in the Overdue block at the top. */
+.dline[data-urgency='late'] .dline__stub {
   border-color: var(--danger-line);
   background: var(--danger-soft);
 }
 
-.dline[data-near='late'] .dline__day {
+.dline[data-urgency='late'] .dline__day,
+.dline[data-urgency='late'] .dline__mon {
   color: var(--danger-ink);
 }
 
-.dline[data-near='today'] .dline__stub {
-  border-color: var(--accent-line);
-  background: var(--accent-softer);
-}
-
-.dline[data-near='today'] .dline__day {
-  color: var(--accent-ink);
-}
-
-.dline[data-near='done'] .dline__stub {
+.dline[data-urgency='done'] .dline__stub {
   opacity: 0.6;
 }
 
@@ -754,7 +1034,7 @@
   color: var(--text-primary);
 }
 
-.dline[data-near='done'] .dline__title {
+.dline[data-urgency='done'] .dline__title {
   color: var(--text-secondary);
 }
 
@@ -791,6 +1071,25 @@
   color: var(--dline-ink);
 }
 
+/* Inside a week the words stand on a soft pill of their own heat. */
+.dline:is([data-urgency='week'], [data-urgency='today'], [data-urgency='late']) .dline__when {
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  font-weight: 600;
+  background: color-mix(in oklab, var(--dline-ink) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--dline-ink) 26%, transparent);
+}
+
+/* A late line's row carries a breath of red too, so it holds the eye without a word read. */
+.dline[data-urgency='late'] .dline__row {
+  background: color-mix(in oklab, var(--danger) 4%, transparent);
+}
+
+.dline[data-urgency='late'] .dline__row:hover,
+.dline[data-urgency='late'][data-open='true'] .dline__row {
+  background: color-mix(in oklab, var(--danger) 9%, transparent);
+}
+
 .dline__agent {
   position: relative;
   z-index: 1;
@@ -814,9 +1113,9 @@
 }
 
 /* Inside a week the way out is always lit; further off it waits for the pointer. */
-.dline[data-near='late'] .dline__agent,
-.dline[data-near='today'] .dline__agent,
-.dline[data-near='week'] .dline__agent,
+.dline[data-urgency='late'] .dline__agent,
+.dline[data-urgency='today'] .dline__agent,
+.dline[data-urgency='week'] .dline__agent,
 .dline__row:hover .dline__agent,
 .dline[data-open='true'] .dline__agent {
   color: var(--accent-ink);
@@ -855,7 +1154,7 @@
 /* ------------------------------------------------------- the open line */
 
 .dline__fold {
-  padding: 6px 10px 18px 70px;
+  padding: 6px 10px 18px 86px;
 }
 
 .dline__detail {
@@ -1119,6 +1418,143 @@
     opacity: 0;
     transform: translate3d(0, 10px, 0) scale(0.97);
   }
+}
+
+/* ------------------------------------------------- an alert, in the app */
+
+/*
+ * A date alert while Forge is open (DateAlertNotice.tsx): the app's notice
+ * tile (.dtoast, Shell.css) in its corner, a size up, with an Open and an ×.
+ * Outside .dates (it is portalled to the body), so the heat is set again here.
+ * The calendar mark and the edge warm with the line; the eyebrow says it in
+ * words ("Overdue", "Today", "This week").
+ */
+.dalert {
+  --dalert-heat: var(--accent);
+
+  align-items: flex-start;
+  gap: 12px;
+  width: min(420px, calc(100vw - 36px));
+  padding: 12px 10px 12px 14px;
+  border-color: color-mix(in srgb, var(--dalert-heat) 45%, var(--glass-line-strong));
+  box-shadow:
+    0 0 22px -6px color-mix(in srgb, var(--dalert-heat) 40%, transparent),
+    var(--glass-shadow),
+    inset 0 1px 0 var(--glass-hi);
+}
+
+.dalert[data-urgency='week'],
+.dalert[data-urgency='month'] {
+  --dalert-heat: var(--warn);
+}
+
+.dalert[data-urgency='today'] {
+  --dalert-heat: color-mix(in oklab, var(--warn), var(--danger) 60%);
+}
+
+.dalert[data-urgency='late'] {
+  --dalert-heat: var(--danger);
+}
+
+/* Another notice is up in the corner: ride above it instead of covering it. */
+body:has(.dtoast:not(.dalert, .bconf)) .dalert {
+  bottom: calc(var(--dock-clear) + 2px + 52px);
+}
+
+.dalert__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--dalert-heat);
+  background: color-mix(in srgb, var(--dalert-heat) 14%, transparent);
+}
+
+.dalert__body {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+
+.dalert__eyebrow {
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--dalert-heat) 70%, var(--text-primary));
+}
+
+.dalert__title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.dalert__text {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: pre-line;
+  color: var(--text-muted);
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.dalert__body:hover .dalert__title {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dalert__open {
+  flex: none;
+  align-self: center;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-on-accent);
+  background: var(--accent);
+}
+
+.dalert__open:hover {
+  background: var(--accent-bright);
+}
+
+.dalert__close {
+  flex: none;
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-full);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.dalert__close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+:is(.dalert__body, .dalert__open, .dalert__close):focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  border-radius: 8px;
 }
 
 /* ----------------------------------------------------------------- empty */
@@ -1686,6 +2122,7 @@ legend.dfield__label {
 
 @media (prefers-reduced-motion: reduce) {
   .dline__detail,
+  .dweekly__edit,
   .dnotice,
   .dform,
   .dform__card {
@@ -1694,6 +2131,7 @@ legend.dfield__label {
 }
 
 :root[data-reduced-motion='true'] .dline__detail,
+:root[data-reduced-motion='true'] .dweekly__edit,
 :root[data-reduced-motion='true'] .dnotice,
 :root[data-reduced-motion='true'] .dform,
 :root[data-reduced-motion='true'] .dform__card {

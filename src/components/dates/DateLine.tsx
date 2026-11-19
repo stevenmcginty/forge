@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { dayLabel, type DateItem } from '@shared/dates'
+import { dayLabel, urgencyOf, type DateItem } from '@shared/dates'
 import { Icon } from '../Icon'
-import { kindLabel, nearnessOf, REPEAT_WORDS, remindWords, snoozeDay, stubOf, whenWords } from './dateWords'
+import { kindLabel, REPEAT_WORDS, remindWords, snoozeDay, stubOf, whenWords } from './dateWords'
 
 /**
  * One date on the page.
@@ -11,6 +11,11 @@ import { kindLabel, nearnessOf, REPEAT_WORDS, remindWords, snoozeDay, stubOf, wh
  * one thing to do about it — "Get an agent on it". A click anywhere else on the
  * line opens it: the facts (note, what to do, reminders) and the rest of the
  * actions (Done, Snooze, Edit, Delete). Delete asks first, in place.
+ *
+ * Two colours, two jobs: the stub wears its month's colour (set by the month
+ * block it sits in), so it says *when*; the "when" words warm from quiet ink
+ * to red as the day comes near (`urgencyOf`, on `data-urgency`), so they say
+ * *act*. The words are always there; the colour only repeats them.
  */
 
 export interface DateLineActions {
@@ -34,14 +39,14 @@ export function DateLine({
   onToggle: () => void
   act: DateLineActions
 }): ReactNode {
-  const near = nearnessOf(item, today)
+  const urgency = urgencyOf(item, today)
   const stub = stubOf(item.date)
   const thisYear = today.slice(0, 4)
   const panelId = `dline-${item.id}`
   const facts = [kindLabel(item.kind), item.group, item.amount].filter(Boolean)
 
   return (
-    <li className="dline" data-near={near} data-open={open ? 'true' : undefined} data-estimated={item.estimated ? 'true' : undefined} id={`date-${item.id}`}>
+    <li className="dline" data-urgency={urgency} data-open={open ? 'true' : undefined} data-estimated={item.estimated ? 'true' : undefined} id={`date-${item.id}`}>
       <div className="dline__row">
         <button type="button" className="dline__hit" aria-expanded={open} aria-controls={panelId} onClick={onToggle}>
           <span className="dline__stub" aria-hidden="true">
@@ -73,7 +78,7 @@ export function DateLine({
             {whenWords(item, today)}
           </span>
         </button>
-        {near !== 'done' ? (
+        {urgency !== 'done' ? (
           <button type="button" className="dline__agent" onClick={() => act.agent(item)} title={`Open an agent with everything about "${item.title}"`}>
             <Icon name="sparkle" size={13} />
             <span>Get an agent on it</span>
