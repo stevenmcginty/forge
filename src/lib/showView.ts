@@ -1,6 +1,6 @@
 /**
  * show_view — switch what Forge's desktop shows (Agents, the Browser, the
- * Board), bring a browser tab to the front, and say in plain words what is on
+ * Board, Dates), bring a browser tab to the front, and say in plain words what is on
  * screen now and which tabs are open.
  *
  * The one exception to "an agent never takes the screen from Steve" (see
@@ -26,7 +26,7 @@
 import { resolveTerminal } from '@shared/terminal-names'
 import { resolveNavTarget, type NavPane } from './hubnav'
 
-export type ShowViewName = 'agents' | 'browser' | 'board'
+export type ShowViewName = 'agents' | 'browser' | 'board' | 'dates'
 
 export interface ShowViewRequest {
   view?: unknown
@@ -110,7 +110,7 @@ export const SHOW_VIEW_LIST_MAX = 8
 /** Tab titles are cut to about this many characters. */
 export const SHOW_VIEW_TITLE_MAX = 60
 
-const MODE_WORDS: Record<string, string> = { agents: 'Agents', browser: 'the Browser', board: 'the Board', read: 'the Read view' }
+const MODE_WORDS: Record<string, string> = { agents: 'Agents', browser: 'the Browser', board: 'the Board', read: 'the Read view', dates: 'Dates' }
 
 function modeWords(id: string, snap: ShowViewSnapshot): string {
   if (MODE_WORDS[id]) return MODE_WORDS[id]
@@ -174,7 +174,14 @@ export function planShowView(request: ShowViewRequest, snap: ShowViewSnapshot): 
     return { ...none, switchTo: already ? null : 'board', maximise, ok: true, text: already ? 'Already showing the Board.' : 'Desktop now shows the Board.', reason: null }
   }
 
-  if (view !== 'browser') return refuse(join(`Unknown view "${said}". Use agents, browser or board.`, stays), 'unknown-view')
+  // Dates: the renewals and deadlines list (src/components/dates/), a full surface like the Board.
+  if (view === 'dates') {
+    if (!has('dates')) return refuse(join('Dates is not available in this Forge right now.', stays), 'unavailable')
+    const already = snap.mode === 'dates'
+    return { ...none, switchTo: already ? null : 'dates', maximise, ok: true, text: already ? 'Already showing Dates.' : 'Desktop now shows Dates.', reason: null }
+  }
+
+  if (view !== 'browser') return refuse(join(`Unknown view "${said}". Use agents, browser, board or dates.`, stays), 'unknown-view')
 
   // The browser: it has to be there, and its tabs readable.
   const problem = !has('browser') ? 'the Browser view is not registered' : snap.tabs === null ? snap.browserProblem || 'the tab list could not be read' : ''

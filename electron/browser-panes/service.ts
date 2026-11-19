@@ -14,6 +14,7 @@ import {
   type BrowserSurfaceInfo,
   type BrowserViewBounds
 } from '@shared/browser'
+import { DATES_TOOL_NAMES } from '@shared/dates-tools'
 import { DESKTOP_LINK_OPS } from '../desktop-hands'
 import { PHONE_LINK_OPS } from '../phone-hands'
 import { BrowserAgentOps } from './agent-ops'
@@ -46,8 +47,8 @@ export interface BrowserServiceDeps {
   appOp?: (op: string, args: Record<string, unknown>, caller: BrowserOwner) => Promise<BrowserAgentReply>
 }
 
-/** Pipe ops that are the app's, not the browser's — the desktop's eyes and hands among them (../desktop-hands.ts), and the phone's (../phone-hands.ts). */
-export const APP_LINK_OPS: ReadonlySet<string> = new Set(['open_agent_pane', 'open_in_reader', 'show_view', 'forge_command', ...DESKTOP_LINK_OPS, ...PHONE_LINK_OPS])
+/** Pipe ops that are the app's, not the browser's — the desktop's eyes and hands among them (../desktop-hands.ts), the phone's (../phone-hands.ts), and the Dates list (shared/dates-tools.ts). */
+export const APP_LINK_OPS: ReadonlySet<string> = new Set(['open_agent_pane', 'open_in_reader', 'show_view', 'forge_command', ...DESKTOP_LINK_OPS, ...PHONE_LINK_OPS, ...DATES_TOOL_NAMES])
 
 export class BrowserService {
   readonly manager: BrowserManager

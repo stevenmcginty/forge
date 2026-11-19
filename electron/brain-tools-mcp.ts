@@ -24,7 +24,9 @@ function zodFor(prop: BrainToolProperty): z.ZodTypeAny {
   const base =
     prop.type === 'integer'
       ? z.number().int()
-      : prop.type === 'boolean'
+      : prop.type === 'array'
+        ? z.array(z.number().int())
+        : prop.type === 'boolean'
         ? z.boolean()
         : prop.enum && prop.enum.length
           ? z.enum(prop.enum as [string, ...string[]])

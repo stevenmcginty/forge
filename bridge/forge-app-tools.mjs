@@ -29,7 +29,7 @@ export const OPEN_AGENT_PANE_DESCRIPTION =
 // ⚠ DUPLICATED from shared/brain-tools.ts SHOW_VIEW_DESCRIPTION, like the one above;
 // scripts/show-view-check.mjs asserts they agree.
 export const SHOW_VIEW_DESCRIPTION =
-  'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. With view agents: pane shows that pane full screen, layout wall shows the Wall; maximise also maximises Forge’s window. Brings Forge back if it is minimised. Use only when Steve asks to see something; never on your own.'
+  'Switch what Forge’s desktop shows — Agents, Browser, Board or Dates — and list the open browser tabs. With view agents: pane shows that pane full screen, layout wall shows the Wall; maximise also maximises Forge’s window. Brings Forge back if it is minimised. Use only when Steve asks to see something; never on your own.'
 
 // ⚠ DUPLICATED from shared/brain-tools.ts FORGE_COMMAND_DESCRIPTION, like the ones above;
 // scripts/forge-command-check.mjs asserts they agree.
@@ -74,7 +74,7 @@ export const APP_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        view: { type: 'string', description: 'What to show', enum: ['agents', 'browser', 'board'] },
+        view: { type: 'string', description: 'What to show', enum: ['agents', 'browser', 'board', 'dates'] },
         tab: { type: 'string', description: 'Optional: a browser tab id from browser_list or browser_open; shows that tab' },
         pane: { type: 'string', description: 'Optional, view agents: a pane by name, as focus_pane_by_name takes it' },
         layout: { type: 'string', description: 'Optional, view agents: full (one pane, the default with pane) or wall', enum: ['full', 'wall'] },

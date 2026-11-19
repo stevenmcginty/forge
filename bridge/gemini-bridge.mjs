@@ -37,6 +37,7 @@ import { BROWSER_HANDLERS, BROWSER_INSTRUCTIONS, BROWSER_TOOLS } from './browser
 import { APP_HANDLERS, APP_INSTRUCTION_LINE, APP_TOOLS } from './forge-app-tools.mjs'
 import { DESKTOP_HANDLERS, DESKTOP_INSTRUCTION_LINE, DESKTOP_TOOLS } from './desktop-tools.mjs'
 import { PHONE_HANDLERS, PHONE_INSTRUCTION_LINE, PHONE_TOOLS } from './phone-tools.mjs'
+import { DATES_HANDLERS, DATES_TOOLS } from './dates-tools.mjs'
 
 const SERVER_NAME = 'forge-bridge'
 const SERVER_VERSION = '1.0.0'
@@ -384,7 +385,8 @@ const TOOLS = [
   ...BROWSER_TOOLS,
   ...APP_TOOLS,
   ...DESKTOP_TOOLS,
-  ...PHONE_TOOLS
+  ...PHONE_TOOLS,
+  ...DATES_TOOLS
 ]
 
 /* ------------------------------------------------------------- text (REST)
@@ -1410,7 +1412,8 @@ const HANDLERS = {
   ...BROWSER_HANDLERS,
   ...APP_HANDLERS,
   ...DESKTOP_HANDLERS,
-  ...PHONE_HANDLERS
+  ...PHONE_HANDLERS,
+  ...DATES_HANDLERS
 }
 
 /**

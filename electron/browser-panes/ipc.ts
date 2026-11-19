@@ -1,6 +1,7 @@
 import { app, ipcMain, type BrowserWindow } from 'electron'
 import { isAbsolute, join, resolve } from 'node:path'
 import { VOICE_OWNER, type BrowserAgentReply, type BrowserOwner } from '@shared/browser'
+import { isDatesTool, runDatesTool } from '@shared/dates-tools'
 import { getDataDir, getProjects } from '../store'
 import { liveSessions } from '../pty-host'
 import { askRendererTool } from '../voice-agent/ipc'
@@ -10,6 +11,7 @@ import { openInReader } from '../reader'
 import { DESKTOP_LINK_OPS } from '../desktop-hands'
 import { desktopLinkOp } from '../desktop-hands-ipc'
 import { PHONE_LINK_OPS, phoneLinkOp } from '../phone-hands'
+import { getDates } from '../dates-store'
 import { setBrainBrowserRunner } from './brain'
 import { setBrowserLinkFile } from './env'
 import { BrowserService, type BrowserServiceDeps } from './service'
@@ -81,8 +83,11 @@ export function registerBrowserPanes(): void {
     // open_in_reader never reaches the renderer: main owns the reader's route in.
     // Nor do the desktop ops (screen_look, window_*): ../desktop-hands.ts runs them here.
     // Nor the phone ops (phone_*): ../phone-hands.ts sends them down the phone's hands socket.
+    // Nor the Dates tools (dates_*): main owns the list, and answers them with
+    // the same runDatesTool Forge's own agents use (../voice-agent/host.ts).
     appOp: async (op, args, caller) => {
       if (op === 'open_in_reader') return openInReaderFor(args, caller)
+      if (isDatesTool(op)) return runDatesTool(getDates(), op, args)
       if (isDesktopOp(op)) return desktopLinkOp(op, args)
       if (isPhoneOp(op)) return phoneLinkOp(op, args, { shotDir: join(getDataDir(), 'phone-looks') })
       const anchored = op === 'open_agent_pane' ? anchoredOpenAction(args, caller.id) : null

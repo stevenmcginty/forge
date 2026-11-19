@@ -175,7 +175,7 @@ console.log('rule 5: the browser cannot be reached')
 }
 
 /* ---------------------------------------------------------------- rule 6 */
-console.log('rule 6: the board, the agents, anything else')
+console.log('rule 6: the board, dates, the agents, anything else')
 {
   const board = planShowView({ view: 'board' }, snap())
   ok(board.ok && board.switchTo === 'board' && board.text === 'Desktop now shows the Board.', 'board', JSON.stringify(board))
@@ -185,6 +185,19 @@ console.log('rule 6: the board, the agents, anything else')
   ok(!noBoard.ok && noBoard.switchTo === null, 'no board surface: no switch')
   ok(noBoard.text === 'The Board is not available in this Forge right now. The desktop stays on the Browser.', 'says so', noBoard.text)
 
+  const withDates = [...SURFACES, { id: 'dates', title: 'Dates' }]
+  const dates = planShowView({ view: 'dates' }, snap({ surfaces: withDates }))
+  ok(dates.ok && dates.switchTo === 'dates' && dates.text === 'Desktop now shows Dates.', 'dates', JSON.stringify(dates))
+  const onDates = planShowView({ view: 'Dates' }, snap({ mode: 'dates', surfaces: withDates }))
+  ok(onDates.ok && onDates.switchTo === null && onDates.text === 'Already showing Dates.', 'already on dates (any case)', onDates.text)
+  const noDates = planShowView({ view: 'dates' }, snap({ mode: 'board' }))
+  ok(!noDates.ok && noDates.switchTo === null && noDates.reason === 'unavailable', 'no dates surface: no switch', JSON.stringify(noDates))
+  ok(noDates.text === 'Dates is not available in this Forge right now. The desktop stays on the Board.', 'says so', noDates.text)
+  const fromDates = planShowView({ view: 'board' }, snap({ mode: 'dates', surfaces: withDates }))
+  ok(fromDates.ok && fromDates.switchTo === 'board', 'and away from dates', JSON.stringify(fromDates))
+  const stayDates = planShowView({ view: 'Terminal' }, snap({ mode: 'dates', surfaces: withDates }))
+  ok(stayDates.text.endsWith('The desktop stays on Dates.'), 'on dates, a refusal says the desktop stays on Dates', stayDates.text)
+
   const agents = planShowView({ view: 'agents' }, snap({ mode: 'read' }))
   ok(agents.ok && agents.switchTo === 'agents' && agents.text === 'Desktop now shows Agents.', 'agents', JSON.stringify(agents))
   const onAgents = planShowView({ view: 'agents' }, snap())
@@ -192,7 +205,7 @@ console.log('rule 6: the board, the agents, anything else')
 
   const odd = planShowView({ view: 'Terminal' }, snap({ mode: 'read' }))
   ok(!odd.ok && odd.switchTo === null && odd.reason === 'unknown-view', 'unknown view: no switch', JSON.stringify(odd))
-  ok(odd.text === 'Unknown view "Terminal". Use agents, browser or board. The desktop stays on the Read view.', 'names it and the three it takes', odd.text)
+  ok(odd.text === 'Unknown view "Terminal". Use agents, browser, board or dates. The desktop stays on the Read view.', 'names it and the four it takes', odd.text)
   const blank = planShowView({}, snap())
   ok(!blank.ok && blank.text.startsWith('Unknown view "".'), 'no view at all: the same words', blank.text)
 }
@@ -324,7 +337,7 @@ console.log('the tool, everywhere it is offered')
   ok(specs.MAIN_AGENT_TOOL_NAMES.includes('show_view'), 'show_view is in the shared tool names (every brain)')
   const spec = specs.MAIN_AGENT_TOOL_SPECS.find((t) => t.name === 'show_view')
   ok(!!spec && JSON.stringify(spec.parameters.required) === '["view"]', 'the shared spec takes view (required) and tab', JSON.stringify(spec?.parameters))
-  ok(JSON.stringify(spec?.parameters.properties.view.enum) === '["agents","browser","board"]', 'view is one of agents, browser, board')
+  ok(JSON.stringify(spec?.parameters.properties.view.enum) === '["agents","browser","board","dates"]', 'view is one of agents, browser, board, dates')
   ok(spec?.description.includes('Use only when Steve asks to see something; never on your own.'), 'the description says: only on his ask', spec?.description)
   ok(spec?.description.includes('Brings Forge back if it is minimised.'), 'and that it brings Forge back', spec?.description)
   const props = spec?.parameters.properties ?? {}

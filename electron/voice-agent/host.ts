@@ -35,13 +35,14 @@ import { closeBrowser } from './chrome-control'
 import { defaultAssetsDir, listFiles, runCommand, saveAsset, writeTextFile } from './file-tools'
 import { CLAUDE_VOICE_PERSONA, VOICE_PERSONA } from './persona'
 import { brainHubTools } from '../hub-brain-tools'
-import { brainSpecAllowed, brainSpecTools } from '../brain-tools-mcp'
+import { brainSpecAllowed, brainSpecTools, zodShapeOf } from '../brain-tools-mcp'
 import { refuseCommand } from './launch-guard'
 import { listAppsReply, openAppReply, openTargetReply } from './desktop-open'
 import { BRAIN_BROWSER_ALLOWED, brainBrowserTools } from '../browser-panes/brain'
 import { PHONE_BRAIN_ALLOWED, phoneBrainTools } from '../phone-hands'
 import { transcriptPath } from '../bridge/claude-transcripts'
-import { MAIN_AGENT_TOOL_SPECS, PROJECT_PROPERTY, withProjectArg } from '@shared/brain-tools'
+import { DATES_TOOL_SPECS, MAIN_AGENT_TOOL_SPECS, PROJECT_PROPERTY, withProjectArg } from '@shared/brain-tools'
+import { DATES_TOOL_NAMES, runDatesTool } from '@shared/dates-tools'
 import type { BrainRisk } from '@shared/brain'
 
 /**
@@ -962,6 +963,17 @@ export class VoiceAgentHost {
           async (args) => text(await this.askRenderer('remember', { note: args.note }))
         ),
 
+        // Steve's Dates list (docs/DATES.md): main owns it, so these are answered
+        // here, not by the renderer — the same runDatesTool pane agents reach
+        // through the bridge (electron/browser-panes/ipc.ts). Loaded on first
+        // call, like ../brain/host below, so this file stays free of the store.
+        ...DATES_TOOL_SPECS.map((spec) =>
+          tool(spec.name, spec.description, zodShapeOf(spec), async (args: Record<string, unknown>) => {
+            const { getDates } = await import('../dates-store')
+            return text(runDatesTool(getDates(), spec.name, args).text)
+          })
+        ),
+
         tool(
           'take_screenshot',
           'Look at the primary display as it is right now. Use this when Steve asks about something visible that is not app structure — a rendered page, an error on screen, a design he is pointing at — and to verify what a desktop action actually did. For questions about projects, tabs or panes use get_app_state instead; it is cheaper and exact.',
@@ -1650,6 +1662,7 @@ export class VoiceAgentHost {
       'mcp__forge__run_app_action',
       'mcp__forge__get_project_memory',
       'mcp__forge__remember',
+      ...DATES_TOOL_NAMES.map((name) => `mcp__forge__${name}`),
       'mcp__forge__take_screenshot',
       'mcp__forge__focus_pane_by_name',
       'mcp__forge__list_panes_with_names',

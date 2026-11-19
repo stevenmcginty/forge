@@ -35,9 +35,11 @@ export function isMainAgentTool(name: string): name is MainAgentToolName {
 }
 
 export interface BrainToolProperty {
-  type: 'string' | 'integer' | 'boolean'
+  type: 'string' | 'integer' | 'boolean' | 'array'
   description: string
   enum?: string[]
+  /** An array's items. Only lists of whole numbers so far (dates' remind_days). */
+  items?: { type: 'integer' }
 }
 
 export interface BrainToolSpec {
@@ -51,7 +53,7 @@ export const USE_OPEN_AGENT_PANE = 'Use open_agent_pane — agents open inside F
 
 /** show_view's description — word for word in bridge/forge-app-tools.mjs too (scripts/show-view-check.mjs holds them together). */
 export const SHOW_VIEW_DESCRIPTION =
-  'Switch what Forge’s desktop shows — Agents, Browser or Board — and list the open browser tabs. With view agents: pane shows that pane full screen, layout wall shows the Wall; maximise also maximises Forge’s window. Brings Forge back if it is minimised. Use only when Steve asks to see something; never on your own.'
+  'Switch what Forge’s desktop shows — Agents, Browser, Board or Dates — and list the open browser tabs. With view agents: pane shows that pane full screen, layout wall shows the Wall; maximise also maximises Forge’s window. Brings Forge back if it is minimised. Use only when Steve asks to see something; never on your own.'
 
 /** forge_command's description — word for word in bridge/forge-app-tools.mjs too (scripts/forge-command-check.mjs holds them together). */
 export const FORGE_COMMAND_DESCRIPTION =
@@ -131,7 +133,7 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
     parameters: {
       type: 'object',
       properties: {
-        view: { type: 'string', description: 'What to show', enum: ['agents', 'browser', 'board'] },
+        view: { type: 'string', description: 'What to show', enum: ['agents', 'browser', 'board', 'dates'] },
         tab: { type: 'string', description: 'Optional: a browser tab id from browser_list or browser_open; shows that tab' },
         pane: { type: 'string', description: 'Optional, view agents: a pane by name, as focus_pane_by_name takes it' },
         layout: { type: 'string', description: 'Optional, view agents: full (one pane, the default with pane) or wall', enum: ['full', 'wall'] },
@@ -153,6 +155,101 @@ export const MAIN_AGENT_TOOL_SPECS: BrainToolSpec[] = [
         confirmed: { type: 'boolean', description: 'True only after Steve said yes to a command that closes something' }
       },
       required: []
+    }
+  }
+]
+
+/* ----------------------------------------------------------------- dates */
+
+/**
+ * The Dates tools (docs/DATES.md, "Agent tools"): Steve's renewals and
+ * deadlines. Not main-agent tools in the sense above — main answers them, not
+ * the renderer (shared/dates-tools.ts `runDatesTool`): electron/voice-agent/
+ * host.ts serves them in `forgeToolDefs`, and bridge/dates-tools.mjs carries a
+ * word-for-word copy for pane agents (scripts/dates-tools-check.mjs holds the
+ * two together).
+ */
+const DATE_FIELDS: Record<string, BrainToolProperty> = {
+  title: { type: 'string', description: 'What happens, in a few words, e.g. "Shop lease ends". At most 120 characters.' },
+  date: { type: 'string', description: 'The day it happens, YYYY-MM-DD' },
+  kind: {
+    type: 'string',
+    description: 'Optional: contract, insurance, domain, payment, subscription, licence, holiday, task or other (the default)'
+  },
+  group: { type: 'string', description: 'Optional: free text to group by, e.g. the business it belongs to' },
+  amount: { type: 'string', description: 'Optional: the money, as written, e.g. "250 a month"' },
+  end_date: { type: 'string', description: 'Optional: the last day, YYYY-MM-DD, for something that spans days (a holiday)' },
+  note: { type: 'string', description: 'Optional: the facts — amounts, notice rules, who to call' },
+  action: { type: 'string', description: 'Optional: what to do when it comes up' },
+  estimated: { type: 'boolean', description: 'Optional: true when the day is not confirmed' },
+  remind_days: {
+    type: 'array',
+    items: { type: 'integer' },
+    description: 'Optional: days before the date an alert fires, each 0 to 730. Default [30, 7, 1, 0].'
+  },
+  repeat: {
+    type: 'string',
+    description: 'Optional: none (the default), monthly, quarterly or yearly. Marking a repeating line done moves it to its next date.',
+    enum: ['none', 'monthly', 'quarterly', 'yearly']
+  }
+}
+
+/** dates_update takes every field, each one optional. */
+function optional(prop: BrainToolProperty): BrainToolProperty {
+  return prop.description.startsWith('Optional: ') ? prop : { ...prop, description: `Optional: ${prop.description}` }
+}
+
+/** The three tools' descriptions — word for word in bridge/dates-tools.mjs too. */
+export const DATES_LIST_DESCRIPTION = [
+  'Read Steve’s Dates list: his renewals and deadlines — contracts and leases, insurance, web domains, subscriptions, licences, payment plans, holidays, forms that are due.',
+  'Call it whenever he asks what is coming up, what is due or when something renews, and before dates_add, so a date is not added twice.',
+  'Open items, soonest first, one line each: id | date | when | kind | group | title | amount | note | action. include_done adds the done ones; kind and group narrow the list.'
+].join(' ')
+
+export const DATES_ADD_DESCRIPTION = [
+  'Add one line to Steve’s Dates list, so Forge alerts him before it.',
+  'Use it when he asks, and when you find a renewal or deadline in something he had you read — an email, a letter, a contract, a web page: an insurance renewal, a contract or lease end, a domain expiry, a last payment, a form due. Check dates_list first, then tell him what you added.',
+  'date is YYYY-MM-DD; set estimated true when the day is not confirmed. Put the facts (amount, notice rules, who to call) in note and what to do in action. The answer is the new line.'
+].join(' ')
+
+export const DATES_UPDATE_DESCRIPTION = [
+  'Change one line of Steve’s Dates list, by the id dates_list shows. Give only the fields that change.',
+  'done true marks it done (a repeating line moves on to its next date instead). snooze_until YYYY-MM-DD stops its alerts until that day; "" clears it. end_date "" clears the end day.',
+  'delete true removes the line for good: only when Steve asks for it to be deleted. When something is finished, use done. The answer is the changed line.'
+].join(' ')
+
+export const DATES_TOOL_SPECS: BrainToolSpec[] = [
+  {
+    name: 'dates_list',
+    description: DATES_LIST_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: {
+        include_done: { type: 'boolean', description: 'Optional: also list the done ones. Default false.' },
+        kind: { type: 'string', description: 'Optional: only this kind, e.g. insurance' },
+        group: { type: 'string', description: 'Optional: only lines whose group contains this' }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'dates_add',
+    description: DATES_ADD_DESCRIPTION,
+    parameters: { type: 'object', properties: { ...DATE_FIELDS }, required: ['title', 'date'] }
+  },
+  {
+    name: 'dates_update',
+    description: DATES_UPDATE_DESCRIPTION,
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The line, by the id dates_list shows' },
+        ...Object.fromEntries(Object.entries(DATE_FIELDS).map(([key, prop]) => [key, optional(prop)])),
+        done: { type: 'boolean', description: 'Optional: true marks it done; false opens it again' },
+        snooze_until: { type: 'string', description: 'Optional: no alerts before this day, YYYY-MM-DD; "" clears it' },
+        delete: { type: 'boolean', description: 'Optional: true removes the line. Only when Steve asks.' }
+      },
+      required: ['id']
     }
   }
 ]
