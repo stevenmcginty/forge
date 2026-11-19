@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { attentionCount, todayOf } from '@shared/dates'
 import { WEB_FEATURE_PASSKEY, type WebPasskeyInfo } from '@shared/web'
 import { Icon } from '@/components/Icon'
 import { phoneThemeCore } from '../deck/theme'
@@ -20,6 +21,7 @@ import { useThemeChoice } from '../lib/theme-choice'
 import { useForge, type NotifySupport } from '../state'
 import { BottomSheet, SheetConfirm, SheetGlyph, SheetRow, SheetSection, SheetSwitch } from './BottomSheet'
 import { FingerprintGlyph } from './Connection'
+import { DatesGlyph } from './DatesSheet'
 import { ThemePicker, ThemeSwatch } from './PhoneTheme'
 import { rustDeskLink } from './Workspace'
 import './MoreSheet.css'
@@ -90,6 +92,8 @@ export function MoreSheet({
   const email = state.session?.email ?? ''
   const at = TEXT_SCALE_STEPS.indexOf(scale)
   const chosenVoice = voiceURI ? (voices.find((voice) => voice.voiceURI === voiceURI) ?? null) : null
+  // Dates: how many lines need Steve this week (overdue, today, or within 7 days).
+  const datesAttention = state.dates ? attentionCount(state.dates, todayOf(new Date())) : 0
 
   return (
     <BottomSheet
@@ -154,6 +158,33 @@ export function MoreSheet({
         />
       ) : (
         <>
+          <SheetSection>
+            <SheetRow
+              icon={<DatesGlyph name="calendar" size={20} />}
+              label="Dates"
+              secondary={
+                datesAttention > 0
+                  ? `${datesAttention} ${datesAttention === 1 ? 'needs' : 'need'} you this week`
+                  : state.dates?.length
+                    ? 'Nothing needs you this week'
+                    : 'Renewals and deadlines'
+              }
+              trailing={
+                datesAttention > 0 ? (
+                  <span className="pu-count" style={{ '--pu-edge': 'var(--p-fill)' } as CSSProperties} aria-hidden="true">
+                    {datesAttention}
+                  </span>
+                ) : undefined
+              }
+              chevron
+              onClick={() => {
+                onClose()
+                actions.dates.open()
+              }}
+              testId="more-dates"
+            />
+          </SheetSection>
+
           <SheetSection title={pane ? `This pane · ${pane.label}` : 'This pane'}>
             <SheetRow
               icon={<Icon name="foreman" size={20} />}

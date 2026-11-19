@@ -10,6 +10,7 @@ import { useWebUpdate } from '../lib/update'
 import { AgentChooser } from './AgentChooser'
 import { AskBanner } from './AskBanner'
 import { BrainConfirm } from './BrainConfirm'
+import { DatesSheet } from './DatesSheet'
 import { MobilePanes } from './MobilePanes'
 import { useTextScale } from './MoreSheet'
 import { OfflineBanner, PhoneStrip } from './OfflineBanner'
@@ -438,6 +439,8 @@ export function Workspace(): ReactNode {
       ) : null}
 
       {mobile ? <ProjectSheet open={drawerOpen} onClose={closeDrawer} onNewAgent={newAgentIn} /> : null}
+      {/* Dates: up when `state.datesOpen` (More's row, or a tap on a date alert). */}
+      {mobile ? <DatesSheet /> : null}
       {mobile ? (
         <PowerDraw open={drumOpen} onOpen={openDrum} onClose={closeDrum} hidden={drawerOpen || watching} />
       ) : null}

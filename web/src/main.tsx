@@ -43,6 +43,7 @@ import { AskBannerPreview } from './components/AskBannerPreview'
 import { ChatPreview } from './components/ChatPreview'
 import { NoticesPreview } from './components/NoticesPreview'
 import { CloudLaunchPreview } from './components/CloudLaunchPreview'
+import { DatesPreview } from './components/DatesPreview'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { GatesPreview } from './components/GatesPreview'
 import { PhoneTopBarPreview } from './components/PhoneTopBarPreview'
@@ -121,6 +122,8 @@ createRoot(host).render(
       <PhoneTopBarPreview />
     ) : preview === 'gates' ? (
       <GatesPreview />
+    ) : preview === 'dates' ? (
+      <DatesPreview />
     ) : (
       <ForgeProvider>
         <RepoProvider>

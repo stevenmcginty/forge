@@ -1,0 +1,406 @@
+/*
+ * Dates on the phone (DatesSheet.tsx, DatesForm.tsx). Built from the sheet
+ * (BottomSheet.css) and the primitives (phone-ui.css); these rules only lay
+ * out what those do not have:
+ *  - a line: the day as a calendar leaf, what and whose, and "when" set right
+ *    so the eye runs down one column;
+ *  - a time bucket's label, with the "!" disc on Overdue and Today, and their
+ *    well washed amber — the one place the list asks for Steve;
+ *  - the chips that narrow the list, one scroller under the head;
+ *  - a line's hero, its three actions, its facts and its prose;
+ *  - the add / edit form's spacing.
+ * Contract: web/PHONE-DESIGN.md. Tokens only.
+ */
+
+/* ------------------------------------------------------------ the steps */
+
+.dates,
+.dates-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--p-4);
+  padding-bottom: var(--p-2);
+}
+
+/* The column's gap spaces the sections; the sheet's own section margin would double it. */
+.app[data-mobile] .dates > .bssec,
+.app[data-mobile] .dates-form > .bssec {
+  margin-top: 0;
+}
+
+/* --------------------------------------------------------------- notices */
+
+.dates-note {
+  margin: 0;
+}
+
+.dates-note__act {
+  display: flex;
+  margin-top: var(--p-2);
+}
+
+/* An error the screen must show whole: no two-line clamp. */
+.pu-notice__body.dates-note__whole {
+  display: block;
+  color: var(--p-ink);
+  -webkit-line-clamp: unset;
+}
+
+/* Done is a tick, in the accent the contract gives ticks. */
+.dates-ok {
+  color: var(--p-act);
+}
+
+.pu-notice__mark.dates-ok {
+  color: var(--p-act);
+}
+
+.dates-flash {
+  align-items: center;
+  padding-right: var(--p-2);
+}
+
+/* ----------------------------------------------------------------- chips */
+
+.dates-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--p-2);
+  /* Bleed to the sheet's edges, so the row scrolls under them rather than stopping short. */
+  margin: 0 calc(var(--p-3) * -1);
+  padding: var(--p-1) var(--p-3);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.dates-chips::-webkit-scrollbar {
+  display: none;
+}
+
+/* Space, not a line, between the groups and the kinds. */
+.dates-chips__rule {
+  flex: none;
+  width: var(--p-2);
+}
+
+.dates-filtered {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: calc(var(--p-2) * -1);
+  padding-left: var(--p-2);
+  font-size: var(--p-t-small);
+  color: var(--p-ink-2);
+}
+
+/* --------------------------------------------------------------- buckets */
+
+.dates-bucket__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dates-bucket__count {
+  font-weight: var(--p-w-medium);
+  color: var(--p-ink-3);
+}
+
+/* Overdue and Today: the well takes the amber wash, under the "!" in its label. */
+.app[data-mobile] .dates-bucket:is([data-bucket='overdue'], [data-bucket='today']) > .bssec__rows {
+  background: var(--p-attn-tint);
+}
+
+/* ----------------------------------------------------------------- lines */
+
+.app[data-mobile] .bsrow.dates-line {
+  gap: var(--p-3);
+  min-height: 60px;
+}
+
+/* The hairline starts at the text, past the leaf. */
+.app[data-mobile] .bssec__rows .bsrow.dates-line + .bsrow.dates-line::after {
+  left: 60px;
+}
+
+.dates-leaf {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  font-family: var(--p-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.dates-leaf__day {
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--p-ink);
+}
+
+.dates-leaf__month {
+  margin-top: 3px;
+  font-size: var(--p-t-micro);
+  font-weight: var(--p-w-strong);
+  line-height: 1;
+  color: var(--p-ink-3);
+}
+
+.dates-leaf__ghost {
+  width: 28px;
+  height: 32px;
+  border-radius: var(--p-r-sm);
+}
+
+.app[data-mobile] .dates-line__title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.app[data-mobile] .dates-line__meta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dates-line__when {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--p-1);
+  max-width: 108px;
+  font-size: var(--p-t-label);
+  font-weight: var(--p-w-medium);
+  line-height: var(--p-lh-tight);
+  text-align: right;
+  color: var(--p-ink-2);
+}
+
+/* A narrow phone gives the title the room: the when wraps onto two lines sooner. */
+@media (max-width: 380px) {
+  .dates-line__when {
+    max-width: 88px;
+  }
+}
+
+.dates-line__when > svg {
+  flex: none;
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+}
+
+/* Within a week, today, or late: the when is in full ink, heavier. */
+.dates-line[data-near='true'] .dates-line__when {
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink);
+}
+
+.app[data-mobile] .dates-line[data-status='done'] .dates-line__title,
+.dates-line[data-status='done'] .dates-leaf__day {
+  color: var(--p-ink-2);
+}
+
+/* ----------------------------------------------------------------- empty */
+
+.dates-empty {
+  padding: var(--p-8) var(--p-4);
+}
+
+/* ---------------------------------------------------------------- detail */
+
+.dates-hero {
+  display: grid;
+  gap: var(--p-2);
+  padding: 0 var(--p-2);
+}
+
+.dates-hero__title {
+  margin: 0;
+  font-size: var(--p-t-display);
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: var(--p-track-tight);
+  color: var(--p-ink);
+  overflow-wrap: anywhere;
+}
+
+.dates-hero__when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--p-2);
+  row-gap: 2px;
+  margin: 0;
+  font-size: var(--p-t-body);
+  line-height: var(--p-lh);
+}
+
+.dates-hero__when > svg {
+  width: var(--p-icon);
+  height: var(--p-icon);
+}
+
+.dates-hero__word {
+  font-weight: var(--p-w-strong);
+  color: var(--p-ink);
+}
+
+.dates-hero__day {
+  font-size: var(--p-t-label);
+  color: var(--p-ink-2);
+}
+
+.dates-hero__amount {
+  margin: 0;
+  font-size: var(--p-t-label);
+  font-weight: var(--p-w-medium);
+  color: var(--p-ink-2);
+}
+
+.dates-acts {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--p-2);
+}
+
+.dates-acts > .pu-btn {
+  min-height: 48px;
+  padding: 0 var(--p-2);
+}
+
+.dates-acts > .pu-btn:disabled {
+  opacity: var(--p-disabled);
+  cursor: default;
+}
+
+.dates-hint,
+.dates-lede {
+  margin: 0;
+  padding: 0 var(--p-2);
+  font-size: var(--p-t-small);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.dates-hint {
+  margin-top: calc(var(--p-2) * -1);
+}
+
+.app[data-mobile] .dates-facts {
+  margin: 0;
+}
+
+.dates-fact {
+  position: relative;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: var(--p-3);
+  padding: var(--p-3);
+}
+
+.dates-fact + .dates-fact::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--p-3);
+  right: var(--p-3);
+  height: 1px;
+  background: color-mix(in srgb, var(--p-ink) 9%, transparent);
+}
+
+.dates-fact > dt {
+  font-size: var(--p-t-label);
+  line-height: var(--p-lh);
+  color: var(--p-ink-2);
+}
+
+.dates-fact > dd {
+  margin: 0;
+  font-size: var(--p-t-label);
+  font-weight: var(--p-w-medium);
+  line-height: var(--p-lh);
+  color: var(--p-ink);
+  overflow-wrap: anywhere;
+}
+
+.app[data-mobile] .dates-prose {
+  margin: 0;
+  padding: var(--p-3) var(--p-4);
+  font-size: var(--p-t-chrome);
+  line-height: var(--p-lh-read);
+  color: var(--p-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------- snooze */
+
+.dates-pick {
+  display: flex;
+  gap: var(--p-2);
+  padding: var(--p-1);
+}
+
+.dates-pick > .pu-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dates-pick > .pu-btn {
+  min-height: 48px;
+}
+
+.dates-pick > .pu-btn:disabled {
+  opacity: var(--p-disabled);
+  cursor: default;
+}
+
+/* ----------------------------------------------------------------- foot */
+
+.dates-foot {
+  display: grid;
+  gap: var(--p-3);
+}
+
+.dates-foot--two {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--p-2);
+}
+
+/* ----------------------------------------------------------------- form */
+
+.dates-form {
+  padding: 0 var(--p-1) var(--p-2);
+}
+
+.dates-form__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--p-2);
+  margin-top: 2px;
+}
+
+.dates-form__fold {
+  width: var(--p-icon-sm);
+  height: var(--p-icon-sm);
+  color: var(--p-ink-3);
+}
+
+textarea.pu-input {
+  display: block;
+  min-height: 72px;
+}
+
+.dates-form .pu-field__hint {
+  margin: 0;
+}
