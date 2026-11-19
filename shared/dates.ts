@@ -219,7 +219,7 @@ export function daysLeft(item: Pick<DateItem, 'date'>, today: string): number {
 }
 
 /** `day` moved on by whole months, clamped to the new month's last day. */
-function addMonths(day: string, months: number): string {
+export function addMonths(day: string, months: number): string {
   const p = parts(day)
   if (!p) return day
   const index = p[0] * 12 + (p[1] - 1) + months
@@ -228,7 +228,8 @@ function addMonths(day: string, months: number): string {
   return dayString(y, mo, Math.min(p[2], lastDayOf(y, mo)))
 }
 
-function addDays(day: string, days: number): string {
+/** `day` moved on by whole calendar days. */
+export function addDays(day: string, days: number): string {
   const p = parts(day)
   if (!p) return day
   const d = new Date(Date.UTC(p[0], p[1] - 1, p[2] + days))

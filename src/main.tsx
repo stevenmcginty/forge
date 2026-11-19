@@ -12,6 +12,7 @@ import { VoiceAgentProvider } from './state/VoiceAgent'
 import { VoiceHubControllerProvider } from './state/VoiceHubController'
 import { LiveControllerProvider } from './state/live/LiveController'
 import { registerBrowser } from './components/browser/registerBrowser'
+import { registerDates } from './components/dates/registerDates'
 import { ReaderOpener } from './components/reader/ReaderOpener'
 import { registerReader } from './components/reader/registerReader'
 import { registerWindowCommands } from './lib/windowCommands'
@@ -20,6 +21,8 @@ import { registerWindowCommands } from './lib/windowCommands'
 registerBrowser()
 // The Read mode's canvas surface (Markdown files, read and edited).
 registerReader()
+// Dates: renewals and deadlines, with a count in the mode switcher (docs/DATES.md).
+registerDates()
 // Minimise / maximise / un-maximise / restore Forge: palette, keymap and forge_command.
 registerWindowCommands()
 
