@@ -33,7 +33,9 @@ export const DATES_IPC = {
   weeklySet: 'dates:weekly-set',
   weeklyRun: 'dates:weekly-run',
   /** Main → renderer: the weekly check's state after every change. */
-  weeklyChanged: 'dates:weekly-changed'
+  weeklyChanged: 'dates:weekly-changed',
+  /** Run one Dates tool (dates_list, dates_add, dates_update) in main, for the realtime voice agent. */
+  tool: 'dates:tool'
 } as const
 
 /* ---------------------------------------------------------------- types */
@@ -228,6 +230,8 @@ export interface DatesApi {
   onAlert(cb: (notice: DateNotice) => void): () => void
   /** The weekly check. */
   weekly: DatesWeeklyApi
+  /** Run one Dates tool in main by the same runDatesTool the other agents use (shared/dates-tools.ts). */
+  tool(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }>
 }
 
 /** `window.forgeDates.weekly`. */

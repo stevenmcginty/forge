@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, Notification } from 'electron'
 import { DEFAULT_PROFILE_ID } from '@shared/agents'
+import { isDatesTool, runDatesTool } from '@shared/dates-tools'
 import {
   agentPrompt,
   DATES_IPC,
@@ -118,6 +119,10 @@ export function initDates(): void {
   ipcMain.handle(DATES_IPC.weeklyGet, () => dates.getWeekly())
   ipcMain.handle(DATES_IPC.weeklySet, (_e, patch: DatesWeeklyPatch) => dates.setWeekly(patch ?? {}))
   ipcMain.handle(DATES_IPC.weeklyRun, () => runWeeklyCheck())
+  // The realtime voice agent's Dates tools: the same runDatesTool as every other agent.
+  ipcMain.handle(DATES_IPC.tool, (_e, name: string, args: unknown) =>
+    isDatesTool(String(name)) ? runDatesTool(dates, String(name), args) : { ok: false, text: 'There is no Dates tool by that name.' }
+  )
 
   dates.onChange((items) => broadcast(DATES_IPC.changed, items))
   dates.onWeekly((weekly) => broadcast(DATES_IPC.weeklyChanged, weekly))

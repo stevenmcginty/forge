@@ -29,6 +29,7 @@ export function datesPreloadApi(ipc: IpcRenderer): DatesApi {
       set: (patch) => ipc.invoke(DATES_IPC.weeklySet, patch),
       runNow: () => ipc.invoke(DATES_IPC.weeklyRun),
       onChange: (cb) => on<[DatesWeeklyView]>(DATES_IPC.weeklyChanged, cb)
-    }
+    },
+    tool: (name, args) => ipc.invoke(DATES_IPC.tool, name, args)
   }
 }

@@ -26,7 +26,8 @@ export const READ_ONLY_TOOLS: readonly string[] = [
   'take_screenshot',
   'window_list',
   'window_read',
-  'list_desktop_apps'
+  'list_desktop_apps',
+  'dates_list'
 ]
 
 export function isSideEffecting(name: string): boolean {
