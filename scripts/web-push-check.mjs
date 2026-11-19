@@ -1,9 +1,10 @@
 /**
  * Head-less proof that the desktop's push decisions are the ones it claims.
  *
- * Bundles the *real* electron/web/push.ts with esbuild and drives its three
- * pure decisions — `shouldPush` (the per-pane flap guard), `pickTargets` (which
- * devices buzz) and `deliver` (one send plus its one retry). No network, no
+ * Bundles the *real* electron/web/push.ts with esbuild and drives its pure
+ * decisions — `shouldPush` (the per-pane flap guard), `pickTargets` (which
+ * devices buzz), `planPush` (the two together, and the Dates alert that skips
+ * both) and `deliver` (one send plus its one retry). No network, no
  * push service, no VAPID keys: the clock is a number passed in, and the sender
  * is a function that fails the way the real one did in the desktop's log.
  *
@@ -76,8 +77,14 @@ async function main() {
     absWorkingDir: ROOT,
   });
 
-  const { shouldPush, pickTargets, deliver, PUSH_THROTTLE_MS, PUSH_RETRY_MS } =
-    await import(pathToFileURL(join(scratch, "web-push.mjs")).href);
+  const {
+    shouldPush,
+    pickTargets,
+    planPush,
+    deliver,
+    PUSH_THROTTLE_MS,
+    PUSH_RETRY_MS,
+  } = await import(pathToFileURL(join(scratch, "web-push.mjs")).href);
 
   /* ------------------------------------------------------------ shouldPush */
 
@@ -170,6 +177,59 @@ async function main() {
         targets.includes(deskTab) &&
         !targets.includes(legacy),
       "an unsubscribed browser on screen silences only the legacy subscription",
+    );
+  }
+
+  /* -------------------------------------------------------------- planPush */
+
+  {
+    const attention = {
+      kind: "attention",
+      sessionId: "s1",
+      state: "asking",
+      title: "Forge",
+      desktopName: "PC",
+    };
+    const date = {
+      kind: "date",
+      id: "d1",
+      title: "Shop lease ends in 7 days",
+      body: "Example Shop.",
+    };
+    const deskOnScreen = { visibleDevices: new Set(["desk-1"]), anyVisible: true };
+    const allOnScreen = {
+      visibleDevices: new Set(["phone-1", "desk-1"]),
+      anyVisible: true,
+    };
+    const recent = { at: t0 - 1_000, state: "asking" };
+
+    const plan = planPush(attention, subs, deskOnScreen, undefined, t0);
+    log(
+      plan !== null &&
+        plan.targets.length === 1 &&
+        plan.targets[0] === phone &&
+        plan.onScreen === 2,
+      "an attention push is planned exactly as pickTargets picks",
+    );
+    log(
+      planPush(attention, subs, deskOnScreen, recent, t0) === null,
+      "an attention push inside the flap guard is held back",
+    );
+    log(
+      planPush(attention, subs, allOnScreen, undefined, t0) === null,
+      "an attention push with every device on screen is held back",
+    );
+
+    const datePlan = planPush(date, subs, allOnScreen, recent, t0);
+    log(
+      datePlan !== null &&
+        datePlan.targets.length === 3 &&
+        datePlan.onScreen === 0,
+      "a date push goes to every subscription, whoever is on screen and however recent the last push",
+    );
+    log(
+      planPush(date, [], allOnScreen, undefined, t0) === null,
+      "a date push with nothing subscribed goes nowhere",
     );
   }
 

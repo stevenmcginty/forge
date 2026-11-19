@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import * as webpush from 'web-push'
-import type { WebPushPayload, WebPushSubscription } from '@shared/web'
+import type { WebAttentionPushPayload, WebPushPayload, WebPushSubscription } from '@shared/web'
 import { getDataDir, getSettings } from '../store'
 
 /**
@@ -52,6 +52,13 @@ function storeFile(): string {
  * is waiting *now*, and one delivered an hour later is a lie about the present.
  */
 const PUSH_TTL_SECONDS = 600
+
+/**
+ * The same for a Dates alert, and a day rather than ten minutes: "the lease
+ * ends in 7 days" is still true when a phone that was off all evening comes
+ * back, and the alert pass sends each one once.
+ */
+const DATE_PUSH_TTL_SECONDS = 24 * 60 * 60
 
 /**
  * At most one push per pane per this long — the flap guard, and the only thing
@@ -311,7 +318,7 @@ export function list(): StoredSubscription[] {
 /** The last push a pane actually sent — kept per pane by `notify`. */
 export interface LastPush {
   at: number
-  state: WebPushPayload['state']
+  state: WebAttentionPushPayload['state']
 }
 
 /**
@@ -332,7 +339,7 @@ export interface LastPush {
  * one. Deliberately generous: the alternative to a missed notification is a
  * person who has stopped trusting the notifications.
  */
-export function shouldPush(last: LastPush | undefined, next: WebPushPayload['state'], now: number): boolean {
+export function shouldPush(last: LastPush | undefined, next: WebAttentionPushPayload['state'], now: number): boolean {
   if (!last) return true
   if (next === 'asking' && last.state === 'done') return true
   return now - last.at >= PUSH_THROTTLE_MS
@@ -371,6 +378,28 @@ export function pickTargets<T extends { deviceId: string }>(
     else targets.push(sub)
   }
   return { targets, onScreen }
+}
+
+/**
+ * Who hears one payload, or null for nobody.
+ *
+ * A pane's news goes through `shouldPush` (its flap guard, `last` being that
+ * pane's last push) and then `pickTargets` (who is not already looking). A
+ * Dates alert goes through neither: it is about a day, not a pane, so no
+ * screen is already showing it and there is no flap to guard — the alert pass
+ * sends each one once. It goes to every subscription.
+ */
+export function planPush<T extends { deviceId: string }>(
+  payload: WebPushPayload,
+  subs: readonly T[],
+  seen: PushSeen,
+  last: LastPush | undefined,
+  now: number
+): { targets: T[]; onScreen: number } | null {
+  if (payload.kind === 'date') return subs.length > 0 ? { targets: [...subs], onScreen: 0 } : null
+  if (!shouldPush(last, payload.state, now)) return null
+  const picked = pickTargets(subs, seen)
+  return picked.targets.length > 0 ? picked : null
 }
 
 /** How one subscription's send ended. */
@@ -432,6 +461,7 @@ function sleep(ms: number): Promise<void> {
  * are showing. The pane's last push is recorded only when some subscription was
  * actually targeted: news held back because every device was already showing
  * Forge is news nobody was buzzed about, and it must not hold back the next.
+ * A Dates alert skips both and goes to every subscription; see `planPush`.
  *
  * The sends themselves are concurrent and independently settled: one dead
  * endpoint must not stop the phone that is actually in somebody's hand from
@@ -450,14 +480,15 @@ export async function notify(payload: WebPushPayload, seen: PushSeen): Promise<v
   if (state.subscriptions.length === 0) return
 
   const now = Date.now()
-  if (!shouldPush(lastPush.get(payload.sessionId), payload.state, now)) return
-  const { targets, onScreen } = pickTargets(state.subscriptions, seen)
-  if (targets.length === 0) return
-  lastPush.set(payload.sessionId, { at: now, state: payload.state })
+  const last = payload.kind === 'attention' ? lastPush.get(payload.sessionId) : undefined
+  const plan = planPush(payload, state.subscriptions, seen, last, now)
+  if (!plan) return
+  const { targets, onScreen } = plan
+  if (payload.kind === 'attention') lastPush.set(payload.sessionId, { at: now, state: payload.state })
 
   const body = JSON.stringify(payload)
   const options = {
-    TTL: PUSH_TTL_SECONDS,
+    TTL: payload.kind === 'date' ? DATE_PUSH_TTL_SECONDS : PUSH_TTL_SECONDS,
     urgency: 'high' as const,
     vapidDetails: {
       subject: subject(),
@@ -485,7 +516,7 @@ export async function notify(payload: WebPushPayload, seen: PushSeen): Promise<v
 
   // The pane's title and counts only — never an endpoint or a key.
   const gone = dead.length > 0 ? `, gone ${dead.length}` : ''
-  console.log(`[web-push] ${payload.state} "${payload.title}": sent ${sent}, on screen ${onScreen}, failed ${failed}${gone}`)
+  console.log(`[web-push] ${payload.kind === 'date' ? 'date' : payload.state} "${payload.title}": sent ${sent}, on screen ${onScreen}, failed ${failed}${gone}`)
 
   if (dead.length > 0) {
     state.subscriptions = state.subscriptions.filter((s) => !dead.includes(s.endpoint))

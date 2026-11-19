@@ -12,12 +12,15 @@ import {
   HOST_HEARTBEAT_MS,
   MAX_REPLAY_BYTES,
   webSocketUrl,
+  type WebDateChange,
+  type WebDateFields,
   type WebHostRecord,
   type WebLayoutOp,
   type WebRequest,
   type WebResult,
   type WebSession
 } from '@shared/web'
+import type { DateItem } from '@shared/dates'
 import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
@@ -221,6 +224,18 @@ export interface ForgeState {
    * confirm card's (components/BrainConfirm.tsx), on both faces.
    */
   brainConfirms: BrainConfirmRequest[]
+  /**
+   * The desktop's Dates list (docs/DATES.md, "Phone"), as it last sent it. Null
+   * until the first answer — and for good from a desktop too old to have one,
+   * which answers the read `unsupported`.
+   */
+  dates: DateItem[] | null
+  /**
+   * Whether the Dates screen should be up. Set by a tap on a date
+   * notification (the worker's `forge-open-dates`, or `?dates=1` on a window
+   * it opened) and by `dates.open()`; cleared by `dates.close()`.
+   */
+  datesOpen: boolean
 }
 
 /** No brain, or nothing waiting: one list, so the state memo does not move. */
@@ -323,6 +338,32 @@ export interface ForgeActions {
   requestNotifyPermission: () => Promise<void>
   /** Switch between the frozen picture and GitHub mode. Offline only. */
   setOfflineMode: (mode: OfflineMode) => void
+  /** The Dates list. Every change also comes back as a `dates` push to every browser. */
+  dates: DatesActions
+}
+
+/**
+ * The Dates screen's actions. The writes resolve with null when the desktop
+ * took them, or with its sentence (a day that is not a day, a line that has
+ * gone) for the screen to show; none raises a notice itself. `dates` in the
+ * state is updated from the answer, before the push that follows.
+ */
+export interface DatesActions {
+  /** Ask the desktop for the list again. Done for you on every connection. */
+  refresh: () => Promise<string | null>
+  /** A new line, in the agent tool's field names. Title and date are required. */
+  add: (input: WebDateFields & { title: string; date: string }) => Promise<string | null>
+  /**
+   * One change to one line, in the agent tool's field names. `done: true`
+   * completes it (a repeating line moves on), `snooze_until` holds its alerts,
+   * `delete: true` removes it.
+   */
+  update: (id: string, patch: WebDateChange) => Promise<string | null>
+  /** Put an agent on a line. The pane opens on the desktop. */
+  startAgent: (id: string) => Promise<string | null>
+  /** Put the Dates screen up, or away. */
+  open: () => void
+  close: () => void
 }
 
 interface ForgeContextValue {
@@ -468,6 +509,31 @@ function takeSessionParam(): string {
   return id
 }
 
+/**
+ * `?dates=1`: a window the worker opened for a tap on a date notification,
+ * with no tab to message. Stripped as it is read, like `?session=`, so a
+ * reload does not open Dates again.
+ */
+function takeDatesParam(): boolean {
+  if (typeof window === 'undefined') return false
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has('dates')) return false
+  params.delete('dates')
+  const query = params.toString()
+  window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
+  return true
+}
+
+/** A Dates answer into state: null when it carried the list, else the sentence to show. */
+function takeDatesAnswer(result: WebResult, set: (items: DateItem[]) => void): string | null {
+  if (result.kind === 'dates') {
+    set(result.items)
+    return null
+  }
+  if (result.kind === 'failed') return result.message
+  return 'The desktop answered with something this page does not understand.'
+}
+
 /* ---------------------------------------------------------------- landing */
 
 /**
@@ -596,6 +662,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
    * and there is no workspace to find the pane in until that lands.
    */
   const [pendingSession, setPendingSession] = useState<string>(() => takeSessionParam())
+  const [dates, setDates] = useState<DateItem[] | null>(null)
+  const [datesOpen, setDatesOpen] = useState<boolean>(() => takeDatesParam())
   /**
    * The asking set as the client handlers see it, kept in step with `asking`
    * frame by frame. A ref because those handlers are built once, and because
@@ -929,6 +997,7 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         const written = rememberGit(snapshot)
         if (written) setCached(written)
       },
+      onDates: (items) => setDates(items),
       onNotice: pushNotice,
       onTokenRejected: () => {
         authRef.current?.signOut()
@@ -1283,6 +1352,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       const data: unknown = event.data
       if (!data || typeof data !== 'object') return
       const message = data as { type?: unknown; sessionId?: unknown }
+      // A date notification's tap: the screen, not a pane.
+      if (message.type === 'forge-open-dates') {
+        setDatesOpen(true)
+        return
+      }
       if (message.type !== 'forge-open-session') return
       if (typeof message.sessionId === 'string' && message.sessionId) setPendingSession(message.sessionId)
     }
@@ -1357,6 +1431,18 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
     return () => clearTimeout(timer)
   }, [connection, pageVisible])
 
+  /**
+   * The Dates list, read on every connection: the pushes only say what
+   * changed while this socket was up, so a reconnect reads it whole. An older
+   * desktop answers `unsupported` and the list stays null.
+   */
+  useEffect(() => {
+    if (connection.state !== 'live') return
+    void client.request({ kind: 'dates' }).then((result) => {
+      if (result.kind === 'dates') setDates(result.items)
+    })
+  }, [client, connection.state])
+
   /* --------------------------------------------------------------- actions */
 
   const actions = useMemo<ForgeActions>(
@@ -1407,6 +1493,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setGit({})
         setAsking(new Set())
         setBusy(new Set())
+        setDates(null)
+        setDatesOpen(false)
         setStage({ kind: 'signed-out', error: '' })
       },
       retry: () => client.retry(),
@@ -1535,7 +1623,20 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           applyNotifyPermission('denied')
         }
       },
-      setOfflineMode
+      setOfflineMode,
+      dates: {
+        refresh: async () => takeDatesAnswer(await client.request({ kind: 'dates' }), setDates),
+        add: async (input) => takeDatesAnswer(await client.request({ kind: 'dates-add', input }), setDates),
+        update: async (id, patch) => takeDatesAnswer(await client.request({ kind: 'dates-update', id, patch }), setDates),
+        startAgent: async (id) => {
+          const result = await client.request({ kind: 'dates-agent', id })
+          if (result.kind === 'ok') return null
+          if (result.kind === 'failed') return result.message
+          return 'The desktop answered with something this page does not understand.'
+        },
+        open: () => setDatesOpen(true),
+        close: () => setDatesOpen(false)
+      }
     }),
     [client, find, projectId, pushNotice, applyNotifyPermission]
   )
@@ -1567,7 +1668,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       notifyPermission,
       pushActive,
       askBanner,
-      brainConfirms
+      brainConfirms,
+      dates,
+      datesOpen
     }),
     [
       stage,
@@ -1590,7 +1693,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       notifyPermission,
       pushActive,
       askBanner,
-      brainConfirms
+      brainConfirms,
+      dates,
+      datesOpen
     ]
   )
 

@@ -119,6 +119,11 @@ import type { HandoffTargetWire } from './handoffview'
  * the same reason: this one describes the *wire*, not what travels on it.
  */
 import type { ChatUpdate } from './chat'
+/**
+ * The Dates list (docs/DATES.md). The phone is handed the store's own lines,
+ * whole: they hold nothing a phone that may change them should not see.
+ */
+import type { DateItem, DateRepeat } from './dates'
 /*
  * The input vocabulary, borrowed whole from the phone link rather than restated
  * here. The rule this file usually follows is the opposite one — MAX_SESSIONS
@@ -1691,6 +1696,61 @@ export type WebRequest =
    * left, whether or not the id was known.
    */
   | { kind: 'passkey-forget'; credentialId: string }
+  /**
+   * The Dates list (docs/DATES.md, "Phone"), open lines and done ones, in the
+   * store's order. Answered `{ kind: 'dates' }`; every change after that also
+   * arrives unasked as a `dates` frame.
+   */
+  | { kind: 'dates' }
+  /** A new line. Answered `{ kind: 'dates' }` with the list and the new line as `item`. */
+  | { kind: 'dates-add'; input: WebDateFields }
+  /**
+   * A change to one line: the `dates_update` agent tool's fields, by the same
+   * names. `done: true` completes it (a repeating line moves on instead),
+   * `delete: true` removes it. Answered `{ kind: 'dates' }` with the list and
+   * the line as it now is (no `item` after a delete); an unknown id or a bad
+   * field is `failed`, with the sentence.
+   */
+  | { kind: 'dates-update'; id: string; patch: WebDateChange }
+  /**
+   * Put an agent on one line: a pane opens on the desktop with the line's
+   * prompt. Answered `{ kind: 'ok' }`, or `failed` with the reason (no such
+   * line, no desktop window).
+   */
+  | { kind: 'dates-agent'; id: string }
+
+/**
+ * A Dates line's fields as they travel, named as the agent tools name them
+ * (snake_case; docs/DATES.md "Agent tools"). Nested under `input` or `patch`
+ * rather than spread into the request, because a line has a `kind` of its own.
+ * Only the fields present are read. Title and date are required for a new line.
+ */
+export interface WebDateFields {
+  title?: string
+  /** `YYYY-MM-DD`. */
+  date?: string
+  /** One of `DATE_KINDS`; an unknown one becomes `other`. */
+  kind?: string
+  group?: string
+  amount?: string
+  /** `YYYY-MM-DD`, not before `date`. `null` (on a change) clears it. */
+  end_date?: string | null
+  note?: string
+  action?: string
+  estimated?: boolean
+  remind_days?: number[]
+  repeat?: DateRepeat
+}
+
+/** A change to a line: any of its fields, plus the three things only a change can do. */
+export interface WebDateChange extends WebDateFields {
+  /** `true` completes the line; `false` opens a done one again. */
+  done?: boolean
+  /** `YYYY-MM-DD`: no alerts before this day. `null` clears it. */
+  snooze_until?: string | null
+  /** `true` removes the line. Nothing else in the change is read. */
+  delete?: boolean
+}
 
 /**
  * What `PushSubscription.toJSON()` yields, narrowed to the fields the desktop
@@ -1704,7 +1764,10 @@ export interface WebPushSubscription {
 }
 
 /** The body of a push message the desktop sends; the service worker shows it. */
-export interface WebPushPayload {
+export type WebPushPayload = WebAttentionPushPayload | WebDatePushPayload
+
+/** A pane is waiting on an answer, or has finished. */
+export interface WebAttentionPushPayload {
   kind: 'attention'
   sessionId: string
   /** 'asking' — a question is waiting; 'done' — the pane went quiet with no question. */
@@ -1716,6 +1779,19 @@ export interface WebPushPayload {
   desktopName: string
   /** When the desktop sent it (epoch ms), so a late-delivered push can tell its age. */
   at?: number
+}
+
+/**
+ * A Dates alert (docs/DATES.md, "Alerts"). Not about a pane, so it is sent to
+ * every subscription whoever is looking, and a tap opens the Dates screen.
+ * `title` and `body` are `alertText`'s words, as the desktop shows them.
+ */
+export interface WebDatePushPayload {
+  kind: 'date'
+  /** The line's id. The notification is tagged by it, so a newer alert replaces an older one. */
+  id: string
+  title: string
+  body: string
 }
 
 /* ------------------------------------------------------------ server frames */
@@ -2201,6 +2277,16 @@ export interface WebGitFrame {
 }
 
 /**
+ * The whole Dates list, after any change made anywhere — the desk, an agent, a
+ * phone, the alert pass marking what it sent. Broadcast to every admitted
+ * browser; a list of a few dozen lines is nothing to send whole.
+ */
+export interface WebDatesFrame {
+  type: 'dates'
+  items: DateItem[]
+}
+
+/**
  * A Claude pane's conversation, as something to read rather than to watch
  * being typed.
  *
@@ -2342,6 +2428,11 @@ export type WebResult =
   | { kind: 'voice-speech'; audio: string; mime: string }
   /** The answer to `brain-ask`: Forge Brain's reply to that one message. */
   | { kind: 'brain-reply'; text: string }
+  /**
+   * The Dates list after a `dates`, `dates-add` or `dates-update`. `item` is
+   * the line that was added or changed; absent for a plain read and a delete.
+   */
+  | { kind: 'dates'; items: DateItem[]; item?: DateItem }
 
 /* ------------------------------------------------------ the voice agent
  *
@@ -2561,6 +2652,7 @@ export type WebServerFrame =
   | WebProjectsFrame
   | WebWorkspaceFrame
   | WebGitFrame
+  | WebDatesFrame
   | WebTranscriptFrame
   | WebResultFrame
   | WebShutdownFrame

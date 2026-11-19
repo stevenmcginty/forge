@@ -39,6 +39,7 @@ import {
 import { BOARD_MIRROR_FEATURE, type BoardChunkFrame, type BoardItemSummary } from '@shared/board-mirror'
 import type { ForemanState } from '@shared/foreman'
 import type { BrainSaysEvent, BrainStatus } from '@shared/brain'
+import type { DateItem } from '@shared/dates'
 import type { GitSnapshot, HandoffRecord, Project, Workspace } from '@shared/types'
 import { publishUsage } from './usage'
 
@@ -381,6 +382,8 @@ export interface ForgeHandlers {
   onProjects: (projects: Project[]) => void
   onWorkspace: (projectId: string, workspace: Workspace) => void
   onGit: (snapshot: GitSnapshot) => void
+  /** The whole Dates list after a change made anywhere. See `WebDatesFrame`. */
+  onDates?: (items: DateItem[]) => void
   /** Something went wrong that no `rid` is waiting on. One sentence, for the user. */
   onNotice: (message: string) => void
   /**
@@ -2236,6 +2239,12 @@ export class ForgeClient {
 
       case 'git':
         this.handlers.onGit(frame.snapshot)
+        return
+
+      case 'dates':
+        // Coerced like the frames above: a list that is not a list is dropped
+        // rather than drawn as an empty Dates screen.
+        if (Array.isArray(frame.items)) this.handlers.onDates?.(frame.items)
         return
 
       case 'usage':

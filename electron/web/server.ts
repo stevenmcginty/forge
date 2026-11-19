@@ -125,7 +125,9 @@ import type {
 } from '@shared/types'
 import type { SkillsList } from '@shared/skills'
 import type { CommandsFeed } from '@shared/commands'
+import type { DateItem } from '@shared/dates'
 import type { WebAuth, WebDevice } from './auth'
+import { addDate, updateDate, type WebDatesService } from './dates-link'
 import { extForMime, imagePasteIntoPane } from './inbox'
 import { readPasskeyAssertion } from './passkey'
 import { listProjectFolder, readProjectFile } from './project-files'
@@ -607,6 +609,18 @@ export interface WebServerHost {
     deviceName: string
   ) => Promise<string | null>
 
+  /* ----------------------------------------------------------------- dates
+   *
+   * The global Dates list (docs/DATES.md, "Phone"), performed in main like
+   * Foreman's: the service is the desktop's own (electron/dates-store.ts), so a
+   * phone's change and the desk's are the same call. The server subscribes to
+   * its changes while it is listening and broadcasts each as a `dates` frame.
+   * Optional: a host without it answers the four requests `unsupported`.
+   */
+  dates?: WebDatesService
+  /** Put an agent on one line (`openDateAgent` in electron/dates-ipc.ts). */
+  datesAgent?: (id: string) => Promise<{ ok: boolean; error?: string }>
+
   /* ----------------------------------------------------------- voice agent
    *
    * A desktop browser running the main voice agent. The audio goes from the
@@ -985,6 +999,8 @@ export class WebServer {
    * in shared/web.ts for why this one is.
    */
   private lastRemoteYes: RemoteYesInfo | null = null
+  /** The subscription to `host.dates` changes, held while listening. */
+  private datesOff: (() => void) | null = null
   /**
    * Every pane asking right now, with its question, so it can be said again
    * after every `hello-ok`. Without it a phone that reconnects (screen lock,
@@ -1191,6 +1207,10 @@ export class WebServer {
     this.http = http
     this.wss = wss
     this.listening = { host: options.host, port: options.port }
+    // Every change to the Dates list, made anywhere, to every admitted browser.
+    // Made once the port is bound, so nothing broadcasts into a server that
+    // never came up; taken down in `stop`.
+    this.datesOff = this.host.dates?.onChange((items) => this.pushDates(items)) ?? null
     this.log(`listening on ${options.host}:${options.port}${WEB_WS_PATH}`)
     return this.listening
   }
@@ -1203,6 +1223,8 @@ export class WebServer {
    * is off instead of dropping to GitHub mode. See `WebShutdownFrame`.
    */
   async stop(notice?: WebShutdownNotice): Promise<void> {
+    this.datesOff?.()
+    this.datesOff = null
     if (notice) this.pushShutdown(notice)
     for (const client of [...this.clients]) this.drop(client, CLOSE_GOING_AWAY, 'Server stopping')
     this.clients.clear()
@@ -1414,6 +1436,11 @@ export class WebServer {
   /** A git status the desktop's watcher produced, unbidden. */
   pushGit(snapshot: GitSnapshot): void {
     this.broadcast({ type: 'git', snapshot })
+  }
+
+  /** The whole Dates list after a change — see `WebDatesFrame`. */
+  pushDates(items: DateItem[]): void {
+    this.broadcast({ type: 'dates', items })
   }
 
   /* --------------------------------------------------- the chat transcript */
@@ -2778,6 +2805,54 @@ export class WebServer {
             return
           }
           answer({ kind: 'skills', skills: await this.host.skills() })
+          return
+        }
+
+        /*
+         * The Dates list. Below the blanket `!client.device` drop in `handle`,
+         * like every request: an admitted browser may read and change it, as
+         * it may add or remove a project. The fields are the agent tools',
+         * read by their own mapper (shared/dates-tools.ts through
+         * electron/web/dates-link.ts), and a bad one comes back as a sentence.
+         */
+        case 'dates':
+        case 'dates-add':
+        case 'dates-update': {
+          const dates = this.host.dates
+          if (!dates) {
+            failed('unsupported', 'This Forge cannot share its Dates list with a browser.')
+            return
+          }
+          if (request.kind === 'dates') {
+            answer({ kind: 'dates', items: dates.list() })
+            return
+          }
+          const outcome =
+            request.kind === 'dates-add' ? addDate(dates, request.input) : updateDate(dates, request.id, request.patch)
+          if (!outcome.ok) {
+            failed('failed', outcome.error)
+            return
+          }
+          answer({ kind: 'dates', items: dates.list(), ...(outcome.item ? { item: outcome.item } : {}) })
+          return
+        }
+
+        case 'dates-agent': {
+          if (!this.host.datesAgent) {
+            failed('unsupported', 'This Forge cannot start an agent on a date for a browser.')
+            return
+          }
+          const id = wireString(request.id, 128)
+          if (!id) {
+            failed('bad-frame', 'That request named no date.')
+            return
+          }
+          const started = await this.host.datesAgent(id)
+          if (!started.ok) {
+            failed('failed', started.error || 'The agent did not start.')
+            return
+          }
+          answer({ kind: 'ok' })
           return
         }
 

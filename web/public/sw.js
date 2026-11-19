@@ -1,6 +1,7 @@
 /*
  * Forge Web's service worker, and it does exactly one job: show a notification
- * when the desktop pushes one, and take you back to the pane that raised it.
+ * when the desktop pushes one, and take you back to the pane that raised it —
+ * or, for a Dates alert, to the Dates screen.
  *
  * Plain JavaScript in `public/` rather than anything Vite compiles, because a
  * worker has to be fetched by URL from the origin root and has no import graph
@@ -65,6 +66,7 @@ self.addEventListener('push', (event) => {
   let vibrate = [30, 80, 30]
   let tag = FALLBACK_TAG
   let sessionId = ''
+  let dates = false
   let key = 'asking|'
   let at = Date.now()
 
@@ -85,6 +87,14 @@ self.addEventListener('push', (event) => {
       body = prompt || 'Waiting for your answer.'
       key = `asking|${prompt}`
     }
+  } else if (payload && payload.kind === 'date' && typeof payload.id === 'string' && payload.id) {
+    // A Dates alert (docs/DATES.md): the desktop's own words. Tagged by the
+    // line, so a newer alert for it (7 days, then 1) replaces the older one.
+    dates = true
+    tag = `date:${payload.id}`
+    title = typeof payload.title === 'string' && payload.title ? payload.title : 'A date is coming up'
+    body = typeof payload.body === 'string' ? payload.body : 'Tap to open Dates.'
+    key = `date|${body}`
   }
 
   // `tag` per session so a pane that asks twice replaces its own notification
@@ -116,7 +126,7 @@ self.addEventListener('push', (event) => {
         badge: '/icons/badge-96.png',
         vibrate,
         timestamp: at,
-        data: { sessionId, key, at }
+        data: { sessionId, dates, key, at }
       })
     })()
   )
@@ -131,10 +141,14 @@ self.addEventListener('push', (event) => {
  * this message and selects the project, the tab and the pane, exactly as a tap
  * on the pane would. Only when there is no window at all is one opened, and
  * then the session travels in the URL because there is nobody to message yet.
+ * A Dates alert does the same with the Dates screen: `forge-open-dates` to an
+ * open tab, `/?dates=1` for a new window.
  */
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const sessionId = (event.notification.data && event.notification.data.sessionId) || ''
+  const data = event.notification.data || {}
+  const sessionId = data.sessionId || ''
+  const dates = data.dates === true
 
   event.waitUntil(
     (async () => {
@@ -144,12 +158,13 @@ self.addEventListener('notificationclick', (event) => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       for (const client of windows) {
         if (new URL(client.url).origin !== self.location.origin) continue
-        client.postMessage({ type: 'forge-open-session', sessionId })
+        client.postMessage(dates ? { type: 'forge-open-dates' } : { type: 'forge-open-session', sessionId })
         if ('focus' in client) return client.focus()
         return
       }
       if (self.clients.openWindow) {
-        await self.clients.openWindow(sessionId ? `/?session=${encodeURIComponent(sessionId)}` : '/')
+        const url = dates ? '/?dates=1' : sessionId ? `/?session=${encodeURIComponent(sessionId)}` : '/'
+        await self.clients.openWindow(url)
       }
     })()
   )

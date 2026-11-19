@@ -72,6 +72,9 @@ import { filePasskeyStorage } from './web/passkey'
 import { hashPin, isValidPin } from './web/pin'
 import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsubscribe } from './web/push'
 import { WebServer, type VoiceClaudeLink, type WebServerHost } from './web/server'
+import { linkDateAlerts } from './web/dates-link'
+import { getDates } from './dates-store'
+import { openDateAgent } from './dates-ipc'
 import { disposeChatMirrors, findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
 import { disposeBrowserMirrors, sharedBrowserMirrorHost } from './browser-panes/web-mirror'
 import { sharedBoardMirrorHost } from './board-web'
@@ -293,6 +296,13 @@ let unsubscribeBrainSays: (() => void) | null = null
  * server that has gone.
  */
 let unsubscribeHandoff: (() => void) | null = null
+/**
+ * Dates alerts as Web Pushes, for as long as the link is up. Not tied to a
+ * pane, so unlike an attention push nobody's screen holds one back — see
+ * `planPush` in electron/web/push.ts. The list's own changes reach browsers
+ * through the server, which subscribes to `host.dates` itself.
+ */
+let unsubscribeDateAlerts: (() => void) | null = null
 /**
  * Each agent pane's usage — Claude's from the files `~/.claude/statusline.js`
  * leaves in `~/.claude/forge-status`, Codex's from its rollouts — relayed to
@@ -1696,6 +1706,10 @@ async function start(): Promise<void> {
     projectRemovePreview: (projectId) => previewProjectRemove(projectId),
     projectRemove: (projectId, deviceName) => dispatchProjectRemove(projectId, deviceName),
     projectCreate: (name, parentDir, deviceName) => dispatchProjectCreate(name, parentDir, deviceName),
+    // The desktop's own list and agent route (docs/DATES.md, "Phone"): a
+    // phone's change is the same call the desk's IPC makes.
+    dates: getDates(),
+    datesAgent: (id) => openDateAgent(id),
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
     saveInboxFile: (bytes, name) => Promise.resolve(saveInboxFile(join(getDataDir(), 'web-inbox'), bytes, name)),
     transcribeAudio: (bytes, mime) => transcribeAudio(bytes, mime),
@@ -1962,6 +1976,14 @@ async function start(): Promise<void> {
   // after that — including the watcher's own `open → ready` promotion, which is
   // what lights a take-over button up.
   unsubscribeHandoff = onHandoffChanged((projectId, records) => instance.pushHandoff(projectId, records))
+
+  // Every Dates alert, to every subscribed device. `notify` answers its own
+  // failures; the catch is the same belt as the attention push's.
+  unsubscribeDateAlerts = linkDateAlerts(getDates(), (payload) => {
+    void notify(payload, { visibleDevices: instance.visibleDeviceIds(), anyVisible: instance.anyVisible() }).catch(
+      () => undefined
+    )
+  })
 
   // And each agent pane's context ring and the account's limits, Claude's and
   // Codex's. The readers are the desktop's (electron/usage-hub.ts) and may
@@ -2246,6 +2268,8 @@ async function stop(reason: 'quit' | 'disabled' = 'disabled'): Promise<void> {
   unsubscribeBrainSays = null
   unsubscribeHandoff?.()
   unsubscribeHandoff = null
+  unsubscribeDateAlerts?.()
+  unsubscribeDateAlerts = null
   // The readers keep running for the desktop; only the phone stops listening.
   unsubscribeUsage?.()
   unsubscribeUsage = null
