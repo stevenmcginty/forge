@@ -19,6 +19,9 @@ const TOOL_LABELS: Record<string, string> = {
   get_project_memory: 'reading project memory',
   remember: 'making a note',
   take_screenshot: 'taking a screenshot',
+  dates_list: 'reading your dates',
+  dates_add: 'adding a date',
+  dates_update: 'updating a date',
   describe_self: 'checking what it can do',
 
   /* ------------------------------------------------------------ the desktop */

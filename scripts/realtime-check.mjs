@@ -246,7 +246,10 @@ await check('one list: the brief’s tools, B7’s main-agent tools, B2’s four
     'browser_key',
     'browser_text',
     'ask_brain',
-    'tell_brain'
+    'tell_brain',
+    'dates_list',
+    'dates_add',
+    'dates_update'
   ])
   const gem = tools.toGeminiTools()[0].functionDeclarations
   assert.deepEqual(gem.map((d) => d.name), names)

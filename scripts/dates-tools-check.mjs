@@ -52,6 +52,8 @@ const { createDatesService } = await import('../electron/dates-store.ts')
 const B = await import('../bridge/dates-tools.mjs')
 const APP = await import('../bridge/forge-app-tools.mjs')
 const { planShowView } = await import('../src/lib/showView.ts')
+const RT = await import('../src/lib/realtime/tools.ts')
+const { toolLabel } = await import('../src/lib/toolLabels.ts')
 
 let pass = 0
 let fail = 0
@@ -301,6 +303,32 @@ try {
     const plan = planShowView({ view: 'dates' }, snap)
     ok(plan.ok && plan.switchTo === 'dates', 'src/lib/showView.ts: view dates switches to the dates surface', plan)
     ok(/'dates'/.test(src('src/lib/showView.ts').match(/export type ShowViewName[^\n]*/)?.[0] ?? ''), 'and ShowViewName includes dates')
+  }
+
+  /* ------------------------------------------- 5. the realtime voice agent */
+  console.log('the realtime voice agent has the three tools, routed to main')
+  {
+    for (const spec of specs.DATES_TOOL_SPECS) {
+      const rt = RT.REALTIME_TOOLS.find((t) => t.name === spec.name)
+      ok(!!rt, `REALTIME_TOOLS lists ${spec.name}`)
+      ok(same(Object.keys(rt?.parameters?.properties ?? {}), Object.keys(spec.parameters.properties)), `${spec.name}: the same parameter names as DATES_TOOL_SPECS`)
+      ok(rt?.description === spec.description, `${spec.name}: the shared description`)
+    }
+    ok(toolLabel('dates_list') === 'reading your dates' && toolLabel('dates_add') === 'adding a date' && toolLabel('dates_update') === 'updating a date', 'plain labels for the three')
+    const saved = globalThis.window
+    const calls = []
+    globalThis.window = {
+      forgeDates: { list: () => [], onChange: () => () => undefined, tool: async (name, args) => (calls.push([name, args]), { ok: true, text: 'main answered' }) }
+    }
+    try {
+      const ans = await RT.runRealtimeTool('dates_list', { kind: 'insurance' }, { deps: null })
+      ok(ans.ok && ans.text === 'main answered' && same(calls, [['dates_list', { kind: 'insurance' }]]), 'a dates_list call goes to window.forgeDates.tool', { ans, calls })
+      delete globalThis.window.forgeDates
+      const stale = await RT.runRealtimeTool('dates_add', {}, { deps: null })
+      ok(!stale.ok && /restart/i.test(stale.text), 'with no Dates preload: a plain restart sentence, no throw', stale)
+    } finally {
+      globalThis.window = saved
+    }
   }
 } finally {
   rmSync(TEMP, { recursive: true, force: true })

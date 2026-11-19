@@ -1,4 +1,5 @@
 import { BRAIN_ASK_WAIT_MS } from '@shared/brain'
+import { DATES_TOOL_SPECS } from '@shared/brain-tools'
 import type { ForgeApi } from '@shared/api'
 import type { RealtimeToolSpec } from '@shared/realtime'
 import {
@@ -7,6 +8,7 @@ import {
   type VoiceAgentToolDeps
 } from '../agenttools'
 import { ACTION_SPECS } from '../appmanifest'
+import { datesApi } from '../datesApi'
 import { toolLabel } from '../toolLabels'
 import type { RealtimeToolAnswer } from './session'
 import { geminiToolDeclarations, openAIToolSpecs } from './tool-format'
@@ -130,6 +132,29 @@ async function runBrainTool(name: string, args: Record<string, unknown>, waitMs:
   return sent.ok
     ? { ok: true, text: `OK: Forge Brain has it${sent.queued ? ' (queued behind what it is doing)' : ''}. It will report back.` }
     : { ok: false, text: `FAILED: ${sent.error}` }
+}
+
+/* ------------------------------------------------------------------ dates */
+
+/**
+ * Steve's Dates list: the same three tools, schema and answers the text agents
+ * have (DATES_TOOL_SPECS, and runDatesTool in the main process, reached over
+ * the dates:tool IPC). Nothing here re-implements them.
+ */
+export const DATES_REALTIME_TOOLS: RealtimeToolSpec[] = DATES_TOOL_SPECS.map((spec) => ({
+  name: spec.name,
+  description: spec.description,
+  parameters: spec.parameters as unknown as Record<string, unknown>
+}))
+
+const DATES_NAMES = new Set(DATES_TOOL_SPECS.map((spec) => spec.name))
+
+async function runDatesRealtimeTool(name: string, args: Record<string, unknown>): Promise<RealtimeToolAnswer | null> {
+  if (!DATES_NAMES.has(name)) return null
+  const dates = datesApi()
+  if (typeof dates?.tool !== 'function') return { ok: false, text: 'FAILED: Dates needs a Forge restart before the voice agent can use it.' }
+  const out = await dates.tool(name, args)
+  return { ok: out.ok, text: out.text }
 }
 
 const NO_ARGS = { type: 'object', properties: {} }
@@ -353,7 +378,8 @@ export const REALTIME_TOOLS: RealtimeToolSpec[] = [
   ...MAIN_REALTIME_TOOLS,
   ...HUB_REALTIME_TOOLS,
   ...BROWSER_REALTIME_TOOLS,
-  ...BRAIN_REALTIME_TOOLS
+  ...BRAIN_REALTIME_TOOLS,
+  ...DATES_REALTIME_TOOLS
 ]
 
 /**
@@ -459,6 +485,8 @@ export async function runRealtimeTool(
     if (browser) return browser
     const brain = await runBrainTool(name, args, env.brainWaitMs ?? BRAIN_ASK_WAIT_MS)
     if (brain) return brain
+    const datesAnswer = await runDatesRealtimeTool(name, args)
+    if (datesAnswer) return datesAnswer
     const desktop = await runDesktopTool(name, args, env.desktop === true)
     if (desktop) return desktop
     switch (name) {
