@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  ALERT_SUMMARY_FROM,
+  alertSummary,
   alertText,
   applyPatch,
   completeItem,
@@ -11,30 +13,40 @@ import {
   markAlerted,
   newDateId,
   normaliseItem,
+  normaliseWeekly,
   sortItems,
   todayOf,
+  weeklyPatchError,
+  weeklyView,
   type DateAlert,
   type DateInput,
   type DateItem,
-  type DatePatch
+  type DatePatch,
+  type DatesWeekly,
+  type DatesWeeklyPatch,
+  type DatesWeeklyView
 } from '@shared/dates'
 import { getDataDir } from './store'
 
 /**
- * The Dates list on disk: `<dataDir>/dates.json`, `{ version: 1, items }`.
+ * The Dates list on disk: `<dataDir>/dates.json`, `{ version: 1, items, weekly }`.
  * The rules live in shared/dates.ts; this file only loads, keeps, saves and
  * tells listeners. docs/DATES.md is the contract.
  *
  * Loaded once, held in memory, written atomically (tmp file + rename) on every
  * change. A hand-written file is cleaned line by line; a file that is not JSON
  * (or has no list in it) is moved aside to `dates.json.bad-<timestamp>` and the
- * list starts empty. Loading never throws.
+ * list starts empty. A file with no `weekly` block (or a bad one) gets the
+ * defaults, and is saved at once so the block's `since` holds. Loading never
+ * throws.
  *
  * No `electron` import, so scripts/dates-check.mjs can drive it against a temp
  * folder through `createDatesService`.
  */
 
 export interface DatesService {
+  /** The folder `dates.json` is in (the weekly check reads `dates-weekly-prompt.md` there). */
+  readonly dir: string
   list(): DateItem[]
   add(input: DateInput, source?: string): DateItem
   update(id: string, patch: DatePatch): DateItem | null
@@ -43,8 +55,20 @@ export interface DatesService {
   remove(id: string): boolean
   onChange(cb: (items: DateItem[]) => void): () => void
   onAlert(cb: (alert: DateAlert) => void): () => void
-  /** The alert pass. Outside 08:00 to 21:00 local time it does nothing unless `force`. */
+  /**
+   * The alert pass. Outside 08:00 to 21:00 local time it does nothing unless
+   * `force`. Returns one alert per line it fired; listeners hear the same, or
+   * one summary in their place when there are `ALERT_SUMMARY_FROM` or more.
+   */
   checkNow(now?: Date, opts?: { force?: boolean }): DateAlert[]
+  /** The weekly check's state, with when it runs next. */
+  getWeekly(): DatesWeeklyView
+  /** Change on/off, the day or the hour. Throws a plain sentence on a bad value. */
+  setWeekly(patch: DatesWeeklyPatch): DatesWeeklyView
+  /** Record a run of the weekly check: it started, or it failed with `error`. */
+  markWeeklyRun(result: 'started' | 'failed', error?: string): DatesWeeklyView
+  /** The weekly state after every change to it. Returns the unsubscribe. */
+  onWeekly(cb: (weekly: DatesWeeklyView) => void): () => void
 }
 
 const FILE = 'dates.json'
@@ -57,7 +81,20 @@ export function createDatesService(opts: { dir: string; now?: () => Date }): Dat
   const clock = opts.now ?? (() => new Date())
   const changeListeners = new Set<(items: DateItem[]) => void>()
   const alertListeners = new Set<(alert: DateAlert) => void>()
+  const weeklyListeners = new Set<(weekly: DatesWeeklyView) => void>()
+  /** The raw `weekly` block from the file, read by `load`; undefined when there was none. */
+  let rawWeekly: unknown
   let items: DateItem[] = load()
+  let weekly: DatesWeekly = normaliseWeekly(rawWeekly, clock())
+  // A file without a sound `since` (no file at all, an older file, a hand
+  // edit) is saved now, so the weekly check counts from this moment and not
+  // from every start of the app.
+  if (!isSince(rawWeekly)) save()
+
+  function isSince(raw: unknown): boolean {
+    const since = raw && typeof raw === 'object' ? (raw as { since?: unknown }).since : undefined
+    return typeof since === 'string' && !Number.isNaN(Date.parse(since))
+  }
 
   function load(): DateItem[] {
     if (!existsSync(file)) return []
@@ -68,6 +105,7 @@ export function createDatesService(opts: { dir: string; now?: () => Date }): Dat
       moveAside(`it is not valid JSON (${err instanceof Error ? err.message : String(err)})`)
       return []
     }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) rawWeekly = (parsed as { weekly?: unknown }).weekly
     const rawItems = Array.isArray(parsed)
       ? parsed
       : parsed && typeof parsed === 'object' && Array.isArray((parsed as { items?: unknown }).items)
@@ -107,7 +145,7 @@ export function createDatesService(opts: { dir: string; now?: () => Date }): Dat
     const tmp = `${file}.tmp`
     try {
       mkdirSync(opts.dir, { recursive: true })
-      writeFileSync(tmp, JSON.stringify({ version: 1, items }, null, 2), 'utf8')
+      writeFileSync(tmp, JSON.stringify({ version: 1, items, weekly }, null, 2), 'utf8')
       renameSync(tmp, file)
     } catch (err) {
       console.error(`[dates] failed to write ${FILE}:`, err)
@@ -136,6 +174,24 @@ export function createDatesService(opts: { dir: string; now?: () => Date }): Dat
     }
   }
 
+  function weeklyNow(): DatesWeeklyView {
+    return weeklyView(weekly, clock())
+  }
+
+  /** Save the weekly block and tell its listeners. */
+  function weeklyChanged(): DatesWeeklyView {
+    save()
+    const view = weeklyNow()
+    for (const cb of weeklyListeners) {
+      try {
+        cb(view)
+      } catch (err) {
+        console.error('[dates] weekly listener failed:', err)
+      }
+    }
+    return view
+  }
+
   /** Swap one line for its changed self, save and tell. Null when the id is unknown. */
   function replace(id: string, change: (item: DateItem) => DateItem): DateItem | null {
     const index = items.findIndex((i) => i.id === id)
@@ -147,6 +203,7 @@ export function createDatesService(opts: { dir: string; now?: () => Date }): Dat
   }
 
   return {
+    dir: opts.dir,
     list,
 
     add(input, source = 'steve') {
@@ -230,7 +287,8 @@ export function createDatesService(opts: { dir: string; now?: () => Date }): Dat
       })
       if (alerts.length === 0) return []
       changed()
-      for (const alert of alerts) {
+      const heard = alerts.length >= ALERT_SUMMARY_FROM ? [alertSummary(alerts, today)] : alerts
+      for (const alert of heard) {
         for (const cb of alertListeners) {
           try {
             cb(alert)
@@ -240,6 +298,37 @@ export function createDatesService(opts: { dir: string; now?: () => Date }): Dat
         }
       }
       return alerts
+    },
+
+    getWeekly: weeklyNow,
+
+    setWeekly(patch) {
+      const error = weeklyPatchError(patch)
+      if (error) throw new Error(error)
+      const p = patch as DatesWeeklyPatch
+      weekly = {
+        ...weekly,
+        ...(p.enabled !== undefined ? { enabled: p.enabled } : {}),
+        ...(p.weekday !== undefined ? { weekday: p.weekday } : {}),
+        ...(p.hour !== undefined ? { hour: p.hour } : {})
+      }
+      return weeklyChanged()
+    },
+
+    markWeeklyRun(result, error) {
+      const next: DatesWeekly = { ...weekly, lastRunAt: clock().toISOString(), lastResult: result }
+      delete next.lastError
+      const why = typeof error === 'string' ? error.trim() : ''
+      if (result === 'failed') next.lastError = why || 'The weekly check did not start.'
+      weekly = next
+      return weeklyChanged()
+    },
+
+    onWeekly(cb) {
+      weeklyListeners.add(cb)
+      return () => {
+        weeklyListeners.delete(cb)
+      }
     }
   }
 }

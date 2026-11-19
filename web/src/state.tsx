@@ -20,7 +20,7 @@ import {
   type WebResult,
   type WebSession
 } from '@shared/web'
-import type { DateItem } from '@shared/dates'
+import type { DateItem, DateNotice, DatesWeeklyPatch, DatesWeeklyView } from '@shared/dates'
 import type { RemoteYesInfo } from '@shared/mobile'
 import type { ChatUpdate } from '@shared/chat'
 import type { ForemanState } from '@shared/foreman'
@@ -236,6 +236,24 @@ export interface ForgeState {
    * it opened) and by `dates.open()`; cleared by `dates.close()`.
    */
   datesOpen: boolean
+  /**
+   * The desktop's weekly dates check (docs/DATES.md, "Weekly check"): on or
+   * off, day, hour, last run and `nextRunAt`. Null until the first answer, and
+   * from a desktop without it.
+   */
+  datesWeekly: DatesWeeklyView | null
+  /**
+   * The latest Dates alert from the desktop (the `date-alert` frame), for an
+   * in-app notice: `at` is when it arrived (epoch ms). A summary of several
+   * has no `id`. Null until one comes, and after `dates.dismissNotice()`. A
+   * tap on it should open Dates (`dates.open()`).
+   */
+  dateNotice: DateNoticeState | null
+}
+
+/** A Dates alert as the page holds it: `DateNotice` plus when it arrived. */
+export interface DateNoticeState extends DateNotice {
+  at: number
 }
 
 /** No brain, or nothing waiting: one list, so the state memo does not move. */
@@ -364,6 +382,16 @@ export interface DatesActions {
   /** Put the Dates screen up, or away. */
   open: () => void
   close: () => void
+  /*
+   * The three below are always there in ForgeProvider. They are optional only
+   * so a stub (components/DatesPreview.tsx) that predates them still compiles.
+   */
+  /** Open the weekly check's agent pane on the desktop now. Null when it started, else the sentence. */
+  runWeekly?: () => Promise<string | null>
+  /** Turn the weekly check on or off, or move its day (0 = Sunday) or hour (0 to 23). */
+  setWeekly?: (patch: DatesWeeklyPatch) => Promise<string | null>
+  /** Clear `dateNotice`. */
+  dismissNotice?: () => void
 }
 
 interface ForgeContextValue {
@@ -524,10 +552,18 @@ function takeDatesParam(): boolean {
   return true
 }
 
-/** A Dates answer into state: null when it carried the list, else the sentence to show. */
-function takeDatesAnswer(result: WebResult, set: (items: DateItem[]) => void): string | null {
+/**
+ * A Dates answer into state: null when it carried the list, else the sentence
+ * to show. The weekly check's state, when the answer has it, goes to `setWeekly`.
+ */
+function takeDatesAnswer(
+  result: WebResult,
+  set: (items: DateItem[]) => void,
+  setWeekly?: (weekly: DatesWeeklyView) => void
+): string | null {
   if (result.kind === 'dates') {
     set(result.items)
+    if (result.weekly) setWeekly?.(result.weekly)
     return null
   }
   if (result.kind === 'failed') return result.message
@@ -664,6 +700,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   const [pendingSession, setPendingSession] = useState<string>(() => takeSessionParam())
   const [dates, setDates] = useState<DateItem[] | null>(null)
   const [datesOpen, setDatesOpen] = useState<boolean>(() => takeDatesParam())
+  const [datesWeekly, setDatesWeekly] = useState<DatesWeeklyView | null>(null)
+  const [dateNotice, setDateNotice] = useState<DateNoticeState | null>(null)
   /**
    * The asking set as the client handlers see it, kept in step with `asking`
    * frame by frame. A ref because those handlers are built once, and because
@@ -997,7 +1035,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         const written = rememberGit(snapshot)
         if (written) setCached(written)
       },
-      onDates: (items) => setDates(items),
+      onDates: (items, weekly) => {
+        setDates(items)
+        if (weekly) setDatesWeekly(weekly)
+      },
+      onDateAlert: (notice) => setDateNotice({ ...notice, at: Date.now() }),
       onNotice: pushNotice,
       onTokenRejected: () => {
         authRef.current?.signOut()
@@ -1439,7 +1481,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
   useEffect(() => {
     if (connection.state !== 'live') return
     void client.request({ kind: 'dates' }).then((result) => {
-      if (result.kind === 'dates') setDates(result.items)
+      if (result.kind === 'dates') {
+        setDates(result.items)
+        if (result.weekly) setDatesWeekly(result.weekly)
+      }
     })
   }, [client, connection.state])
 
@@ -1495,6 +1540,8 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
         setBusy(new Set())
         setDates(null)
         setDatesOpen(false)
+        setDatesWeekly(null)
+        setDateNotice(null)
         setStage({ kind: 'signed-out', error: '' })
       },
       retry: () => client.retry(),
@@ -1625,9 +1672,10 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       },
       setOfflineMode,
       dates: {
-        refresh: async () => takeDatesAnswer(await client.request({ kind: 'dates' }), setDates),
-        add: async (input) => takeDatesAnswer(await client.request({ kind: 'dates-add', input }), setDates),
-        update: async (id, patch) => takeDatesAnswer(await client.request({ kind: 'dates-update', id, patch }), setDates),
+        refresh: async () => takeDatesAnswer(await client.request({ kind: 'dates' }), setDates, setDatesWeekly),
+        add: async (input) => takeDatesAnswer(await client.request({ kind: 'dates-add', input }), setDates, setDatesWeekly),
+        update: async (id, patch) =>
+          takeDatesAnswer(await client.request({ kind: 'dates-update', id, patch }), setDates, setDatesWeekly),
         startAgent: async (id) => {
           const result = await client.request({ kind: 'dates-agent', id })
           if (result.kind === 'ok') return null
@@ -1635,7 +1683,12 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
           return 'The desktop answered with something this page does not understand.'
         },
         open: () => setDatesOpen(true),
-        close: () => setDatesOpen(false)
+        close: () => setDatesOpen(false),
+        runWeekly: async () =>
+          takeDatesAnswer(await client.request({ kind: 'dates-weekly', action: 'run' }), setDates, setDatesWeekly),
+        setWeekly: async (patch) =>
+          takeDatesAnswer(await client.request({ kind: 'dates-weekly', action: 'set', ...patch }), setDates, setDatesWeekly),
+        dismissNotice: () => setDateNotice(null)
       }
     }),
     [client, find, projectId, pushNotice, applyNotifyPermission]
@@ -1670,7 +1723,9 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       askBanner,
       brainConfirms,
       dates,
-      datesOpen
+      datesOpen,
+      datesWeekly,
+      dateNotice
     }),
     [
       stage,
@@ -1695,8 +1750,11 @@ export function ForgeProvider({ children }: { children: ReactNode }): ReactNode 
       askBanner,
       brainConfirms,
       dates,
-      datesOpen
+      datesOpen,
+      datesWeekly,
+      dateNotice
     ]
+
   )
 
   // One object per real change: a fresh literal here would re-render every

@@ -50,8 +50,9 @@ export function updateDate(service: WebDatesService, id: unknown, patch: unknown
   return result.removed || !result.item ? { ok: true } : { ok: true, item: result.item }
 }
 
-/** The push for one alert, in `alertText`'s words. */
+/** The push for one alert, in `alertText`'s words. A summary of several has no `id`. */
 export function datePushPayload(alert: DateAlert): WebDatePushPayload {
+  if (alert.summary) return { kind: 'date', title: alert.title, body: alert.body, summary: true }
   return { kind: 'date', id: alert.item.id, title: alert.title, body: alert.body }
 }
 

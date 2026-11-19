@@ -123,7 +123,7 @@ import type { ChatUpdate } from './chat'
  * The Dates list (docs/DATES.md). The phone is handed the store's own lines,
  * whole: they hold nothing a phone that may change them should not see.
  */
-import type { DateItem, DateRepeat } from './dates'
+import type { DateItem, DateNotice, DateRepeat, DatesWeeklyView } from './dates'
 /*
  * The input vocabulary, borrowed whole from the phone link rather than restated
  * here. The rule this file usually follows is the opposite one — MAX_SESSIONS
@@ -1718,6 +1718,13 @@ export type WebRequest =
    * line, no desktop window).
    */
   | { kind: 'dates-agent'; id: string }
+  /**
+   * The weekly check (docs/DATES.md, "Weekly check"). `run` opens its agent
+   * pane on the desktop now; `set` changes on/off, the day (0 = Sunday) or
+   * the hour (0 to 23). Answered `{ kind: 'dates' }` with the list and the new
+   * `weekly`, or `failed` with the reason (no desktop window, a bad value).
+   */
+  | { kind: 'dates-weekly'; action: 'run' | 'set'; enabled?: boolean; weekday?: number; hour?: number }
 
 /**
  * A Dates line's fields as they travel, named as the agent tools name them
@@ -1785,13 +1792,16 @@ export interface WebAttentionPushPayload {
  * A Dates alert (docs/DATES.md, "Alerts"). Not about a pane, so it is sent to
  * every subscription whoever is looking, and a tap opens the Dates screen.
  * `title` and `body` are `alertText`'s words, as the desktop shows them.
+ * A summary of several alerts from one pass (`summary: true`) has no `id`.
  */
 export interface WebDatePushPayload {
   kind: 'date'
-  /** The line's id. The notification is tagged by it, so a newer alert replaces an older one. */
-  id: string
+  /** The line's id. The notification is tagged by it, so a newer alert replaces an older one. Absent on a summary. */
+  id?: string
   title: string
   body: string
+  /** Several alerts in one ("5 dates are coming up"). Tagged `date:summary`. */
+  summary?: true
 }
 
 /* ------------------------------------------------------------ server frames */
@@ -2284,6 +2294,17 @@ export interface WebGitFrame {
 export interface WebDatesFrame {
   type: 'dates'
   items: DateItem[]
+  /** The weekly check's state, from a desktop that has one. Sent after its own changes too. */
+  weekly?: DatesWeeklyView
+}
+
+/**
+ * A Dates alert fired on the desktop, for an in-app notice on the phone
+ * (docs/DATES.md, "In-app notices"). Sent to every admitted browser beside the
+ * `date` push. A summary of several alerts has no `id`.
+ */
+export interface WebDateAlertFrame extends DateNotice {
+  type: 'date-alert'
 }
 
 /**
@@ -2429,10 +2450,12 @@ export type WebResult =
   /** The answer to `brain-ask`: Forge Brain's reply to that one message. */
   | { kind: 'brain-reply'; text: string }
   /**
-   * The Dates list after a `dates`, `dates-add` or `dates-update`. `item` is
-   * the line that was added or changed; absent for a plain read and a delete.
+   * The Dates list after a `dates`, `dates-add`, `dates-update` or
+   * `dates-weekly`. `item` is the line that was added or changed; absent for a
+   * plain read, a delete and a weekly request. `weekly` is the weekly check's
+   * state, from a desktop that has one.
    */
-  | { kind: 'dates'; items: DateItem[]; item?: DateItem }
+  | { kind: 'dates'; items: DateItem[]; item?: DateItem; weekly?: DatesWeeklyView }
 
 /* ------------------------------------------------------ the voice agent
  *
@@ -2653,6 +2676,7 @@ export type WebServerFrame =
   | WebWorkspaceFrame
   | WebGitFrame
   | WebDatesFrame
+  | WebDateAlertFrame
   | WebTranscriptFrame
   | WebResultFrame
   | WebShutdownFrame

@@ -14,14 +14,18 @@
  *    write as it is refused everything else; a host with no Dates answers
  *    `unsupported`.
  * 2. THE FRAME. Each change, from a phone or from the desk, reaches every
- *    admitted browser as exactly one `dates` frame carrying the new list.
+ *    admitted browser as exactly one `dates` frame carrying the new list and
+ *    the weekly check's state; `dates-weekly` runs or changes that check; each
+ *    alert also reaches every browser as a `date-alert` frame.
  * 3. THE PUSH. An alert from the service becomes one `date` payload
  *    (electron/web/dates-link.ts), and `planPush` (electron/web/push.ts) sends
  *    it to every subscription even where the same "who is looking" and flap
- *    guard hold an attention push back.
+ *    guard hold an attention push back. Three or more in one pass become one
+ *    summary payload with no id.
  * 4. THE WORKER. web/public/sw.js, run over a fake `self`: a `date` push shows
- *    the alert's words under a per-line tag, and its tap opens Dates — a
- *    message to an open tab, `/?dates=1` when there is none.
+ *    the alert's words under a per-line tag (`date:summary` for a summary), and
+ *    its tap opens Dates — a message to an open tab, `/?dates=1` when there is
+ *    none.
  *
  * The live data dir is never touched: every `./store` import in the bundle is
  * a stub whose getDataDir throws. All examples are made up.
@@ -232,6 +236,11 @@ async function main() {
   }
   /** The service as the server sees it, counting the change subscriptions it holds. */
   let watching = 0
+  let alertWatching = 0
+  let weeklyWatching = 0
+  /** How many times the server asked for a weekly run, and whether the next one fails. */
+  let weeklyRuns = 0
+  let weeklyRunFails = false
   const hostDates = {
     list: () => dates.list(),
     add: (input, source) => dates.add(input, source),
@@ -239,7 +248,14 @@ async function main() {
     complete: (id) => dates.complete(id),
     snooze: (id, until) => dates.snooze(id, until),
     remove: (id) => dates.remove(id),
-    onAlert: (cb) => dates.onAlert(cb),
+    onAlert: (cb) => {
+      alertWatching++
+      const off = dates.onAlert(cb)
+      return () => {
+        alertWatching--
+        off()
+      }
+    },
     onChange: (cb) => {
       watching++
       const off = dates.onChange(cb)
@@ -249,7 +265,26 @@ async function main() {
       }
     }
   }
-  const server = new WebServer({ ...baseHost, auth: makeAuth(), dates: hostDates, datesAgent })
+  /** The weekly check as web-host.ts wires it, with runWeeklyCheck stood in for: it records `started`, as the real one does. */
+  const datesWeekly = {
+    get: () => dates.getWeekly(),
+    set: (patch) => dates.setWeekly(patch),
+    run: async () => {
+      weeklyRuns++
+      if (weeklyRunFails) return { ok: false, error: 'The Forge window on the desktop is not ready.' }
+      dates.markWeeklyRun('started')
+      return { ok: true }
+    },
+    onChange: (cb) => {
+      weeklyWatching++
+      const off = dates.onWeekly(cb)
+      return () => {
+        weeklyWatching--
+        off()
+      }
+    }
+  }
+  const server = new WebServer({ ...baseHost, auth: makeAuth(), dates: hostDates, datesAgent, datesWeekly })
   await server.start({ host: '127.0.0.1', port: PORT })
   // An older-shaped desktop: no Dates at all.
   const bare = new WebServer({ ...baseHost, auth: makeAuth() })
@@ -264,7 +299,8 @@ async function main() {
       closed: false,
       send: (frame) => socket.send(JSON.stringify(frame)),
       first: (type) => browser.frames.find((f) => f.type === type),
-      datesFrames: () => browser.frames.filter((f) => f.type === 'dates')
+      datesFrames: () => browser.frames.filter((f) => f.type === 'dates'),
+      alertFrames: () => browser.frames.filter((f) => f.type === 'date-alert')
     }
     open.push(browser)
     socket.on('message', (raw) => browser.frames.push(JSON.parse(String(raw))))
@@ -302,6 +338,7 @@ async function main() {
 
   try {
     ok(watching === 1, 'a listening server holds one subscription to the list', `${watching}`)
+    ok(alertWatching === 1 && weeklyWatching === 1, 'and one to the alerts and one to the weekly check', `${alertWatching} ${weeklyWatching}`)
     const { browser: phone, frame: phoneHello } = await hello(PORT, 'dev-phone')
     const { browser: other, frame: otherHello } = await hello(PORT, 'dev-laptop')
     ok(phoneHello.type === 'hello-ok' && otherHello.type === 'hello-ok', 'two browsers are admitted')
@@ -311,6 +348,11 @@ async function main() {
     {
       const read = await request(phone, { kind: 'dates' })
       ok(read.kind === 'dates' && Array.isArray(read.items) && read.items.length === 0, 'dates reads the empty list', JSON.stringify(read))
+      ok(
+        read.weekly?.enabled === true && read.weekly.weekday === 1 && read.weekly.hour === 7 && typeof read.weekly.since === 'string' && typeof read.weekly.nextRunAt === 'string',
+        'the dates result carries the weekly check, with nextRunAt',
+        JSON.stringify(read.weekly)
+      )
 
       const { result: added, count, last } = await framesFrom(other, () =>
         request(phone, {
@@ -404,6 +446,40 @@ async function main() {
       const phoneGot = phone.datesFrames().slice(phoneBefore)
       ok(count === 1 && phoneGot.length === 1, 'a change made on the desk reaches every browser once', `other ${count}, phone ${phoneGot.length}`)
       ok(JSON.stringify(last?.items) === JSON.stringify(dates.list()), 'carrying the whole new list')
+      ok(JSON.stringify(last?.weekly) === JSON.stringify(dates.getWeekly()), 'and the weekly check', JSON.stringify(last?.weekly))
+    }
+
+    /* --------------------------------------------------- weekly check */
+    section('the weekly check')
+    {
+      const runsBefore = weeklyRuns
+      const run = await framesFrom(other, () => request(phone, { kind: 'dates-weekly', action: 'run' }))
+      ok(run.result.kind === 'dates' && run.result.weekly?.lastResult === 'started' && weeklyRuns === runsBefore + 1, 'dates-weekly run asks the host once and answers the new state', JSON.stringify(run.result.weekly))
+      ok(run.count === 1 && run.last?.weekly?.lastResult === 'started', 'the other browser gets one dates frame with it', `count ${run.count}`)
+
+      weeklyRunFails = true
+      const runFailed = await framesFrom(other, () => request(phone, { kind: 'dates-weekly', action: 'run' }))
+      weeklyRunFails = false
+      ok(runFailed.result.kind === 'failed' && /not ready/.test(runFailed.result.message), 'a run that did not start comes back as the host\'s sentence', JSON.stringify(runFailed.result))
+      ok(runFailed.count === 0, 'and sends no frame')
+
+      const set = await framesFrom(other, () => request(phone, { kind: 'dates-weekly', action: 'set', weekday: 3, hour: 9, enabled: false }))
+      ok(
+        set.result.kind === 'dates' && set.result.weekly?.weekday === 3 && set.result.weekly.hour === 9 && set.result.weekly.enabled === false && set.result.weekly.nextRunAt === null,
+        'dates-weekly set changes day, hour and switch (off: no next run)',
+        JSON.stringify(set.result.weekly)
+      )
+      ok(set.count === 1 && set.last?.weekly?.weekday === 3, 'one dates frame for the change', `count ${set.count}`)
+      const badHour = await framesFrom(other, () => request(phone, { kind: 'dates-weekly', action: 'set', hour: 24 }))
+      ok(badHour.result.kind === 'failed' && /hour/.test(badHour.result.message) && dates.getWeekly().hour === 9 && badHour.count === 0, 'a bad hour is refused with a sentence and changes nothing', JSON.stringify(badHour.result))
+      const badDay = await request(phone, { kind: 'dates-weekly', action: 'set', weekday: 'Monday' })
+      ok(badDay.kind === 'failed' && dates.getWeekly().weekday === 3, 'a day that is not a number is refused', JSON.stringify(badDay))
+      const nothing = await request(phone, { kind: 'dates-weekly', action: 'set' })
+      ok(nothing.kind === 'failed' && /Nothing to change/.test(nothing.message), 'a set with nothing in it is refused', JSON.stringify(nothing))
+      const noAction = await request(phone, { kind: 'dates-weekly' })
+      ok(noAction.kind === 'failed' && noAction.code === 'bad-frame', 'a weekly request with no action is refused', JSON.stringify(noAction))
+      const back = await request(phone, { kind: 'dates-weekly', action: 'set', enabled: true, weekday: 1, hour: 7 })
+      ok(back.kind === 'dates' && back.weekly?.enabled === true && typeof back.weekly.nextRunAt === 'string', 'and set back on, it has a next run again')
     }
 
     /* -------------------------------------------------------- refusals */
@@ -421,6 +497,15 @@ async function main() {
       )
       ok(JSON.stringify(dates.list()) === before, 'and the list is unchanged')
 
+      const sneak = await connect(PORT)
+      sneak.send({ type: 'request', rid: 'x2', body: { kind: 'dates-weekly', action: 'set', enabled: false } })
+      await waitFor(() => sneak.closed, 5000, 'the second stranger to be dropped')
+      ok(
+        sneak.first('error')?.code === 'bad-frame' && !sneak.first('result') && dates.getWeekly().enabled === true,
+        'a socket that was not let in is refused dates-weekly the same way, and the weekly check is unchanged',
+        JSON.stringify(sneak.frames)
+      )
+
       const { browser: old } = await hello(BARE_PORT, 'dev-old')
       const answers = [
         await request(old, { kind: 'dates' }),
@@ -429,6 +514,10 @@ async function main() {
         await request(old, { kind: 'dates-agent', id: 'x' })
       ]
       ok(answers.every((a) => a.kind === 'failed' && a.code === 'unsupported'), 'a host with no Dates answers all four unsupported', answers.map((a) => a.code).join(', '))
+      const oldWeekly = await request(old, { kind: 'dates-weekly', action: 'run' })
+      ok(oldWeekly.kind === 'failed' && oldWeekly.code === 'unsupported', 'and dates-weekly unsupported too', JSON.stringify(oldWeekly))
+      const oldRead = await request(old, { kind: 'dates' })
+      ok(!('weekly' in oldRead), 'a host without the weekly check sends no weekly field')
     }
 
     /* ------------------------------------------------------------ push */
@@ -446,6 +535,13 @@ async function main() {
         mine[0]?.kind === 'date' && mine[0].title === words.title && mine[0].body === words.body && Object.keys(mine[0]).sort().join() === 'body,id,kind,title',
         'of kind date, with the id and alertText\'s words and nothing else',
         JSON.stringify(mine[0])
+      )
+      await waitFor(() => phone.alertFrames().some((f) => f.id === line.id), 3000, 'a date-alert frame').catch(() => undefined)
+      const alertFrame = phone.alertFrames().find((f) => f.id === line.id)
+      ok(
+        alertFrame?.title === words.title && alertFrame.body === words.body && !('summary' in alertFrame) && other.alertFrames().some((f) => f.id === line.id),
+        'the alert also reaches every browser as a date-alert frame, with its id and words',
+        JSON.stringify(alertFrame)
       )
       dates.checkNow(NOW, { force: true })
       ok(payloads.filter((p) => p.id === line.id).length === 1, 'the same alert is not pushed twice')
@@ -468,11 +564,41 @@ async function main() {
       ok(payloads.length === 1, 'after the unsubscribe, alerts push nothing')
     }
 
+    /* ---------------------------------------------------- summary push */
+    section('summary push')
+    {
+      const payloads = []
+      const off = M.linkDateAlerts(dates, (payload) => payloads.push(payload))
+      // Let the last section's frame (its after-unsubscribe alert) land first.
+      await sleep(150)
+      const alertsBefore = phone.alertFrames().length
+      for (const [title, date] of [['Shop insurance renews', '2026-01-12'], ['Phone plan ends', '2026-01-13'], ['Licence renews', '2026-01-14']]) {
+        dates.add({ title, date, remindDays: [7] })
+      }
+      const fired = dates.checkNow(NOW, { force: true })
+      ok(fired.length === 3 && payloads.length === 1, 'three alerts in one pass give one push', `${fired.length} fired, ${payloads.length} pushed`)
+      const sum = payloads[0]
+      ok(
+        sum?.kind === 'date' && sum.summary === true && !('id' in sum) && sum.title === '3 dates are coming up' && sum.body.includes('Shop insurance renews'),
+        'a summary push: kind date, summary, no id, the summary\'s words',
+        JSON.stringify(sum)
+      )
+      const subs = [{ deviceId: 'dev-phone' }, { deviceId: 'dev-laptop' }]
+      const seen = { visibleDevices: new Set(['dev-phone', 'dev-laptop']), anyVisible: true }
+      ok(M.planPush(sum, subs, seen, undefined, Date.now())?.targets.length === 2, 'and goes to every subscription')
+      await waitFor(() => phone.alertFrames().length > alertsBefore, 3000, 'the summary date-alert frame').catch(() => undefined)
+      await sleep(150)
+      const got = phone.alertFrames().slice(alertsBefore)
+      ok(got.length === 1 && got[0].summary === true && !('id' in got[0]) && got[0].title === sum?.title, 'and one date-alert frame, a summary with no id', JSON.stringify(got))
+      off()
+    }
+
     /* ------------------------------------------------------------ stop */
     section('stop')
     {
       await server.stop({ reason: 'quit', message: 'check over' })
       ok(watching === 0, 'a stopped server lets go of the list', `${watching}`)
+      ok(alertWatching === 0 && weeklyWatching === 0, 'and of the alerts and the weekly check', `${alertWatching} ${weeklyWatching}`)
     }
   } finally {
     for (const browser of open) {
@@ -571,6 +697,19 @@ async function workerChecks() {
 
   await push({ kind: 'date', title: 'no id' })
   ok(w.shown.at(-1)?.tag === 'forge', 'a date push with no id falls back to the generic notification')
+
+  await push({ kind: 'date', summary: true, title: '3 dates are coming up', body: 'Shop lease ends: in 7 days\nVan tax due: tomorrow\nDomain renews: today' })
+  const summary = w.shown.at(-1)
+  ok(
+    summary?.tag === 'date:summary' && summary.title === '3 dates are coming up' && summary.body.startsWith('Shop lease ends') && summary.data?.dates === true,
+    'a summary push (no id) shows its words under its own tag',
+    JSON.stringify(summary)
+  )
+  w.self.clients.windows = []
+  const openedBefore = w.opened.length
+  await click(summary)
+  ok(w.opened.length === openedBefore + 1 && w.opened.at(-1) === '/?dates=1', 'and its tap opens Dates', JSON.stringify(w.opened))
+
 
   // The page half of the tap: state.tsx listens for the message and the URL the worker uses.
   const state = readFileSync(join(ROOT, 'web', 'src', 'state.tsx'), 'utf8')

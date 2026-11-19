@@ -1,4 +1,4 @@
-import type { DatesApi } from '@shared/dates'
+import type { DatesApi, DatesWeeklyApi } from '@shared/dates'
 
 /**
  * `window.forgeDates`, or null.
@@ -10,4 +10,22 @@ import type { DatesApi } from '@shared/dates'
 export function datesApi(): DatesApi | null {
   const dates = (window as unknown as { forgeDates?: Partial<DatesApi> }).forgeDates
   return dates && typeof dates.list === 'function' && typeof dates.onChange === 'function' ? (dates as DatesApi) : null
+}
+
+/**
+ * `window.forgeDates.weekly`, or null. A preload from before the weekly check
+ * has Dates but not this, so it is checked on its own.
+ */
+export function datesWeeklyApi(): DatesWeeklyApi | null {
+  const weekly = (datesApi() as Partial<DatesApi> | null)?.weekly as Partial<DatesWeeklyApi> | undefined
+  return weekly && typeof weekly.get === 'function' && typeof weekly.onChange === 'function' ? (weekly as DatesWeeklyApi) : null
+}
+
+/**
+ * Listen for date alerts (`DateNotice`) for an in-app notice. Returns the
+ * unsubscribe; a no-op on a preload that predates it.
+ */
+export function onDatesAlert(cb: Parameters<DatesApi['onAlert']>[0]): () => void {
+  const api = datesApi() as Partial<DatesApi> | null
+  return typeof api?.onAlert === 'function' ? api.onAlert(cb) : () => undefined
 }

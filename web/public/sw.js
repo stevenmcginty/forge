@@ -87,11 +87,17 @@ self.addEventListener('push', (event) => {
       body = prompt || 'Waiting for your answer.'
       key = `asking|${prompt}`
     }
-  } else if (payload && payload.kind === 'date' && typeof payload.id === 'string' && payload.id) {
+  } else if (
+    payload &&
+    payload.kind === 'date' &&
+    ((typeof payload.id === 'string' && payload.id) || payload.summary === true)
+  ) {
     // A Dates alert (docs/DATES.md): the desktop's own words. Tagged by the
     // line, so a newer alert for it (7 days, then 1) replaces the older one.
+    // A summary of several ("5 dates are coming up") has no line, so one tag
+    // of its own.
     dates = true
-    tag = `date:${payload.id}`
+    tag = typeof payload.id === 'string' && payload.id ? `date:${payload.id}` : 'date:summary'
     title = typeof payload.title === 'string' && payload.title ? payload.title : 'A date is coming up'
     body = typeof payload.body === 'string' ? payload.body : 'Tap to open Dates.'
     key = `date|${body}`

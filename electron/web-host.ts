@@ -74,7 +74,7 @@ import { notify, publicKey, subscribe as pushSubscribe, unsubscribe as pushUnsub
 import { WebServer, type VoiceClaudeLink, type WebServerHost } from './web/server'
 import { linkDateAlerts } from './web/dates-link'
 import { getDates } from './dates-store'
-import { openDateAgent } from './dates-ipc'
+import { openDateAgent, runWeeklyCheck } from './dates-ipc'
 import { disposeChatMirrors, findChat, pruneChatMirrors, sharedChatMirrorHost } from './chat-panes/phone-mirror'
 import { disposeBrowserMirrors, sharedBrowserMirrorHost } from './browser-panes/web-mirror'
 import { sharedBoardMirrorHost } from './board-web'
@@ -299,8 +299,10 @@ let unsubscribeHandoff: (() => void) | null = null
 /**
  * Dates alerts as Web Pushes, for as long as the link is up. Not tied to a
  * pane, so unlike an attention push nobody's screen holds one back — see
- * `planPush` in electron/web/push.ts. The list's own changes reach browsers
- * through the server, which subscribes to `host.dates` itself.
+ * `planPush` in electron/web/push.ts. Several alerts from one pass arrive as
+ * one summary, pushed with no id. The list's own changes, the weekly check's
+ * state and the in-app `date-alert` frames reach browsers through the server,
+ * which subscribes to `host.dates` and `host.datesWeekly` itself.
  */
 let unsubscribeDateAlerts: (() => void) | null = null
 /**
@@ -1710,6 +1712,12 @@ async function start(): Promise<void> {
     // phone's change is the same call the desk's IPC makes.
     dates: getDates(),
     datesAgent: (id) => openDateAgent(id),
+    datesWeekly: {
+      get: () => getDates().getWeekly(),
+      set: (patch) => getDates().setWeekly(patch),
+      run: () => runWeeklyCheck(),
+      onChange: (cb) => getDates().onWeekly(cb)
+    },
     saveInboxImage: (bytes, ext) => Promise.resolve(saveInboxImage(join(getDataDir(), 'web-inbox'), bytes, ext)),
     saveInboxFile: (bytes, name) => Promise.resolve(saveInboxFile(join(getDataDir(), 'web-inbox'), bytes, name)),
     transcribeAudio: (bytes, mime) => transcribeAudio(bytes, mime),

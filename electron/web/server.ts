@@ -125,7 +125,7 @@ import type {
 } from '@shared/types'
 import type { SkillsList } from '@shared/skills'
 import type { CommandsFeed } from '@shared/commands'
-import type { DateItem } from '@shared/dates'
+import { dateNoticeOf, type DateItem, type DatesWeeklyPatch, type DatesWeeklyView } from '@shared/dates'
 import type { WebAuth, WebDevice } from './auth'
 import { addDate, updateDate, type WebDatesService } from './dates-link'
 import { extForMime, imagePasteIntoPane } from './inbox'
@@ -290,6 +290,18 @@ const CLOSE_HEARTBEAT = 4008
 const CLOSE_GOING_AWAY = 1001
 
 /* --------------------------------------------------------------------- host */
+
+/**
+ * What the phone link needs of the Dates weekly check: the store's
+ * `getWeekly`/`setWeekly`/`onWeekly` and `runWeeklyCheck` in
+ * electron/dates-ipc.ts. `set` throws a plain sentence on a bad value.
+ */
+export interface WebDatesWeeklyHost {
+  get(): DatesWeeklyView
+  set(patch: DatesWeeklyPatch): DatesWeeklyView
+  run(): Promise<{ ok: boolean; error?: string }>
+  onChange(cb: (weekly: DatesWeeklyView) => void): () => void
+}
 
 /**
  * Everything this server needs from the world, and nothing else.
@@ -620,6 +632,12 @@ export interface WebServerHost {
   dates?: WebDatesService
   /** Put an agent on one line (`openDateAgent` in electron/dates-ipc.ts). */
   datesAgent?: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /**
+   * The weekly check (docs/DATES.md, "Weekly check"). Its state rides on every
+   * `dates` answer and frame; a change to it is broadcast as a `dates` frame.
+   * Optional: without it (or without `dates`) `dates-weekly` is `unsupported`.
+   */
+  datesWeekly?: WebDatesWeeklyHost
 
   /* ----------------------------------------------------------- voice agent
    *
@@ -1001,6 +1019,9 @@ export class WebServer {
   private lastRemoteYes: RemoteYesInfo | null = null
   /** The subscription to `host.dates` changes, held while listening. */
   private datesOff: (() => void) | null = null
+  /** The subscriptions to `host.dates` alerts and `host.datesWeekly` changes, held while listening. */
+  private datesAlertOff: (() => void) | null = null
+  private datesWeeklyOff: (() => void) | null = null
   /**
    * Every pane asking right now, with its question, so it can be said again
    * after every `hello-ok`. Without it a phone that reconnects (screen lock,
@@ -1211,6 +1232,11 @@ export class WebServer {
     // Made once the port is bound, so nothing broadcasts into a server that
     // never came up; taken down in `stop`.
     this.datesOff = this.host.dates?.onChange((items) => this.pushDates(items)) ?? null
+    // Each alert as an in-app notice, and each change to the weekly check as
+    // a `dates` frame carrying it.
+    this.datesAlertOff = this.host.dates?.onAlert((alert) => this.broadcast({ type: 'date-alert', ...dateNoticeOf(alert) })) ?? null
+    const dates = this.host.dates
+    this.datesWeeklyOff = dates ? (this.host.datesWeekly?.onChange(() => this.pushDates(dates.list())) ?? null) : null
     this.log(`listening on ${options.host}:${options.port}${WEB_WS_PATH}`)
     return this.listening
   }
@@ -1225,6 +1251,10 @@ export class WebServer {
   async stop(notice?: WebShutdownNotice): Promise<void> {
     this.datesOff?.()
     this.datesOff = null
+    this.datesAlertOff?.()
+    this.datesAlertOff = null
+    this.datesWeeklyOff?.()
+    this.datesWeeklyOff = null
     if (notice) this.pushShutdown(notice)
     for (const client of [...this.clients]) this.drop(client, CLOSE_GOING_AWAY, 'Server stopping')
     this.clients.clear()
@@ -1438,9 +1468,21 @@ export class WebServer {
     this.broadcast({ type: 'git', snapshot })
   }
 
-  /** The whole Dates list after a change — see `WebDatesFrame`. */
+  /** The whole Dates list after a change, with the weekly check's state — see `WebDatesFrame`. */
   pushDates(items: DateItem[]): void {
-    this.broadcast({ type: 'dates', items })
+    this.broadcast({ type: 'dates', items, ...this.weeklyField() })
+  }
+
+  /** `{ weekly }` for a `dates` answer or frame, or nothing from a host without the weekly check. */
+  private weeklyField(): { weekly?: DatesWeeklyView } {
+    const weekly = this.host.datesWeekly
+    if (!weekly) return {}
+    try {
+      return { weekly: weekly.get() }
+    } catch (err) {
+      this.log(`dates: weekly state could not be read: ${err instanceof Error ? err.message : String(err)}`)
+      return {}
+    }
   }
 
   /* --------------------------------------------------- the chat transcript */
@@ -2824,7 +2866,7 @@ export class WebServer {
             return
           }
           if (request.kind === 'dates') {
-            answer({ kind: 'dates', items: dates.list() })
+            answer({ kind: 'dates', items: dates.list(), ...this.weeklyField() })
             return
           }
           const outcome =
@@ -2833,7 +2875,52 @@ export class WebServer {
             failed('failed', outcome.error)
             return
           }
-          answer({ kind: 'dates', items: dates.list(), ...(outcome.item ? { item: outcome.item } : {}) })
+          answer({ kind: 'dates', items: dates.list(), ...(outcome.item ? { item: outcome.item } : {}), ...this.weeklyField() })
+          return
+        }
+
+        /*
+         * The weekly check: run it now, or change when it runs. Behind the
+         * same gate as the other Dates writes (an admitted browser). The
+         * values are the store's to check; a bad one comes back as its
+         * sentence.
+         */
+        case 'dates-weekly': {
+          const dates = this.host.dates
+          const weekly = this.host.datesWeekly
+          if (!dates || !weekly) {
+            failed('unsupported', 'This Forge cannot share its weekly dates check with a browser.')
+            return
+          }
+          if (request.action === 'run') {
+            const started = await weekly.run()
+            if (!started.ok) {
+              failed('failed', started.error || 'The weekly check did not start.')
+              return
+            }
+            answer({ kind: 'dates', items: dates.list(), ...this.weeklyField() })
+            return
+          }
+          if (request.action !== 'set') {
+            failed('bad-frame', 'That weekly request said neither run nor set.')
+            return
+          }
+          // Only the three fields, as sent: `set` checks each and refuses a bad one.
+          const patch: Record<string, unknown> = {}
+          if (request.enabled !== undefined) patch['enabled'] = request.enabled
+          if (request.weekday !== undefined) patch['weekday'] = request.weekday
+          if (request.hour !== undefined) patch['hour'] = request.hour
+          if (Object.keys(patch).length === 0) {
+            failed('failed', 'Nothing to change in the weekly check.')
+            return
+          }
+          try {
+            weekly.set(patch as DatesWeeklyPatch)
+          } catch (err) {
+            failed('failed', err instanceof Error && err.message ? err.message : 'That change to the weekly check could not be saved.')
+            return
+          }
+          answer({ kind: 'dates', items: dates.list(), ...this.weeklyField() })
           return
         }
 

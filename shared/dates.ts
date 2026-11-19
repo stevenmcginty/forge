@@ -25,7 +25,15 @@ export const DATES_IPC = {
   /** Main → renderer: the whole list, after every change. */
   changed: 'dates:changed',
   /** Main → renderer: a date notification was clicked; open the Dates surface. */
-  open: 'dates:open'
+  open: 'dates:open',
+  /** Main → renderer: an alert fired, as a `DateNotice`, for an in-app notice. */
+  alert: 'dates:alert',
+  /** The weekly check's state (`DatesWeeklyView`), a change to it, a run now. */
+  weeklyGet: 'dates:weekly-get',
+  weeklySet: 'dates:weekly-set',
+  weeklyRun: 'dates:weekly-run',
+  /** Main → renderer: the weekly check's state after every change. */
+  weeklyChanged: 'dates:weekly-changed'
 } as const
 
 /* ---------------------------------------------------------------- types */
@@ -118,12 +126,79 @@ export interface DatePatch {
   snoozedUntil?: string | null
 }
 
-/** One alert, as the store hands it to its listeners. */
+/**
+ * One alert, as the store hands it to its listeners. When one pass finds 3 or
+ * more, listeners hear one summary instead (`summary: true`): `items` holds
+ * every line in it, soonest first, and `item` and `daysLeft` are the soonest
+ * line's.
+ */
 export interface DateAlert {
   item: DateItem
   daysLeft: number
   title: string
   body: string
+  summary?: true
+  items?: DateItem[]
+}
+
+/**
+ * An alert as the faces get it for an in-app notice: `DATES_IPC.alert` on the
+ * desktop, the `date-alert` frame on the phone. A summary has no `id`; a tap
+ * on it opens Dates.
+ */
+export interface DateNotice {
+  id?: string
+  title: string
+  body: string
+  summary?: true
+}
+
+/** A month block's key and colour index; see `monthBlocksOf`. */
+export interface DateMonthBlock {
+  /** `overdue`, `done`, or the month as `YYYY-MM`. */
+  key: string
+  label: string
+  /** The calendar month's year and number (1 to 12). Only on a month block. */
+  year?: number
+  month?: number
+  /** The month's index, 0 to 11, so a month has the same colour on every face. Only on a month block. */
+  tone?: number
+  items: DateItem[]
+}
+
+/** How close a line is, for its colour: see `urgencyOf`. */
+export type DateUrgency = 'done' | 'late' | 'today' | 'week' | 'month' | 'calm'
+
+/**
+ * The weekly check (docs/DATES.md, "Weekly check"): once a week an agent pane
+ * opens to check every mailbox and account it can reach and update the list.
+ * Kept in `dates.json` as the top-level `weekly` block.
+ */
+export interface DatesWeekly {
+  enabled: boolean
+  /** 0 = Sunday, 1 = Monday … 6 = Saturday. */
+  weekday: number
+  /** The hour of the day it runs, 0 to 23, local time. */
+  hour: number
+  /** ISO time the block was first made. No slot at or before it runs. */
+  since: string
+  /** ISO time of the last run, started or failed. */
+  lastRunAt?: string
+  lastResult?: 'started' | 'failed'
+  /** Why the last run failed. Only with `lastResult: 'failed'`. */
+  lastError?: string
+}
+
+/** The weekly state as the faces get it: plus when it runs next (ISO), or null when it is off. */
+export interface DatesWeeklyView extends DatesWeekly {
+  nextRunAt: string | null
+}
+
+/** The parts of the weekly check a face may change. */
+export interface DatesWeeklyPatch {
+  enabled?: boolean
+  weekday?: number
+  hour?: number
 }
 
 /**
@@ -149,6 +224,21 @@ export interface DatesApi {
   onChange(cb: (items: DateItem[]) => void): () => void
   /** A date notification was clicked. Returns the unsubscribe. */
   onOpen(cb: () => void): () => void
+  /** An alert fired (one line, or a summary of several). Returns the unsubscribe. */
+  onAlert(cb: (notice: DateNotice) => void): () => void
+  /** The weekly check. */
+  weekly: DatesWeeklyApi
+}
+
+/** `window.forgeDates.weekly`. */
+export interface DatesWeeklyApi {
+  get(): Promise<DatesWeeklyView>
+  /** Throws (a rejected promise, with a plain sentence) on a bad value. */
+  set(patch: DatesWeeklyPatch): Promise<DatesWeeklyView>
+  /** Open the weekly check's agent pane now. */
+  runNow(): Promise<{ ok: boolean; error?: string }>
+  /** The weekly state after every change. Returns the unsubscribe. */
+  onChange(cb: (weekly: DatesWeeklyView) => void): () => void
 }
 
 /* ------------------------------------------------------------ constants */
@@ -396,6 +486,71 @@ export function bucketsOf(items: readonly DateItem[], today: string): DateBucket
   )
 }
 
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December'
+]
+
+/**
+ * The list cut into calendar months, for a UI that shows each month as a
+ * block in its own colour: `Overdue` first (when any open line is overdue),
+ * then one block per month that holds open lines, in date order, then `Done`
+ * (when any). A line with an `endDate` that is running now sits in today's
+ * month. `tone` is the month's index (0 to 11), so November is the same
+ * colour on every face and in every year.
+ */
+export function monthBlocksOf(items: readonly DateItem[], today: string): DateMonthBlock[] {
+  const sorted = sortItems(items, today)
+  const overdue: DateItem[] = []
+  const done: DateItem[] = []
+  const months = new Map<string, DateItem[]>()
+  for (const item of sorted) {
+    const status = statusOf(item, today)
+    if (status === 'done') done.push(item)
+    else if (status === 'overdue') overdue.push(item)
+    else {
+      const key = (status === 'today' && item.date < today ? today : item.date).slice(0, 7)
+      const block = months.get(key)
+      if (block) block.push(item)
+      else months.set(key, [item])
+    }
+  }
+  const blocks: DateMonthBlock[] = []
+  if (overdue.length > 0) blocks.push({ key: 'overdue', label: 'Overdue', items: overdue })
+  for (const key of [...months.keys()].sort()) {
+    const year = Number(key.slice(0, 4))
+    const month = Number(key.slice(5, 7))
+    blocks.push({ key, year, month, label: `${MONTH_NAMES[month - 1]} ${year}`, tone: month - 1, items: months.get(key)! })
+  }
+  if (done.length > 0) blocks.push({ key: 'done', label: 'Done', items: done })
+  return blocks
+}
+
+/**
+ * How close a line is, for its colour: `late` (overdue), `today`, `week` (1
+ * to 7 days), `month` (8 to 30 days), `calm` (more than 30), or `done`.
+ */
+export function urgencyOf(item: DateItem, today: string): DateUrgency {
+  const status = statusOf(item, today)
+  if (status === 'done') return 'done'
+  if (status === 'overdue') return 'late'
+  if (status === 'today') return 'today'
+  const d = daysLeft(item, today)
+  if (d <= 7) return 'week'
+  if (d <= 30) return 'month'
+  return 'calm'
+}
+
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /** When, in plain words: "today", "tomorrow", "in 12 days", "in 5 months", "3 days overdue". */
@@ -425,10 +580,23 @@ export function attentionCount(items: readonly DateItem[], today: string): numbe
 
 /* --------------------------------------------------------------- alerts */
 
+/** Every line except a monthly one alerts when it enters its last 30 days (docs/DATES.md, "Alerts"). */
+export const LAST_DAYS_ALERT = 30
+
+/**
+ * The thresholds the alerts use: `remindDays` plus 30, unless the line repeats
+ * every month (a monthly bill would otherwise alert all the time). High to low.
+ */
+export function effectiveRemindDays(item: Pick<DateItem, 'remindDays' | 'repeat'>): number[] {
+  if (item.repeat === 'monthly' || item.remindDays.includes(LAST_DAYS_ALERT)) return [...item.remindDays]
+  return [...item.remindDays, LAST_DAYS_ALERT].sort((a, b) => b - a)
+}
+
 /**
  * The one alert due for a line today, or null. Rules in docs/DATES.md
- * ("Alerts"): before the date, the smallest reminder threshold not below the
- * days left, once; after the date (no `endDate`), once per 7-day block.
+ * ("Alerts"): before the date, the smallest threshold of `effectiveRemindDays`
+ * not below the days left, once; after the date (no `endDate`), once per
+ * 7-day block.
  */
 export function dueAlert(item: DateItem, today: string): DueAlert | null {
   if (item.done) return null
@@ -437,7 +605,7 @@ export function dueAlert(item: DateItem, today: string): DueAlert | null {
   if (Number.isNaN(d)) return null
   if (d >= 0) {
     let threshold: number | null = null
-    for (const t of item.remindDays) if (t >= d && (threshold === null || t < threshold)) threshold = t
+    for (const t of effectiveRemindDays(item)) if (t >= d && (threshold === null || t < threshold)) threshold = t
     if (threshold === null) return null
     const key = `${item.date}:${threshold}`
     return item.alerted.includes(key) ? null : { key, daysLeft: d, threshold }
@@ -456,9 +624,45 @@ export function markAlerted(item: DateItem, alert: DueAlert): DateItem {
   const keys = new Set(item.alerted)
   keys.add(alert.key)
   if (alert.threshold >= 0) {
-    for (const t of item.remindDays) if (t >= alert.threshold) keys.add(`${item.date}:${t}`)
+    for (const t of effectiveRemindDays(item)) if (t >= alert.threshold) keys.add(`${item.date}:${t}`)
   }
   return { ...item, alerted: [...keys] }
+}
+
+/** From this many alerts in one pass, listeners hear one summary instead. */
+export const ALERT_SUMMARY_FROM = 3
+/** How many lines a summary's body names before "and N more". */
+const SUMMARY_NAMES = 3
+
+/**
+ * One alert for several (`ALERT_SUMMARY_FROM` or more) from the same pass:
+ * "5 dates are coming up", the soonest three as "<title>: <when>", then
+ * "and 2 more". `item` and `daysLeft` are the soonest line's.
+ */
+export function alertSummary(alerts: readonly DateAlert[], today: string): DateAlert {
+  const items = sortItems(
+    alerts.map((a) => a.item),
+    today
+  )
+  const lines = items.slice(0, SUMMARY_NAMES).map((i) => `${i.title}: ${humanWhen(i, today)}`)
+  const more = items.length - SUMMARY_NAMES
+  if (more > 0) lines.push(`and ${more} more`)
+  const first = items[0]!
+  return {
+    item: first,
+    daysLeft: daysLeft(first, today),
+    title: `${items.length} dates are coming up`,
+    body: lines.join('\n'),
+    summary: true,
+    items
+  }
+}
+
+/** An alert as an in-app notice: see `DateNotice`. */
+export function dateNoticeOf(alert: DateAlert): DateNotice {
+  return alert.summary
+    ? { title: alert.title, body: alert.body, summary: true }
+    : { id: alert.item.id, title: alert.title, body: alert.body }
 }
 
 /** The words of a notification. The title names the line; the body says exactly when. */
@@ -573,4 +777,141 @@ export function agentPrompt(item: DateItem, today: string): string {
     'Ask Steve before you send any message, pay anything, or submit any form.'
   )
   return lines.join('\n')
+}
+
+/* ---------------------------------------------------------- weekly check */
+
+/** The weekly check's defaults: on, Mondays at 07:00. `since` is the moment the block is made. */
+export const WEEKLY_DEFAULTS: Readonly<Omit<DatesWeekly, 'since'>> = { enabled: true, weekday: 1, hour: 7 }
+
+/**
+ * The weekly agent's job, when `<dataDir>/dates-weekly-prompt.md` does not
+ * replace it. `WEEKLY_HARD_RULES` always follows, whichever prompt is used.
+ */
+export const DEFAULT_WEEKLY_PROMPT = [
+  'This is the weekly check of the Dates list in Forge: the renewals, expiries and deadlines that matter.',
+  '',
+  'Your job:',
+  '1. First call dates_list with include_done set to true, so you know every line already on the list.',
+  '2. Check every mailbox and account you can reach for renewals, expiries, contract ends, payment-plan ends, licences, tax and filing dates, and booked holidays. Read the mail from the last 14 days, and anything older that the list does not have yet.',
+  '3. For each thing you find: when a line for it is already on the list and its date or amount changed, update that line with dates_update. When there is no line for it, add one with dates_add, with a kind, a group, the amount, a note that names the source (the sender and the date of the mail) and an action. Set estimated to true when you worked the date out and did not read it.',
+  '4. For lines marked as estimated, correct the date when the real date is now known, and set estimated to false.',
+  '5. End with a short plain report in three parts: what you added, what you changed, and what you could not check.'
+].join('\n')
+
+/** Always the last words of the weekly agent's prompt. */
+export const WEEKLY_HARD_RULES = [
+  'Hard rules:',
+  '- Never delete a line.',
+  '- Never mark a line done unless a mail proves it is finished. When you do, say so in its note.',
+  '- Read only everywhere else: do not send, reply, delete, archive, pay, book or submit any form.',
+  '- Do not add the same thing twice. Check dates_list before you add a line.'
+].join('\n')
+
+const isInt = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
+
+/**
+ * Any value (a hand-written block, nothing at all) as a clean weekly block.
+ * A bad or missing field gets its default; `since` defaults to `now`. Never throws.
+ */
+export function normaliseWeekly(raw: unknown, now: Date = new Date()): DatesWeekly {
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const out: DatesWeekly = {
+    enabled: typeof r['enabled'] === 'boolean' ? r['enabled'] : WEEKLY_DEFAULTS.enabled,
+    weekday: isInt(r['weekday'], 0, 6) ? r['weekday'] : WEEKLY_DEFAULTS.weekday,
+    hour: isInt(r['hour'], 0, 23) ? r['hour'] : WEEKLY_DEFAULTS.hour,
+    since: isoOf(r['since']) ?? now.toISOString()
+  }
+  const lastRunAt = isoOf(r['lastRunAt'])
+  if (lastRunAt) out.lastRunAt = lastRunAt
+  if (r['lastResult'] === 'started' || r['lastResult'] === 'failed') out.lastResult = r['lastResult']
+  const lastError = text(r['lastError'])
+  if (out.lastResult === 'failed' && lastError) out.lastError = lastError
+  return out
+}
+
+/** Why this change to the weekly check cannot be saved, in a plain sentence, or null when it can. */
+export function weeklyPatchError(patch: unknown): string | null {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return 'That is not a change to the weekly check.'
+  const p = patch as Record<string, unknown>
+  if (p['enabled'] !== undefined && typeof p['enabled'] !== 'boolean') return 'On or off must be true or false.'
+  if (p['weekday'] !== undefined && !isInt(p['weekday'], 0, 6)) return 'The day must be a whole number from 0 (Sunday) to 6 (Saturday).'
+  if (p['hour'] !== undefined && !isInt(p['hour'], 0, 23)) return 'The hour must be a whole number from 0 to 23.'
+  return null
+}
+
+/** The weekday (0 = Sunday) of a calendar day. */
+function weekdayOf(day: string): number {
+  const p = parts(day)
+  return p ? new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay() : NaN
+}
+
+/** `hour`:00 local time on a calendar day. */
+function slotOn(day: string, hour: number): Date {
+  const p = parts(day)!
+  return new Date(p[0], p[1] - 1, p[2], hour, 0, 0, 0)
+}
+
+/** The latest slot (the weekday at hour:00 local time) at or before `now`. */
+function latestSlot(weekly: DatesWeekly, now: Date): Date {
+  const today = todayOf(now)
+  for (let k = 0; k <= 7; k++) {
+    const day = addDays(today, -k)
+    if (weekdayOf(day) !== weekly.weekday) continue
+    const slot = slotOn(day, weekly.hour)
+    if (slot.getTime() <= now.getTime()) return slot
+  }
+  // Unreachable: one of eight days back is the weekday, and at most one of them is still to come.
+  return slotOn(addDays(today, -14), weekly.hour)
+}
+
+const timeOf = (iso: string | undefined): number => (iso ? Date.parse(iso) : NaN)
+
+/**
+ * Whether the weekly check should run now: it is on, and the latest slot at
+ * or before `now` is later than both `since` and `lastRunAt`. So nothing runs
+ * on the day the block is made until its first slot, and a PC that was off for
+ * three weeks runs it once, not three times.
+ */
+export function weeklyDue(weekly: DatesWeekly, now: Date): boolean {
+  if (!weekly.enabled) return false
+  const slot = latestSlot(weekly, now).getTime()
+  const since = timeOf(weekly.since)
+  const last = timeOf(weekly.lastRunAt)
+  return (Number.isNaN(since) || slot > since) && (Number.isNaN(last) || slot > last)
+}
+
+/**
+ * When the weekly check runs next, as an ISO time, or null when it is off.
+ * When it is due now, that is `now` (it runs at the next pass); else the first
+ * slot after `now`, `since` and `lastRunAt`.
+ */
+export function nextWeeklyRun(weekly: DatesWeekly, now: Date): string | null {
+  if (!weekly.enabled) return null
+  if (weeklyDue(weekly, now)) return now.toISOString()
+  const floor = Math.max(now.getTime(), timeOf(weekly.since) || 0, timeOf(weekly.lastRunAt) || 0)
+  const start = todayOf(new Date(floor))
+  for (let k = 0; k <= 8; k++) {
+    const day = addDays(start, k)
+    if (weekdayOf(day) !== weekly.weekday) continue
+    const slot = slotOn(day, weekly.hour)
+    if (slot.getTime() > floor) return slot.toISOString()
+  }
+  return null
+}
+
+/** The weekly state with `nextRunAt`, as the faces get it. */
+export function weeklyView(weekly: DatesWeekly, now: Date): DatesWeeklyView {
+  return { ...weekly, nextRunAt: nextWeeklyRun(weekly, now) }
+}
+
+/**
+ * The weekly agent's whole first prompt: the custom prompt (the text of
+ * `dates-weekly-prompt.md`) when it is not empty, else
+ * `DEFAULT_WEEKLY_PROMPT`; then today's date and the number of open lines;
+ * then `WEEKLY_HARD_RULES`, always last.
+ */
+export function weeklyPrompt(custom: string | null | undefined, today: string, openLines: number): string {
+  const job = typeof custom === 'string' && custom.trim() ? custom.trim() : DEFAULT_WEEKLY_PROMPT
+  return [job, '', `Today is ${dayLabel(today)} (${today}). The list has ${plural(openLines, 'open line')}.`, '', WEEKLY_HARD_RULES].join('\n')
 }

@@ -231,6 +231,21 @@ async function main() {
       planPush(date, [], allOnScreen, undefined, t0) === null,
       "a date push with nothing subscribed goes nowhere",
     );
+
+    // Several alerts from one pass, as one push with no line id.
+    const summary = {
+      kind: "date",
+      summary: true,
+      title: "3 dates are coming up",
+      body: "Shop lease ends: in 7 days\nand 2 more",
+    };
+    const summaryPlan = planPush(summary, subs, allOnScreen, recent, t0);
+    log(
+      summaryPlan !== null &&
+        summaryPlan.targets.length === 3 &&
+        summaryPlan.onScreen === 0,
+      "a summary date push (no id) goes to every subscription too",
+    );
   }
 
   /* --------------------------------------------------------------- deliver */

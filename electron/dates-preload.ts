@@ -1,5 +1,5 @@
 import type { IpcRenderer, IpcRendererEvent } from 'electron'
-import { DATES_IPC, type DateItem, type DatesApi } from '@shared/dates'
+import { DATES_IPC, type DateItem, type DateNotice, type DatesApi, type DatesWeeklyView } from '@shared/dates'
 
 /**
  * `window.forgeDates`, built from the preload's ipcRenderer. A separate global
@@ -22,6 +22,13 @@ export function datesPreloadApi(ipc: IpcRenderer): DatesApi {
     snooze: (id, until) => ipc.invoke(DATES_IPC.snooze, id, until),
     remove: (id) => ipc.invoke(DATES_IPC.remove, id),
     onChange: (cb) => on<[DateItem[]]>(DATES_IPC.changed, cb),
-    onOpen: (cb) => on<[]>(DATES_IPC.open, () => cb())
+    onOpen: (cb) => on<[]>(DATES_IPC.open, () => cb()),
+    onAlert: (cb) => on<[DateNotice]>(DATES_IPC.alert, cb),
+    weekly: {
+      get: () => ipc.invoke(DATES_IPC.weeklyGet),
+      set: (patch) => ipc.invoke(DATES_IPC.weeklySet, patch),
+      runNow: () => ipc.invoke(DATES_IPC.weeklyRun),
+      onChange: (cb) => on<[DatesWeeklyView]>(DATES_IPC.weeklyChanged, cb)
+    }
   }
 }
